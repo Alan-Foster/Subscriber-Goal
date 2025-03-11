@@ -23,6 +23,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - App is still in early development. Images Coming Soon!
 
 ## Changelog
+- 0.7.0 - Fixed critical form.0 error related to dynamic forms not passing data properly
 - 0.6.0 - Fixed Redis storage to store data under postID. Headers inside posts customizable.
 - 0.5.0 - Large subreddit goals and subscriber counts are rounded eg 400,000 to 400k or 12m
 - 0.4.0 - Subscriber goals are automatically stickied and announced in r/SubGoal
