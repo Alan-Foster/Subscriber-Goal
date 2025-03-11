@@ -182,36 +182,38 @@ Devvit.addCustomPostType({
 
 
 // Creates the form to generate the Subscriber Goal
-const createSubGoalForm = (defaultGoal, subredditName) => Devvit.createForm(
-  {
-    title: 'Create a New Sub Goal Post',
-    description: '', 
-    fields: [
-      {
-        name: 'title',
-        label: 'Enter your Post Title:',
-        defaultValue: `Welcome to r/${subredditName}!`,
-        type: 'string',
-        helpText: 'The actual title of the generated post', 
-        required: true 
-      },
-      {
-        name: 'header',
-        label: 'Enter your Goal Header:',
-        defaultValue: `Help r/${subredditName} reach ${formatNumberUnlessExact(defaultGoal)} members!`,
-        type: 'string',
-        helpText: 'The large header inside the post itself.', 
-        required: true 
-      },
-      {
-        name: 'subscriberGoal',
-        label: 'Enter your Subscriber Goal',
-        type: 'number',
-        defaultValue: defaultGoal, 
-        helpText: 'Default goal is based on your current subscriber count', 
-        required: true 
-      },
-    ],
+const createSubGoalForm = Devvit.createForm(
+  (data) => {
+    return {
+      title: 'Create a New Sub Goal Post',
+      description: '', 
+      fields: [
+        {
+          name: 'title',
+          label: 'Enter your Post Title:',
+          defaultValue: `Welcome to r/${data.subredditName}!`,
+          type: 'string',
+          helpText: 'The actual title of the generated post', 
+          required: true 
+        },
+        {
+          name: 'header',
+          label: 'Enter your Goal Header:',
+          defaultValue: `Help r/${data.subredditName} reach ${formatNumberUnlessExact(data.defaultGoal)} members!`,
+          type: 'string',
+          helpText: 'The large header inside the post itself.', 
+          required: true 
+        },
+        {
+          name: 'subscriberGoal',
+          label: 'Enter your Subscriber Goal',
+          type: 'number',
+          defaultValue: data.defaultGoal, 
+          helpText: 'Default goal is based on your current subscriber count', 
+          required: true 
+        },
+      ],
+    } as const;
   },
   async (event, context) => {
     const title = event.values.title;
@@ -303,9 +305,11 @@ Devvit.addMenuItem({
       const subscriberCount = subreddit.numberOfSubscribers;
       const subredditName = subreddit.name;
       const defaultGoal = getDefaultSubscriberGoal(subscriberCount);
-      const subGoalForm = createSubGoalForm(defaultGoal, subreddit.name);
 
-      await context.ui.showForm(subGoalForm);
+      await context.ui.showForm(createSubGoalForm, {
+        subredditName,
+        defaultGoal,
+      });
     } catch (error: any) {
       console.error(`Error fetching subscriber count: ${error.message}`);
       context.ui.showToast('Error fetching subreddit data.');
