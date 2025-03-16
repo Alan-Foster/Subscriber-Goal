@@ -1,2 +1,6 @@
 name: subscriber-goal
+<<<<<<< HEAD
 version: 0.7.3
+=======
+version: 0.6.0.92
+>>>>>>> 783baae2bfde131f4f242ddbace12fb62dbaa6cb
