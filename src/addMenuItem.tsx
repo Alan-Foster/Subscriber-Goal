@@ -1,9 +1,10 @@
-import { Devvit } from '@devvit/public-api';
-import { getDefaultSubscriberGoal } from './defaultSubscriberGoal.js';
-import { createSubGoalForm } from './createSubGoalForm.js';
+import {Devvit} from '@devvit/public-api';
+
+import {createSubGoalForm} from './createSubGoalForm.js';
+import {getDefaultSubscriberGoal} from './defaultSubscriberGoal.js';
 
 // The menu item for moderators used to launch the form and generate a new Subscriber Goal
-function addMenuItem() {
+function addMenuItem () {
   Devvit.addMenuItem({
     label: 'Create a New Sub Goal Post',
     location: 'subreddit',
@@ -15,16 +16,16 @@ function addMenuItem() {
         const subredditName = subreddit.name;
         const defaultGoal = getDefaultSubscriberGoal(subscriberCount);
 
-        await context.ui.showForm(createSubGoalForm, {
+        context.ui.showForm(createSubGoalForm, {
           subredditName,
           defaultGoal,
         });
-      } catch (error: any) {
-        console.error(`Error fetching subscriber count: ${error.message}`);
+      } catch (error: unknown) {
+        console.error(`Error fetching subscriber count: ${error instanceof Error ? error.message : String(error)}`);
         context.ui.showToast('Error fetching subreddit data.');
       }
     },
   });
 }
 
-export { addMenuItem };
+export {addMenuItem};
