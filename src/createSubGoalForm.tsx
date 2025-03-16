@@ -1,10 +1,21 @@
-import {Devvit} from '@devvit/public-api';
+import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from './utils.js';
 
-// Creates the form to generate the Subscriber Goal
-export const createSubGoalForm = Devvit.createForm(
-  data => ({
+export type CreateSubGoalFormData = {
+  defaultGoal?: number;
+  subredditName?: string;
+}
+
+const form: FormFunction<CreateSubGoalFormData> = (data: CreateSubGoalFormData) => {
+  if (!data.subredditName) {
+    throw new Error('subredditName is required');
+  }
+  if (!data.defaultGoal) {
+    throw new Error('defaultGoal is required');
+  }
+
+  return {
     title: 'Create a New Sub Goal Post',
     description: '',
     fields: [
@@ -33,41 +44,55 @@ export const createSubGoalForm = Devvit.createForm(
         required: true,
       },
     ],
-  } as const),
-  async (event, context) => {
-    const title = event.values.title;
-    const header = event.values.header;
-    const subscriberGoal = event.values.subscriberGoal;
-    const {reddit, redis} = context;
+  };
+};
 
-    try {
-      const subreddit = await reddit.getCurrentSubreddit();
-      // Using the form data, generate a Custom Post containing the Subscriber Goal
-      const post = await reddit.submitPost({
-        subredditName: subreddit.name,
-        title,
-        textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
-        preview: (
-          <vstack alignment="middle center" height="100%" width="100%">
-            <text>Loading Subscriber Goal...</text>
-          </vstack>
-        ),
-      });
+export type CreateSubGoalSubmitData = {
+  title?: string;
+  header?: string;
+  subscriberGoal?: number;
+}
 
-      // Store the new Subscriber Goal and custom Header in Redis using the Post ID
-      await redis.hSet('subscriber_goals', {
-        [`${post.id}_goal`]: subscriberGoal.toString(),
-        [`${post.id}_header`]: header,
-      });
-      console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}, Header: ${header}`);
+const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (event: FormOnSubmitEvent<CreateSubGoalSubmitData>, context: Context) => {
+  const title = event.values.title;
+  const header = event.values.header;
+  const subscriberGoal = event.values.subscriberGoal;
+  const {reddit, redis} = context;
 
-      // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
-      await post.sticky();
-      context.ui.showToast('Subscriber Goal post created!');
-      context.ui.navigateTo(post);
-    } catch (error: unknown) {
-      console.error(`Error creating button post: ${error instanceof Error ? error.message : String(error)}`);
-      context.ui.showToast('An error occurred while creating the post.');
-    }
+  if (!title || !header || !subscriberGoal) {
+    context.ui.showToast('Please fill out all fields.');
+    return;
   }
-);
+
+  try {
+    const subreddit = await reddit.getCurrentSubreddit();
+    // Using the form data, generate a Custom Post containing the Subscriber Goal
+    const post = await reddit.submitPost({
+      subredditName: subreddit.name,
+      title,
+      textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
+      preview: (
+        <vstack alignment="middle center" height="100%" width="100%">
+          <text>Loading Subscriber Goal...</text>
+        </vstack>
+      ),
+    });
+
+    // Store the new Subscriber Goal and custom Header in Redis using the Post ID
+    await redis.hSet('subscriber_goals', {
+      [`${post.id}_goal`]: subscriberGoal.toString(),
+      [`${post.id}_header`]: header,
+    });
+    console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}, Header: ${header}`);
+
+    // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
+    await post.sticky();
+    context.ui.showToast('Subscriber Goal post created!');
+    context.ui.navigateTo(post);
+  } catch (error: unknown) {
+    console.error(`Error creating button post: ${error instanceof Error ? error.message : String(error)}`);
+    context.ui.showToast('An error occurred while creating the post.');
+  }
+};
+
+export const createSubGoalForm: FormKey = Devvit.createForm(form, formHandler);
