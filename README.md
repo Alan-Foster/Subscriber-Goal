@@ -10,19 +10,22 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Features
 
+- **Realtime Subscriber Notifications**: Show your community who just subscribed in real-time!
+- **Progress Bar**: Track progress with a visual ratio bar!
 - **Custom Post Technology**: High-quality custom formatting for your subscriber goal
 - **Subscribe Now button**: Set the text of your Subscribe Now action button
-- **Teach New Users to Subscribe**: New users get to understand how subscribing to subreddits work
 
 ## Benefits
 
 - Higher subscription rates of new users, great for new subreddits!
 - Larger subreddits can celebrate major user milestones
+- Teach new users to subscribe and remind them to join the community
 
 ## Screenshots
 - App is still in early development. Images Coming Soon!
 
 ## Changelog
+- 0.8.0 - Realtime subscriber name messages and progress updates (mostly) fixed. Launch of Private Beta.
 - 0.7.3 - Major refactoring. Announcements in r/SubGoal removed for refactoring.
 - 0.7.1 - Adding / testing realtime subscriber names, announces new goals in r/SubGoal. Minor refactoring, Devvit 0.11.10.
 - 0.7.0 - Fixed critical form.0 error related to dynamic forms not passing data properly. Devvit 0.11.9.

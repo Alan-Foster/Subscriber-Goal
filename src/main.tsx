@@ -7,13 +7,21 @@ import { formatNumberAlwaysRound, formatNumberUnlessExact } from './utils.js';
 import { Devvit, useState, useAsync, useChannel } from '@devvit/public-api';
 Devvit.configure({ redditAPI: true, redis: true, media: true, realtime: true });
 
+// Define our realtime message type
+interface SubscriberMessage {
+  newSubscriberCount: number;
+  recentSubscriber: string;
+}
 
+// Main App Component
 Devvit.addCustomPostType({
   name: 'SubscriberGoal',
   height: 'tall',
   render: (context) => {
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [recentSubscriberMessage, setRecentSubscriberMessage] = useState('');
+    const [realtimeConnected, setRealtimeConnected] = useState(false);
+    const [pendingRealtimeMessage, setPendingRealtimeMessage] = useState<SubscriberMessage | null>(null);
   
     const { data: subredditData, loading: subredditLoading, error: subredditError } = useAsync(
       async () => {
@@ -47,13 +55,13 @@ Devvit.addCustomPostType({
       header: null, 
       recentSubscriber: "No recent subscribers"
     };
-	
+    
     // Must be placed here because cannot access 'subredditData' before initialization
     const progress = Math.min(((subredditData?.numberOfSubscribers || 0) / (goal || 2000)) * 100, 100);
     // Constant for subscriber goal math
     const remainingSubscribers = Math.max((goal || 2000) - (subredditData?.numberOfSubscribers || 0), 0);
 
-	  // Realtime function to update the subscriber count as users click the button
+    // Realtime function to update the subscriber count as users click the button
     const channel = useChannel({
       name: 'subscriber_updates',
       onMessage: (data) => {
@@ -71,38 +79,67 @@ Devvit.addCustomPostType({
           console.warn('Unexpected realtime message:', data);
         }
       },
+      onSubscribed: async () => {
+        console.log("Realtime channel connected");
+        setRealtimeConnected(true);
+        
+        // If we have a pending message, send it now that we're connected
+        if (pendingRealtimeMessage) {
+          try {
+            await channel.send(pendingRealtimeMessage);
+            console.log("Sent pending realtime message after reconnection");
+            setPendingRealtimeMessage(null);
+          } catch (error) {
+            console.error("Failed to send pending message:", error);
+          }
+        }
+      },
+      onUnsubscribed: () => {
+        console.log("Realtime channel disconnected");
+        setRealtimeConnected(false);
+      }
     });
 
     channel.subscribe();    
   
-    const handleSubscribe = () => {
-      context.reddit.subscribeToCurrentSubreddit().then(async () => {
+    const handleSubscribe = async () => {
+      try {
+        await context.reddit.subscribeToCurrentSubreddit();
         context.ui.showToast('Thank you for subscribing!');
-    
+        
         const currentUsername = await context.reddit.getCurrentUsername();
-    
+        
         // Immediately increment subscriber count optimistically
         setRefreshTrigger(prev => prev + 1);
         setRecentSubscriberMessage(`${currentUsername} just subscribed!`);
-    
+        
         // Update Redis with recent subscriber
         await context.redis.hSet('subscriber_goals', { 
           [`${context.postId}_recent_subscriber`]: currentUsername!
         });
-    
-        // Send new subscriber data through the realtime channel
-        await channel.send({ 
+        
+        // Create the message object
+        const message: SubscriberMessage = {
           newSubscriberCount: subscriberCount + 1,  // Optimistic increment
           recentSubscriber: currentUsername!
-        });
-    
-      }).catch((error) => {
+        };
+        
+        // Send message if connected, otherwise store as pending
+        if (realtimeConnected) {
+          await channel.send(message);
+          console.log("Sent realtime subscription update");
+        } else {
+          console.log("Realtime not connected, storing message as pending");
+          setPendingRealtimeMessage(message);
+          context.ui.showToast('Your subscription was recorded! Updates will sync when connection is restored.');
+        }
+      } catch (error) {
         console.error('Subscription failed:', error);
         context.ui.showToast('Subscription failed. Try again.');
-      });
+      }
     };
     
-
+    
 	// The returned block code that builds the actual Subscriber Goal post content
 	return (
 	  <blocks>
