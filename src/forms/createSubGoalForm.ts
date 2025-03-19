@@ -1,6 +1,7 @@
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from './utils.js';
+import {basicPreview} from '../customPost/components/basicPreview.js';
+import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
 
 export type CreateSubGoalFormData = {
   defaultGoal?: number;
@@ -71,11 +72,7 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
       subredditName: subreddit.name,
       title,
       textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
-      preview: (
-        <vstack alignment="middle center" height="100%" width="100%">
-          <text>Loading Subscriber Goal...</text>
-        </vstack>
-      ),
+      preview: basicPreview,
     });
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID

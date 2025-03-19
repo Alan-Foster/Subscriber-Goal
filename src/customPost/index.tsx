@@ -1,10 +1,6 @@
 import {Devvit, useAsync, useChannel, useState} from '@devvit/public-api';
 
-export {createSubGoalButton} from './createSubGoalButton.js';
-export {createSubGoalForm} from './createSubGoalForm.js';
-import {formatNumberAlwaysRound, formatNumberUnlessExact} from './utils.js';
-
-Devvit.configure({redditAPI: true, redis: true, media: true, realtime: true});
+import {formatNumberAlwaysRound, formatNumberUnlessExact} from '../utils/formatNumbers.js';
 
 // Define our realtime message type
 export type SubscriberMessage = {
@@ -13,7 +9,7 @@ export type SubscriberMessage = {
 }
 
 // Main App Component
-Devvit.addCustomPostType({
+export const customPostType = Devvit.addCustomPostType({
   name: 'SubscriberGoal',
   height: 'tall',
   render: context => {
@@ -197,5 +193,3 @@ Devvit.addCustomPostType({
     );
   },
 });
-
-export default Devvit;
