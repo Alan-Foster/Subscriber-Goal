@@ -144,33 +144,33 @@ Devvit.addCustomPostType({
         <vstack alignment="middle center" darkBackgroundColor="" gap="small" height="100%" lightBackgroundColor=""
           padding="medium" width="100%" >
 
-          {/* // Goal Header text rendered as defined within the addMenuItem Form */}
+          {/* Goal Header text rendered as defined within the addMenuItem Form */}
           <text alignment="middle center" onPress={handleSubscribe} size="xxlarge" weight="bold" width="100%" wrap>
             {header || `Help r/${subredditData?.name || 'Subreddit'} reach ${formatNumberUnlessExact(goal)} members!`}
           </text>
 
           <spacer size="small" />
 
-          {/* // The subscriber goal rendered as a ratio between the true subscriber count / the Redis goal value */}
+          {/* The subscriber goal rendered as a ratio between the true subscriber count / the Redis goal value */}
           <text size="xlarge" weight="regular">
           Goal: {formatNumberAlwaysRound(subscriberCount || 1)} / {formatNumberUnlessExact(goal)} subscribers
           </text>
 
-          {/* // Progress Bar as colored vstack backgrounds with width as derived by Progress constant above */}
+          {/* Progress Bar as colored vstack backgrounds with width as derived by Progress constant above */}
           <vstack backgroundColor='global-white' border='thin' borderColor='black' cornerRadius='medium' width='70%'>
             <hstack backgroundColor='#D93A00' width={`${progress}%`}>
               <spacer shape='square' size='large' />
             </hstack>
           </vstack>
 
-          {/* // Subscribers required to reach the goal as derived by remainingSubscribers constant above */}
+          {/* Subscribers required to reach the goal as derived by remainingSubscribers constant above */}
           <text size="xlarge" weight="regular">
             {remainingSubscribers === 0
               ? 'Subscriber goal reached!'
               : `Only ${remainingSubscribers} more to reach the goal`}
           </text>
 
-          {/* // Most recent subscriber username rendered by Realtime as defined by constant above */}
+          {/* Most recent subscriber username rendered by Realtime as defined by constant above */}
           {recentSubscriberMessage && (
             <text size="xlarge" weight="regular">
               {recentSubscriberMessage}
@@ -179,14 +179,14 @@ Devvit.addCustomPostType({
 
           <spacer size="small" />
 
-          {/* // The actual large green subscriber button */}
+          {/* The actual large green subscriber button */}
           <button appearance="success" onPress={handleSubscribe} size="large">
         Subscribe to r/{subredditData?.name || 'Subreddit'}
           </button>
 
-          {/* // <spacer size="small" /> */}
+          {/* <spacer size="small" /> */}
 
-          {/* // Link back to home subreddit r/SubGoal to qualify for Reddit Developer Funds */}
+          {/* Link back to home subreddit r/SubGoal to qualify for Reddit Developer Funds */}
           <button appearance="bordered" onPress={() => context.ui.navigateTo('https://www.reddit.com/r/SubGoal/')}
             size="medium">
         See other goals at r/SubGoal
