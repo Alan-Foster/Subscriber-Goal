@@ -75,6 +75,8 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
       preview: basicPreview,
     });
 
+    // TODO: Dispatch new post event to r/SubGoal
+
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
     await redis.hSet('subscriber_goals', {
       [`${post.id}_goal`]: subscriberGoal.toString(),
