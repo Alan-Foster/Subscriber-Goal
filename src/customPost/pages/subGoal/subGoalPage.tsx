@@ -17,8 +17,10 @@ export const SubGoalPage: PageElement = (context, router) => {
            Goal: {formatNumberAlwaysRound(state.subreddit.subscribers || 1)} / {formatNumberUnlessExact(state.goal)} subscribers
       </text>
       <ProgressBar current={state.subreddit.subscribers} end={state.goal} start={0} width={'70%'} />
-      {state.goalRemaining > 0 ? 'Subscriber goal reached!'
-        : `Only ${state.goalRemaining} more to reach the goal`}
+      <text size="xlarge" weight="regular">
+        {state.goalRemaining > 0 ? 'Subscriber goal reached!'
+          : `Only ${state.goalRemaining} more to reach the goal`}
+      </text>
       {state.recentSubscriber && (
         <text size="xlarge" weight="regular">
           {`${state.recentSubscriber} just subscribed!`}
