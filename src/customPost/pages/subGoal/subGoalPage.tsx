@@ -18,7 +18,7 @@ export const SubGoalPage: PageElement = (context, router) => {
       </text>
       <ProgressBar current={state.subreddit.subscribers} end={state.goal} start={0} width={'70%'} />
       <text size="xlarge" weight="regular">
-        {state.goalRemaining > 0 ? 'Subscriber goal reached!'
+        {state.goalRemaining <= 0 ? 'Subscriber goal reached!'
           : `Only ${state.goalRemaining} more to reach the goal`}
       </text>
       {state.recentSubscriber && (

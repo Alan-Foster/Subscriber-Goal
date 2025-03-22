@@ -89,7 +89,7 @@ export class SubGoalState {
     return Math.max(this.goal - this.subreddit.subscribers, 0);
   }
   get header (): string {
-    return this._subGoalData.data?.header ?? `Help r/${this.subreddit.name || 'Subreddit'} reach ${formatNumberUnlessExact(this.goal)} members!`;
+    return this._subGoalData.data?.header ?? `Loading Header...`;
   }
   get loaded (): boolean {
     return this.subreddit !== null && this.goal !== null;

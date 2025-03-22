@@ -31,7 +31,7 @@ const form: FormFunction<CreateSubGoalFormData> = (data: CreateSubGoalFormData) 
       {
         name: 'header',
         label: 'Enter your Goal Header:',
-        defaultValue: `Help r/${data.subredditName} reach ${formatNumberUnlessExact(data.defaultGoal)} members!`,
+        defaultValue: `Help r/${data.subredditName} celebrate ${formatNumberUnlessExact(data.defaultGoal)} members!`,
         type: 'string',
         helpText: 'The large header inside the post itself.',
         required: true,
@@ -67,6 +67,23 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
+  
+    // Get all existing posts from u/subscriber-goal in the current subreddit
+    const userPosts = await reddit.getPostsByUser({
+      username: "subscriber-goal",
+      limit: 100
+    });
+    const posts = await userPosts.all();
+    const subredditPosts = posts.filter(post => post.subredditName === subreddit.name);
+    
+    // Unsticky any existing goal posts before generating a new one
+    for (const existingPost of subredditPosts) {
+      if (existingPost.stickied) {
+        await existingPost.unsticky();
+        console.log(`Unstickied previous goal post: ${existingPost.id}`);
+      }
+    }
+
     // Using the form data, generate a Custom Post containing the Subscriber Goal
     const post = await reddit.submitPost({
       subredditName: subreddit.name,
@@ -74,6 +91,11 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
       textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
       preview: basicPreview,
     });
+
+    // Approve the post explicitly to resolve potential AutoMod bug
+    await post.approve();
+    console.log(`Approved post: ${post.id}`);
+
 
     // TODO: Dispatch new post event to r/SubGoal
 

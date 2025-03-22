@@ -25,6 +25,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - App is still in early development. Images Coming Soon!
 
 ## Changelog
+- 0.8.1 - SubGoal now removes old pins before making new goals. Self-approves posts to fix AutoMod platform bug.
 - 0.8.0 - Realtime subscriber name messages and progress updates (mostly) fixed. Launch of Private Beta.
 - 0.7.3 - Major refactoring. Announcements in r/SubGoal removed for refactoring.
 - 0.7.1 - Adding / testing realtime subscriber names, announces new goals in r/SubGoal. Minor refactoring, Devvit 0.11.10.
