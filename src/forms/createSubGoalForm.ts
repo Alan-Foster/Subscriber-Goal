@@ -67,15 +67,14 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
-  
+
     // Get all existing posts from u/subscriber-goal in the current subreddit
     const userPosts = await reddit.getPostsByUser({
-      username: "subscriber-goal",
-      limit: 100
-    });
-    const posts = await userPosts.all();
-    const subredditPosts = posts.filter(post => post.subredditName === subreddit.name);
-    
+      username: 'subscriber-goal',
+      limit: 100,
+    }).all();
+    const subredditPosts = userPosts.filter(post => post.subredditName === subreddit.name);
+
     // Unsticky any existing goal posts before generating a new one
     for (const existingPost of subredditPosts) {
       if (existingPost.stickied) {
@@ -95,7 +94,6 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
     // Approve the post explicitly to resolve potential AutoMod bug
     await post.approve();
     console.log(`Approved post: ${post.id}`);
-
 
     // TODO: Dispatch new post event to r/SubGoal
 
