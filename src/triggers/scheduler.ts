@@ -2,7 +2,7 @@ import {Devvit, ScheduledJobEvent, TriggerContext} from '@devvit/public-api';
 
 import {getAppSettings} from '../settings.js';
 
-export async function onPostUpdateJob (event: ScheduledJobEvent<undefined>, context: TriggerContext) {
+export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, context: TriggerContext) {
   console.log(`postsUpdaterJob job ran at ${new Date().toISOString()}\nevent:\n${JSON.stringify(event)}\ncontext:\n${JSON.stringify(context)}`);
 
   const appSettings = await getAppSettings(context.settings);
@@ -14,7 +14,7 @@ export async function onPostUpdateJob (event: ScheduledJobEvent<undefined>, cont
   // TODO: Implement preview and text fallback updater here
 }
 
-export const postUpdaterJob = Devvit.addSchedulerJob({
+export const postsUpdaterJob = Devvit.addSchedulerJob({
   name: 'postsUpdaterJob',
-  onRun: onPostUpdateJob,
+  onRun: onPostsUpdaterJob,
 });

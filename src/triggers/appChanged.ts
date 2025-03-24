@@ -4,9 +4,9 @@ import {startSingletonJob} from 'devvit-helpers';
 export async function onAppChanged (event: TriggerEventType[AppInstall] | TriggerEventType[AppUpgrade], context: TriggerContext) {
   try {
     // This function from devvit-helpers will start a job, but it terminates any other jobs with the same name first.
-    await startSingletonJob(context.scheduler, 'postUpdaterJob', '* * * * *', {});
+    await startSingletonJob(context.scheduler, 'postsUpdaterJob', '* * * * *', {});
   } catch (e) {
-    console.error('Failed to schedule postUpdaterJob job', e);
+    console.error('Failed to schedule postsUpdaterJob job', e);
     throw e;
   }
 }

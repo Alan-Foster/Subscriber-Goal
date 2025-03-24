@@ -7,7 +7,7 @@ export {createSubGoalButton} from './buttons/createSubGoalButton.js';
 // Forms
 export {createSubGoalForm} from './forms/createSubGoalForm.js';
 // Scheduler
-export {postUpdaterJob} from './triggers/scheduler.js';
+export {postsUpdaterJob} from './triggers/scheduler.js';
 // Settings
 export {appSettings} from './settings.js';
 // Triggers
