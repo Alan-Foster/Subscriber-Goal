@@ -5,7 +5,6 @@ import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
 import {getSubGoalData, setNewSubscriber, SubGoalData} from '../../../data/subGoalData.js';
 import {getDefaultSubscriberGoal} from '../../../utils/defaultSubscriberGoal.js';
-import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
 import {Router} from '../../router.js';
 
 export type ChannelPacket = {
@@ -89,7 +88,7 @@ export class SubGoalState {
     return Math.max(this.goal - this.subreddit.subscribers, 0);
   }
   get header (): string {
-    return this._subGoalData.data?.header ?? `Loading Header...`;
+    return this._subGoalData.data?.header ?? 'Loading Header...';
   }
   get loaded (): boolean {
     return this.subreddit !== null && this.goal !== null;
