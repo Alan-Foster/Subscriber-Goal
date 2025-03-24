@@ -1,5 +1,4 @@
 import {Context, useAsync, UseAsyncResult, useChannel, UseChannelResult, useState, UseStateResult} from '@devvit/public-api';
-import {ChannelStatus} from '@devvit/public-api/types/realtime.js';
 import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 
 import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
@@ -71,11 +70,7 @@ export class SubGoalState {
       onSubscribed: this.onChannelSubscribed,
       onUnsubscribed: this.onChannelUnsubscribed,
     });
-    try {
-      this._channel.subscribe();
-    } catch (e) {
-      console.error('Failed to subscribe to channel:', e);
-    }
+    this.connectToChannel();
   }
 
   get goal (): number {
@@ -130,6 +125,13 @@ export class SubGoalState {
     this.refresher = Date.now();
   }
 
+  connectToChannel = () => {
+    try {
+      this._channel.subscribe();
+    } catch (e) {
+      console.error('Failed to connect to channel:', e);
+    }
+  };
   onChannelMessage = (message: ChannelPacket) => {
     if (message.type === 'sub') {
       if (message.recentSubscriber) {
@@ -158,18 +160,17 @@ export class SubGoalState {
     this.context.ui.navigateTo('https://www.reddit.com/r/SubGoal/');
   };
   sendToChannel = async (message: ChannelPacket): Promise<boolean> => {
-    if (this._channel.status === ChannelStatus.Connected) {
-      try {
-        console.log('Sending message:', message);
-        await this._channel.send(message);
-        return true;
-      } catch (e) {
-        console.error('Failed to send message:', e);
-      }
+    try {
+      console.log('Sending message:', message);
+      await this._channel.send(message);
+      return true;
+    } catch (e) {
+      console.error('Failed to send message:', e);
+      // Save message for later if we're not connected or sending fails and attempt to reconnect
+      this.pendingMessage = message;
+      this.connectToChannel();
+      return false;
     }
-    // Save message for later if we're not connected or sending fails
-    this.pendingMessage = message;
-    return false;
   };
   subscribePressed = async () => {
     if (!this.user) {
