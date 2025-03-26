@@ -3,12 +3,12 @@ import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitE
 import {basicPreview} from '../customPost/components/basicPreview.js';
 import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
 
-export type CreateSubGoalFormData = {
+export type CreateFormData = {
   defaultGoal?: number;
   subredditName?: string;
 }
 
-const form: FormFunction<CreateSubGoalFormData> = (data: CreateSubGoalFormData) => {
+const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
   if (!data.subredditName) {
     throw new Error('subredditName is required');
   }
@@ -48,13 +48,13 @@ const form: FormFunction<CreateSubGoalFormData> = (data: CreateSubGoalFormData) 
   };
 };
 
-export type CreateSubGoalSubmitData = {
+export type CreateFormSubmitData = {
   title?: string;
   header?: string;
   subscriberGoal?: number;
 }
 
-const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (event: FormOnSubmitEvent<CreateSubGoalSubmitData>, context: Context) => {
+const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, context: Context) => {
   const title = event.values.title;
   const header = event.values.header;
   const subscriberGoal = event.values.subscriberGoal;
@@ -114,4 +114,4 @@ const formHandler: FormOnSubmitEventHandler<CreateSubGoalSubmitData> = async (ev
   }
 };
 
-export const createSubGoalForm: FormKey = Devvit.createForm(form, formHandler);
+export const createForm: FormKey = Devvit.createForm(form, formHandler);

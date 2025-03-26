@@ -3,9 +3,9 @@ import {Devvit} from '@devvit/public-api';
 // Custom Post
 export {customPostType} from './customPost/index.js';
 // Buttons
-export {createSubGoalButton} from './buttons/createSubGoalButton.js';
+export {createMenuItem} from './buttons/createMenuItem.js';
 // Forms
-export {createSubGoalForm} from './forms/createSubGoalForm.js';
+export {createForm} from './forms/createForm.js';
 // Scheduler
 export {postsUpdaterJob} from './triggers/scheduler.js';
 // Settings
