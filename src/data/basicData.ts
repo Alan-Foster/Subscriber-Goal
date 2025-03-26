@@ -1,6 +1,7 @@
 export type BasicSubredditData = {
   id: string;
   name: string;
+  icon: string;
   subscribers: number;
 };
 

@@ -1,19 +1,21 @@
-import {Context, useAsync, UseAsyncResult, useChannel, UseChannelResult, useState, UseStateResult} from '@devvit/public-api';
+import {Context, useAsync, UseAsyncResult, useChannel, UseChannelResult, useInterval, UseIntervalResult, useState, UseStateResult} from '@devvit/public-api';
 import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 
 import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
-import {getSubGoalData, setNewSubscriber, SubGoalData} from '../../../data/subGoalData.js';
-import {getDefaultSubscriberGoal} from '../../../utils/defaultSubscriberGoal.js';
+import {checkCompletionStatus, getSubGoalData, SubGoalData} from '../../../data/subGoalData.js';
+import {getSubscriberStats, setNewSubscriber, SubscriberStats} from '../../../data/subscriberStats.js';
 import {Router} from '../../router.js';
 
 export type ChannelPacket = {
   type: 'sub'; // Allows for other types of messages in the future
   newSubscriberCount: number;
-  recentSubscriber: string;
+  recentSubscriber?: string;
 };
 
 export class SubGoalState {
   // UseStateResult
+  readonly _currentSubscibers: UseStateResult<number>;
+  readonly _hasSubscribed: UseStateResult<boolean>;
   readonly _pendingMessage: UseStateResult<ChannelPacket | null>;
   readonly _recentSubscriber: UseStateResult<string>;
   readonly _refresher: UseStateResult<number>;
@@ -21,15 +23,21 @@ export class SubGoalState {
   readonly _currentUser: UseAsyncResult<BasicUserData | null>;
   readonly _subGoalData: UseAsyncResult<SubGoalData>;
   readonly _subredditData: UseAsyncResult<BasicSubredditData>;
+  readonly _subscriptionStats: UseAsyncResult<SubscriberStats | null>;
   // UseChannelResult
   readonly _channel: UseChannelResult<ChannelPacket>;
+  // UseInterval
+  readonly _interval: UseIntervalResult;
 
   constructor (readonly context: Context, protected router: Router) {
-    this._refresher = useState(0);
+    this._currentSubscibers = useState(0);
+    this._hasSubscribed = useState(false);
     this._pendingMessage = useState<ChannelPacket | null>(null);
     this._recentSubscriber = useState('');
+    this._refresher = useState(0);
 
     this._subGoalData = useAsync<SubGoalData>(async () => getSubGoalData(this.context.redis, this.postId), {
+      depends: [this.refresher],
       finally: (data, error) => {
         if (!data || error) {
           return;
@@ -37,6 +45,10 @@ export class SubGoalState {
 
         if (!this.recentSubscriber && data.recentSubscriber) {
           this.recentSubscriber = data.recentSubscriber;
+        }
+
+        if (data.completedTime) {
+          this.router.changePage('completed');
         }
       },
     });
@@ -46,9 +58,20 @@ export class SubGoalState {
       return {
         id: subreddit.id,
         name: subreddit.name,
+        icon: (await this.context.reddit.getSubredditStyles(subreddit.id)).icon ?? 'https://i.redd.it/xaaj3xsdy0re1.png',
         subscribers: subreddit.numberOfSubscribers,
       };
-    }, {depends: [this.recentSubscriber, this.refresher]});
+    }, {
+      depends: [this.recentSubscriber, this.refresher],
+      finally: (data, error) => {
+        if (!data || error) {
+          console.error('Failed to load subreddit data:', error);
+          return;
+        }
+
+        this.subscribers = data.subscribers;
+      },
+    });
 
     this._currentUser = useAsync<BasicUserData | null>(async () => {
       if (!this.context.userId) {
@@ -62,6 +85,26 @@ export class SubGoalState {
         id: this.context.userId,
         username,
       };
+    }, {depends: [this.context.userId ?? null]});
+
+    this._subscriptionStats = useAsync<SubscriberStats | null>(async () => {
+      if (!this.user || !this.user.id) {
+        return null;
+      }
+      const subStats = await getSubscriberStats(this.context.redis, this.user.id);
+      return subStats ?? null;
+    }, {
+      depends: [this.user?.id ?? null, this.refresher],
+      finally: (data, error) => {
+        if (error) {
+          console.error('Failed to load subreddit data:', error);
+          return;
+        }
+
+        if (data) {
+          this.subscribed = true;
+        }
+      },
     });
 
     this._channel = useChannel<ChannelPacket>({
@@ -71,22 +114,24 @@ export class SubGoalState {
       onUnsubscribed: this.onChannelUnsubscribed,
     });
     this.connectToChannel();
+
+    this._interval = useInterval(this.refresh, 30000);
   }
 
-  get goal (): number {
-    return this._subGoalData.data?.goal ?? getDefaultSubscriberGoal(this.subreddit.subscribers);
+  get completedTime (): Date | null {
+    return this._subGoalData.data?.completedTime ? new Date(this._subGoalData.data.completedTime) : null;
+  }
+  get goal (): number | null {
+    return this._subGoalData.data?.goal ?? null;
   }
   get goalProgress (): number {
     return Math.min((this.subreddit.subscribers || 0) / (this.goal || 2000) * 100, 100);
   }
-  get goalRemaining (): number {
-    return Math.max(this.goal - this.subreddit.subscribers, 0);
+  get goalRemaining (): number | null {
+    return this.goal !== null ? Math.max(this.goal - this.subreddit.subscribers, 0) : null;
   }
   get header (): string {
     return this._subGoalData.data?.header ?? 'Loading Header...';
-  }
-  get loaded (): boolean {
-    return this.subreddit !== null && this.goal !== null;
   }
   protected get pendingMessage (): ChannelPacket | null {
     return this._pendingMessage[0];
@@ -114,15 +159,24 @@ export class SubGoalState {
     return this._subredditData.data ?? {
       id: this.context.subredditId,
       name: this.context.subredditName ?? '',
+      icon: '',
       subscribers: 0,
     };
   }
+  get subscribed (): boolean {
+    return this._hasSubscribed[0];
+  }
+  set subscribed (value: boolean) {
+    this._hasSubscribed[1](value);
+  }
+  get subscribers (): number {
+    return this._currentSubscibers[0];
+  }
+  set subscribers (value: number) {
+    this._currentSubscibers[1](value);
+  }
   get user (): BasicUserData | null {
     return this._currentUser.data;
-  }
-
-  public refresh (): void {
-    this.refresher = Date.now();
   }
 
   connectToChannel = () => {
@@ -137,6 +191,7 @@ export class SubGoalState {
       if (message.recentSubscriber) {
         this.recentSubscriber = message.recentSubscriber;
       }
+      this.subscribers = message.newSubscriberCount;
     } else {
       console.warn('Unexpected message type:', message);
     }
@@ -156,6 +211,9 @@ export class SubGoalState {
       console.error(`Error resubscribing to channel: ${String(e)}`);
     }
   };
+  refresh = () => {
+    this.refresher = Date.now();
+  };
   seeMorePressed = async () => {
     this.context.ui.navigateTo('https://www.reddit.com/r/SubGoal/');
   };
@@ -173,9 +231,11 @@ export class SubGoalState {
     }
   };
   subscribePressed = async () => {
-    if (!this.user) {
+    if (!this.user || !this.user.id) {
       return this.context.ui.showToast('Please log in to subscribe!');
     }
+
+    await this.context.reddit.getCurrentUsername(); // Prevent ServerCallRequired exception catching in the following block by starting it here
 
     try {
       await this.context.reddit.subscribeToCurrentSubreddit();
@@ -183,19 +243,27 @@ export class SubGoalState {
 
       this.refresh();
       this.recentSubscriber = this.user.username;
+      this.subscribed = true;
 
-      const newSubscriber = await setNewSubscriber(this.context.redis, this.postId, this.subreddit.subscribers + 1, this.user);
+      const newSubscriberCount = this.subreddit.subscribers + 1;
+      const newSubscriber = await setNewSubscriber(this.context.redis, this.postId, newSubscriberCount, this.user);
       if (!newSubscriber) {
-        return; // Don't show the recent subscriber message if they're already subscribed
+        const sendSuccess = await this.sendToChannel({
+          type: 'sub',
+          newSubscriberCount,
+          recentSubscriber: this.user.username,
+        });
+        if (!sendSuccess) {
+          this.subscribed = false;
+          return this.context.ui.showToast('Your subscription was recorded! Updates will sync when connection is restored.');
+        }
       }
 
-      const sendSuccess = await this.sendToChannel({
-        type: 'sub',
-        newSubscriberCount: this.subreddit.subscribers + 1,
-        recentSubscriber: this.user.username,
-      });
-      if (!sendSuccess) {
-        return this.context.ui.showToast('Your subscription was recorded! Updates will sync when connection is restored.');
+      if (this.goal !== null && newSubscriberCount >= this.goal) {
+        await checkCompletionStatus(this.context.reddit, this.context.redis, this.postId);
+        this.router.changePage('completed');
+      } else {
+        this.router.changePage('thanks');
       }
     } catch (e) {
       console.error(`${this.user.username} failed to subscribe:`, e);
