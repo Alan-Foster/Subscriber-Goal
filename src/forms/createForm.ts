@@ -1,6 +1,8 @@
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
-import {basicPreview} from '../customPost/components/basicPreview.js';
+import {BasicPreview} from '../customPost/components/basicPreview.js';
+import {setSubGoalData} from '../data/subGoalData.js';
+import {queueUpdate, trackPost} from '../data/updaterData.js';
 import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
 
 export type CreateFormData = {
@@ -88,7 +90,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
       subredditName: subreddit.name,
       title,
       textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
-      preview: basicPreview,
+      preview: BasicPreview,
     });
 
     // Approve the post explicitly to resolve potential AutoMod bug
@@ -98,11 +100,15 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
     // TODO: Dispatch new post event to r/SubGoal
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
-    await redis.hSet('subscriber_goals', {
-      [`${post.id}_goal`]: subscriberGoal.toString(),
-      [`${post.id}_header`]: header,
-    });
     console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}, Header: ${header}`);
+    await setSubGoalData(redis, post.id, {
+      goal: subscriberGoal,
+      header,
+      recentSubscriber: '',
+      completedTime: 0,
+    });
+    await trackPost(redis, post.id, post.createdAt);
+    await queueUpdate(redis, post.id, post.createdAt);
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
     await post.sticky();

@@ -2,6 +2,9 @@ import {RedisClient} from '@devvit/public-api';
 import {zScanAll} from 'devvit-helpers';
 
 import {BasicUserData} from './basicData.js';
+import {subscriberGoalsKey} from './subGoalData.js';
+
+export const subscriberStatsKey = 'subscriber_stats';
 
 export type SubscriberStats = {
   id: string;
@@ -22,8 +25,8 @@ export function isSubscriberStats (object: unknown): object is SubscriberStats {
 }
 
 export async function getSubscriberStats (redis: RedisClient, userId: string): Promise<SubscriberStats | undefined> {
-  // Ideally we would use this, but it's not working properly for some reason: await redis.zRange('subscriber_stats', `[${userId}:`, `[${userId}:\xFF`, {by: 'lex'});
-  const foundSubscribers = await zScanAll(redis, 'subscriber_stats', `${userId}:*`);
+  // Ideally we would use this, but it's not working properly for some reason: await redis.zRange(subscriberStatsKey, `[${userId}:`, `[${userId}:\xFF`, {by: 'lex'});
+  const foundSubscribers = await zScanAll(redis, subscriberStatsKey, `${userId}:*`);
   if (foundSubscribers.length === 0) {
     return;
   }
@@ -56,10 +59,10 @@ export async function setNewSubscriber (redis: RedisClient, postId: string, curr
     return false;
   }
 
-  await redis.hSet('subscriber_goals', {
+  await redis.hSet(subscriberGoalsKey, {
     [`${postId}_recent_subscriber`]: user.username,
   });
-  await redis.zAdd('subscriber_stats', {
+  await redis.zAdd(subscriberStatsKey, {
     member: `${user.id}:${user.username}:${currentSubscribers}`,
     score: Date.now(),
   });

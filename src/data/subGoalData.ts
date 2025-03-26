@@ -1,5 +1,7 @@
 import {RedditAPIClient, RedisClient} from '@devvit/public-api';
 
+export const subscriberGoalsKey = 'subscriber_goals';
+
 export type SubGoalData = {
   goal: number;
   header: string;
@@ -8,7 +10,7 @@ export type SubGoalData = {
 };
 
 export async function getSubGoalData (redis: RedisClient, postId: string): Promise<SubGoalData> {
-  const [goal, header, recentSubscriber, completedTime] = await redis.hMGet('subscriber_goals', [
+  const [goal, header, recentSubscriber, completedTime] = await redis.hMGet(subscriberGoalsKey, [
     `${postId}_goal`,
     `${postId}_header`,
     `${postId}_recent_subscriber`,
@@ -23,7 +25,7 @@ export async function getSubGoalData (redis: RedisClient, postId: string): Promi
 }
 
 export async function setSubGoalData (redis: RedisClient, postId: string, data: SubGoalData): Promise<void> {
-  await redis.hSet('subscriber_goals', {
+  await redis.hSet(subscriberGoalsKey, {
     [`${postId}_goal`]: data.goal.toString(),
     [`${postId}_header`]: data.header,
     [`${postId}_recent_subscriber`]: data.recentSubscriber ?? '',
