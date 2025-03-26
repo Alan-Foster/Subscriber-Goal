@@ -49,7 +49,7 @@ export async function getSubscriberStats (redis: RedisClient, userId: string): P
 
 export async function isTrackedSubscriber (redis: RedisClient, userId: string): Promise<boolean> {
   // This is a fancy way of getting entries that start with a prefix (in this case, the user ID)
-  const subscriberStats = getSubscriberStats(redis, userId);
+  const subscriberStats = await getSubscriberStats(redis, userId);
   return subscriberStats !== undefined;
 }
 
