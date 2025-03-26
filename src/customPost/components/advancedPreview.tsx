@@ -25,7 +25,7 @@ export const AdvancedPreview = (props: AdvancedPreviewProps) => {
         </hstack>
         <text alignment="middle center" selectable={false} size="xxlarge" weight="bold" width="100%" wrap>r/{props.subredditName} reached {formatNumberUnlessExact(props.goal)} subscribers!</text>
         <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
-          `Goal reached at ${props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on ${props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}`
+          Goal reached at ${props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on {props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}
         </text>
         <button appearance="success" disabled={true} size="large">
           Loading...
