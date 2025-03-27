@@ -45,7 +45,7 @@ export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, co
 
       const textFallback = subGoalData.completedTime
         ? `r/${subreddit.name} reached ${subGoalData.goal} subscribers!\n\nGoal reached at ${new Date(subGoalData.completedTime).toLocaleTimeString('en', {timeZone: 'UTC'})} on ${new Date(subGoalData.completedTime).toLocaleDateString('en', {timeZone: 'UTC'})}`
-        : `Welcome to r/${subreddit.name}\n\n${subreddit.numberOfSubscribers} / ${subGoalData.goal} subscribers.\n  Help us reach our goal!\n\n[Visit this post on Shreddit to enjoy interactive features](https://sh.reddit.com/${post.permalink})`;
+        : `Welcome to r/${subreddit.name}\n\n${subreddit.numberOfSubscribers} / ${subGoalData.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.)`;
       await post.setTextFallback({text: textFallback});
 
       if (subGoalData.completedTime) {
