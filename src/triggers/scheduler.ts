@@ -1,6 +1,6 @@
 import {Devvit, ScheduledJobEvent, TriggerContext} from '@devvit/public-api';
 
-import {previewMaker, PreviewProps} from '../customPost/components/preview.js';
+import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {checkCompletionStatus, getSubGoalData} from '../data/subGoalData.js';
 import {cancelUpdates, getQueuedUpdates, queueUpdate} from '../data/updaterData.js';
 import {getAppSettings} from '../settings.js';
@@ -43,11 +43,7 @@ export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, co
 
       const post = await context.reddit.getPostById(postId);
       await post.setCustomPostPreview(() => previewMaker(previewProps));
-
-      const textFallback = subGoalData.completedTime
-        ? `r/${subreddit.name} reached ${subGoalData.goal} subscribers!\n\nGoal reached at ${new Date(subGoalData.completedTime).toLocaleTimeString('en', {timeZone: 'UTC'})} on ${new Date(subGoalData.completedTime).toLocaleDateString('en', {timeZone: 'UTC'})}`
-        : `Welcome to r/${subreddit.name}\n\n${subreddit.numberOfSubscribers} / ${subGoalData.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.)`;
-      await post.setTextFallback({text: textFallback});
+      await post.setTextFallback({text: textFallbackMaker(previewProps)});
 
       if (subGoalData.completedTime) {
         await cancelUpdates(context.redis, postId);

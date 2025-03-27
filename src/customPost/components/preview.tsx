@@ -68,3 +68,6 @@ export const Preview = (props: PreviewProps) => {
 
 export const previewMaker = (props: PreviewProps) => <Preview {...props}/>;
 
+export const textFallbackMaker = (props: PreviewProps) => props.completedTime
+  ? `r/${props.subredditName} reached ${props.goal} subscribers!\n\nGoal reached at ${props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on ${props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}`
+  : `Welcome to r/${props.subredditName}\n\n${props.subscribers} / ${props.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.)`;

@@ -1,6 +1,6 @@
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
-import {previewMaker} from '../customPost/components/preview.js';
+import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {setSubGoalData} from '../data/subGoalData.js';
 import {queueUpdate, trackPost} from '../data/updaterData.js';
 import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
@@ -85,19 +85,21 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
       }
     }
 
+    const previewProps: PreviewProps = {
+      goal: subscriberGoal,
+      subscribers: subreddit.numberOfSubscribers,
+      subredditName: subreddit.name,
+      recentSubscriber: '',
+      completedTime: null,
+      subredditIcon: await getSubredditIcon(reddit, subreddit.id),
+    };
+
     // Using the form data, generate a Custom Post containing the Subscriber Goal
     const post = await reddit.submitPost({
       subredditName: subreddit.name,
       title,
-      textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
-      preview: previewMaker({
-        goal: subscriberGoal,
-        subscribers: subreddit.numberOfSubscribers,
-        subredditName: subreddit.name,
-        subredditIcon: await getSubredditIcon(reddit, subreddit.id),
-        recentSubscriber: null,
-        completedTime: null,
-      }),
+      textFallback: {text: textFallbackMaker(previewProps)},
+      preview: previewMaker(previewProps),
     });
 
     // Approve the post explicitly to resolve potential AutoMod bug
