@@ -4,6 +4,7 @@ import {advancedPreviewMaker, AdvancedPreviewProps} from '../customPost/componen
 import {checkCompletionStatus, getSubGoalData} from '../data/subGoalData.js';
 import {cancelUpdates, getQueuedUpdates, queueUpdate} from '../data/updaterData.js';
 import {getAppSettings} from '../settings.js';
+import {getSubredditIcon} from '../utils/subredditUtils.js';
 
 export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, context: TriggerContext) {
   console.log(`postsUpdaterJob job ran at ${new Date().toISOString()}`);
@@ -14,7 +15,7 @@ export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, co
     // TODO: Implement r/SubGoal post creation here
   }
 
-  const subredditIcon = (await context.reddit.getSubredditStyles(subreddit.id)).icon ?? 'https://i.redd.it/xaaj3xsdy0re1.png';
+  const subredditIcon = await getSubredditIcon(context.reddit, subreddit.id);
 
   const postIds = await getQueuedUpdates(context.redis);
   console.log(`Updating ${postIds.length} posts`);

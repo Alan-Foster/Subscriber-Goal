@@ -4,6 +4,7 @@ import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
 import {checkCompletionStatus, getSubGoalData, SubGoalData} from '../../../data/subGoalData.js';
 import {getSubscriberStats, setNewSubscriber, SubscriberStats} from '../../../data/subscriberStats.js';
+import {getSubredditIcon} from '../../../utils/subredditUtils.js';
 import {Router} from '../../router.js';
 
 export type ChannelPacket = {
@@ -58,7 +59,7 @@ export class SubGoalState {
       return {
         id: subreddit.id,
         name: subreddit.name,
-        icon: (await this.context.reddit.getSubredditStyles(subreddit.id)).icon ?? 'https://i.redd.it/xaaj3xsdy0re1.png',
+        icon: await getSubredditIcon(this.context.reddit, subreddit.id),
         subscribers: subreddit.numberOfSubscribers,
       };
     }, {
