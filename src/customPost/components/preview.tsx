@@ -2,6 +2,7 @@ import {Devvit} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from '../../utils/formatNumbers.js';
 import {ProgressBar} from './progressBar.js';
+import {SubredditIcon} from './subredditIcon.js';
 
 export type PreviewProps = {
   goal: number;
@@ -19,9 +20,7 @@ export const Preview = (props: PreviewProps) => {
   if (props.completedTime) {
     previewContents = (
       <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
-        <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
-          <image imageHeight={100} imageWidth={100} url={props.subredditIcon} />
-        </hstack>
+        <SubredditIcon iconUrl={props.subredditIcon} imageHeight={100} imageWidth={100} />
         <text alignment="middle center" selectable={false} size="xxlarge" weight="bold" width="100%" wrap>r/{props.subredditName} reached {formatNumberUnlessExact(props.goal)} subscribers!</text>
         <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
           Goal reached at {props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on {props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}
@@ -35,9 +34,7 @@ export const Preview = (props: PreviewProps) => {
     previewContents = (
       <vstack alignment="center middle" gap="medium" height="100%" padding="medium" width="100%">
         <spacer size='xsmall' />
-        <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
-          <image imageHeight={100} imageWidth={100} url={props.subredditIcon} />
-        </hstack>
+        <SubredditIcon iconUrl={props.subredditIcon} imageHeight={100} imageWidth={100} />
         <hstack alignment="center middle" gap='none' padding='none'>
           <text alignment="center middle" size="xlarge" weight="bold" wrap>Welcome to r/</text>
           <text alignment="center middle" selectable={false} size="xlarge" weight="bold" wrap>{props.subredditName}</text>

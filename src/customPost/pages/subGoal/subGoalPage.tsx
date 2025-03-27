@@ -3,6 +3,7 @@ import {Devvit} from '@devvit/public-api';
 import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
 import {LoadingElement} from '../../components/loadingElement.js';
 import {ProgressBar} from '../../components/progressBar.js';
+import {SubredditIcon} from '../../components/subredditIcon.js';
 import {PageElement} from '../../router.js';
 
 export const SubGoalPage: PageElement = router => {
@@ -10,11 +11,7 @@ export const SubGoalPage: PageElement = router => {
   return (
     <vstack alignment="center middle" gap="medium" height="100%" padding="medium" width="100%">
       <spacer size='xsmall' />
-      <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
-        <LoadingElement name="load-fill" size="large">
-          {state.subreddit.icon && <image imageHeight={100} imageWidth={100} onPress={state.subscribePressed} url={state.subreddit.icon} />}
-        </LoadingElement>
-      </hstack>
+      <SubredditIcon iconUrl={state.subreddit.icon} imageHeight={100} imageWidth={100} onPress={state.subscribePressed} />
       <hstack alignment="center middle" gap='none' padding='none'>
         <text alignment="center middle" onPress={state.subscribePressed} size="xlarge" weight="bold" wrap>
           Welcome to r/
