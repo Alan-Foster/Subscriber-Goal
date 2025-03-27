@@ -1,6 +1,6 @@
 import {Devvit, ScheduledJobEvent, TriggerContext} from '@devvit/public-api';
 
-import {advancedPreviewMaker, AdvancedPreviewProps} from '../customPost/components/advancedPreview.js';
+import {previewMaker, PreviewProps} from '../customPost/components/preview.js';
 import {checkCompletionStatus, getSubGoalData} from '../data/subGoalData.js';
 import {cancelUpdates, getQueuedUpdates, queueUpdate} from '../data/updaterData.js';
 import {getAppSettings} from '../settings.js';
@@ -32,7 +32,7 @@ export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, co
         await checkCompletionStatus(context.reddit, context.redis, postId); // This could probably be done better than here
       }
 
-      const previewProps: AdvancedPreviewProps = {
+      const previewProps: PreviewProps = {
         goal: subGoalData.goal,
         subscribers: subreddit.numberOfSubscribers,
         subredditName: subreddit.name,
@@ -42,7 +42,7 @@ export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, co
       };
 
       const post = await context.reddit.getPostById(postId);
-      await post.setCustomPostPreview(() => advancedPreviewMaker(previewProps));
+      await post.setCustomPostPreview(() => previewMaker(previewProps));
 
       const textFallback = subGoalData.completedTime
         ? `r/${subreddit.name} reached ${subGoalData.goal} subscribers!\n\nGoal reached at ${new Date(subGoalData.completedTime).toLocaleTimeString('en', {timeZone: 'UTC'})} on ${new Date(subGoalData.completedTime).toLocaleDateString('en', {timeZone: 'UTC'})}`

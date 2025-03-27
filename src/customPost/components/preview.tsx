@@ -1,10 +1,9 @@
 import {Devvit} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from '../../utils/formatNumbers.js';
-import {BasicPreview} from './basicPreview.js';
 import {ProgressBar} from './progressBar.js';
 
-export type AdvancedPreviewProps = {
+export type PreviewProps = {
   goal: number;
   subscribers: number;
   subredditName: string;
@@ -14,8 +13,8 @@ export type AdvancedPreviewProps = {
 }
 
 // TODO: This duplicates a lot of the subGoalPage and completedPage code. Maybe split those into more components, so we can use them here?
-export const AdvancedPreview = (props: AdvancedPreviewProps) => {
-  let previewContents = BasicPreview;
+export const Preview = (props: PreviewProps) => {
+  let previewContents = <text>Loading Subscriber Goal...</text>;
 
   if (props.completedTime) {
     previewContents = (
@@ -67,5 +66,5 @@ export const AdvancedPreview = (props: AdvancedPreviewProps) => {
   );
 };
 
-export const advancedPreviewMaker = (props: AdvancedPreviewProps) => <AdvancedPreview {...props}/>;
+export const previewMaker = (props: PreviewProps) => <Preview {...props}/>;
 

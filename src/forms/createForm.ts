@@ -1,9 +1,10 @@
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
-import {BasicPreview} from '../customPost/components/basicPreview.js';
+import {previewMaker} from '../customPost/components/preview.js';
 import {setSubGoalData} from '../data/subGoalData.js';
 import {queueUpdate, trackPost} from '../data/updaterData.js';
 import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
+import {getSubredditIcon} from '../utils/subredditUtils.js';
 
 export type CreateFormData = {
   defaultGoal?: number;
@@ -56,14 +57,13 @@ export type CreateFormSubmitData = {
   subscriberGoal?: number;
 }
 
-const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, context: Context) => {
+const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {reddit, redis, ui}: Context) => {
   const title = event.values.title;
   const header = event.values.header;
   const subscriberGoal = event.values.subscriberGoal;
-  const {reddit, redis} = context;
 
   if (!title || !header || !subscriberGoal) {
-    context.ui.showToast('Please fill out all fields.');
+    ui.showToast('Please fill out all fields.');
     return;
   }
 
@@ -90,7 +90,14 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
       subredditName: subreddit.name,
       title,
       textFallback: {text: 'This content is only available on New Reddit. Please visit r/SubGoal to learn more!'},
-      preview: BasicPreview,
+      preview: previewMaker({
+        goal: subscriberGoal,
+        subscribers: subreddit.numberOfSubscribers,
+        subredditName: subreddit.name,
+        subredditIcon: await getSubredditIcon(reddit, subreddit.id),
+        recentSubscriber: null,
+        completedTime: null,
+      }),
     });
 
     // Approve the post explicitly to resolve potential AutoMod bug
@@ -112,11 +119,11 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
     await post.sticky();
-    context.ui.showToast('Subscriber Goal post created!');
-    context.ui.navigateTo(post);
+    ui.showToast('Subscriber Goal post created!');
+    ui.navigateTo(post);
   } catch (error: unknown) {
     console.error(`Error creating button post: ${error instanceof Error ? error.message : String(error)}`);
-    context.ui.showToast('An error occurred while creating the post.');
+    ui.showToast('An error occurred while creating the post.');
   }
 };
 
