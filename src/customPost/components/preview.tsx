@@ -39,10 +39,7 @@ export const Preview = (props: PreviewProps) => {
           <text alignment="center middle" size="xlarge" weight="bold" wrap>Welcome to r/</text>
           <text alignment="center middle" selectable={false} size="xlarge" weight="bold" wrap>{props.subredditName}</text>
         </hstack>
-        <zstack alignment="center middle" width={'70%'}>
-          <ProgressBar current={props.subscribers} end={props.goal ?? 100} start={0} width={'100%'} />
-          <text alignment="center middle" selectable={false} size="medium" weight="bold" wrap>{props.subscribers} / {formatNumberUnlessExact(props.goal)}</text>
-        </zstack>
+        <ProgressBar current={props.subscribers} end={props.goal} showText={true} start={0} width={'70%'} />
         <button appearance="success" disabled={true} size="large">
           Loading...
         </button>

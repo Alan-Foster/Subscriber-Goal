@@ -1,6 +1,5 @@
 import {Devvit} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
 import {LoadingElement} from '../../components/loadingElement.js';
 import {ProgressBar} from '../../components/progressBar.js';
 import {SubredditIcon} from '../../components/subredditIcon.js';
@@ -20,12 +19,7 @@ export const SubGoalPage: PageElement = router => {
           {state.subreddit.name && <text alignment="center middle" onPress={state.subscribePressed} selectable={false} size="xlarge" weight="bold" wrap>{state.subreddit.name}</text>}
         </LoadingElement>
       </hstack>
-      <zstack alignment="center middle" width={'70%'}>
-        <ProgressBar current={state.subscribers} end={state.goal ?? 100} start={0} width={'100%'} />
-        <LoadingElement name="load-fill" size="medium">
-          {state.goalRemaining !== null && state.goal !== null && <text alignment="center middle" selectable={false} size="medium" weight="bold" wrap>{state.subscribers} / {formatNumberUnlessExact(state.goal)}</text>}
-        </LoadingElement>
-      </zstack>
+      <ProgressBar current={state.subscribers} end={state.goal ?? undefined} showText={true} start={0} width={'70%'} />
       <button appearance="success" disabled={state.subscribed} onPress={state.subscribePressed} size="large">
          Subscribe{state.subscribed ? 'd' : ''} to r/{state.subreddit.name}
       </button>
