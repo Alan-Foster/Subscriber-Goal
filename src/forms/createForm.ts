@@ -73,7 +73,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
     console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}`);
-    await registerNewSubGoalPost(redis, await getAppSettings(settings), post, subscriberGoal);
+    await registerNewSubGoalPost(reddit, redis, await getAppSettings(settings), post, subscriberGoal);
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
     ui.showToast('Subscriber Goal post created!');
