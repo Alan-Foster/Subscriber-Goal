@@ -3,7 +3,6 @@ import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitE
 import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {setSubGoalData} from '../data/subGoalData.js';
 import {queueUpdate, trackPost} from '../data/updaterData.js';
-import {formatNumberUnlessExact} from '../utils/formatNumbers.js';
 import {getSubredditIcon} from '../utils/subredditUtils.js';
 
 export type CreateFormData = {
@@ -24,27 +23,11 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
     description: '',
     fields: [
       {
-        name: 'title',
-        label: 'Enter your Post Title:',
-        defaultValue: `Welcome to r/${data.subredditName}!`,
-        type: 'string',
-        helpText: 'The actual title of the generated post',
-        required: true,
-      },
-      {
-        name: 'header',
-        label: 'Enter your Goal Header:',
-        defaultValue: `Help r/${data.subredditName} celebrate ${formatNumberUnlessExact(data.defaultGoal)} members!`,
-        type: 'string',
-        helpText: 'The large header inside the post itself.',
-        required: true,
-      },
-      {
         name: 'subscriberGoal',
         label: 'Enter your Subscriber Goal',
         type: 'number',
         defaultValue: data.defaultGoal,
-        helpText: 'Default goal is based on your current subscriber count',
+        helpText: 'The default goal is a suggestion on your current subscriber count, you may set it to any number greater than your current subscriber count.',
         required: true,
       },
     ],
@@ -52,23 +35,19 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
 };
 
 export type CreateFormSubmitData = {
-  title?: string;
-  header?: string;
   subscriberGoal?: number;
 }
 
 const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {reddit, redis, ui}: Context) => {
-  const title = event.values.title;
-  const header = event.values.header;
   const subscriberGoal = event.values.subscriberGoal;
-
-  if (!title || !header || !subscriberGoal) {
-    ui.showToast('Please fill out all fields.');
-    return;
-  }
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
+
+    if (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal) {
+      ui.showToast('Please select a valid subscriber goal!');
+      return;
+    }
 
     // Get all existing posts from u/subscriber-goal in the current subreddit
     const userPosts = await reddit.getPostsByUser({
@@ -97,7 +76,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
     // Using the form data, generate a Custom Post containing the Subscriber Goal
     const post = await reddit.submitPost({
       subredditName: subreddit.name,
-      title,
+      title: `Welcome to r/${subreddit.name}!`,
       textFallback: {text: textFallbackMaker(previewProps)},
       preview: previewMaker(previewProps),
     });
@@ -109,10 +88,9 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
     // TODO: Dispatch new post event to r/SubGoal
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
-    console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}, Header: ${header}`);
+    console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}`);
     await setSubGoalData(redis, post.id, {
       goal: subscriberGoal,
-      header,
       recentSubscriber: '',
       completedTime: 0,
     });
