@@ -21,12 +21,12 @@ export const Preview = (props: PreviewProps) => {
     previewContents = (
       <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
         <SubredditIcon iconUrl={props.subredditIcon} imageHeight={100} imageWidth={100} />
-        <text alignment="middle center" selectable={false} size="xxlarge" weight="bold" width="100%" wrap>r/{props.subredditName} reached {formatNumberUnlessExact(props.goal)} subscribers!</text>
+        <text alignment="middle center" selectable={false} size="xxlarge" weight="bold" width="100%" wrap>&nbsp;r/{props.subredditName} reached {formatNumberUnlessExact(props.goal)} subscribers!&nbsp;</text>
         <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
-          Goal reached at {props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on {props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}
+          &nbsp;Goal reached at {props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on {props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}&nbsp;
         </text>
         <button appearance="success" disabled={true} size="large">
-          Loading...
+          &nbsp;Loading...&nbsp;
         </button>
       </vstack>
     );
@@ -36,12 +36,12 @@ export const Preview = (props: PreviewProps) => {
         <spacer size='xsmall' />
         <SubredditIcon iconUrl={props.subredditIcon} imageHeight={100} imageWidth={100} />
         <hstack alignment="center middle" gap='none' padding='none'>
-          <text alignment="center middle" size="xlarge" weight="bold" wrap>Welcome to r/</text>
-          <text alignment="center middle" selectable={false} size="xlarge" weight="bold" wrap>{props.subredditName}</text>
+          <text alignment="center middle" size="xlarge" weight="bold" wrap>&nbsp;Welcome to r/</text>
+          <text alignment="center middle" selectable={false} size="xlarge" weight="bold" wrap>{props.subredditName}&nbsp;</text>
         </hstack>
         <ProgressBar current={props.subscribers} end={props.goal} showText={true} start={0} width={'70%'} />
         <button appearance="success" disabled={true} size="large">
-          Loading...
+          &nbsp;Loading...&nbsp;
         </button>
         {props.recentSubscriber ? (
           <text alignment="top center" selectable={false} size="medium" weight="regular" wrap>
@@ -64,4 +64,4 @@ export const previewMaker = (props: PreviewProps) => <Preview {...props}/>;
 
 export const textFallbackMaker = (props: PreviewProps) => props.completedTime
   ? `r/${props.subredditName} reached ${props.goal} subscribers!\n\nGoal reached at ${props.completedTime.toLocaleTimeString('en', {timeZone: 'UTC'})} on ${props.completedTime.toLocaleDateString('en', {timeZone: 'UTC'})}`
-  : `Welcome to r/${props.subredditName}\n\n${props.subscribers} / ${props.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.)`;
+  : `Welcome to r/${props.subredditName}\n\n${props.subscribers} / ${props.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.`;

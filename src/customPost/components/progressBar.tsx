@@ -27,7 +27,7 @@ export const ProgressBar = ({start, end, current, showText, width}: ProgressBarP
         </hstack>
       </vstack>
       {showText ? <text alignment="center middle" color={'rgb(51, 61, 66)'} selectable={false} size="medium" weight="bold" wrap>
-        {current} / {formatNumberUnlessExact(end)}
+        &nbsp;{current} / {formatNumberUnlessExact(end)}&nbsp;
       </text> : null}
     </zstack>
   );
