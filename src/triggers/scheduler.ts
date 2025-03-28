@@ -3,18 +3,12 @@ import {Devvit, ScheduledJobEvent, TriggerContext} from '@devvit/public-api';
 import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {checkCompletionStatus, getSubGoalData} from '../data/subGoalData.js';
 import {cancelUpdates, getQueuedUpdates, queueUpdate} from '../data/updaterData.js';
-import {getAppSettings} from '../settings.js';
 import {getSubredditIcon} from '../utils/subredditUtils.js';
 
 export async function onPostsUpdaterJob (event: ScheduledJobEvent<undefined>, context: TriggerContext) {
   console.log(`postsUpdaterJob job ran at ${new Date().toISOString()}`);
 
-  const appSettings = await getAppSettings(context.settings);
   const subreddit = await context.reddit.getCurrentSubreddit();
-  if (subreddit.name.toLowerCase() === appSettings.promoSubreddit.toLowerCase()) {
-    // TODO: Implement r/SubGoal post creation here
-  }
-
   const subredditIcon = await getSubredditIcon(context.reddit, subreddit.id);
 
   const postIds = await getQueuedUpdates(context.redis);
