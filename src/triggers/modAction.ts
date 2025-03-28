@@ -116,12 +116,12 @@ export async function updateFromWikis ({redis, reddit}: TriggerContext, appSetti
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
-      await reddit.crosspost({
+      const crosspost = await reddit.crosspost({
         subredditName: appSettings.promoSubreddit,
         title: `Visit r/${appSettings.promoSubreddit}, they are trying to reach ${newPost.goal} subscribers!`,
         postId: post.id,
       });
-      await storeCorrespondingPost(redis, newPost.postId, post.id);
+      await storeCorrespondingPost(redis, newPost.postId, crosspost.id);
       await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
     } catch (e) {
       console.error('Error crossposting', newPost.postId, e);
