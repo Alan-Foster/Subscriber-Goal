@@ -2,26 +2,30 @@ import {Devvit} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
 import {LoadingElement} from '../../components/loadingElement.js';
+import {TopButton} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';
 
 export const ThanksPage: PageElement = router => {
   const state = router.PageStates.subGoal; // Piggybacking off of subGoal state, so we don't need to refetch data
   return (
-    <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
-      <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
-        <LoadingElement name="load-fill" size="large">
-          {state.subreddit.icon && <image imageHeight={100} imageWidth={100} onPress={state.subscribePressed} url={state.subreddit.icon} />}
-        </LoadingElement>
-      </hstack>
-      <text alignment="middle center" size="xxlarge" weight="bold" wrap>
+    <zstack alignment="center middle" height="100%" width="100%">
+      {state.appSettings && <TopButton onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
+      <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
+        <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
+          <LoadingElement name="load-fill" size="large">
+            {state.subreddit.icon && <image imageHeight={100} imageWidth={100} onPress={state.subscribePressed} url={state.subreddit.icon} />}
+          </LoadingElement>
+        </hstack>
+        <text alignment="middle center" size="xxlarge" weight="bold" wrap>
         Thanks for Subscribing!
-      </text>
-      <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
+        </text>
+        <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
         There are now {formatNumberUnlessExact(state.subscribers)} subscribers in the community!
-      </text>
-      <button appearance="plain" onPress={() => router.changePage('subGoal')} size="large">
+        </text>
+        <button appearance="plain" onPress={() => router.changePage('subGoal')} size="large">
         Return to Previous Page
-      </button>
-    </vstack>
+        </button>
+      </vstack>
+    </zstack>
   );
 };

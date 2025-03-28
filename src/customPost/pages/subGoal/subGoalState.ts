@@ -4,6 +4,7 @@ import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
 import {checkCompletionStatus, getSubGoalData, SubGoalData} from '../../../data/subGoalData.js';
 import {getSubscriberStats, setNewSubscriber, SubscriberStats} from '../../../data/subscriberStats.js';
+import {AppSettings, getAppSettings} from '../../../settings.js';
 import {getSubredditIcon} from '../../../utils/subredditUtils.js';
 import {Router} from '../../router.js';
 
@@ -21,6 +22,7 @@ export class SubGoalState {
   readonly _recentSubscriber: UseStateResult<string>;
   readonly _refresher: UseStateResult<number>;
   // UseAsyncResult
+  readonly _appSettings: UseAsyncResult<AppSettings | null>;
   readonly _currentUser: UseAsyncResult<BasicUserData | null>;
   readonly _subGoalData: UseAsyncResult<SubGoalData>;
   readonly _subredditData: UseAsyncResult<BasicSubredditData>;
@@ -74,6 +76,13 @@ export class SubGoalState {
       },
     });
 
+    this._appSettings = useAsync<AppSettings | null>(async () => {
+      const settings = await getAppSettings(this.context.settings);
+      if (!settings) {
+        return null;
+      }
+      return settings;
+    });
     this._currentUser = useAsync<BasicUserData | null>(async () => {
       if (!this.context.userId) {
         return null;
@@ -119,6 +128,9 @@ export class SubGoalState {
     this._interval = useInterval(this.refresh, 30000);
   }
 
+  get appSettings (): AppSettings | null {
+    return this._appSettings.data;
+  }
   get completedTime (): Date | null {
     return this._subGoalData.data?.completedTime ? new Date(this._subGoalData.data.completedTime) : null;
   }
@@ -130,9 +142,6 @@ export class SubGoalState {
   }
   get goalRemaining (): number | null {
     return this.goal !== null ? Math.max(this.goal - this.subreddit.subscribers, 0) : null;
-  }
-  get header (): string {
-    return this._subGoalData.data?.header ?? 'Loading Header...';
   }
   protected get pendingMessage (): ChannelPacket | null {
     return this._pendingMessage[0];
@@ -186,6 +195,9 @@ export class SubGoalState {
     } catch (e) {
       console.error('Failed to connect to channel:', e);
     }
+  };
+  notifyPressed = () => {
+    this.context.ui.showToast('This feature has not yet been implemented!');
   };
   onChannelMessage = (message: ChannelPacket) => {
     if (message.type === 'sub') {
@@ -270,5 +282,11 @@ export class SubGoalState {
       console.error(`${this.user.username} failed to subscribe:`, e);
       return this.context.ui.showToast('Subscription failed. Try again.');
     }
+  };
+  visitPromoSubPressed = () => {
+    if (!this.appSettings || !this.appSettings.promoSubreddit) {
+      return this.context.ui.showToast('Settings not loaded yet.');
+    }
+    this.context.ui.navigateTo(`https://www.reddit.com/r/${this.appSettings.promoSubreddit}/`);
   };
 }
