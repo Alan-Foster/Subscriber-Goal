@@ -194,7 +194,7 @@ export async function onModAction (event: ModAction, context: TriggerContext) {
   if (!appSettings.crosspost && event.action === 'approvelink') {
     return; // Ignore approvals if crossposting is disabled, we still want to respect removals though (in case the setting was changed after the post was already crossposted)
   }
-  await dispatchPostAction(context.reddit, appSettings, event.targetPost.id, modToPostActionMap['event.action']);
+  await dispatchPostAction(context.reddit, appSettings, event.targetPost.id, modToPostActionMap[event.action]);
 }
 
 export const modActionTrigger = Devvit.addTrigger({
