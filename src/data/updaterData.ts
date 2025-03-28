@@ -7,6 +7,10 @@ export async function trackPost (redis: RedisClient, postId: string, created: Da
   await redis.zAdd(postsKey, {member: postId, score: created.getTime()});
 }
 
+export async function untrackPost (redis: RedisClient, postId: string) {
+  await redis.zRem(postsKey, [postId]);
+}
+
 export async function getTrackedPosts (redis: RedisClient): Promise<string[]> {
   const zRangeResult = await redis.zRange(postsKey, 0, -1);
   return zRangeResult.map(result => result.member);

@@ -1,6 +1,7 @@
 import {Context, Devvit, Form, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
 import {dispatchPostAction} from '../data/crosspostData.js';
+import {cancelUpdates, untrackPost} from '../data/updaterData.js';
 import {getAppSettings} from '../settings.js';
 
 const form: Form = {
@@ -23,7 +24,7 @@ export type DeleteFormSubmitData = {
   confirm?: boolean;
 }
 
-const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event: FormOnSubmitEvent<DeleteFormSubmitData>, {settings, reddit, ui, postId, subredditName}: Context) => {
+const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event: FormOnSubmitEvent<DeleteFormSubmitData>, {settings, reddit, redis, ui, postId, subredditName}: Context) => {
   const confirm = event.values.confirm;
 
   if (!confirm) {
@@ -44,6 +45,8 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
       await dispatchPostAction(reddit, appSettings, postId, 'delete');
     }
     await post.delete();
+    await cancelUpdates(redis, postId);
+    await untrackPost(redis, postId);
     ui.showToast('Post deleted successfully!');
   } catch (e) {
     ui.showToast('Error deleting post. Pleae refresh the page and try again if the post is still there.');
