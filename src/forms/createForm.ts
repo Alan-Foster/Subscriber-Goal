@@ -1,8 +1,7 @@
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
 import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
-import {setSubGoalData} from '../data/subGoalData.js';
-import {queueUpdate, trackPost} from '../data/updaterData.js';
+import {registerNewSubGoalPost} from '../data/subGoalData.js';
 import {getSubredditIcon} from '../utils/subredditUtils.js';
 
 export type CreateFormData = {
@@ -89,13 +88,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
     console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}`);
-    await setSubGoalData(redis, post.id, {
-      goal: subscriberGoal,
-      recentSubscriber: '',
-      completedTime: 0,
-    });
-    await trackPost(redis, post.id, post.createdAt);
-    await queueUpdate(redis, post.id, post.createdAt);
+    await registerNewSubGoalPost(redis, post, subscriberGoal);
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
     await post.sticky();

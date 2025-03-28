@@ -1,4 +1,6 @@
-import {RedditAPIClient, RedisClient} from '@devvit/public-api';
+import {Post, RedditAPIClient, RedisClient} from '@devvit/public-api';
+
+import {queueUpdate, trackPost} from './updaterData.js';
 
 export const subscriberGoalsKey = 'subscriber_goals';
 
@@ -42,4 +44,14 @@ export async function checkCompletionStatus (reddit: RedditAPIClient, redis: Red
     return subGoalData.completedTime;
   }
   return 0;
+}
+
+export async function registerNewSubGoalPost (redis: RedisClient, post: Post, goal: number): Promise<void> {
+  await setSubGoalData(redis, post.id, {
+    goal,
+    recentSubscriber: '',
+    completedTime: 0,
+  });
+  await trackPost(redis, post.id, post.createdAt);
+  await queueUpdate(redis, post.id, post.createdAt);
 }
