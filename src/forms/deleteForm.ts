@@ -23,7 +23,7 @@ export type DeleteFormSubmitData = {
   confirm?: boolean;
 }
 
-const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event: FormOnSubmitEvent<DeleteFormSubmitData>, {settings, reddit, ui, postId}: Context) => {
+const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event: FormOnSubmitEvent<DeleteFormSubmitData>, {settings, reddit, ui, postId, subredditName}: Context) => {
   const confirm = event.values.confirm;
 
   if (!confirm) {
@@ -31,8 +31,8 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
     return;
   }
 
-  if (!postId) {
-    ui.showToast('Post ID was somehow lost. Please try again.');
+  if (!postId || !subredditName) {
+    ui.showToast('Deletion metadata was somehow lost. Please try again.');
     return;
   }
 
@@ -40,7 +40,9 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
     const post = await reddit.getPostById(postId);
 
     const appSettings = await getAppSettings(settings);
-    await dispatchPostAction(reddit, appSettings, postId, 'delete');
+    if (subredditName.toLowerCase() !== appSettings.promoSubreddit.toLowerCase()) {
+      await dispatchPostAction(reddit, appSettings, postId, 'delete');
+    }
     await post.delete();
     ui.showToast('Post deleted successfully!');
   } catch (e) {
