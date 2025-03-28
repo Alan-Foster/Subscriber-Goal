@@ -11,14 +11,16 @@ import {getAppSettings} from '../settings.js';
  */
 
 export async function onModAction (event: ModAction, context: TriggerContext) {
-  if (event.action !== 'removelink' && event.action !== 'approvelink' && event.action !== 'spamlink') {
-    return;
-  }
-
   const appSettings = await getAppSettings(context.settings);
   const subredditName = context.subredditName ?? await context.reddit.getCurrentSubredditName();
+
   if (subredditName.toLowerCase() === appSettings.promoSubreddit.toLowerCase()) {
-    return; // We don't want to dispatch events in the promo subreddit
+    if (event.action === 'wikirevise') {
+      // TODO: Handle wiki revisions, probably in a different function
+    }
+    return; // We don't want to execute further in the promo subreddit.
+  } else if (event.action !== 'removelink' && event.action !== 'approvelink' && event.action !== 'spamlink') {
+    return; // If it's a different subreddit, we only care about these actions.
   }
 
   if (!event.targetPost) {
