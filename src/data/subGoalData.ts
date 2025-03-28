@@ -1,5 +1,6 @@
 import {Post, RedditAPIClient, RedisClient} from '@devvit/public-api';
 
+import {AppSettings} from '../settings.js';
 import {queueUpdate, trackPost} from './updaterData.js';
 
 export const subscriberGoalsKey = 'subscriber_goals';
@@ -46,7 +47,7 @@ export async function checkCompletionStatus (reddit: RedditAPIClient, redis: Red
   return 0;
 }
 
-export async function registerNewSubGoalPost (redis: RedisClient, post: Post, goal: number): Promise<void> {
+export async function registerNewSubGoalPost (redis: RedisClient, appSettings: AppSettings, post: Post, goal: number): Promise<void> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
@@ -54,4 +55,8 @@ export async function registerNewSubGoalPost (redis: RedisClient, post: Post, go
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
+  if (appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase() && appSettings.crosspost) {
+    // TODO: Dispatch new post event to r/SubGoal
+    console.log('We should be crossposting here!');
+  }
 }

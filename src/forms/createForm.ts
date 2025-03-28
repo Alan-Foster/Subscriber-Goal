@@ -2,7 +2,8 @@ import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitE
 
 import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {registerNewSubGoalPost} from '../data/subGoalData.js';
-import {getSubredditIcon} from '../utils/subredditUtils.js';
+import {getAppSettings} from '../settings.js';
+import {clearUserStickies, getSubredditIcon} from '../utils/subredditUtils.js';
 
 export type CreateFormData = {
   defaultGoal?: number;
@@ -37,7 +38,7 @@ export type CreateFormSubmitData = {
   subscriberGoal?: number;
 }
 
-const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {reddit, redis, ui}: Context) => {
+const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {settings, reddit, redis, ui, appName}: Context) => {
   const subscriberGoal = event.values.subscriberGoal;
 
   try {
@@ -48,20 +49,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
       return;
     }
 
-    // Get all existing posts from u/subscriber-goal in the current subreddit
-    const userPosts = await reddit.getPostsByUser({
-      username: 'subscriber-goal',
-      limit: 100,
-    }).all();
-    const subredditPosts = userPosts.filter(post => post.subredditName === subreddit.name);
-
-    // Unsticky any existing goal posts before generating a new one
-    for (const existingPost of subredditPosts) {
-      if (existingPost.stickied) {
-        await existingPost.unsticky();
-        console.log(`Unstickied previous goal post: ${existingPost.id}`);
-      }
-    }
+    await clearUserStickies(reddit, appName);
 
     const previewProps: PreviewProps = {
       goal: subscriberGoal,
@@ -81,19 +69,17 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
     });
 
     // Approve the post explicitly to resolve potential AutoMod bug
-    await post.approve();
     console.log(`Approved post: ${post.id}`);
-
-    // TODO: Dispatch new post event to r/SubGoal
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
     console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}`);
-    await registerNewSubGoalPost(redis, post, subscriberGoal);
+    await registerNewSubGoalPost(redis, await getAppSettings(settings), post, subscriberGoal);
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
-    await post.sticky();
     ui.showToast('Subscriber Goal post created!');
     ui.navigateTo(post);
+    await post.approve();
+    await post.sticky();
   } catch (error: unknown) {
     console.error(`Error creating button post: ${error instanceof Error ? error.message : String(error)}`);
     ui.showToast('An error occurred while creating the post.');
