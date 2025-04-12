@@ -118,7 +118,7 @@ export async function updateFromWikis ({redis, reddit}: TriggerContext, appSetti
       }
       const crosspost = await reddit.crosspost({
         subredditName: appSettings.promoSubreddit,
-        title: `Visit r/${appSettings.promoSubreddit}, they are trying to reach ${newPost.goal} subscribers!`,
+        title: `Visit r/${post.subredditName}, they are trying to reach ${newPost.goal} subscribers!`,
         postId: post.id,
       });
       await storeCorrespondingPost(redis, newPost.postId, crosspost.id);
