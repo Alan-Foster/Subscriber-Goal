@@ -60,3 +60,20 @@ export async function registerNewSubGoalPost (reddit: RedditAPIClient, redis: Re
     await dispatchNewPost(reddit, appSettings, post.id, goal);
   }
 }
+
+export async function eraseFromRecentSubscribers (redis: RedisClient, username: string): Promise<void> {
+  const foundRecords = await redis.hGetAll(subscriberGoalsKey);
+  const keysToUpdate: Record<string, string> = {};
+
+  username = username.toLowerCase();
+
+  for (const key in foundRecords) {
+    if (foundRecords[key].toLowerCase() === username) {
+      keysToUpdate[key] = '';
+    }
+  }
+
+  if (Object.keys(keysToUpdate).length > 0) {
+    await redis.hSet(subscriberGoalsKey, keysToUpdate);
+  }
+}

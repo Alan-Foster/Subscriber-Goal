@@ -69,4 +69,20 @@ export async function setNewSubscriber (redis: RedisClient, postId: string, curr
   return true;
 }
 
+export async function untrackSubscriberById (redis: RedisClient, userId: string): Promise<void> {
+  const foundRecords = await zScanAll(redis, subscriberStatsKey, `${userId}:*`);
+
+  if (foundRecords.length > 0) {
+    await redis.zRem(subscriberStatsKey, foundRecords.map(record => record.member));
+  }
+}
+
+export async function untrackSubscriberByUsername (redis: RedisClient, username: string): Promise<void> {
+  const foundRecords = await zScanAll(redis, subscriberStatsKey, `*:${username}:*`);
+
+  if (foundRecords.length > 0) {
+    await redis.zRem(subscriberStatsKey, foundRecords.map(record => record.member));
+  }
+}
+
 // TODO: implement getAllSubscriberStats, not needed for now
