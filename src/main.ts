@@ -3,11 +3,11 @@ import {Devvit} from '@devvit/public-api';
 // Custom Post
 export {customPostType} from './customPost/index.js';
 // Buttons
-export {createMenuItem} from './buttons/createMenuItem.js';
-export {deleteMenuItem} from './buttons/deleteMenuItem.js';
+export {createGoalButton} from './buttons/createGoalButton.js';
+export {deleteGoalButton} from './buttons/deleteGoalButton.js';
 // Forms
-export {createForm} from './forms/createForm.js';
-export {deleteForm} from './forms/deleteForm.js';
+export {createGoalForm} from './forms/createGoalForm.js';
+export {deleteGoalForm} from './forms/deleteGoalForm.js';
 // Scheduler
 export {postsUpdaterJob} from './triggers/scheduler.js';
 // Settings

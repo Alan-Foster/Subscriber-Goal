@@ -19,8 +19,8 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
   }
 
   return {
-    title: 'Create a New Sub Goal Post',
-    description: '',
+    title: 'Sub Goal - Create a New Goal',
+    description: 'This will create a new subscriber goal post in the subreddit.',
     fields: [
       {
         name: 'subscriberGoal',
@@ -86,4 +86,4 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
   }
 };
 
-export const createForm: FormKey = Devvit.createForm(form, formHandler);
+export const createGoalForm: FormKey = Devvit.createForm(form, formHandler);

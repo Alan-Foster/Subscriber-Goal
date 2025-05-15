@@ -1,6 +1,6 @@
 import {Context, Devvit, MenuItemOnPressEvent} from '@devvit/public-api';
 
-import {createForm} from '../main.js';
+import {createGoalForm} from '../main.js';
 import {getDefaultSubscriberGoal} from '../utils/defaultSubscriberGoal.js';
 
 async function onPress (event: MenuItemOnPressEvent, context: Context) {
@@ -10,7 +10,7 @@ async function onPress (event: MenuItemOnPressEvent, context: Context) {
     const subredditName = subreddit.name;
     const defaultGoal = getDefaultSubscriberGoal(subscriberCount);
 
-    context.ui.showForm(createForm, {
+    context.ui.showForm(createGoalForm, {
       subredditName,
       defaultGoal,
     });
@@ -20,8 +20,8 @@ async function onPress (event: MenuItemOnPressEvent, context: Context) {
   }
 }
 
-export const createMenuItem = Devvit.addMenuItem({
-  label: 'Create a New Sub Goal Post',
+export const createGoalButton = Devvit.addMenuItem({
+  label: 'Sub Goal - Create a New Goal',
   location: 'subreddit',
   forUserType: 'moderator',
   onPress,

@@ -5,15 +5,15 @@ import {cancelUpdates, untrackPost} from '../data/updaterData.js';
 import {getAppSettings} from '../settings.js';
 
 const form: Form = {
-  title: 'Delete Sub Goal Post',
-  description: 'This action is irreversible.',
+  title: 'Sub Goal - Delete This Post',
+  description: 'This will permanently delete the Sub Goal post. If you wish to temporarily hide the post, you can remove it as a moderator and re-approve it later.',
   fields: [
     {
       name: 'confirm',
       label: 'Are you sure?',
       type: 'boolean',
       defaultValue: false,
-      helpText: 'This will permanently delete the Sub Goal post. If you wish to temporarily hide the post, you can remove it as a moderator and re-approve it later.',
+      helpText: 'This action is irreversible.',
     },
   ],
   acceptLabel: 'Delete',
@@ -55,4 +55,4 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
   }
 };
 
-export const deleteForm: FormKey = Devvit.createForm(form, formHandler);
+export const deleteGoalForm: FormKey = Devvit.createForm(form, formHandler);

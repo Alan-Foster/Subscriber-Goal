@@ -1,13 +1,13 @@
 import {Context, Devvit, MenuItemOnPressEvent} from '@devvit/public-api';
 
-import {deleteForm} from '../main.js';
+import {deleteGoalForm} from '../main.js';
 
 async function onPress (event: MenuItemOnPressEvent, context: Context) {
-  context.ui.showForm(deleteForm);
+  context.ui.showForm(deleteGoalForm);
 }
 
-export const deleteMenuItem = Devvit.addMenuItem({
-  label: 'Delete Sub Goal Post',
+export const deleteGoalButton = Devvit.addMenuItem({
+  label: 'Sub Goal - Delete This Goal',
   location: 'post',
   forUserType: 'moderator',
   postFilter: 'currentApp',
