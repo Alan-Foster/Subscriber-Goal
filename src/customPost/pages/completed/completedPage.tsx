@@ -24,9 +24,6 @@ export const CompletedPage: PageElement = router => {
         <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
           {state.completedTime ? `Goal reached at ${state.completedTime.toLocaleTimeString(locale, {timeZone})} on ${state.completedTime.toLocaleDateString(locale, {timeZone})}` : 'Goal reached just now!'}
         </text>
-        <button appearance="success" onPress={() => router.context.ui.showToast('🎆🎉🎉🎊🎉🎊🎉🎆')} size="large">
-        Celebrate
-        </button>
       </vstack>
     </zstack>
   );
