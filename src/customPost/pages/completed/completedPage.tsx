@@ -19,7 +19,13 @@ export const CompletedPage: PageElement = router => {
           </LoadingElement>
         </hstack>
         <LoadingElement name="load-fill" size="large">
-          {state.subreddit.name && state.goal !== null && <text alignment="middle center" onPress={state.subscribePressed} selectable={false} size="xxlarge" weight="bold" width="100%" wrap>r/{state.subreddit.name} reached {formatNumberUnlessExact(state.goal)} subscribers!</text>}
+          {state.subreddit.name && state.goal !== null && 
+            <text alignment="middle center" onPress={state.subscribePressed} selectable={false} size="xxlarge" weight="bold" width="100%" wrap>
+            r/{state.subreddit.name} reached 
+            {"\n"}
+            {formatNumberUnlessExact(state.goal)} subscribers!
+            </text>
+          }
         </LoadingElement>
         <text alignment="middle center" size="xlarge" weight="bold" width="100%" wrap>
           {state.completedTime ? `Goal reached at ${state.completedTime.toLocaleTimeString(locale, {timeZone})} on ${state.completedTime.toLocaleDateString(locale, {timeZone})}` : 'Goal reached just now!'}

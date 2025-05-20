@@ -16,7 +16,7 @@
     "eslint": "^9.26.0",
     "eslint-plugin-perfectionist": "^4.13.0",
     "eslint-plugin-vitest": "^0.5.4",
-    "typescript": "^5.8.3",
+    "typescript": "5.8.3",
     "vitest": "^3.1.3"
   }
 }
