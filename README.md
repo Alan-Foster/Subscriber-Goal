@@ -8,25 +8,52 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 - To view a live version of Subscriber Goal, visit [https://www.reddit.com/r/SubGoal](https://www.reddit.com/r/SubGoal)
 
+
+
+![An example of Subscriber Goal Posts](https://i.redd.it/zrkpv7gfg4af1.jpeg)
+
+
+
 ## Features
 
-- **Realtime Subscriber Notifications**: Show your community who just subscribed in real-time!
-- **Progress Bar**: Track progress with a visual ratio bar!
+- **Progress Bar**: Track progress with a visual ratio bar
 - **Custom Post Technology**: High-quality custom formatting for your subscriber goal
-- **Subscribe Now button**: Set the text of your Subscribe Now action button
+- **Realtime Subscriber Notifications**: Show your community who just subscribed in real-time
+- **Goal Achieved Page**: Once reached, the post shows the date and subscriber milestone!
+- **User Data Removal**: Remove a user from the database if they request their data hidden
 
 ## Benefits
 
 - Higher subscription rates of new users, great for new subreddits!
-- Larger subreddits can celebrate major user milestones
+- Both large and small subreddits can celebrate major user milestones
 - Teach new users to subscribe and remind them to join the community
 
-## Screenshots
-- App is still in early development. Images Coming Soon!
+
+
+![The subreddit r/MotivationalPics saw its average daily subscribers increase by 100%](https://i.redd.it/nlch4724d4af1.jpeg)
+
+
+
+## Install Instructions
+
+1. To install the app, click "Add to Community" and select the community to install.
+2. Decide if you would like to announce your new goal in the [r/SubGoal](https://www.reddit.com/r/SubGoal) community
+3. Navigate to your subreddit and access the Settings Menu (...)
+4. Select "Create a New Sub Goal". The app will recommend a value for your goal to achieve next.
+5. Click "Okay". Post generation may take 5-10 seconds, and you will be automatically redirected.
+6. If you had less than 4 pinned posts, the new Subscriber Goal will be pinned automatically.
+7. Once the goal is reached, the post will convert to a Success Page, showing the date and milestone.
+
+
+
+![Select Create a New Goal from the dropdown next to Mod Tools](https://i.redd.it/qqrxpxt094af1.jpeg)
+
+
 
 ## Changelog
+- 0.9.2 - Added images and installation instructions to the ReadMe file. Devvit 0.11.17
 - 0.9.0 - SubGoal data strucutre reworked - preparation for Milestone Announcement Messages, Devvit 0.11.15
-- - - - - NOTE - 0.9.0 is not compatible with old subscriber goals, you must re-create your current goal!
+- - PLEASE NOTE - 0.9.0 is not compatible with old subscriber goals. All members will need to re-click the button.
 - 0.8.1 - SubGoal now removes old pins before making new goals. Self-approves posts to fix AutoMod platform bug.
 - 0.8.0 - Realtime subscriber name messages and progress updates (mostly) fixed. Launch of Private Beta.
 - 0.7.3 - Major refactoring. Announcements in r/SubGoal removed for refactoring.
