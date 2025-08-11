@@ -1,6 +1,6 @@
 import {Devvit} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
+import {formatNumberUnlessExact} from '../../../utils/numberUtils.js';
 import {LoadingElement} from '../../components/loadingElement.js';
 import {TopButton} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';

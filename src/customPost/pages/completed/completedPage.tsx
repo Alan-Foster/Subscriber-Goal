@@ -1,6 +1,6 @@
 import {Devvit} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from '../../../utils/formatNumbers.js';
+import {formatNumberUnlessExact} from '../../../utils/numberUtils.js';
 import {LoadingElement} from '../../components/loadingElement.js';
 import {TopButton} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';
@@ -19,9 +19,9 @@ export const CompletedPage: PageElement = router => {
           </LoadingElement>
         </hstack>
         <LoadingElement name="load-fill" size="large">
-          {state.subreddit.name && state.goal !== null && 
+          {state.subreddit.name && state.goal !== null &&
             <text alignment="middle center" onPress={state.subscribePressed} selectable={false} size="xxlarge" weight="bold" width="100%" wrap>
-            r/{state.subreddit.name} reached 
+            r/{state.subreddit.name} reached
             {"\n"}
             {formatNumberUnlessExact(state.goal)} subscribers!
             </text>

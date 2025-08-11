@@ -1,6 +1,6 @@
 import {Devvit} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from '../../utils/formatNumbers.js';
+import {formatNumberUnlessExact} from '../../utils/numberUtils.js';
 import {ProgressBar} from './progressBar.js';
 import {SubredditIcon} from './subredditIcon.js';
 

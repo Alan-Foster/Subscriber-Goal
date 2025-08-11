@@ -1,6 +1,6 @@
 import {Devvit} from '@devvit/public-api';
 
-import {formatNumberUnlessExact} from '../../utils/formatNumbers.js';
+import {formatNumberUnlessExact} from '../../utils/numberUtils.js';
 
 // TODO: Maybe add color customization stuff
 export type ProgressBarProps = {

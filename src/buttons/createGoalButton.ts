@@ -1,7 +1,7 @@
 import {Context, Devvit, MenuItemOnPressEvent} from '@devvit/public-api';
 
 import {createGoalForm} from '../main.js';
-import {getDefaultSubscriberGoal} from '../utils/defaultSubscriberGoal.js';
+import { getDefaultSubscriberGoal } from "../utils/numberUtils.js";
 
 async function onPress (event: MenuItemOnPressEvent, context: Context) {
   try {
