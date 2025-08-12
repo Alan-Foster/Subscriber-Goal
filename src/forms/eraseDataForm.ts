@@ -1,3 +1,6 @@
+/**
+ * @file This form allows moderators to erase all stored data associated with a specific username or user ID.
+ */
 import {Context, Devvit, Form, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
 import {eraseFromRecentSubscribers} from '../data/subGoalData.js';
@@ -33,13 +36,24 @@ const form: Form = {
   cancelLabel: 'Cancel',
 };
 
-export type DeleteFormSubmitData = {
+// All fields must be optional (regardless of the required attribute) due to limitations on Devvit and TypeScript's part for type inference.
+export type EraseFormSubmitData = {
   username?: string;
   userId?: string;
   confirm?: boolean;
 }
 
-const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event: FormOnSubmitEvent<DeleteFormSubmitData>, {reddit, redis, ui}: Context) => {
+/**
+ * The form submit handler first validates the submitted form data, after which it attempts to resolve the user ID and canonical username as best it can.
+ * After that it calls {@linkcode untrackSubscriberById}, {@linkcode untrackSubscriberByUsername}, and {@linkcode eraseFromRecentSubscribers} to perform the erasures.
+ * This may have issues if the user has already been deleted and the inputs are not perfect (e.g., the username is not exactly as it appears in their profile link).
+ * @param event - An object containing the event data, specifically the submitted form values.
+ * @param context - The full context object provided by Devvit.
+ * @param context.reddit - Instance of RedditAPIClient.
+ * @param context.redis - Instance of RedisClient.
+ * @param context.ui - Instance of UIClient.
+ */
+const formHandler: FormOnSubmitEventHandler<EraseFormSubmitData> = async (event: FormOnSubmitEvent<EraseFormSubmitData>, {reddit, redis, ui}: Context) => {
   if (!event.values.confirm) {
     ui.showToast('You did not confirm the erasure. Please enable the confirmation toggle before proceeding.');
     return;
@@ -87,4 +101,7 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
   ui.showToast('User data has been erased successfully.');
 };
 
+/**
+ * @description Creates the eraseDataForm. This is exported via main.js, which tells Devvit about the form.
+ */
 export const eraseDataForm: FormKey = Devvit.createForm(form, formHandler);

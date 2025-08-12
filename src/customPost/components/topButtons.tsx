@@ -1,3 +1,8 @@
+/**
+ * @file This is the component that shows the bar with the buttons at the top of the post.
+ * @todo Actually implement the functionality behind the notification parts.
+ */
+
 import {Devvit} from '@devvit/public-api';
 
 export type TopButtonsProps = {

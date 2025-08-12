@@ -1,3 +1,8 @@
+/**
+ * This is the primary view for Subscriber Goal posts.
+ * It displays the goal, progress bar, and a call to action to subscribe.
+ */
+
 import {Devvit} from '@devvit/public-api';
 
 import {LoadingElement} from '../../components/loadingElement.js';
@@ -7,7 +12,7 @@ import {TopButton} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';
 
 export const SubGoalPage: PageElement = router => {
-  const state = router.PageStates.subGoal;
+  const state = router.PageStates.subGoal; // This is where basically everything to do with the custom post happens.
   return (
     <zstack alignment="center middle" height="100%" width="100%">
       {state.appSettings && <TopButton onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}

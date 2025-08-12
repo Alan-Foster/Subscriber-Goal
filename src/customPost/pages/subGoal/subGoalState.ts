@@ -1,3 +1,9 @@
+/**
+ * @file This file contains the class which is used as the state for the SubGoal custom post page.
+ * Essentially this is where all the data used by the custom post is fetched, stored, and updated (from realtime or Redis).
+ * It also contains the logic for all the actions that can be performed on the page, such as subscribing, visiting the promo subreddit, etc.
+ */
+
 import {Context, useAsync, UseAsyncResult, useChannel, UseChannelResult, useInterval, UseIntervalResult, useState, UseStateResult} from '@devvit/public-api';
 import {assertNonNull} from '@devvit/shared-types/NonNull.js';
 
@@ -5,7 +11,7 @@ import {BasicSubredditData, BasicUserData} from '../../../data/basicData.js';
 import {checkCompletionStatus, getSubGoalData, SubGoalData} from '../../../data/subGoalData.js';
 import {getSubscriberStats, setNewSubscriber, SubscriberStats} from '../../../data/subscriberStats.js';
 import {AppSettings, getAppSettings} from '../../../settings.js';
-import {getSubredditIcon} from '../../../utils/subredditUtils.js';
+import {getSubredditIcon} from '../../../utils/redditUtils.js';
 import {Router} from '../../router.js';
 
 export type ChannelPacket = {
@@ -14,6 +20,14 @@ export type ChannelPacket = {
   recentSubscriber?: string;
 };
 
+/**
+ * @description SubGoalState is the beating heart of the SubGoalPage.
+ * It is structured as a class, where the useState, useAsync, etc hooks are defined as readonly properties.
+ * This allows us to define getters and setters as the primary way of accessing and modifying the state.
+ * It also allows more abstract properties to be defined, such as  `goalProgress` and `goalRemaining`, which are derived from the `goal` and `subscribers` values.
+ * The getters can also wrap things like useAsync calls, so that placeholders are provided until the data is loaded.
+ * The class methods are a convenient way to define the various event handlers, because they can access and manipulate all the class properties directly.
+ */
 export class SubGoalState {
   // UseStateResult
   readonly _currentSubscibers: UseStateResult<number>;
