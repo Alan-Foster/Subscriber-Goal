@@ -1,3 +1,7 @@
+/**
+ * @file The ThanksPage is shown after a user clicks the subscribe button on the sub goal post. It does not have its own state, instead it grabs data from the main SubGoalPage state.
+ */
+
 import {Devvit} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from '../../../utils/numberUtils.js';

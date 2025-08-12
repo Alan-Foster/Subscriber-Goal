@@ -5,10 +5,10 @@
 /**
  * Round the number to nearest 1k or 1m regardless of exact value eg 12,456 to 12.4k
  * Used for number of actual subscribers to render (912 K / 1 million) instead of (912345 / 1000000)
- * Ideal for international communities because Europe vs USA use different thousands denominators
+ * Ideal for international communities because Europe vs USA use different thousands denominators.
  * @param num - The number to format.
  * @returns Exact number if less than 10k, otherwise rounded to the nearest thousand or million and one decimal place with the appropriate suffix.
-*/
+ */
 export function formatNumberAlwaysRound (num: number): string {
   if (num >= 1000000) {
     return `${(num / 1000000).toFixed(1)} M`;
@@ -19,8 +19,8 @@ export function formatNumberAlwaysRound (num: number): string {
 }
 
 /**
- * Round the number to the nearest 1k or 1m unless it's an exact goal eg 12,345,678
- * Used for subscriber goal which is usually a round number (300k) but may be specific (1,234,567)
+ * Round the number to the nearest 1k or 1m unless it's an exact goal eg 12,345,678.
+ * Used for subscriber goal which is usually a round number (300k) but may be specific (1,234,567).
  * @param num - The number to format.
  * @returns Formats the number with one decimal place and appropriate suffix if it's a round number, otherwise returns the number's toLocaleString.
  */
@@ -35,7 +35,7 @@ export function formatNumberUnlessExact (num: number): string {
 
 /**
  * This function returns the recommended default subscriber goal based on the current subscriber count.
- * @param subscriberCount Current subscriber count of the subreddit.
+ * @param subscriberCount - Current subscriber count of the subreddit.
  * @returns Suggested goal for the subscriber goal post, usually a nice round number, always greater than the current subscriber count.
  */
 export const getDefaultSubscriberGoal = (subscriberCount: number): number => {

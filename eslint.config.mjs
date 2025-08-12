@@ -221,7 +221,6 @@ export default [{
     "perfectionist/sort-named-exports": ["error", {
       "partitionByComment": true,
     }],
-    "jsdoc/require-jsdoc": "off",
     "jsdoc/require-file-overview": "warn",
     "jsdoc/require-hyphen-before-param-description": "warn",
     "jsdoc/require-description-complete-sentence": "warn",

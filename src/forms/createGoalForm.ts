@@ -1,15 +1,24 @@
+/**
+ * @file Defines the form and its submit handler for creating a new subscriber goal post.
+ */
+
 import {Context, Devvit, FormFunction, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
 import {previewMaker, PreviewProps, textFallbackMaker} from '../customPost/components/preview.js';
 import {registerNewSubGoalPost} from '../data/subGoalData.js';
 import {getAppSettings} from '../settings.js';
-import {clearUserStickies, getSubredditIcon} from '../utils/subredditUtils.js';
+import {clearUserStickies, getSubredditIcon} from '../utils/redditUtils.js';
 
 export type CreateFormData = {
   defaultGoal?: number;
   subredditName?: string;
 }
 
+/**
+ * This is a form function for generating the create post form.
+ * @param data - Data used to generate the form.
+ * @returns Form object as specified by Devvit.
+ */
 const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
   if (!data.subredditName) {
     throw new Error('subredditName is required');
@@ -34,10 +43,22 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
   };
 };
 
+// All fields must be optional (regardless of the required attribute) due to limitations on Devvit and TypeScript's part for type inference.
 export type CreateFormSubmitData = {
   subscriberGoal?: number;
 }
 
+/**
+ * This is what happens when the form is submitted.
+ * It does basic validation and then creates a new subscriber goal post and then calls {@linkcode registerNewSubGoalPost} to perform the necessary post-submission actions.
+ * @param event - An object containing the event data associated with the form submission, specifically the form values.
+ * @param context - The full context object provided by Devvit.
+ * @param context.settings - Instance of SettingsClient.
+ * @param context.reddit - Instance of RedditAPIClient.
+ * @param context.redis - Instance of RedisClient.
+ * @param context.ui - Instance of UIClient.
+ * @param context.appName - The name of the Devvit app, which also serves as the app account username.
+ */
 const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {settings, reddit, redis, ui, appName}: Context) => {
   const subscriberGoal = event.values.subscriberGoal;
 
@@ -86,4 +107,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
   }
 };
 
+/**
+ * @description Creates the createGoalForm. This is exported via main.js, which tells Devvit about the form.
+ */
 export const createGoalForm: FormKey = Devvit.createForm(form, formHandler);
