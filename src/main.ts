@@ -1,3 +1,8 @@
+/**
+ * @file This is the main entry point for a Devvit app, we are keeping it simple and separating all Devvit definitions into their own files.
+ * It exports all the buttons, forms, triggers, etc that we've defined elsewhere in the app.
+ */
+
 import {Devvit} from '@devvit/public-api';
 
 // Custom Post

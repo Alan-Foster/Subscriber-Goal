@@ -1,3 +1,6 @@
+/**
+ * @file Adds a component to display the subreddit icon and handle loading states and interactions.
+ */
 import {Devvit, IconName} from '@devvit/public-api';
 
 import {LoadingElement} from './loadingElement.js';

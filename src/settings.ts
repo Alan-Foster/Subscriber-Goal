@@ -1,3 +1,7 @@
+/**
+ * @file Contains the definitions, types, defaults, and getters for the Devvit app settings.
+ */
+
 import {Devvit, SettingsClient, SettingScope} from '@devvit/public-api';
 
 export type AppSettings = {
@@ -10,6 +14,11 @@ export const defaultAppSettings: AppSettings = {
   crosspost: true,
 };
 
+/**
+ * Retrieves the application settings from the SettingsClient.
+ * @param settings - Instance of SettingsClient.
+ * @returns The AppSettings object containing the current settings, or the default values if not set.
+ */
 export async function getAppSettings (settings: SettingsClient): Promise<AppSettings> {
   const allSettings = await settings.getAll<AppSettings>();
 
@@ -19,6 +28,9 @@ export async function getAppSettings (settings: SettingsClient): Promise<AppSett
   };
 }
 
+/**
+ * @description Registers the application settings with Devvit. This is exported via main.js, which enables the configuration through Devvit.
+ */
 export const appSettings = Devvit.addSettings([
   {
     type: 'string',
