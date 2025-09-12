@@ -81,8 +81,9 @@ export async function checkCompletionStatus (reddit: RedditAPIClient, redis: Red
  * @param appSettings - Application settings object, specifically used for setting the central promo subreddit and optionally disabling that feature.
  * @param post - This is the Devvit Post object that is returned when a post is submitted.
  * @param goal - The subscriber goal for this post.
+ * @param crosspost - Whether to crosspost this to the central subreddit.
  */
-export async function registerNewSubGoalPost (reddit: RedditAPIClient, redis: RedisClient, appSettings: AppSettings, post: Post, goal: number): Promise<void> {
+export async function registerNewSubGoalPost (reddit: RedditAPIClient, redis: RedisClient, appSettings: AppSettings, post: Post, goal: number, crosspost: boolean): Promise<void> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
@@ -90,7 +91,7 @@ export async function registerNewSubGoalPost (reddit: RedditAPIClient, redis: Re
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
-  if (appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase() && appSettings.crosspost) {
+  if (appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase() && crosspost) {
     await dispatchNewPost(reddit, appSettings, post.id, goal);
   }
 }

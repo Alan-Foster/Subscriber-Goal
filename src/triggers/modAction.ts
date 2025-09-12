@@ -242,7 +242,7 @@ export async function onModAction (event: ModAction, context: TriggerContext) {
     return; // Ignore actions taken by the app itself, like approving immediately after posting
   }
 
-  if (!appSettings.crosspost && event.action === 'approvelink') {
+  if (event.action === 'approvelink') { // TODO: Maybe track if we actually crossposted the post, and only pass approval if we did?
     return; // Ignore approvals if crossposting is disabled, we still want to respect removals though (in case the setting was changed after the post was already crossposted)
   }
   await dispatchPostAction(context.reddit, appSettings, event.targetPost.id, modToPostActionMap[event.action]);

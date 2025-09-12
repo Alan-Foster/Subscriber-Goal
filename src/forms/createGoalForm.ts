@@ -12,6 +12,7 @@ import {clearUserStickies, getSubredditIcon} from '../utils/redditUtils.js';
 export type CreateFormData = {
   defaultGoal?: number;
   subredditName?: string;
+  promoSubreddit?: string;
 }
 
 /**
@@ -26,6 +27,9 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
   if (!data.defaultGoal) {
     throw new Error('defaultGoal is required');
   }
+  if (!data.promoSubreddit) {
+    throw new Error('promoSubreddit is required');
+  }
 
   return {
     title: 'Sub Goal - Create a New Goal',
@@ -39,6 +43,15 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
         helpText: 'The default goal is a suggestion on your current subscriber count, you may set it to any number greater than your current subscriber count.',
         required: true,
       },
+      {
+        name: 'crosspost',
+        label: `Auto-Crosspost to r/${data.promoSubreddit} (Recommended)`,
+        type: 'boolean',
+        helpText: `Keep this enabled to announce your goal in the r/${data.promoSubreddit} index subreddit.`,
+        defaultValue: data.subredditName.toLowerCase() === data.promoSubreddit.toLowerCase() ? false : true,
+        disabled: data.subredditName.toLowerCase() === data.promoSubreddit.toLowerCase(),
+        required: true,
+      },
     ],
   };
 };
@@ -46,6 +59,7 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
 // All fields must be optional (regardless of the required attribute) due to limitations on Devvit and TypeScript's part for type inference.
 export type CreateFormSubmitData = {
   subscriberGoal?: number;
+  crosspost?: boolean;
 }
 
 /**
@@ -61,12 +75,18 @@ export type CreateFormSubmitData = {
  */
 const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {settings, reddit, redis, ui, appName}: Context) => {
   const subscriberGoal = event.values.subscriberGoal;
+  const crosspost = event.values.crosspost;
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
 
     if (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal) {
       ui.showToast('Please select a valid subscriber goal!');
+      return;
+    }
+
+    if (crosspost === undefined) {
+      ui.showToast('Please specify if you want to crosspost!');
       return;
     }
 
@@ -94,7 +114,7 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
 
     // Store the new Subscriber Goal and custom Header in Redis using the Post ID
     console.log(`Storing subscriber goal in Redis. Post ID: ${post.id}, Goal: ${subscriberGoal}`);
-    await registerNewSubGoalPost(reddit, redis, await getAppSettings(settings), post, subscriberGoal);
+    await registerNewSubGoalPost(reddit, redis, await getAppSettings(settings), post, subscriberGoal, crosspost);
 
     // Sticky, show confirmation Toast message and navigate to newly generated subscriber goal
     ui.showToast('Subscriber Goal post created!');

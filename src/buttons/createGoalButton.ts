@@ -5,6 +5,7 @@
 import {Context, Devvit, MenuItemOnPressEvent} from '@devvit/public-api';
 
 import {createGoalForm} from '../main.js';
+import {getAppSettings} from '../settings.js';
 import {getDefaultSubscriberGoal} from '../utils/numberUtils.js';
 
 /**
@@ -19,10 +20,12 @@ async function onPress (event: MenuItemOnPressEvent, context: Context) {
     const subscriberCount = subreddit.numberOfSubscribers;
     const subredditName = subreddit.name;
     const defaultGoal = getDefaultSubscriberGoal(subscriberCount);
+    const promoSubreddit = (await getAppSettings(context.settings)).promoSubreddit;
 
     context.ui.showForm(createGoalForm, {
       subredditName,
       defaultGoal,
+      promoSubreddit,
     });
   } catch (error: unknown) {
     console.error(`Error fetching subscriber count: ${error instanceof Error ? error.message : String(error)}`);
