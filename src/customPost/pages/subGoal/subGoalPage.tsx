@@ -1,5 +1,5 @@
 /**
- * This is the primary view for Subscriber Goal posts.
+ * @file This is the primary view for Subscriber Goal posts.
  * It displays the goal, progress bar, and a call to action to subscribe.
  */
 
