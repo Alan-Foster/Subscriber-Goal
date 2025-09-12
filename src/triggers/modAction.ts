@@ -5,7 +5,7 @@
 
 import {ModAction} from '@devvit/protos';
 import {Devvit, RedditAPIClient, RedisClient, TriggerContext} from '@devvit/public-api';
-import {isLinkId} from '@devvit/shared-types/tid.js';
+import {isLinkId} from '@devvit/public-api/types/tid.js';
 
 import {dispatchPostAction, getCorrespondingPost, hasCrosspost, isProcessedRevision, modToPostActionMap, PostActionType, storeCorrespondingPost, storeProcessedRevision} from '../data/crosspostData.js';
 import {AppSettings, getAppSettings} from '../settings.js';
