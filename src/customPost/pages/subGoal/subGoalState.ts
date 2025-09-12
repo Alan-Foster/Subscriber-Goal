@@ -210,9 +210,6 @@ export class SubGoalState {
       console.error('Failed to connect to channel:', e);
     }
   };
-  notifyPressed = () => {
-    this.context.ui.showToast('This feature has not yet been implemented!');
-  };
   onChannelMessage = (message: ChannelPacket) => {
     if (message.type === 'sub') {
       if (message.recentSubscriber) {

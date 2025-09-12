@@ -6,7 +6,7 @@ import {Devvit} from '@devvit/public-api';
 
 import {formatNumberUnlessExact} from '../../../utils/numberUtils.js';
 import {LoadingElement} from '../../components/loadingElement.js';
-import {TopButton} from '../../components/topButtons.js';
+import {TopButtons} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';
 
 export const CompletedPage: PageElement = router => {
@@ -15,7 +15,7 @@ export const CompletedPage: PageElement = router => {
   const timeZone = state.context.uiEnvironment?.timezone ?? 'UTC';
   return (
     <zstack alignment="center middle" height="100%" width="100%">
-      {state.appSettings && <TopButton hideNotify={true} onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
+      {state.appSettings && <TopButtons hideNotify={true} onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
       <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
         <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
           <LoadingElement name="load-fill" size="large">

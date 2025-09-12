@@ -8,14 +8,14 @@ import {Devvit} from '@devvit/public-api';
 import {LoadingElement} from '../../components/loadingElement.js';
 import {ProgressBar} from '../../components/progressBar.js';
 import {SubredditIcon} from '../../components/subredditIcon.js';
-import {TopButton} from '../../components/topButtons.js';
+import {TopButtons} from '../../components/topButtons.js';
 import {PageElement} from '../../router.js';
 
 export const SubGoalPage: PageElement = router => {
   const state = router.PageStates.subGoal; // This is where basically everything to do with the custom post happens.
   return (
     <zstack alignment="center middle" height="100%" width="100%">
-      {state.appSettings && <TopButton onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
+      {state.appSettings && <TopButtons onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
       <vstack alignment="center middle" gap="medium" height="100%" padding="medium" width="100%">
         <spacer size='xsmall' />
         <SubredditIcon iconUrl={state.subreddit.icon} imageHeight={100} imageWidth={100} onPress={state.subscribePressed} />
