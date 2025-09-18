@@ -13,7 +13,7 @@ export const ThanksPage: PageElement = router => {
   const state = router.PageStates.subGoal; // Piggybacking off of subGoal state, so we don't need to refetch data
   return (
     <zstack alignment="center middle" height="100%" width="100%">
-      {state.appSettings && <TopButtons onNotifyPressed={state.notifyPressed} onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
+      {state.appSettings && <TopButtons onVisitPromoSubPressed={state.visitPromoSubPressed}/>}
       <vstack alignment="middle center" gap="medium" height="100%" padding="medium" width="100%">
         <hstack alignment="center middle" backgroundColor="" cornerRadius="full" height="100px" width="100px">
           <LoadingElement name="load-fill" size="large">
