@@ -44,6 +44,14 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
         required: true,
       },
       {
+        name: 'postTitle',
+        label: 'Post Title',
+        type: 'string',
+        defaultValue: `Welcome to r/${data.subredditName}!`,
+        helpText: 'This will be used as the title of the post, you can customize it as you see fit.',
+        required: true,
+      },
+      {
         name: 'crosspost',
         label: `Auto-Crosspost to r/${data.promoSubreddit} (Recommended)`,
         type: 'boolean',
@@ -60,6 +68,7 @@ const form: FormFunction<CreateFormData> = (data: CreateFormData) => {
 export type CreateFormSubmitData = {
   subscriberGoal?: number;
   crosspost?: boolean;
+  postTitle?: string;
 }
 
 /**
@@ -76,6 +85,7 @@ export type CreateFormSubmitData = {
 const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event: FormOnSubmitEvent<CreateFormSubmitData>, {settings, reddit, redis, ui, appName}: Context) => {
   const subscriberGoal = event.values.subscriberGoal;
   const crosspost = event.values.crosspost;
+  const title = event.values.postTitle;
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
@@ -87,6 +97,11 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
 
     if (crosspost === undefined) {
       ui.showToast('Please specify if you want to crosspost!');
+      return;
+    }
+
+    if (!title || title.trim().length === 0) {
+      ui.showToast('Please provide a post title!');
       return;
     }
 
@@ -104,9 +119,9 @@ const formHandler: FormOnSubmitEventHandler<CreateFormSubmitData> = async (event
     // Using the form data, generate a Custom Post containing the Subscriber Goal
     const post = await reddit.submitPost({
       subredditName: subreddit.name,
-      title: `Welcome to r/${subreddit.name}!`,
       textFallback: {text: textFallbackMaker(previewProps)},
       preview: previewMaker(previewProps),
+      title,
     });
 
     // Approve the post explicitly to resolve potential AutoMod bug
