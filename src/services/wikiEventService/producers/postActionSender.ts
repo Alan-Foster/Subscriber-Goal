@@ -58,7 +58,7 @@ export async function sendPostActionEvent ({reddit, targetSubredditName, action,
     type: WikiEventType.PostActionEvent,
     action,
     postId,
-    actionTimestamp: actionedAt?.getTime() ?? Date.now(),
+    timestamp: actionedAt?.getTime() ?? Date.now(),
   };
 
   await sendWikiEvent({
