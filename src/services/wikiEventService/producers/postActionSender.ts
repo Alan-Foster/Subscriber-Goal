@@ -5,7 +5,7 @@
 import {RedditAPIClient} from '@devvit/public-api';
 
 import {WikiEventType} from '../types/baseWikiEvent.js';
-import {POST_ACTION_TYPES, PostActionEventData} from '../types/postActionEvent.js';
+import {PostActionEventData, PostActionType} from '../types/postActionEvent.js';
 import {sendWikiEvent} from './wikiEventSender.js';
 
 export type SupportedModAction = 'removelink' | 'approvelink' | 'spamlink';
@@ -24,7 +24,7 @@ export function isSupportedModAction (action: string): action is SupportedModAct
  * @param action - One of the three supported mod actions from the ModAction trigger.
  * @returns The corresponding PostActionEvent action type.
  */
-export function mapModActionToPostActionType (action: SupportedModAction): typeof POST_ACTION_TYPES[number] {
+export function mapModActionToPostActionType (action: SupportedModAction): PostActionType {
   switch (action) {
   case 'removelink':
   case 'spamlink':
@@ -39,7 +39,7 @@ export function mapModActionToPostActionType (action: SupportedModAction): typeo
 export type SendPostActionEventProps = {
   reddit: RedditAPIClient;
   targetSubredditName: string;
-  action: typeof POST_ACTION_TYPES[number];
+  action: PostActionType;
   postId: string;
   actionedAt?: Date;
 }
