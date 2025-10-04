@@ -4,8 +4,8 @@
 
 import {Post, RedditAPIClient, RedisClient} from '@devvit/public-api';
 
+import {sendPostCreateEvent} from '../services/wikiEventService/producers/postCreateSender.js';
 import {AppSettings} from '../settings.js';
-import {dispatchNewPost} from './crosspostData.js';
 import {queueUpdate, trackPost} from './updaterData.js';
 
 export const subscriberGoalsKey = 'subscriber_goals';
@@ -94,8 +94,19 @@ export async function registerNewSubGoalPost (reddit: RedditAPIClient, redis: Re
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
-  if (appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase() && crosspost) {
-    await dispatchNewPost(reddit, appSettings, post.id, goal);
+  if (appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase()) {
+    await sendPostCreateEvent({
+      reddit,
+      targetSubredditName: appSettings.promoSubreddit,
+      post,
+      subGoalData: {
+        goal,
+        recentSubscriber: '',
+        completedTime: 0,
+        sendWikiEvents: crosspost,
+        subredditDisplayName: post.subredditName,
+      },
+    });
   }
 }
 

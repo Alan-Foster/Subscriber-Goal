@@ -2,9 +2,7 @@
  * @file These are the functions for sending events to the central promo subreddit via wiki revisions, as well as the way the central promo subreddit keeps track of crosspost-post relationships and processed revisions.
  */
 
-import {RedditAPIClient, RedisClient} from '@devvit/public-api';
-
-import {AppSettings} from '../settings.js';
+import {RedisClient} from '@devvit/public-api';
 
 export type PostActionType = 'remove' | 'approve' | 'delete';
 
@@ -23,9 +21,9 @@ export const modToPostActionMap: Record<string, PostActionType> = {
  * @param postId - The full ID of the post that was created (e.g., 't3_123456').
  * @param goal - The subscriber goal for the created post.
  */
-export async function dispatchNewPost (reddit: RedditAPIClient, appSettings: AppSettings, postId: string, goal: number): Promise<void> {
-  await reddit.updateWikiPage({subredditName: appSettings.promoSubreddit, page: '/post', content: `${postId}\n${goal}`, reason: `Post ${postId} with goal ${goal}`});
-}
+// export async function dispatchNewPost (reddit: RedditAPIClient, appSettings: AppSettings, postId: string, goal: number): Promise<void> {
+//   await reddit.updateWikiPage({subredditName: appSettings.promoSubreddit, page: '/post', content: `${postId}\n${goal}`, reason: `Post ${postId} with goal ${goal}`});
+// }
 
 /**
  * This function tells the central promo subreddit about an action taken on a post.
@@ -37,9 +35,9 @@ export async function dispatchNewPost (reddit: RedditAPIClient, appSettings: App
  * @param postId - The full ID of the post that was actioned (e.g., 't3_123456').
  * @param action - This is either a `remove`, `delete`, or `approve` action, which will be sent to the central promo subreddit and mirrored there on the crosspost.
  */
-export async function dispatchPostAction (reddit: RedditAPIClient, appSettings: AppSettings, postId: string, action: PostActionType): Promise<void> {
-  await reddit.updateWikiPage({subredditName: appSettings.promoSubreddit, page: `/${action}`, content: postId, reason: `Dispatch ${action} for ${postId}`}); ;
-}
+// export async function dispatchPostAction (reddit: RedditAPIClient, appSettings: AppSettings, postId: string, action: PostActionType): Promise<void> {
+//   await reddit.updateWikiPage({subredditName: appSettings.promoSubreddit, page: `/${action}`, content: postId, reason: `Dispatch ${action} for ${postId}`}); ;
+// }
 
 export const wikiRevisionCutoffKey = 'revisionCutoff';
 export const processedRevisionsKey = 'processedRevisions';
