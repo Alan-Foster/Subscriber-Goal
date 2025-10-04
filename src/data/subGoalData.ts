@@ -17,6 +17,9 @@ export type SubGoalData = {
   goal: number;
   recentSubscriber: string | null;
   completedTime: number;
+  sendWikiEvents?: boolean;
+  showRecentSubscriber?: boolean;
+  subredditDisplayName?: string;
 };
 
 /**
