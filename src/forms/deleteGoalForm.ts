@@ -4,8 +4,8 @@
 
 import {Context, Devvit, Form, FormKey, FormOnSubmitEvent, FormOnSubmitEventHandler} from '@devvit/public-api';
 
-import {dispatchPostAction} from '../data/crosspostData.js';
 import {cancelUpdates, untrackPost} from '../data/updaterData.js';
+import {sendPostActionEvent} from '../services/wikiEventService/producers/postActionSender.js';
 import {getAppSettings} from '../settings.js';
 
 const form: Form = {
@@ -58,7 +58,12 @@ const formHandler: FormOnSubmitEventHandler<DeleteFormSubmitData> = async (event
 
     const appSettings = await getAppSettings(settings);
     if (subredditName.toLowerCase() !== appSettings.promoSubreddit.toLowerCase()) {
-      await dispatchPostAction(reddit, appSettings, postId, 'delete');
+      await sendPostActionEvent({
+        reddit,
+        targetSubredditName: appSettings.promoSubreddit,
+        action: 'delete',
+        postId,
+      });
     }
     await post.delete();
     await cancelUpdates(redis, postId);
