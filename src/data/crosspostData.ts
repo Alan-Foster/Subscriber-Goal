@@ -39,74 +39,7 @@ export const modToPostActionMap: Record<string, PostActionType> = {
 //   await reddit.updateWikiPage({subredditName: appSettings.promoSubreddit, page: `/${action}`, content: postId, reason: `Dispatch ${action} for ${postId}`}); ;
 // }
 
-export const wikiRevisionCutoffKey = 'revisionCutoff';
-export const processedRevisionsKey = 'processedRevisions';
 export const crosspostListKey = 'crosspostList';
-
-/**
- * Stores the timestamp of latest wiki revision that was processed by the central promo subreddit.
- *
- * This should only be used by an instance of the app running on the central promo subreddit.
- * @param redis - Instance of RedisClient.
- * @param cutoff - The cutoff date for wiki revisions, it should be a Date object representing the creation timestamp of the latest processed revision.
- */
-export async function storeRevisionCutoff (redis: RedisClient, cutoff: Date): Promise<void> {
-  await redis.set(wikiRevisionCutoffKey, cutoff.getTime().toString());
-}
-
-/**
- * Get the timestamp of the latest wiki revision that was processed by the central promo subreddit.
- *
- * This should only be used by an instance of the app running on the central promo subreddit.
- * @param redis - Instance of RedisClient.
- * @returns A Date object representing the cutoff time, where times after it have been processed and times before it have not.
- */
-export async function getRevisionCutoff (redis: RedisClient): Promise<Date> {
-  const cutoff = await redis.get(wikiRevisionCutoffKey);
-  if (!cutoff) {
-    return new Date(0);
-  }
-  return new Date(parseInt(cutoff));
-}
-
-/**
- * Stores a processed wiki revision ID and the corresponding post ID.
- *
- * This should only be used by an instance of the app running on the central promo subreddit.
- * @param redis - Instance of RedisClient.
- * @param wikiRevisionId - The ID of the wiki revision that was processed.
- * @param postId - This is the full ID of the post that the wiki revision was sent about, not the crosspost on the central promo subreddit.
- */
-export async function storeProcessedRevision (redis: RedisClient, wikiRevisionId: string, postId: string): Promise<void> {
-  await redis.hSet(processedRevisionsKey, {
-    [wikiRevisionId]: postId,
-  });
-}
-
-/**
- * Checks if a wiki revision has already been processed.
- *
- * This should only be used by an instance of the app running on the central promo subreddit.
- * @param redis - Instance of RedisClient.
- * @param wikiRevisionId - The ID of the wiki revision to check.
- * @returns A boolean indicating whether the revision has been processed.
- */
-export async function isProcessedRevision (redis: RedisClient, wikiRevisionId: string): Promise<boolean> {
-  const revision = await redis.hGet(processedRevisionsKey, wikiRevisionId);
-  return !!revision;
-}
-
-/**
- * Retrieves all processed wiki revision IDs.
- *
- * This should only be used by an instance of the app running on the central promo subreddit.
- * @param redis - Instance of RedisClient.
- * @returns A list of all processed wiki revision IDs.
- */
-export async function getAllProcessedRevisions (redis: RedisClient): Promise<string[]> {
-  const revisions = await redis.hGetAll(processedRevisionsKey);
-  return Object.keys(revisions);
-}
 
 /**
  * Stores a mapping between a post ID on a different subreddit and its corresponding crosspost ID on the central promo subreddit.
