@@ -164,6 +164,7 @@ export async function updateFromWikis ({redis, reddit}: TriggerContext, appSetti
         subredditName: appSettings.promoSubreddit,
         title: `Visit r/${post.subredditName}, they are trying to reach ${newPost.goal} subscribers!`,
         postId: post.id,
+        nsfw: post.nsfw ?? (await reddit.getSubredditInfoById(post.subredditId)).isNsfw, // Use the original post's NSFW status, or fall back to the subreddit's status if it's undefined on the post.
       });
       await storeCorrespondingPost(redis, newPost.postId, crosspost.id);
       await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
