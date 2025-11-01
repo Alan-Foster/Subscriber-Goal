@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@devvit/protos": "0.12.0",
-    "@devvit/public-api": "0.12.0",
+    "@devvit/public-api": "0.12.1",
     "@devvit/shared-types": "0.12.0",
     "devvit-helpers": "0.7.12"
   },
