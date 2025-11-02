@@ -1,0 +1,37 @@
+{
+  "name": "subscriber-goal",
+  "blocks": {
+    "entry": "src/main.ts",
+    "triggers": [
+      "onAppInstall",
+      "onAppUpgrade",
+      "onModAction"
+    ],
+    "forms": {
+      "enable": true
+    },
+    "menu": {
+      "enable": true
+    },
+    "settings": {
+      "enable": true
+    }
+  },
+  "media": {
+    "dir": "assets/"
+  },
+  "permissions": {
+    "media": true,
+    "realtime": true,
+    "reddit": {
+      "asUser": [
+        "SUBSCRIBE_TO_SUBREDDIT"
+      ],
+      "enable": true
+    },
+    "redis": true
+  },
+  "dev": {
+    "subreddit": "SubGoal"
+  }
+}
