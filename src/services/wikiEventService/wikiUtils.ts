@@ -51,10 +51,10 @@ export function normalizeWikiPathWithRevision (path: string, revisionId: string)
  * @returns Whether the given text is a valid revision reason.
  */
 export function isValidRevisionReason (text: string): boolean {
-  // Reddit enforces a maximum length of 256 characters for revision reasons.
+  // Reddit enforces a maximum length of 256 characters for revision reasons: https://github.com/reddit-archive/reddit/blob/753b17407e9a9dca09558526805922de24133d53/r2/r2/controllers/wiki.py#L386
   if (new TextEncoder().encode(text).length > 256) {
     return false;
   }
 
-  return [...text].every(ch => ch >= ' ' && ch <= '~');
+  return [...text].every(ch => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) <= 126);
 }
