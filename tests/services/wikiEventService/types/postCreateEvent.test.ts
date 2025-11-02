@@ -2,6 +2,7 @@
  * @file Tests for src/services/wikiEventService/types/postCreateEvent.ts.
  */
 
+import {WikiEventType} from '../../../../src/services/wikiEventService/types/baseWikiEvent.js';
 import {isPostCreateEvent} from '../../../../src/services/wikiEventService/types/postCreateEvent.js';
 import {makeTestBaseWikiEvent} from './baseWikiEvent.test.js';
 import {makeTestPostActionEvent} from './postActionEvent.test.js';
@@ -13,7 +14,7 @@ import {makeTestPostActionEvent} from './postActionEvent.test.js';
  */
 export function makeTestPostCreateEvent (overrides: object = {}) {
   return makeTestBaseWikiEvent({
-    type: 'PostCreateEvent',
+    type: WikiEventType.PostCreateEvent,
     postId: 'abc123',
     subGoal: 1000,
     ...overrides,

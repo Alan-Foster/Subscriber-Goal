@@ -32,6 +32,7 @@ export async function sendWikiEvent ({reddit, eventData, targetSubredditName}: S
     return;
   }
 
+  // TODO: Implement a centralized way to get the wiki paths, so the formatting here parsing logic in parseWikiRevision are in one place.
   const wikiPath = normalizeWikiPath(`${(await reddit.getAppUser()).username}/${eventData.type}`);
   const payload = JSON.stringify(eventData);
 
