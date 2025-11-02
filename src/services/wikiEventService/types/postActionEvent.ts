@@ -10,7 +10,7 @@ export type PostActionEventData = {
   type: WikiEventType.PostActionEvent;
   postId: string;
   action: PostActionType;
-  actionTimestamp: number;
+  timestamp: number;
 }
 export type PostActionEvent = BaseWikiEvent<PostActionEventData>;
 
@@ -28,6 +28,6 @@ export function isPostActionEvent (object: unknown): object is PostActionEvent {
     maybeEvent.data.type === WikiEventType.PostActionEvent &&
     typeof maybeEvent.data.postId === 'string' &&
     ['remove', 'approve', 'delete'].includes(maybeEvent.data.action) &&
-    typeof maybeEvent.data.actionTimestamp === 'number'
+    typeof maybeEvent.data.timestamp === 'number'
   );
 }
