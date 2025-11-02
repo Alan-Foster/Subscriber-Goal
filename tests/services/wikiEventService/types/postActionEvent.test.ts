@@ -16,7 +16,7 @@ export function makeTestPostActionEvent (overrides: object = {}) {
     type: 'PostActionEvent',
     postId: 'abc123',
     action: POST_ACTION_TYPES[0],
-    timestamp: 1234567890,
+    actionTimestamp: 1234567890,
     ...overrides,
   });
 }
@@ -50,7 +50,7 @@ describe('isPostActionEvent', () => {
   });
 
   it('returns false if actionTimestamp is not a number', () => {
-    expect(isPostActionEvent(makeTestPostActionEvent({timestamp: '42'}))).toBe(false);
+    expect(isPostActionEvent(makeTestPostActionEvent({actionTimestamp: '42'}))).toBe(false);
   });
 
   it('returns false if given a PostCreateEvent', () => {

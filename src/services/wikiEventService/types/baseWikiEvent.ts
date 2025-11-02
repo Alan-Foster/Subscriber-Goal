@@ -10,7 +10,6 @@ export enum WikiEventType {
 }
 
 export type BaseWikiEventData = {
-  timestamp?: number; // Timestamp associated with the received data, as opposed to the parent event's timestamp, which is the wiki revision time.
   type: WikiEventType;
 }
 
