@@ -26,8 +26,6 @@ export const WikiEventConsumers: Record<WikiEventType, WikiEventConsumer<WikiEve
   [WikiEventType.PostActionEvent]: logWikiEvent,
 };
 
-export const LegacyPages = ['remove', 'approve', 'delete', 'post'];
-
 /**
  * This function will take a wiki event and route it to the appropriate consumer based on its type.
  * @param context - Context or TriggerContext from Devvit.

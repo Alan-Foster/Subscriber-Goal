@@ -30,18 +30,7 @@ export function normalizeWikiPath (path: string): string {
   if (path === '') {
     throw new Error('Wiki path should not be empty after normalization.');
   }
-  return `/${path}`; // Ensure it starts with a single leading slash
-}
-
-/**
- * Normalizes a wiki path and ensures it uses the correct format to specify the revision ID.
- * @param path - The wiki path to normalize.
- * @param revisionId - The revision ID to append to the path.
- * @returns The normalized wiki path with the revision ID.
- */
-export function normalizeWikiPathWithRevision (path: string, revisionId: string): string {
-  const normalizedPath = normalizeWikiPath(path);
-  return `${normalizedPath}?v=${revisionId}&raw_json=1&`;
+  return path; // Ensure it starts with a single leading slash
 }
 
 /**

@@ -6,7 +6,7 @@ import {Context, TriggerContext, WikiPageRevision} from '@devvit/public-api';
 
 import {isBaseWikiEventData, WikiEventType} from '../types/baseWikiEvent.js';
 import {isWikiEvent, WikiEvent} from '../types/wikiEvent.js';
-import {normalizeWikiPathWithRevision} from '../wikiUtils.js';
+import {normalizeWikiPath} from '../wikiUtils.js';
 import {isLegacyWikiRevision, parseLegacyWikiRevision} from './legacyRevisionParser.js';
 
 /**
@@ -61,7 +61,7 @@ export async function parseWikiRevision (context: Context | TriggerContext, revi
   // Otherwise, fetch the wiki page content and parse that.
   try {
     const subredditName = context.subredditName ?? await context.reddit.getCurrentSubredditName();
-    const wikiPage = await context.reddit.getWikiPage(subredditName, normalizeWikiPathWithRevision(revision.page, revision.id));
+    const wikiPage = await context.reddit.getWikiPage(subredditName, normalizeWikiPath(revision.page), revision.id);
 
     const parsedContent: unknown = JSON.parse(wikiPage.content);
     if (isBaseWikiEventData(parsedContent)) {

@@ -1,31 +1,31 @@
 /**
  * @file Tests for src/services/wikiEventService/wikiUtils.ts.
  */
-import {isValidRevisionReason, normalizeWikiPath, normalizeWikiPathWithRevision} from '../../../src/services/wikiEventService/wikiUtils.js';
+import {isValidRevisionReason, normalizeWikiPath} from '../../../src/services/wikiEventService/wikiUtils.js';
 
 describe('normalizeWikiPath', () => {
   it('should strip leading and trailing slashes', () => {
-    expect(normalizeWikiPath('/example/path/')).toBe('/example/path');
+    expect(normalizeWikiPath('/example/path/')).toBe('example/path');
   });
   it('should trim whitespace', () => {
-    expect(normalizeWikiPath('  example/path  ')).toBe('/example/path');
+    expect(normalizeWikiPath('  example/path  ')).toBe('example/path');
   });
   it('should convert to lowercase', () => {
-    expect(normalizeWikiPath('ExAmPlE/PaTh')).toBe('/example/path');
+    expect(normalizeWikiPath('ExAmPlE/PaTh')).toBe('example/path');
   });
   it('should remove leading "wiki/" segments', () => {
-    expect(normalizeWikiPath('wiki/example/path')).toBe('/example/path');
+    expect(normalizeWikiPath('wiki/example/path')).toBe('example/path');
   });
   it('should handle multiple consecutive slashes', () => {
-    expect(normalizeWikiPath('//example///path')).toBe('/example/path');
+    expect(normalizeWikiPath('//example///path')).toBe('example/path');
   });
   it('should handle paths that are just "wiki"', () => {
-    expect(normalizeWikiPath('wiki')).toBe('/wiki');
-    expect(normalizeWikiPath('/wiki/')).toBe('/wiki');
-    expect(normalizeWikiPath('wiki/wiki')).toBe('/wiki');
+    expect(normalizeWikiPath('wiki')).toBe('wiki');
+    expect(normalizeWikiPath('/wiki/')).toBe('wiki');
+    expect(normalizeWikiPath('wiki/wiki')).toBe('wiki');
   });
   it('should handle a mix of all cases', () => {
-    expect(normalizeWikiPath('  /WiKi//ExAmPlE/PaTh///  ')).toBe('/example/path');
+    expect(normalizeWikiPath('  /WiKi//ExAmPlE/PaTh///  ')).toBe('example/path');
   });
   it('should throw an error for empty paths after normalization', () => {
     expect(() => normalizeWikiPath('   ')).toThrow();
@@ -52,11 +52,5 @@ describe('isValidRevisionReason', () => {
 
   it('should allow for basic JSON data', () => {
     expect(isValidRevisionReason('{"key":"value","number":123}')).toBe(true);
-  });
-});
-
-describe('normalizeWikiPathWithRevision', () => {
-  it('should return true for valid ASCII strings within length limit', () => {
-    expect(normalizeWikiPathWithRevision('/path/a/b/c/', 'revisionid')).toEqual('/path/a/b/c?v=revisionid&raw_json=1&');
   });
 });

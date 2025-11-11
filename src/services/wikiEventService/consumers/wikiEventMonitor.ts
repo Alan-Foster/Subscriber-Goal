@@ -24,7 +24,6 @@ export async function scanForWikiEvents (context: TriggerContext | Context) {
   const wikiRevisionsListing = context.reddit.getWikiPageRevisions({
     subredditName,
     limit: 100,
-    page: '', // This is a hacky workaround to get revisions for all wiki pages, pending a proper getWikiRevisions() method as requested here: https://github.com/reddit/devvit/issues/206
   });
   for await (const revision of wikiRevisionsListing) {
     // I don't see how these could ever be missing, but out of an abundance of caution...
@@ -66,7 +65,6 @@ export async function scanForWikiEvents (context: TriggerContext | Context) {
       await consumeWikiEvent(context, wikiEvent);
     } catch (error) {
       console.error(`Error consuming wiki event for revision ${revision.id}:`, revision, error);
-      // Don't mark this revision as processed so we can try again later.
       continue;
     }
 

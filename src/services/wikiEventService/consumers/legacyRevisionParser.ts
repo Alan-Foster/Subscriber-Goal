@@ -16,7 +16,7 @@ import {PostCreateEvent} from '../types/postCreateEvent.js';
 import {WikiEvent} from '../types/wikiEvent.js';
 import {normalizeWikiPath} from '../wikiUtils.js';
 
-export const LEGACY_PAGES = ['/remove', '/approve', '/delete', '/post'];
+export const LEGACY_PAGES = ['remove', 'approve', 'delete', 'post'];
 
 // TODO: Write some tests for these.
 
@@ -36,7 +36,7 @@ export function isLegacyWikiRevision (revision: WikiPageRevision): boolean {
  */
 export function parseLegacyWikiRevision (revision: WikiPageRevision): WikiEvent | undefined {
   const page = normalizeWikiPath(revision.page);
-  if (page === '/post') {
+  if (page === 'post') {
     const match = revision.reason.match(/Post (t3_[\w\d]+) with goal (\d+)/);
     if (!match) {
       console.warn('Invalid revision reason format', revision.reason);
@@ -71,7 +71,7 @@ export function parseLegacyWikiRevision (revision: WikiPageRevision): WikiEvent 
     return event;
   }
 
-  if (page === '/remove' || page === '/approve' || page === '/delete') {
+  if (page === 'remove' || page === 'approve' || page === 'delete') {
     const actionType = page.slice(1);
     const match = revision.reason.match(new RegExp(`Dispatch ${actionType} for (t3_[\\w\\d]+)`));
     if (!match) {
