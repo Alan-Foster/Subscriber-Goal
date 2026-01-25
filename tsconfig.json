@@ -1,11 +1,5 @@
 {
-  "extends": "@devvit/public-api/devvit.tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "exclude": [
-    "**/node_modules",
-    "**/.*/",
-    "eslint.config.mjs"
-  ]
+  // Only build references.
+  "files": [],
+  "references": [{ "path": "./src/client" }, { "path": "./src/shared" }, { "path": "./src/server" }]
 }
