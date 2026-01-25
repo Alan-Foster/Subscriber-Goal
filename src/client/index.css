@@ -1,1 +1,88 @@
 @import 'tailwindcss';
+
+:root {
+  color-scheme: light dark;
+  --sg-bg: #ffffff;
+  --sg-surface: #ffffff;
+  --sg-surface-muted: #f1f5f9;
+  --sg-text-primary: #0f172a;
+  --sg-text-secondary: #334155;
+  --sg-text-muted: #64748b;
+  --sg-border: #cbd5e1;
+  --sg-border-strong: #0f172a;
+  --sg-accent: #d93a00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sg-bg: #0b0b0c;
+    --sg-surface: #111827;
+    --sg-surface-muted: #1f2937;
+    --sg-text-primary: #f8fafc;
+    --sg-text-secondary: #cbd5f5;
+    --sg-text-muted: #94a3b8;
+    --sg-border: #334155;
+    --sg-border-strong: #475569;
+    --sg-accent: #ff4500;
+  }
+}
+
+html,
+body,
+#root {
+  height: 320px;
+  max-height: 320px;
+  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior: auto;
+  touch-action: manipulation;
+}
+
+body {
+  background: var(--sg-bg);
+  color: var(--sg-text-primary);
+}
+
+.sg-fade-in {
+  animation: sg-fade-in 220ms ease-out 180ms;
+  animation-fill-mode: backwards;
+}
+
+.confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -12px;
+  opacity: 0;
+  animation-name: confetti-fall;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-12px) translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(420px) translateX(var(--confetti-drift, 0px));
+    opacity: 1;
+  }
+}
+
+@keyframes sg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
