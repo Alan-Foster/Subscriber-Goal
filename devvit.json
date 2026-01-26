@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "subscriber-goal-",
+  "name": "subscriber-goal",
   "post": {
     "dir": "dist/client",
     "entrypoints": {
