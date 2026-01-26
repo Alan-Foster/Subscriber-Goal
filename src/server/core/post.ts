@@ -1,7 +1,16 @@
 import { reddit } from '@devvit/web/server';
 
-export const createPost = async () => {
+type CreateGoalPostParams = {
+  title: string;
+  subredditName: string;
+};
+
+export const createGoalPost = async ({
+  title,
+  subredditName,
+}: CreateGoalPostParams) => {
   return await reddit.submitCustomPost({
-    title: '<% name %>',
+    title,
+    subredditName,
   });
 };

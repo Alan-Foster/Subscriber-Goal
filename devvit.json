@@ -6,10 +6,12 @@
     "entrypoints": {
       "default": {
         "inline": true,
-        "entry": "splash.html"
+        "entry": "app.html",
+        "height": "regular"
       },
-      "game": {
-        "entry": "game.html"
+      "app": {
+        "entry": "app.html",
+        "height": "regular"
       }
     }
   },
@@ -20,18 +22,66 @@
   "media": {
     "dir": "assets"
   },
+  "settings": {
+    "global": {
+      "promoSubreddit": {
+        "type": "string",
+        "label": "Promo Subreddit",
+        "defaultValue": "SubGoal"
+      }
+    }
+  },
+  "permissions": {
+    "media": true,
+    "realtime": true,
+    "redis": true,
+    "reddit": {
+      "enable": true,
+      "asUser": ["SUBSCRIBE_TO_SUBREDDIT"]
+    }
+  },
   "menu": {
     "items": [
       {
-        "label": "Create a new post",
-        "description": "subscriber-goal-",
+        "label": "Sub Goal - Create a New Goal",
+        "description": "Create a new subscriber goal post",
         "location": "subreddit",
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/post-create"
+        "endpoint": "/internal/menu/create-goal"
+      },
+      {
+        "label": "Sub Goal - Delete This Goal",
+        "description": "Delete the current subscriber goal post",
+        "location": "post",
+        "forUserType": "moderator",
+        "postFilter": "currentApp",
+        "endpoint": "/internal/menu/delete-goal"
+      },
+      {
+        "label": "Sub Goal - Erase a User's Data",
+        "description": "Erase subscriber data for a specific user",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/erase-data"
       }
     ]
   },
+  "forms": {
+    "createGoalForm": "/internal/form/create-goal",
+    "deleteGoalForm": "/internal/form/delete-goal",
+    "eraseDataForm": "/internal/form/erase-data"
+  },
   "triggers": {
-    "onAppInstall": "/internal/on-app-install"
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onAppUpgrade": "/internal/triggers/on-app-upgrade",
+    "onModAction": "/internal/triggers/on-mod-action"
+  },
+  "scheduler": {
+    "tasks": {
+      "posts-updater-job": {
+        "endpoint": "/internal/scheduler/posts-updater-job",
+        "cron": "*/1 * * * *"
+      }
+    }
   }
 }
