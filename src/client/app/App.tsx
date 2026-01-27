@@ -1,4 +1,4 @@
-import { canRunAsUser, navigateTo, showToast } from '@devvit/web/client';
+import { navigateTo, showToast } from '@devvit/web/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSubGoal } from '../hooks/useSubGoal';
 import { ConfettiBurst } from './components/ConfettiBurst';
@@ -100,12 +100,6 @@ export const App = () => {
     if (!state?.user) {
       setError('Please log in to subscribe.');
       showToast('Please log in to subscribe.');
-      return;
-    }
-    const canSubscribe = await canRunAsUser();
-    if (!canSubscribe) {
-      setError('Permission required to subscribe.');
-      showToast('Permission required to subscribe.');
       return;
     }
     const { state: updatedState, error: subscribeError } = await subscribe({
