@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 0.10.0 - Devvit Web Migration. Devvit 0.12.9
+- 0.10.0 - Devvit Web Migration. Devvit 0.12.10
 - 0.9.2 - Added images and installation instructions to the ReadMe file. Devvit 0.11.17
 - 0.9.0 - SubGoal data strucutre reworked - preparation for Milestone Announcement Messages, Devvit 0.11.15
 - - PLEASE NOTE - 0.9.0 is not compatible with old subscriber goals. All members will need to re-click the button.

@@ -23,9 +23,9 @@
     "type-check": "tsc --build"
   },
   "dependencies": {
-    "@devvit/web": "0.12.9",
+    "@devvit/web": "0.12.10",
     "clsx": "2.1.1",
-    "devvit": "0.12.9",
+    "devvit": "0.12.10",
     "express": "5.1.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
