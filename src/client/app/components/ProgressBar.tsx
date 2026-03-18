@@ -34,21 +34,21 @@ export const ProgressBar = ({
   if (isInvalid) {
     return (
       <div className="relative" style={{ width }}>
-        <div className="h-5 w-full rounded-md border border-[color:var(--sg-border-strong)] bg-[color:var(--sg-surface)]" />
+        <div className="h-5 w-full rounded-md border border-[color:var(--sg-border-strong)] bg-[color:#ffffff]" />
       </div>
     );
   }
 
   return (
     <div className="relative" style={{ width }}>
-      <div className="h-5 w-full rounded-md border border-[color:var(--sg-border-strong)] bg-[color:var(--sg-surface)]">
+      <div className="h-5 w-full rounded-md border border-[color:var(--sg-border-strong)] bg-[color:#ffffff]">
         <div
           className="h-full rounded-md bg-[color:var(--sg-accent)] transition-[width] duration-700 ease-out"
           style={{ width: `${animatedProgress}%` }}
         />
       </div>
       {showText ? (
-        <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-[color:var(--sg-text-secondary)]">
+        <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-[color:#0f172a]">
           {current} / {formatNumberUnlessExact(end)}
         </div>
       ) : null}
