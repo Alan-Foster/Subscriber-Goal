@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.10.4 - Major lint / type-checking fixes. Crossposting working again!
 - 0.10.3 - Updated to Devvit 0.12.17
 - 0.10.2 - Updated to Devvit 0.12.15
 - 0.10.1 - Removed canRusAsUser permissions.

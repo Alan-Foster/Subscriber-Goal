@@ -2,6 +2,7 @@ import type { RedditClient, RedisClient } from '../types';
 import type { AppSettings } from '../../shared/types/api';
 import { dispatchNewPost } from './crosspostData';
 import { queueUpdate, trackPost } from './updaterData';
+import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 
 export const subscriberGoalsKey = 'subscriber_goals';
 export const postGoalSuffix = '_goal';
@@ -15,6 +16,11 @@ export type SubGoalData = {
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient['submitCustomPost']>>;
+
+export type CrosspostDispatchResult = {
+  status: 'success' | 'skipped' | 'failed';
+  errorMessage?: string;
+};
 
 export async function getSubGoalData(
   redis: RedisClient,
@@ -73,7 +79,7 @@ export async function registerNewSubGoalPost(
   post: RedditPost,
   goal: number,
   crosspost: boolean
-): Promise<void> {
+): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
@@ -81,11 +87,45 @@ export async function registerNewSubGoalPost(
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
-  if (
-    appSettings.promoSubreddit.toLowerCase() !== post.subredditName.toLowerCase() &&
-    crosspost
-  ) {
+  if (!crosspost) {
+    logCrosspostEvent({
+      event: 'crosspost_attempt_skipped',
+      sourcePostId: post.id,
+      targetSubreddit: appSettings.promoSubreddit,
+      reason: 'crosspost_disabled',
+    });
+    return { status: 'skipped' };
+  }
+
+  if (appSettings.promoSubreddit.toLowerCase() === post.subredditName.toLowerCase()) {
+    logCrosspostEvent({
+      event: 'crosspost_attempt_skipped',
+      sourcePostId: post.id,
+      targetSubreddit: appSettings.promoSubreddit,
+      reason: 'source_is_promo_subreddit',
+    });
+    return { status: 'skipped' };
+  }
+
+  try {
     await dispatchNewPost(reddit, appSettings, post.id, goal);
+    return { status: 'success' };
+  } catch (error) {
+    const errorMessage = toErrorMessage(error);
+    logCrosspostEvent(
+      {
+        event: 'crosspost_attempt_failed',
+        sourcePostId: post.id,
+        targetSubreddit: appSettings.promoSubreddit,
+        reason: 'dispatch_new_post_failed',
+        errorMessage,
+      },
+      'error'
+    );
+    return {
+      status: 'failed',
+      errorMessage,
+    };
   }
 }
 

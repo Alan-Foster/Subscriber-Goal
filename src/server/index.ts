@@ -380,7 +380,7 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
       completedTime: null,
     });
 
-    await registerNewSubGoalPost(
+    const crosspostDispatchResult = await registerNewSubGoalPost(
       reddit,
       redis,
       appSettings,
@@ -396,8 +396,13 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
       `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${resolvedCrosspost}`
     );
 
+    const showToast =
+      crosspostDispatchResult.status === 'failed'
+        ? `Subscriber Goal post created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
+        : 'Subscriber Goal post created!';
+
     res.json({
-      showToast: 'Subscriber Goal post created!',
+      showToast,
       navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
     });
   } catch (error) {

@@ -1,9 +1,41 @@
 import { isSubredditId, type RedditClient } from '../types';
+import { logCrosspostEvent, toErrorMessage } from './crosspostLogs';
 
 export type WikiPageRevision = {
   id: string;
   reason: string;
 };
+
+export const WIKI_REVISION_FETCH_LIMIT = 100;
+export const WIKI_FETCH_TIMEOUT_MS = 10_000;
+
+export type WikiRevisionsFetchResult = {
+  ok: boolean;
+  revisions: WikiPageRevision[];
+  errorMessage?: string;
+  durationMs: number;
+};
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
 
 export async function getSubredditIcon(
   reddit: RedditClient,
@@ -40,15 +72,63 @@ export async function safeGetWikiPageRevisions(
   reddit: RedditClient,
   subredditName: string,
   page: string
-): Promise<WikiPageRevision[] | undefined> {
+): Promise<WikiRevisionsFetchResult> {
+  const startedAt = Date.now();
+  logCrosspostEvent({
+    event: 'wiki_fetch_started',
+    targetSubreddit: subredditName,
+    page,
+    reason: 'fetch_wiki_revisions',
+  });
+
   try {
-    const revisions = await reddit.getWikiPageRevisions({ subredditName, page }).all();
-    return revisions.map((revision) => ({
+    const listing = reddit.getWikiPageRevisions({
+      subredditName,
+      page,
+      limit: WIKI_REVISION_FETCH_LIMIT,
+    });
+    const revisions = await withTimeout(
+      listing.get(WIKI_REVISION_FETCH_LIMIT),
+      WIKI_FETCH_TIMEOUT_MS,
+      `Timed out fetching wiki revisions for ${subredditName}/${page}`
+    );
+    const mapped = revisions.map((revision) => ({
       id: revision.id,
       reason: revision.reason ?? '',
     }));
+    const durationMs = Date.now() - startedAt;
+    logCrosspostEvent({
+      event: 'wiki_fetch_succeeded',
+      targetSubreddit: subredditName,
+      page,
+      reason: 'fetch_wiki_revisions',
+      revisionsFetched: mapped.length,
+      durationMs,
+    });
+    return {
+      ok: true,
+      revisions: mapped,
+      durationMs,
+    };
   } catch (e) {
-    console.error(`Failed to get wiki page ${page} for subreddit ${subredditName}:`, e);
-    return undefined;
+    const errorMessage = toErrorMessage(e);
+    const durationMs = Date.now() - startedAt;
+    logCrosspostEvent(
+      {
+        event: 'wiki_fetch_failed',
+        targetSubreddit: subredditName,
+        page,
+        reason: 'fetch_wiki_revisions',
+        errorMessage,
+        durationMs,
+      },
+      'error'
+    );
+    return {
+      ok: false,
+      revisions: [],
+      errorMessage,
+      durationMs,
+    };
   }
 }

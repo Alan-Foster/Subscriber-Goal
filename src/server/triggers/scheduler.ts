@@ -1,11 +1,24 @@
-import { reddit, redis } from '@devvit/web/server';
+import { context, reddit, redis } from '@devvit/web/server';
 import { checkCompletionStatus, getSubGoalData } from '../data/subGoalData';
 import { cancelUpdates, getQueuedUpdates, queueUpdate } from '../data/updaterData';
 import { isLinkId } from '../types';
 import { applyTextFallback } from '../utils/textFallback';
+import { getAppSettings } from '../settings';
+import { processCrosspostDispatchQueue } from './modAction';
 
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
+
+  const appSettings = await getAppSettings(
+    (context as { settings?: { getAll<T>(): Promise<Partial<T>> } }).settings
+  );
+  const ingestionSummary = await processCrosspostDispatchQueue(
+    appSettings,
+    'scheduler_posts_updater'
+  );
+  console.info(
+    `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} error=${ingestionSummary.errorMessage ?? 'none'}`
+  );
 
   const subreddit = await reddit.getCurrentSubreddit();
 
