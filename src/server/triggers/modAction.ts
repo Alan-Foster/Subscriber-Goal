@@ -73,6 +73,9 @@ function emptySummary(): CrosspostIngestionSummary {
   };
 }
 
+const withErrorMessage = (errorMessage?: string): { errorMessage?: string } =>
+  errorMessage ? { errorMessage } : {};
+
 async function getNewPosts(
   appSettings: AppSettings
 ): Promise<{
@@ -91,7 +94,7 @@ async function getNewPosts(
       events: [],
       revisionsFetched: 0,
       ok: false,
-      errorMessage: result.errorMessage,
+      ...withErrorMessage(result.errorMessage),
     };
   }
 
@@ -149,7 +152,7 @@ async function getNewPostActions(
       events: [],
       revisionsFetched: 0,
       ok: false,
-      errorMessage: result.errorMessage,
+      ...withErrorMessage(result.errorMessage),
     };
   }
 
@@ -528,7 +531,7 @@ export async function processCrosspostDispatchQueue(
             crosspostsFailed: summary.crosspostsFailed,
             actionsMirrored: summary.actionsMirrored,
             actionsFailed: summary.actionsFailed,
-            errorMessage: summary.errorMessage,
+            ...withErrorMessage(summary.errorMessage),
             consecutiveFailures,
           },
           'warn'
@@ -552,7 +555,7 @@ export async function processCrosspostDispatchQueue(
         crosspostsFailed: summary.crosspostsFailed,
         actionsMirrored: summary.actionsMirrored,
         actionsFailed: summary.actionsFailed,
-        errorMessage: summary.errorMessage,
+        ...withErrorMessage(summary.errorMessage),
       },
       summary.status === 'failed' ? 'error' : 'info'
     );
@@ -588,7 +591,7 @@ export async function processCrosspostDispatchQueue(
           crosspostsFailed: summary.crosspostsFailed,
           actionsMirrored: summary.actionsMirrored,
           actionsFailed: summary.actionsFailed,
-          errorMessage: summary.errorMessage,
+          ...withErrorMessage(summary.errorMessage),
           consecutiveFailures,
         },
         'warn'
@@ -608,7 +611,7 @@ export async function processCrosspostDispatchQueue(
         crosspostsFailed: summary.crosspostsFailed,
         actionsMirrored: summary.actionsMirrored,
         actionsFailed: summary.actionsFailed,
-        errorMessage: summary.errorMessage,
+        ...withErrorMessage(summary.errorMessage),
       },
       'error'
     );

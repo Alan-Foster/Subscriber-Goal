@@ -74,7 +74,7 @@ export const SubGoalPage = ({
         />
       )}
       <button
-        className="cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+        className="cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isDisabled}
         onClick={onSubscribe}
       >

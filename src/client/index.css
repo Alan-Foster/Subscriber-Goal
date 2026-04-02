@@ -11,6 +11,9 @@
   --sg-border: #cbd5e1;
   --sg-border-strong: #0f172a;
   --sg-accent: #d93a00;
+  --sg-progress-track-bg: #ffffff;
+  --sg-progress-text: #0f172a;
+  --sg-button-text: #0f172a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,6 +27,9 @@
     --sg-border: #334155;
     --sg-border-strong: #475569;
     --sg-accent: #ff4500;
+    --sg-progress-track-bg: #ffffff;
+    --sg-progress-text: #0f172a;
+    --sg-button-text: #0f172a;
   }
 }
 
