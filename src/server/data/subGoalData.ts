@@ -97,6 +97,19 @@ export async function registerNewSubGoalPost(
     return { status: 'skipped' };
   }
 
+  const sourceSubreddit = await reddit.getCurrentSubreddit();
+  const sourceSubredditIsNsfw =
+    (sourceSubreddit as { isNsfw?: boolean }).isNsfw === true;
+  if (sourceSubredditIsNsfw) {
+    logCrosspostEvent({
+      event: 'crosspost_attempt_skipped',
+      sourcePostId: post.id,
+      targetSubreddit: appSettings.promoSubreddit,
+      reason: 'source_subreddit_nsfw',
+    });
+    return { status: 'skipped' };
+  }
+
   if (appSettings.promoSubreddit.toLowerCase() === post.subredditName.toLowerCase()) {
     logCrosspostEvent({
       event: 'crosspost_attempt_skipped',

@@ -76,6 +76,11 @@ function emptySummary(): CrosspostIngestionSummary {
 const withErrorMessage = (errorMessage?: string): { errorMessage?: string } =>
   errorMessage ? { errorMessage } : {};
 
+const isPermanentCrosspostError = (errorMessage: string): boolean =>
+  /(OVER18_SUBREDDIT_CROSSPOST|SUBREDDIT_NOEXIST|INVALID_SUBREDDIT|FORBIDDEN|NOT_ALLOWED|is private|must be a moderator|doesn't allow crossposts|does not allow crossposts)/i.test(
+    errorMessage
+  );
+
 async function getNewPosts(
   appSettings: AppSettings
 ): Promise<{
@@ -216,6 +221,7 @@ async function updateFromWikis(
   const newPostIds = newPostBatch.events;
   summary.newPostsSeen = newPostIds.length;
   for (const newPost of newPostIds) {
+    let sourceSubredditIsNsfw = false;
     try {
       const post = await reddit.getPostById(newPost.postId);
       if (!post) {
@@ -233,6 +239,20 @@ async function updateFromWikis(
         console.info(
           `[crosspost] source post missing; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId}`
         );
+        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+        continue;
+      }
+      const sourceSubredditInfo = await reddit.getSubredditInfoById(post.subredditId);
+      sourceSubredditIsNsfw = sourceSubredditInfo.isNsfw === true;
+      if (sourceSubredditIsNsfw) {
+        summary.crosspostsSkipped += 1;
+        logCrosspostEvent({
+          event: 'crosspost_attempt_skipped',
+          sourcePostId: newPost.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: 'source_subreddit_nsfw',
+          revisionId: newPost.revisionId,
+        });
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
@@ -264,9 +284,7 @@ async function updateFromWikis(
           subredditName: appSettings.promoSubreddit,
           title: `Visit r/${post.subredditName}, they are trying to reach ${newPost.goal} subscribers!`,
           postId: post.id,
-          nsfw:
-            post.nsfw ??
-            (await reddit.getSubredditInfoById(post.subredditId)).isNsfw,
+          nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });
         crosspostId = crosspost.id;
       } catch (error) {
@@ -298,6 +316,26 @@ async function updateFromWikis(
         `[crosspost] created crosspost and marked processed: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspostId}`
       );
     } catch (e) {
+      const errorMessage = toErrorMessage(e);
+      const permanentFailure = isPermanentCrosspostError(errorMessage);
+      if (permanentFailure || sourceSubredditIsNsfw) {
+        summary.crosspostsSkipped += 1;
+        logCrosspostEvent(
+          {
+            event: 'crosspost_attempt_skipped',
+            sourcePostId: newPost.postId,
+            targetSubreddit: appSettings.promoSubreddit,
+            reason: sourceSubredditIsNsfw
+              ? 'source_subreddit_nsfw'
+              : 'target_policy_reject_or_denied',
+            revisionId: newPost.revisionId,
+            errorMessage,
+          },
+          'warn'
+        );
+        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+        continue;
+      }
       summary.crosspostsFailed += 1;
       console.error(
         `[crosspost] error creating crosspost: revisionId=${newPost.revisionId} postId=${newPost.postId}`,
@@ -659,10 +697,6 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   }
 
   if (event.targetPost.authorId !== appAccount.id) {
-    return;
-  }
-
-  if (event.action === 'approvelink') {
     return;
   }
 

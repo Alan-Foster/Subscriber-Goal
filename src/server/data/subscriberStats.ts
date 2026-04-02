@@ -3,6 +3,7 @@ import type { BasicUserData } from './basicData';
 import { postRecentSubscriberSuffix, subscriberGoalsKey } from './subGoalData';
 
 export const subscriberStatsKey = 'subscriber_stats';
+export const subscriberStatsByUserIdKey = 'subscriber_stats_by_user_id';
 
 export type SubscriberStats = {
   id: string;
@@ -32,10 +33,53 @@ const getMatchingSubscribers = async (
   return allSubscribers.filter((record) => match(record.member));
 };
 
+type ParsedSubscriberMember = {
+  id: string;
+  username: string;
+  subscribers: number;
+  timestamp?: number;
+};
+
+const parseSubscriberMember = (member: string): ParsedSubscriberMember | undefined => {
+  const [id, username, subscribers, timestamp] = member.split(':');
+  if (!id || !username || !subscribers) {
+    return undefined;
+  }
+  const parsedSubscribers = parseInt(subscribers, 10);
+  if (Number.isNaN(parsedSubscribers)) {
+    return undefined;
+  }
+  return {
+    id,
+    username,
+    subscribers: parsedSubscribers,
+    ...(timestamp && !Number.isNaN(parseInt(timestamp, 10))
+      ? { timestamp: parseInt(timestamp, 10) }
+      : {}),
+  };
+};
+
 export async function getSubscriberStats(
   redis: RedisClient,
   userId: string
 ): Promise<SubscriberStats | undefined> {
+  const indexedMember = await redis.hGet(subscriberStatsByUserIdKey, userId);
+  if (indexedMember) {
+    const parsed = parseSubscriberMember(indexedMember);
+    if (parsed) {
+      return {
+        id: parsed.id,
+        username: parsed.username,
+        timestamp: parsed.timestamp ?? Date.now(),
+        subscribers: parsed.subscribers,
+      };
+    }
+    console.error(
+      'Found malformed indexed subscriber stats record: ',
+      JSON.stringify(indexedMember)
+    );
+  }
+
   const foundSubscribers = await getMatchingSubscribers(redis, (member) =>
     member.startsWith(`${userId}:`)
   );
@@ -52,26 +96,24 @@ export async function getSubscriberStats(
   if (!firstRecord) {
     return;
   }
-  const [id, username, subscribers] = firstRecord.member.split(':');
-  if (!id || !username || !subscribers) {
+  const parsed = parseSubscriberMember(firstRecord.member);
+  if (!parsed) {
     console.error('Found malformed subscriber stats record: ', JSON.stringify(firstRecord));
     return;
   }
-  const parsedSubscribers = parseInt(subscribers, 10);
-  if (Number.isNaN(parsedSubscribers)) {
-    console.error('Found malformed subscriber count in stats record: ', JSON.stringify(firstRecord));
-    return;
-  }
   const subStats = {
-    id,
-    username,
+    id: parsed.id,
+    username: parsed.username,
     timestamp: firstRecord.score,
-    subscribers: parsedSubscribers,
+    subscribers: parsed.subscribers,
   };
   if (!isSubscriberStats(subStats)) {
     console.error('Found invalid subscriber stats: ', JSON.stringify(foundSubscribers));
     return;
   }
+  await redis.hSet(subscriberStatsByUserIdKey, {
+    [subStats.id]: `${subStats.id}:${subStats.username}:${subStats.subscribers}:${subStats.timestamp}`,
+  });
   return subStats;
 }
 
@@ -98,9 +140,13 @@ export async function setNewSubscriber(
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postRecentSubscriberSuffix}`]: shareUsername ? user.username : '',
   });
+  const now = Date.now();
   await redis.zAdd(subscriberStatsKey, {
     member: `${user.id}:${user.username}:${currentSubscribers}`,
-    score: Date.now(),
+    score: now,
+  });
+  await redis.hSet(subscriberStatsByUserIdKey, {
+    [user.id]: `${user.id}:${user.username}:${currentSubscribers}:${now}`,
   });
   return true;
 }
@@ -109,6 +155,7 @@ export async function untrackSubscriberById(
   redis: RedisClient,
   userId: string
 ): Promise<void> {
+  await redis.hDel(subscriberStatsByUserIdKey, [userId]);
   const foundRecords = await getMatchingSubscribers(redis, (member) =>
     member.startsWith(`${userId}:`)
   );
@@ -131,6 +178,12 @@ export async function untrackSubscriberByUsername(
   );
 
   if (foundRecords.length > 0) {
+    const userIds = foundRecords
+      .map((record) => parseSubscriberMember(record.member)?.id)
+      .filter((id): id is string => Boolean(id));
+    if (userIds.length > 0) {
+      await redis.hDel(subscriberStatsByUserIdKey, userIds);
+    }
     await redis.zRem(
       subscriberStatsKey,
       foundRecords.map((record) => record.member)

@@ -57,14 +57,32 @@ export async function clearUserStickies(
   username: string
 ): Promise<void> {
   const subreddit = await reddit.getCurrentSubreddit();
-  const topPosts = await reddit
-    .getHotPosts({ limit: 2, subredditName: subreddit.name })
-    .all();
-  for (const post of topPosts) {
-    if (post.stickied && post.authorName === username) {
+  const hotPosts = await reddit
+    .getHotPosts({ limit: 100, subredditName: subreddit.name })
+    .get(100);
+  const stickyPosts = hotPosts.filter(
+    (post) => post.stickied && post.authorName === username
+  );
+
+  for (const post of stickyPosts) {
+    try {
       await post.unsticky();
-      console.log(`Unstickied post: ${post.id}`);
+      console.info(
+        `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id}`
+      );
+    } catch (error) {
+      console.warn(
+        `[sticky] failed to unsticky app-owned post: subreddit=${subreddit.name} postId=${post.id} error=${toErrorMessage(
+          error
+        )}`
+      );
     }
+  }
+
+  if (stickyPosts.length === 0) {
+    console.info(
+      `[sticky] no existing app-owned stickies found: subreddit=${subreddit.name}`
+    );
   }
 }
 

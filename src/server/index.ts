@@ -280,8 +280,14 @@ router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>
     const subreddit = await reddit.getCurrentSubreddit();
     const appSettings = await getAppSettings(getSettingsClient());
     const defaultGoal = getDefaultSubscriberGoal(subreddit.numberOfSubscribers);
+    const sourceSubredditIsNsfw =
+      (subreddit as { isNsfw?: boolean }).isNsfw === true;
     const shouldCrosspost =
+      !sourceSubredditIsNsfw &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
+    const crosspostHelpText = sourceSubredditIsNsfw
+      ? 'Crossposting is disabled for NSFW source subreddits.'
+      : `Keep this enabled to announce your goal in the r/${appSettings.promoSubreddit} index subreddit.`;
 
     res.json({
       showForm: {
@@ -312,7 +318,7 @@ router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>
               name: 'crosspost',
               label: `Auto-Crosspost to r/${appSettings.promoSubreddit} (Recommended)`,
               type: 'boolean',
-              helpText: `Keep this enabled to announce your goal in the r/${appSettings.promoSubreddit} index subreddit.`,
+              helpText: crosspostHelpText,
               defaultValue: shouldCrosspost,
               disabled: !shouldCrosspost,
             },
@@ -338,7 +344,10 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
   try {
     const subreddit = await reddit.getCurrentSubreddit();
     const appSettings = await getAppSettings(getSettingsClient());
+    const sourceSubredditIsNsfw =
+      (subreddit as { isNsfw?: boolean }).isNsfw === true;
     const shouldCrosspostByDefault =
+      !sourceSubredditIsNsfw &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
     const resolvedCrosspost =
       typeof requestedCrosspost === 'boolean'
