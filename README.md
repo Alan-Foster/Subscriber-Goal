@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.10.3 - Updated to Devvit 0.12.17
 - 0.10.2 - Updated to Devvit 0.12.15
 - 0.10.1 - Removed canRusAsUser permissions.
 - 0.10.0 - Devvit Web Migration. Users must opt-in to broadcast name. Devvit 0.12.10
