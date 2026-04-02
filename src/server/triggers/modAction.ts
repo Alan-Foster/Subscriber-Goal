@@ -1,16 +1,20 @@
 import { reddit, redis, context } from '@devvit/web/server';
-import type { AppSettings } from '../settings';
+import type { AppSettings } from '../../shared/types/api';
 import { getAppSettings } from '../settings';
 import {
+  crosspostWikiPages,
   dispatchPostAction,
   getCorrespondingPost,
   hasCrosspost,
   isProcessedRevision,
   modToPostActionMap,
+  parseNewPostDispatchReason,
+  parsePostActionDispatchReason,
   storeCorrespondingPost,
   storeProcessedRevision,
 } from '../data/crosspostData';
 import { safeGetWikiPageRevisions } from '../utils/redditUtils';
+import { isLinkId, isThingId, type LinkId } from '../types';
 
 export type ModActionEvent = {
   action?: string;
@@ -27,18 +31,16 @@ export type ModActionEvent = {
 };
 
 type NewPostEvent = {
-  postId: string;
+  postId: LinkId;
   revisionId: string;
   goal: number;
 };
 
 type PostActionEvent = {
-  postId: string;
+  postId: LinkId;
   revisionId: string;
   action: 'remove' | 'approve' | 'delete';
 };
-
-const isLinkId = (postId: string): boolean => /^t3_[\w\d]+$/.test(postId);
 
 async function getNewPosts(
   appSettings: AppSettings
@@ -46,7 +48,7 @@ async function getNewPosts(
   const revisions = await safeGetWikiPageRevisions(
     reddit,
     appSettings.promoSubreddit,
-    'post'
+    crosspostWikiPages.newPost
   );
   if (!revisions) {
     return [];
@@ -58,13 +60,18 @@ async function getNewPosts(
       continue;
     }
 
-    const match = revision.reason.match(/Post (t3_[\w\d]+) with goal (\d+)/);
-    if (!match) {
+    const parsedReason = parseNewPostDispatchReason(revision.reason);
+    if (!parsedReason) {
+      console.warn(
+        `[crosspost] skipping revision with unexpected new-post reason: revisionId=${revision.id} reason=${revision.reason}`
+      );
       continue;
     }
-    const [, postId, goalString] = match;
-    const goal = parseInt(goalString);
+    const { postId, goal } = parsedReason;
     if (!postId || Number.isNaN(goal) || !isLinkId(postId)) {
+      console.warn(
+        `[crosspost] skipping new-post revision with invalid payload: revisionId=${revision.id} postId=${postId} goal=${goal}`
+      );
       continue;
     }
 
@@ -85,7 +92,7 @@ async function getNewPostActions(
   const revisions = await safeGetWikiPageRevisions(
     reddit,
     appSettings.promoSubreddit,
-    `${actionType}`
+    crosspostWikiPages.action[actionType]
   );
   if (!revisions) {
     return [];
@@ -97,14 +104,21 @@ async function getNewPostActions(
       continue;
     }
 
-    const match = revision.reason.match(
-      new RegExp(`Dispatch ${actionType} for (t3_[\\w\\d]+)`)
+    const parsedReason = parsePostActionDispatchReason(
+      revision.reason,
+      actionType
     );
-    if (!match) {
+    if (!parsedReason) {
+      console.warn(
+        `[crosspost] skipping revision with unexpected action reason: revisionId=${revision.id} action=${actionType} reason=${revision.reason}`
+      );
       continue;
     }
-    const [, postId] = match;
+    const { postId } = parsedReason;
     if (!postId || !isLinkId(postId)) {
+      console.warn(
+        `[crosspost] skipping action revision with invalid post id: revisionId=${revision.id} action=${actionType} postId=${postId}`
+      );
       continue;
     }
 
@@ -124,10 +138,16 @@ async function updateFromWikis(appSettings: AppSettings): Promise<void> {
     try {
       const post = await reddit.getPostById(newPost.postId);
       if (!post) {
+        console.info(
+          `[crosspost] source post missing; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId}`
+        );
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
       if (await hasCrosspost(redis, newPost.postId)) {
+        console.info(
+          `[crosspost] mapping already exists; skipping duplicate crosspost: revisionId=${newPost.revisionId} postId=${newPost.postId}`
+        );
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
@@ -141,8 +161,14 @@ async function updateFromWikis(appSettings: AppSettings): Promise<void> {
       });
       await storeCorrespondingPost(redis, newPost.postId, crosspost.id);
       await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+      console.info(
+        `[crosspost] created crosspost and marked processed: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspost.id}`
+      );
     } catch (e) {
-      console.error('Error crossposting', newPost.postId, e);
+      console.error(
+        `[crosspost] error creating crosspost: revisionId=${newPost.revisionId} postId=${newPost.postId}`,
+        e
+      );
     }
   }
 
@@ -152,28 +178,78 @@ async function updateFromWikis(appSettings: AppSettings): Promise<void> {
     ...(await getNewPostActions(appSettings, 'delete')),
   ];
   for (const postAction of postActions) {
+    let terminal = false;
     try {
       const crosspostId = await getCorrespondingPost(redis, postAction.postId);
       if (!crosspostId) {
+        console.info(
+          `[crosspost] no mapping found for action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId}`
+        );
+        terminal = true;
         await storeProcessedRevision(redis, postAction.revisionId, postAction.postId);
         continue;
       }
       switch (postAction.action) {
         case 'remove':
+          if (!isThingId(crosspostId)) {
+            console.warn(
+              `[crosspost] mapped id is not a valid thing id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
+            );
+            terminal = true;
+            break;
+          }
           await reddit.remove(crosspostId, false);
           break;
         case 'approve':
+          if (!isThingId(crosspostId)) {
+            console.warn(
+              `[crosspost] mapped id is not a valid thing id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
+            );
+            terminal = true;
+            break;
+          }
           await reddit.approve(crosspostId);
           break;
         case 'delete': {
+          if (!isLinkId(crosspostId)) {
+            console.warn(
+              `[crosspost] mapped id is not a valid post id for delete; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
+            );
+            terminal = true;
+            break;
+          }
           const crosspost = await reddit.getPostById(crosspostId);
           await crosspost.delete();
           break;
         }
       }
-      await storeProcessedRevision(redis, postAction.revisionId, postAction.postId);
+      terminal = true;
+      console.info(
+        `[crosspost] mirrored action and marked processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId}`
+      );
     } catch (e) {
-      console.error('Error processing action', postAction.postId, e);
+      const errorText = e instanceof Error ? e.message : String(e);
+      const missingCrosspost =
+        /not[\s-]?found|does not exist|deleted|no longer exists/i.test(errorText);
+      if (missingCrosspost) {
+        terminal = true;
+        console.warn(
+          `[crosspost] missing target while mirroring action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} error=${errorText}`
+        );
+      } else {
+        console.error(
+          `[crosspost] error mirroring action: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId}`,
+          e
+        );
+      }
+    }
+
+    if (terminal) {
+      await storeProcessedRevision(
+        redis,
+        postAction.revisionId,
+        postAction.postId
+      );
     }
   }
 }
@@ -183,7 +259,7 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     (context as { settings?: { getAll<T>(): Promise<Partial<T>> } }).settings
   );
   const subredditName =
-    context.subredditName ?? (await reddit.getCurrentSubredditName());
+    context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
 
   if (
     subredditName.toLowerCase() === appSettings.promoSubreddit.toLowerCase()
@@ -208,6 +284,10 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   }
 
   const appAccount = await reddit.getAppUser();
+  if (!appAccount) {
+    console.warn('ModAction missing app account context');
+    return;
+  }
   if (event.moderator?.name === appAccount.username) {
     return;
   }
@@ -220,10 +300,15 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     return;
   }
 
+  const mappedAction = modToPostActionMap[event.action];
+  if (!mappedAction) {
+    return;
+  }
+
   await dispatchPostAction(
     reddit,
     appSettings,
     event.targetPost.id,
-    modToPostActionMap[event.action]
+    mappedAction
   );
 }

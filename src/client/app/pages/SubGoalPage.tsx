@@ -57,13 +57,22 @@ export const SubGoalPage = ({
           <span className="w-full truncate text-center">{notice ?? ''}</span>
         </div>
       </div>
-      <ProgressBar
-        current={state.subreddit.subscribers}
-        end={state.goal ?? undefined}
-        start={0}
-        showText
-        width="70%"
-      />
+      {state.goal !== null ? (
+        <ProgressBar
+          current={state.subreddit.subscribers}
+          end={state.goal}
+          start={0}
+          showText
+          width="70%"
+        />
+      ) : (
+        <ProgressBar
+          current={state.subreddit.subscribers}
+          start={0}
+          showText
+          width="70%"
+        />
+      )}
       <button
         className="cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isDisabled}

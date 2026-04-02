@@ -1,5 +1,5 @@
 import type { RedditClient, RedisClient } from '../types';
-import type { AppSettings } from '../settings';
+import type { AppSettings } from '../../shared/types/api';
 import { dispatchNewPost } from './crosspostData';
 import { queueUpdate, trackPost } from './updaterData';
 
@@ -99,8 +99,12 @@ export async function eraseFromRecentSubscribers(
   const normalized = username.toLowerCase();
 
   for (const key in foundRecords) {
+    const value = foundRecords[key];
+    if (value === undefined) {
+      continue;
+    }
     if (
-      foundRecords[key].toLowerCase() === normalized &&
+      value.toLowerCase() === normalized &&
       key.endsWith(postRecentSubscriberSuffix)
     ) {
       keysToUpdate[key] = '';

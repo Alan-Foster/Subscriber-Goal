@@ -1,4 +1,4 @@
-import type { RedditClient } from '../types';
+import { isSubredditId, type RedditClient } from '../types';
 
 export type WikiPageRevision = {
   id: string;
@@ -10,7 +10,10 @@ export async function getSubredditIcon(
   subredditId: string,
   defaultIconUrl: string = 'https://i.redd.it/xaaj3xsdy0re1.png'
 ): Promise<string> {
-  const subredditStyles = await reddit.getSubredditStyles(subredditId as any);
+  if (!isSubredditId(subredditId)) {
+    return defaultIconUrl;
+  }
+  const subredditStyles = await reddit.getSubredditStyles(subredditId);
   return (
     subredditStyles.icon ??
     defaultIconUrl

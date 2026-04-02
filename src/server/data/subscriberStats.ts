@@ -48,12 +48,25 @@ export async function getSubscriberStats(
       JSON.stringify(foundSubscribers)
     );
   }
-  const [id, username, subscribers] = foundSubscribers[0].member.split(':');
+  const firstRecord = foundSubscribers[0];
+  if (!firstRecord) {
+    return;
+  }
+  const [id, username, subscribers] = firstRecord.member.split(':');
+  if (!id || !username || !subscribers) {
+    console.error('Found malformed subscriber stats record: ', JSON.stringify(firstRecord));
+    return;
+  }
+  const parsedSubscribers = parseInt(subscribers, 10);
+  if (Number.isNaN(parsedSubscribers)) {
+    console.error('Found malformed subscriber count in stats record: ', JSON.stringify(firstRecord));
+    return;
+  }
   const subStats = {
     id,
     username,
-    timestamp: foundSubscribers[0].score,
-    subscribers: parseInt(subscribers),
+    timestamp: firstRecord.score,
+    subscribers: parsedSubscribers,
   };
   if (!isSubscriberStats(subStats)) {
     console.error('Found invalid subscriber stats: ', JSON.stringify(foundSubscribers));

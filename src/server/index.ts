@@ -321,7 +321,10 @@ router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>
       },
     });
   } catch (error) {
-    console.error('Failed to open create goal form:', error);
+    console.error(
+      `Failed to open create goal form: subreddit=${context.subredditName ?? 'unknown'} userId=${context.userId ?? 'unknown'}`,
+      error
+    );
     res.json({ showToast: 'Error preparing the create goal form.' });
   }
 });
@@ -329,26 +332,33 @@ router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>
 router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>) => {
   const values = req.body as CreateGoalFormValues;
   const subscriberGoal = values.subscriberGoal;
-  const crosspost = values.crosspost;
+  const requestedCrosspost = values.crosspost;
   const title = values.postTitle?.trim();
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
     const appSettings = await getAppSettings(getSettingsClient());
+    const shouldCrosspostByDefault =
+      subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
+    const resolvedCrosspost =
+      typeof requestedCrosspost === 'boolean'
+        ? requestedCrosspost
+        : shouldCrosspostByDefault;
 
     if (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal) {
       res.json({ showToast: 'Please select a valid subscriber goal!' });
       return;
     }
 
-    if (crosspost === undefined) {
-      res.json({ showToast: 'Please specify if you want to crosspost!' });
-      return;
-    }
-
     if (!title) {
       res.json({ showToast: 'Please provide a post title!' });
       return;
+    }
+
+    if (requestedCrosspost === undefined) {
+      console.info(
+        `[crosspost] create-goal crosspost value omitted; derived default used: subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} resolvedCrosspost=${resolvedCrosspost}`
+      );
     }
 
     const appUser = await reddit.getAppUser();
@@ -376,11 +386,15 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
       appSettings,
       post,
       subscriberGoal,
-      crosspost
+      resolvedCrosspost
     );
 
     await post.approve();
     await post.sticky();
+
+    console.info(
+      `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${resolvedCrosspost}`
+    );
 
     res.json({
       showToast: 'Subscriber Goal post created!',

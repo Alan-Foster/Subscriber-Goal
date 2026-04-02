@@ -1,6 +1,7 @@
 import { reddit, redis } from '@devvit/web/server';
 import { checkCompletionStatus, getSubGoalData } from '../data/subGoalData';
 import { cancelUpdates, getQueuedUpdates, queueUpdate } from '../data/updaterData';
+import { isLinkId } from '../types';
 import { applyTextFallback } from '../utils/textFallback';
 
 export async function onPostsUpdaterJob(): Promise<void> {
@@ -29,6 +30,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const completedTime = subGoalData.completedTime
         ? new Date(subGoalData.completedTime)
         : null;
+      if (!isLinkId(postId)) {
+        console.error(`Skipping invalid post id in scheduler queue: ${postId}`);
+        await cancelUpdates(redis, postId);
+        continue;
+      }
       const post = await reddit.getPostById(postId);
       await applyTextFallback(post, {
         goal: subGoalData.goal,
