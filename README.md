@@ -8,6 +8,11 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 - To view a live version of Subscriber Goal, visit [https://www.reddit.com/r/SubGoal](https://www.reddit.com/r/SubGoal)
 
+## AI Coding Instructions
+
+- Project-specific vibecoding instructions are stored in `.cursor/rules/vibecoding.mdc`.
+- The rule is scoped to TypeScript and TSX files (`**/*.ts`, `**/*.tsx`).
+
 
 
 ![An example of Subscriber Goal Posts](https://i.redd.it/zrkpv7gfg4af1.jpeg)
@@ -51,13 +56,13 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 0.10.4 - Major lint / type-checking fixes. Crossposting working again!
-- 0.10.3 - Updated to Devvit 0.12.17
+- 0.11.0 - Removed NSFW crossposting, fixed subscriber-stats scale issue, fixed sticky cleanup.
+- 0.10.3 - Major lint / type-checking fixes. Color changes. Crossposting working again! Updated to Devvit 0.12.17
 - 0.10.2 - Updated to Devvit 0.12.15
-- 0.10.1 - Removed canRusAsUser permissions.
+- 0.10.1 - Removed canRunAsUser permissions.
 - 0.10.0 - Devvit Web Migration. Users must opt-in to broadcast name. Devvit 0.12.10
 - 0.9.2 - Added images and installation instructions to the ReadMe file. Devvit 0.11.17
-- 0.9.0 - SubGoal data strucutre reworked - preparation for Milestone Announcement Messages, Devvit 0.11.15
+- 0.9.0 - SubGoal data structure reworked - preparation for Milestone Announcement Messages, Devvit 0.11.15
 - - PLEASE NOTE - 0.9.0 is not compatible with old subscriber goals. All members will need to re-click the button.
 - 0.8.1 - SubGoal now removes old pins before making new goals. Self-approves posts to fix AutoMod platform bug.
 - 0.8.0 - Realtime subscriber name messages and progress updates (mostly) fixed. Launch of Private Beta.
