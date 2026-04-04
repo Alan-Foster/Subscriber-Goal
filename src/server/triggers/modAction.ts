@@ -2,20 +2,26 @@ import { reddit, redis, context } from '@devvit/web/server';
 import type { AppSettings } from '../../shared/types/api';
 import { getAppSettings } from '../settings';
 import {
+  crosspostListKey,
   crosspostWikiPages,
   dispatchPostAction,
   getCorrespondingPost,
   hasCrosspost,
   isProcessedRevision,
+  processedRevisionsByTimeKey,
+  processedRevisionsKey,
   modToPostActionMap,
   parseNewPostDispatchReason,
   parsePostActionDispatchReason,
+  removeCorrespondingPost,
+  removeProcessedRevisions,
   storeCorrespondingPost,
   storeProcessedRevision,
 } from '../data/crosspostData';
+import { getTrackedPosts } from '../data/updaterData';
 import { safeGetWikiPageRevisions } from '../utils/redditUtils';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
-import { isLinkId, isThingId, type LinkId } from '../types';
+import { isLinkId, isThingId, type LinkId, type RedisClient } from '../types';
 
 export type ModActionEvent = {
   action?: string;
@@ -59,6 +65,18 @@ export type CrosspostIngestionSummary = {
 
 const crosspostRetryDegradedCountKey = 'crosspostRetryDegradedCount';
 const crosspostRetryDegradedThreshold = 3;
+export const crosspostBookkeepingCleanupLastRunKey =
+  'crosspostBookkeepingCleanupLastRun';
+const processedRevisionRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const processedRevisionMaxEntries = 10_000;
+const crosspostCleanupMinIntervalMs = 6 * 60 * 60 * 1000;
+
+type CrosspostBookkeepingCleanupOptions = {
+  retentionMs?: number;
+  maxEntries?: number;
+  minIntervalMs?: number;
+  nowMs?: number;
+};
 
 function emptySummary(): CrosspostIngestionSummary {
   return {
@@ -83,6 +101,114 @@ const isPermanentCrosspostError = (errorMessage: string): boolean =>
 
 const isPermanentMirrorError = (errorMessage: string): boolean =>
   /only allowed inside (the )?current subreddit/i.test(errorMessage);
+
+export async function cleanupCrosspostBookkeeping(
+  redisClient: RedisClient,
+  options: CrosspostBookkeepingCleanupOptions = {}
+): Promise<void> {
+  const nowMs = options.nowMs ?? Date.now();
+  const retentionMs = options.retentionMs ?? processedRevisionRetentionMs;
+  const maxEntries = options.maxEntries ?? processedRevisionMaxEntries;
+  const minIntervalMs = options.minIntervalMs ?? crosspostCleanupMinIntervalMs;
+  const cutoffMs = nowMs - retentionMs;
+
+  const lastRunRaw = await redisClient.get(crosspostBookkeepingCleanupLastRunKey);
+  const lastRunMs = lastRunRaw ? Number.parseInt(lastRunRaw, 10) : 0;
+  if (!Number.isNaN(lastRunMs) && lastRunMs > 0 && nowMs - lastRunMs < minIntervalMs) {
+    return;
+  }
+  const revisionIndexEntries = await redisClient.zRange(
+    processedRevisionsByTimeKey,
+    0,
+    -1
+  );
+  const indexedRevisions = revisionIndexEntries
+    .map((entry) => ({ member: entry.member, score: Number(entry.score) }))
+    .filter((entry) => entry.member && !Number.isNaN(entry.score))
+    .sort((a, b) => a.score - b.score);
+  const processedRevisionHash = await redisClient.hGetAll(processedRevisionsKey);
+  const hashRevisionIds = new Set(Object.keys(processedRevisionHash));
+  const indexedRevisionIds = new Set(indexedRevisions.map((entry) => entry.member));
+  const processedRevisionIdsToRemove = new Set<string>();
+  const processedRevisionIdsToIndex: string[] = [];
+
+  for (const indexedRevisionId of indexedRevisionIds) {
+    if (!hashRevisionIds.has(indexedRevisionId)) {
+      processedRevisionIdsToRemove.add(indexedRevisionId);
+    }
+  }
+
+  for (const hashRevisionId of hashRevisionIds) {
+    if (!indexedRevisionIds.has(hashRevisionId)) {
+      processedRevisionIdsToIndex.push(hashRevisionId);
+    }
+  }
+
+  if (processedRevisionIdsToIndex.length > 0) {
+    const toIndex = processedRevisionIdsToIndex.map((revisionId) => ({
+      member: revisionId,
+      score: nowMs,
+    }));
+    await redisClient.zAdd(processedRevisionsByTimeKey, ...toIndex);
+  }
+
+  const effectiveIndexedRevisions = [
+    ...indexedRevisions.filter(
+      (entry) => !processedRevisionIdsToRemove.has(entry.member)
+    ),
+    ...processedRevisionIdsToIndex.map((revisionId) => ({
+      member: revisionId,
+      score: nowMs,
+    })),
+  ].sort((a, b) => a.score - b.score);
+
+  for (const entry of effectiveIndexedRevisions) {
+    if (entry.score < cutoffMs) {
+      processedRevisionIdsToRemove.add(entry.member);
+    }
+  }
+
+  const retainedIndexedRevisions = effectiveIndexedRevisions.filter(
+    (entry) => !processedRevisionIdsToRemove.has(entry.member)
+  );
+  const excessCount = retainedIndexedRevisions.length - maxEntries;
+  if (excessCount > 0) {
+    for (let i = 0; i < excessCount; i += 1) {
+      const entry = retainedIndexedRevisions[i];
+      if (entry) {
+        processedRevisionIdsToRemove.add(entry.member);
+      }
+    }
+  }
+
+  if (processedRevisionIdsToRemove.size > 0) {
+    await removeProcessedRevisions(redisClient, [
+      ...processedRevisionIdsToRemove,
+    ]);
+  }
+
+  const trackedPosts = new Set(await getTrackedPosts(redisClient));
+  const sourceToCrosspostMappings = await redisClient.hGetAll(crosspostListKey);
+  const staleSourcePostIds: string[] = [];
+
+  for (const [sourcePostId, mappedCrosspostId] of Object.entries(
+    sourceToCrosspostMappings
+  )) {
+    const staleSourcePost =
+      !isLinkId(sourcePostId) || !trackedPosts.has(sourcePostId);
+    const staleMappedCrosspost =
+      typeof mappedCrosspostId !== 'string' || !isLinkId(mappedCrosspostId);
+    if (staleSourcePost || staleMappedCrosspost) {
+      staleSourcePostIds.push(sourcePostId);
+    }
+  }
+
+  for (const sourcePostId of staleSourcePostIds) {
+    await removeCorrespondingPost(redisClient, sourcePostId);
+  }
+
+  await redisClient.set(crosspostBookkeepingCleanupLastRunKey, nowMs.toString());
+}
 
 async function getNewPosts(
   appSettings: AppSettings
@@ -406,6 +532,7 @@ async function updateFromWikis(
           console.warn(
             `[crosspost] missing target while mirroring action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId}`
           );
+          await removeCorrespondingPost(redis, postAction.postId);
           terminal = true;
           return null;
         }
@@ -426,6 +553,7 @@ async function updateFromWikis(
           console.warn(
             `[crosspost] mapped target subreddit mismatch; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId} expectedSubreddit=${appSettings.promoSubreddit} actualSubreddit=${crosspost.subredditName}`
           );
+          await removeCorrespondingPost(redis, postAction.postId);
           terminal = true;
           return null;
         }
@@ -451,6 +579,7 @@ async function updateFromWikis(
             console.warn(
               `[crosspost] mapped id is not a valid thing id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
             );
+            await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
             break;
           }
@@ -479,6 +608,7 @@ async function updateFromWikis(
             console.warn(
               `[crosspost] mapped id is not a valid thing id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
             );
+            await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
             break;
           }
@@ -507,6 +637,7 @@ async function updateFromWikis(
             console.warn(
               `[crosspost] mapped id is not a valid post id for delete; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
             );
+            await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
             break;
           }
@@ -558,6 +689,9 @@ async function updateFromWikis(
         console.warn(
           `[crosspost] terminal mirror error; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} error=${errorText}`
         );
+        if (missingCrosspost) {
+          await removeCorrespondingPost(redis, postAction.postId);
+        }
       } else {
         summary.actionsFailed += 1;
         logCrosspostEvent(
@@ -613,6 +747,16 @@ export async function processCrosspostDispatchQueue(
   });
 
   try {
+    try {
+      await cleanupCrosspostBookkeeping(redis);
+    } catch (cleanupError) {
+      console.warn(
+        `[crosspost] bookkeeping cleanup failed; continuing ingestion: error=${toErrorMessage(
+          cleanupError
+        )}`
+      );
+    }
+
     const summary = await updateFromWikis(appSettings);
     if (summary.status === 'success') {
       await redis.set(crosspostRetryDegradedCountKey, '0');

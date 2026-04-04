@@ -96,6 +96,7 @@ export async function dispatchPostAction(
 
 export const wikiRevisionCutoffKey = 'revisionCutoff';
 export const processedRevisionsKey = 'processedRevisions';
+export const processedRevisionsByTimeKey = 'processedRevisionsByTime';
 export const crosspostListKey = 'crosspostList';
 
 export async function storeRevisionCutoff(
@@ -116,10 +117,15 @@ export async function getRevisionCutoff(redis: RedisClient): Promise<Date> {
 export async function storeProcessedRevision(
   redis: RedisClient,
   wikiRevisionId: string,
-  postId: string
+  postId: string,
+  processedAtMs: number = Date.now()
 ): Promise<void> {
   await redis.hSet(processedRevisionsKey, {
     [wikiRevisionId]: postId,
+  });
+  await redis.zAdd(processedRevisionsByTimeKey, {
+    member: wikiRevisionId,
+    score: processedAtMs,
   });
 }
 
@@ -138,6 +144,17 @@ export async function getAllProcessedRevisions(
   return Object.keys(revisions);
 }
 
+export async function removeProcessedRevisions(
+  redis: RedisClient,
+  revisionIds: string[]
+): Promise<void> {
+  if (revisionIds.length === 0) {
+    return;
+  }
+  await redis.hDel(processedRevisionsKey, revisionIds);
+  await redis.zRem(processedRevisionsByTimeKey, revisionIds);
+}
+
 export async function storeCorrespondingPost(
   redis: RedisClient,
   postId: string,
@@ -154,6 +171,13 @@ export async function getCorrespondingPost(
 ): Promise<string | undefined> {
   const crosspostId = await redis.hGet(crosspostListKey, postId);
   return crosspostId;
+}
+
+export async function removeCorrespondingPost(
+  redis: RedisClient,
+  postId: string
+): Promise<void> {
+  await redis.hDel(crosspostListKey, [postId]);
 }
 
 export async function hasCrosspost(

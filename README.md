@@ -56,7 +56,8 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 0.11.0 - Removed NSFW crossposting, fixed subscriber-stats scale issue, fixed sticky cleanup.
+- 0.10.5 - Data Retry for Missing Data Load utility. Locally hosted fallback subreddit logo.
+- 0.10.4 - Removed NSFW crossposting, fixed subscriber-stats scale issue, fixed sticky cleanup.
 - 0.10.3 - Major lint / type-checking fixes. Color changes. Crossposting working again! Updated to Devvit 0.12.17
 - 0.10.2 - Updated to Devvit 0.12.15
 - 0.10.1 - Removed canRunAsUser permissions.
