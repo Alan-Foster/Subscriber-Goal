@@ -8,7 +8,10 @@ export type CrosspostLogEvent =
   | 'crosspost_retry_started'
   | 'crosspost_retry_succeeded'
   | 'crosspost_retry_failed'
+  | 'crosspost_retry_skipped'
   | 'crosspost_retry_degraded'
+  | 'crosspost_persistence_partial'
+  | 'crosspost_persistence_failed_after_create'
   | 'wiki_fetch_started'
   | 'wiki_fetch_succeeded'
   | 'wiki_fetch_failed';
@@ -32,6 +35,17 @@ export type CrosspostLogPayload = {
   actionsFailed?: number;
   durationMs?: number;
   consecutiveFailures?: number;
+  currentInstallSubreddit?: string;
+  authoritySubreddit?: string;
+  ingestionAllowed?: boolean;
+  freshnessWindowMs?: number;
+  revisionFreshnessWindowMs?: number;
+  crosspostsCreatedThisRun?: number;
+  crosspostsBlockedByRunCap?: number;
+  crosspostsBlockedByHourlyCap?: number;
+  crosspostPersistencePartial?: number;
+  crosspostPersistenceFailedAfterCreate?: number;
+  crosspostsSkippedBySourceCooldown?: number;
 };
 
 export function toErrorMessage(error: unknown): string {
@@ -61,6 +75,19 @@ export function logCrosspostEvent(
     actionsFailed: payload.actionsFailed ?? null,
     durationMs: payload.durationMs ?? null,
     consecutiveFailures: payload.consecutiveFailures ?? null,
+    currentInstallSubreddit: payload.currentInstallSubreddit ?? null,
+    authoritySubreddit: payload.authoritySubreddit ?? null,
+    ingestionAllowed: payload.ingestionAllowed ?? null,
+    freshnessWindowMs: payload.freshnessWindowMs ?? null,
+    revisionFreshnessWindowMs: payload.revisionFreshnessWindowMs ?? null,
+    crosspostsCreatedThisRun: payload.crosspostsCreatedThisRun ?? null,
+    crosspostsBlockedByRunCap: payload.crosspostsBlockedByRunCap ?? null,
+    crosspostsBlockedByHourlyCap: payload.crosspostsBlockedByHourlyCap ?? null,
+    crosspostPersistencePartial: payload.crosspostPersistencePartial ?? null,
+    crosspostPersistenceFailedAfterCreate:
+      payload.crosspostPersistenceFailedAfterCreate ?? null,
+    crosspostsSkippedBySourceCooldown:
+      payload.crosspostsSkippedBySourceCooldown ?? null,
   });
 
   if (level === 'error') {

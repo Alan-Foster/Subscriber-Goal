@@ -29,7 +29,7 @@ export const App = () => {
   const confettiTimeoutRef = useRef<number | null>(null);
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
-  const [shareUsername, setShareUsername] = useState(false);
+  const [shareUsername, setShareUsername] = useState(true);
   const showDebugControls = false;
   const debugToggleRef = useRef(false);
 

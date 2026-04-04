@@ -12,6 +12,12 @@ export type BasicUserData = {
 
 export type AppSettings = {
   promoSubreddit: string;
+  crosspostAuthoritySubreddit: string;
+  crosspostMaxSourcePostAgeMinutes: number;
+  crosspostIngestionEnabled: boolean;
+  crosspostMaxRevisionAgeMinutes: number;
+  maxCrosspostsPerRun: number;
+  maxCrosspostsPerHour: number;
 };
 
 export type SubGoalState = {

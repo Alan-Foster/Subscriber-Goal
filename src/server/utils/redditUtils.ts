@@ -4,6 +4,7 @@ import { logCrosspostEvent, toErrorMessage } from './crosspostLogs';
 export type WikiPageRevision = {
   id: string;
   reason: string;
+  dateMs?: number;
 };
 
 export const WIKI_REVISION_FETCH_LIMIT = 100;
@@ -112,10 +113,28 @@ export async function safeGetWikiPageRevisions(
       WIKI_FETCH_TIMEOUT_MS,
       `Timed out fetching wiki revisions for ${subredditName}/${page}`
     );
-    const mapped = revisions.map((revision) => ({
-      id: revision.id,
-      reason: revision.reason ?? '',
-    }));
+    const mapped = revisions.map((revision) => {
+      const maybeDate =
+        revision.date ??
+        (revision as { revisionDate?: unknown }).revisionDate;
+      let dateMs: number | undefined;
+      if (maybeDate instanceof Date) {
+        dateMs = maybeDate.getTime();
+      } else if (typeof maybeDate === 'number') {
+        dateMs = maybeDate;
+      } else if (typeof maybeDate === 'string') {
+        const parsed = Date.parse(maybeDate);
+        if (!Number.isNaN(parsed)) {
+          dateMs = parsed;
+        }
+      }
+
+      return {
+        id: revision.id,
+        reason: revision.reason ?? '',
+        ...(typeof dateMs === 'number' ? { dateMs } : {}),
+      };
+    });
     const durationMs = Date.now() - startedAt;
     logCrosspostEvent({
       event: 'wiki_fetch_succeeded',

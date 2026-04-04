@@ -28,6 +28,42 @@
         "type": "string",
         "label": "Promo Subreddit",
         "defaultValue": "SubGoal"
+      },
+      "crosspostAuthoritySubreddit": {
+        "type": "string",
+        "label": "Crosspost Authority Subreddit",
+        "defaultValue": "",
+        "helpText": "Only this installation context ingests crosspost wiki revisions."
+      },
+      "crosspostMaxSourcePostAgeMinutes": {
+        "type": "number",
+        "label": "Max Source Post Age for Crosspost (minutes)",
+        "defaultValue": 10,
+        "helpText": "Skip crossposting source posts older than this age."
+      },
+      "crosspostIngestionEnabled": {
+        "type": "boolean",
+        "label": "Enable Crosspost Ingestion",
+        "defaultValue": true,
+        "helpText": "Disable to stop all wiki-driven crosspost ingestion."
+      },
+      "crosspostMaxRevisionAgeMinutes": {
+        "type": "number",
+        "label": "Max Wiki Revision Age (minutes)",
+        "defaultValue": 10,
+        "helpText": "Skip revisions older than this age."
+      },
+      "maxCrosspostsPerRun": {
+        "type": "number",
+        "label": "Max Crossposts Per Run",
+        "defaultValue": 5,
+        "helpText": "Hard cap for crossposts created in one ingestion run."
+      },
+      "maxCrosspostsPerHour": {
+        "type": "number",
+        "label": "Max Crossposts Per Hour",
+        "defaultValue": 30,
+        "helpText": "Hard rolling-hour cap for crossposts."
       }
     }
   },

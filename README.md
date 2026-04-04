@@ -56,6 +56,8 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.11.0 - Harden crosspost replay prevention and dedupe
+- 0.10.7 - Missing-post crosspost error handling
 - 0.10.6 - Crosspost bookkeeping cleanup and hardening
 - 0.10.5 - Data Retry for Missing Data Load utility. Locally hosted fallback subreddit logo.
 - 0.10.4 - Removed NSFW crossposting, fixed subscriber-stats scale issue, fixed sticky cleanup.
