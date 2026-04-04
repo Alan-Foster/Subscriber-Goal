@@ -2,14 +2,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { crosspostWikiPages } from '../data/crosspostData';
 import type { AppSettings } from '../../shared/types/api';
 
-const mockContext: { subredditName?: string } = {};
-const mockReddit = {
-  getCurrentSubreddit: vi.fn(),
-  getPostById: vi.fn(),
-  getSubredditInfoById: vi.fn(),
-  getNewPosts: vi.fn(),
-  crosspost: vi.fn(),
-};
+const hoisted = vi.hoisted(() => ({
+  mockContext: {} as {
+    subredditName?: string;
+    settings?: { getAll<T>(): Promise<Partial<T>> };
+  },
+  mockReddit: {
+    getCurrentSubreddit: vi.fn(),
+    getPostById: vi.fn(),
+    getSubredditInfoById: vi.fn(),
+    getNewPosts: vi.fn(),
+    crosspost: vi.fn(),
+  },
+  safeGetWikiPageRevisionsMock: vi.fn(),
+  loggedEvents: [] as Array<Record<string, unknown>>,
+  redisState: {
+    redisMock: undefined as unknown,
+    redisGlobalMock: undefined as unknown,
+  },
+}));
+
+const mockContext = hoisted.mockContext;
+const mockReddit = hoisted.mockReddit;
+const safeGetWikiPageRevisionsMock = hoisted.safeGetWikiPageRevisionsMock;
+const loggedEvents = hoisted.loggedEvents;
 
 type ZEntry = { member: string; score: number };
 type SetOptions = {
@@ -97,46 +113,59 @@ class InMemoryRedis {
 
 let redisMock: InMemoryRedis;
 let redisGlobalMock: InMemoryRedis;
-const safeGetWikiPageRevisionsMock = vi.fn();
-const loggedEvents: Array<Record<string, unknown>> = [];
 
 vi.mock('@devvit/web/server', () => ({
-  reddit: mockReddit,
+  reddit: hoisted.mockReddit,
   redis: {
-    get: (...args: [string]) => redisMock.get(...args),
-    set: (...args: [string, string, SetOptions?]) => redisMock.set(...args),
-    del: (...args: string[]) => redisMock.del(...args),
-    hSet: (...args: [string, Record<string, string>]) => redisMock.hSet(...args),
-    hGet: (...args: [string, string]) => redisMock.hGet(...args),
-    hGetAll: (...args: [string]) => redisMock.hGetAll(...args),
-    hDel: (...args: [string, string[]]) => redisMock.hDel(...args),
-    zAdd: (...args: [string, ...ZEntry[]]) => redisMock.zAdd(...args),
-    zRange: (...args: [string, number, number]) => redisMock.zRange(...args),
-    zRem: (...args: [string, string[]]) => redisMock.zRem(...args),
+    get: (...args: [string]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).get(...args),
+    set: (...args: [string, string, SetOptions?]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).set(...args),
+    del: (...args: string[]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).del(...args),
+    hSet: (...args: [string, Record<string, string>]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hSet(...args),
+    hGet: (...args: [string, string]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hGet(...args),
+    hGetAll: (...args: [string]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hGetAll(...args),
+    hDel: (...args: [string, string[]]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hDel(...args),
+    zAdd: (...args: [string, ...ZEntry[]]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).zAdd(...args),
+    zRange: (...args: [string, number, number]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).zRange(...args),
+    zRem: (...args: [string, string[]]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).zRem(...args),
     global: {
-      get: (...args: [string]) => redisGlobalMock.get(...args),
+      get: (...args: [string]) =>
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).get(...args),
       set: (...args: [string, string, SetOptions?]) =>
-        redisGlobalMock.set(...args),
-      del: (...args: string[]) => redisGlobalMock.del(...args),
-      zAdd: (...args: [string, ...ZEntry[]]) => redisGlobalMock.zAdd(...args),
-      zRange: (...args: [string, number, number]) => redisGlobalMock.zRange(...args),
-      zRem: (...args: [string, string[]]) => redisGlobalMock.zRem(...args),
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).set(...args),
+      del: (...args: string[]) =>
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).del(...args),
+      zAdd: (...args: [string, ...ZEntry[]]) =>
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zAdd(...args),
+      zRange: (...args: [string, number, number]) =>
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zRange(...args),
+      zRem: (...args: [string, string[]]) =>
+        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zRem(...args),
     },
   },
-  context: mockContext,
+  context: hoisted.mockContext,
 }));
 
 vi.mock('../utils/crosspostLogs', () => ({
   toErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   logCrosspostEvent: (payload: Record<string, unknown>) => {
-    loggedEvents.push(payload);
+    hoisted.loggedEvents.push(payload);
   },
 }));
 
 vi.mock('../utils/redditUtils', () => ({
   safeGetWikiPageRevisions: (...args: unknown[]) =>
-    safeGetWikiPageRevisionsMock(...args),
+    hoisted.safeGetWikiPageRevisionsMock(...args),
 }));
 
 import { onModAction, processCrosspostDispatchQueue } from './modAction';
@@ -155,6 +184,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
   beforeEach(() => {
     redisMock = new InMemoryRedis();
     redisGlobalMock = new InMemoryRedis();
+    hoisted.redisState.redisMock = redisMock;
+    hoisted.redisState.redisGlobalMock = redisGlobalMock;
     mockContext.subredditName = undefined;
     (
       mockContext as {
@@ -578,6 +609,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
     });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
 
     const summary = await processCrosspostDispatchQueue(
       baseSettings,
