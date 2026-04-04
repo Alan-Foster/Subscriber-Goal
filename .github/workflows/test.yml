@@ -3,7 +3,7 @@ on:
   pull_request:
   push:
 permissions:
-  contents: write
+  contents: read
   actions: read
   checks: write
   statuses: write
@@ -19,8 +19,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22.x"
-      - run: npm install
-      - run: npm audit fix
+          cache: "npm"
+      - run: npm ci
       - run: npm run test:unit
-      - run: npm run lint:fix
-      - uses: stefanzweifel/git-auto-commit-action@v7
+      - run: npm run lint:ci
