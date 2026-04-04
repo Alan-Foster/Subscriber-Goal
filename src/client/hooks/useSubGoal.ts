@@ -22,6 +22,17 @@ type SubscribeResult = {
   error: string | null;
 };
 
+const initRetryOptions = {
+  maxDurationMs: 8000,
+  initialDelayMs: 200,
+  delayMultiplier: 2,
+  maxDelayMs: 1500,
+  attemptTimeoutMs: 1500,
+} as const;
+
+const recoveryWindowMs = 30000;
+const recoveryIntervalMs = 5000;
+
 const requestJson = async <T>(input: RequestInfo, init?: RequestInit): Promise<RequestResult<T>> => {
   try {
     const res = await fetch(input, init);
@@ -132,7 +143,7 @@ export const useSubGoal = () => {
       const result = await requestJsonWithRetry<InitResponse>(
         '/api/init',
         { signal },
-        { maxDurationMs: 5000 }
+        initRetryOptions
       );
       if (cancelled || result.aborted) {
         return;
@@ -154,6 +165,72 @@ export const useSubGoal = () => {
       controller.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (loading || state !== null) {
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const startedAt = Date.now();
+
+    const runRecovery = async () => {
+      if (cancelled || state !== null) {
+        return;
+      }
+
+      const result = await requestJsonWithRetry<InitResponse>(
+        '/api/init',
+        undefined,
+        {
+          ...initRetryOptions,
+          maxDurationMs: 3000,
+        }
+      );
+      if (cancelled || result.aborted) {
+        return;
+      }
+      if (result.error) {
+        setError(result.error);
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= recoveryWindowMs) {
+          return;
+        }
+        timeoutId = window.setTimeout(() => {
+          void runRecovery();
+        }, recoveryIntervalMs);
+        return;
+      }
+
+      const nextState = result.data?.state ?? null;
+      if (!nextState) {
+        setError('Initialization returned no state.');
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= recoveryWindowMs) {
+          return;
+        }
+        timeoutId = window.setTimeout(() => {
+          void runRecovery();
+        }, recoveryIntervalMs);
+        return;
+      }
+
+      setState(nextState);
+      setError(null);
+    };
+
+    timeoutId = window.setTimeout(() => {
+      void runRecovery();
+    }, recoveryIntervalMs);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [loading, state]);
 
   useEffect(() => {
     if (realtimeConnectedRef.current) {

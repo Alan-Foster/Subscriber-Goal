@@ -81,6 +81,9 @@ const isPermanentCrosspostError = (errorMessage: string): boolean =>
     errorMessage
   );
 
+const isPermanentMirrorError = (errorMessage: string): boolean =>
+  /only allowed inside (the )?current subreddit/i.test(errorMessage);
+
 async function getNewPosts(
   appSettings: AppSettings
 ): Promise<{
@@ -364,6 +367,7 @@ async function updateFromWikis(
 
   for (const postAction of postActions) {
     let terminal = false;
+    let mirrored = false;
     try {
       const crosspostId = await getCorrespondingPost(redis, postAction.postId);
       if (!crosspostId) {
@@ -382,8 +386,55 @@ async function updateFromWikis(
         await storeProcessedRevision(redis, postAction.revisionId, postAction.postId);
         continue;
       }
+
+      const expectedSubreddit = appSettings.promoSubreddit.toLowerCase();
+      const getCrosspostOrSkip = async () => {
+        const crosspost = await reddit.getPostById(crosspostId);
+        if (!crosspost) {
+          summary.crosspostsSkipped += 1;
+          logCrosspostEvent(
+            {
+              event: 'crosspost_attempt_skipped',
+              sourcePostId: postAction.postId,
+              targetSubreddit: appSettings.promoSubreddit,
+              crosspostId,
+              reason: `action_${postAction.action}_target_missing`,
+              revisionId: postAction.revisionId,
+            },
+            'warn'
+          );
+          console.warn(
+            `[crosspost] missing target while mirroring action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId}`
+          );
+          terminal = true;
+          return null;
+        }
+
+        if (crosspost.subredditName.toLowerCase() !== expectedSubreddit) {
+          summary.crosspostsSkipped += 1;
+          logCrosspostEvent(
+            {
+              event: 'crosspost_attempt_skipped',
+              sourcePostId: postAction.postId,
+              targetSubreddit: appSettings.promoSubreddit,
+              crosspostId,
+              reason: `action_${postAction.action}_wrong_subreddit`,
+              revisionId: postAction.revisionId,
+            },
+            'warn'
+          );
+          console.warn(
+            `[crosspost] mapped target subreddit mismatch; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId} expectedSubreddit=${appSettings.promoSubreddit} actualSubreddit=${crosspost.subredditName}`
+          );
+          terminal = true;
+          return null;
+        }
+
+        return crosspost;
+      };
+
       switch (postAction.action) {
-        case 'remove':
+        case 'remove': {
           if (!isThingId(crosspostId)) {
             summary.crosspostsSkipped += 1;
             logCrosspostEvent(
@@ -403,9 +454,15 @@ async function updateFromWikis(
             terminal = true;
             break;
           }
-          await reddit.remove(crosspostId, false);
+          const crosspost = await getCrosspostOrSkip();
+          if (!crosspost) {
+            break;
+          }
+          await crosspost.remove(false);
+          mirrored = true;
           break;
-        case 'approve':
+        }
+        case 'approve': {
           if (!isThingId(crosspostId)) {
             summary.crosspostsSkipped += 1;
             logCrosspostEvent(
@@ -425,8 +482,14 @@ async function updateFromWikis(
             terminal = true;
             break;
           }
-          await reddit.approve(crosspostId);
+          const crosspost = await getCrosspostOrSkip();
+          if (!crosspost) {
+            break;
+          }
+          await crosspost.approve();
+          mirrored = true;
           break;
+        }
         case 'delete': {
           if (!isLinkId(crosspostId)) {
             summary.crosspostsSkipped += 1;
@@ -447,29 +510,36 @@ async function updateFromWikis(
             terminal = true;
             break;
           }
-          const crosspost = await reddit.getPostById(crosspostId);
+          const crosspost = await getCrosspostOrSkip();
+          if (!crosspost) {
+            break;
+          }
           await crosspost.delete();
+          mirrored = true;
           break;
         }
       }
-      terminal = true;
-      summary.actionsMirrored += 1;
-      logCrosspostEvent({
-        event: 'crosspost_attempt_succeeded',
-        sourcePostId: postAction.postId,
-        targetSubreddit: appSettings.promoSubreddit,
-        crosspostId,
-        reason: `action_${postAction.action}_mirrored`,
-        revisionId: postAction.revisionId,
-      });
-      console.info(
-        `[crosspost] mirrored action and marked processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId}`
-      );
+      if (mirrored) {
+        terminal = true;
+        summary.actionsMirrored += 1;
+        logCrosspostEvent({
+          event: 'crosspost_attempt_succeeded',
+          sourcePostId: postAction.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          crosspostId,
+          reason: `action_${postAction.action}_mirrored`,
+          revisionId: postAction.revisionId,
+        });
+        console.info(
+          `[crosspost] mirrored action and marked processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${crosspostId}`
+        );
+      }
     } catch (e) {
       const errorText = e instanceof Error ? e.message : String(e);
       const missingCrosspost =
         /not[\s-]?found|does not exist|deleted|no longer exists/i.test(errorText);
-      if (missingCrosspost) {
+      const permanentMirrorFailure = isPermanentMirrorError(errorText);
+      if (missingCrosspost || permanentMirrorFailure) {
         terminal = true;
         summary.crosspostsSkipped += 1;
         logCrosspostEvent(
@@ -477,14 +547,16 @@ async function updateFromWikis(
             event: 'crosspost_attempt_skipped',
             sourcePostId: postAction.postId,
             targetSubreddit: appSettings.promoSubreddit,
-            reason: `action_${postAction.action}_target_missing`,
+            reason: missingCrosspost
+              ? `action_${postAction.action}_target_missing`
+              : `action_${postAction.action}_terminal_context_error`,
             revisionId: postAction.revisionId,
             errorMessage: errorText,
           },
           'warn'
         );
         console.warn(
-          `[crosspost] missing target while mirroring action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} error=${errorText}`
+          `[crosspost] terminal mirror error; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} error=${errorText}`
         );
       } else {
         summary.actionsFailed += 1;

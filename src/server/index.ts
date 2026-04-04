@@ -85,6 +85,7 @@ const buildState = async (
 router.get('/api/init', async (_req, res): Promise<void> => {
   const { postId } = context;
   if (!postId) {
+    console.warn('[api/init] returning 400 validation_error: missing postId');
     res.status(400).json({
       status: 'error',
       message: 'postId is required but missing from context',
@@ -103,13 +104,19 @@ router.get('/api/init', async (_req, res): Promise<void> => {
     console.error(`API Init Error for post ${postId}:`, error);
     const errorMessage =
       error instanceof Error ? `Initialization failed: ${error.message}` : 'Unknown error during initialization';
-    res.status(400).json({ status: 'error', message: errorMessage } satisfies ErrorResponse);
+    console.warn(
+      `[api/init] returning 503 runtime_failure: postId=${postId} message=${errorMessage}`
+    );
+    res
+      .status(503)
+      .json({ status: 'error', message: errorMessage } satisfies ErrorResponse);
   }
 });
 
 router.get('/api/refresh', async (_req, res): Promise<void> => {
   const { postId } = context;
   if (!postId) {
+    console.warn('[api/refresh] returning 400 validation_error: missing postId');
     res.status(400).json({
       status: 'error',
       message: 'postId is required but missing from context',
@@ -136,7 +143,12 @@ router.get('/api/refresh', async (_req, res): Promise<void> => {
     console.error(`API Refresh Error for post ${postId}:`, error);
     const errorMessage =
       error instanceof Error ? `Refresh failed: ${error.message}` : 'Unknown error during refresh';
-    res.status(400).json({ status: 'error', message: errorMessage } satisfies ErrorResponse);
+    console.warn(
+      `[api/refresh] returning 503 runtime_failure: postId=${postId} message=${errorMessage}`
+    );
+    res
+      .status(503)
+      .json({ status: 'error', message: errorMessage } satisfies ErrorResponse);
   }
 });
 
