@@ -56,6 +56,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.11.1 - Double Crosspost Errors, fixed WSL and Github linter
 - 0.11.0 - Harden crosspost replay prevention and dedupe
 - 0.10.7 - Missing-post crosspost error handling
 - 0.10.6 - Crosspost bookkeeping cleanup and hardening
