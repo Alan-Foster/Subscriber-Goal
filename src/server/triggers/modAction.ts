@@ -99,6 +99,11 @@ const isPermanentCrosspostError = (errorMessage: string): boolean =>
     errorMessage
   );
 
+export const isMissingSourcePostError = (errorMessage: string): boolean =>
+  /(no post\s+t3_|not[\s-]?found|does not exist|deleted|no longer exists)/i.test(
+    errorMessage
+  );
+
 const isPermanentMirrorError = (errorMessage: string): boolean =>
   /only allowed inside (the )?current subreddit/i.test(errorMessage);
 
@@ -447,7 +452,8 @@ async function updateFromWikis(
     } catch (e) {
       const errorMessage = toErrorMessage(e);
       const permanentFailure = isPermanentCrosspostError(errorMessage);
-      if (permanentFailure || sourceSubredditIsNsfw) {
+      const missingSourcePost = isMissingSourcePostError(errorMessage);
+      if (permanentFailure || sourceSubredditIsNsfw || missingSourcePost) {
         summary.crosspostsSkipped += 1;
         logCrosspostEvent(
           {
@@ -456,12 +462,19 @@ async function updateFromWikis(
             targetSubreddit: appSettings.promoSubreddit,
             reason: sourceSubredditIsNsfw
               ? 'source_subreddit_nsfw'
+              : missingSourcePost
+                ? 'source_post_missing'
               : 'target_policy_reject_or_denied',
             revisionId: newPost.revisionId,
             errorMessage,
           },
           'warn'
         );
+        if (missingSourcePost) {
+          console.warn(
+            `[crosspost] terminal missing source post; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId} error=${errorMessage}`
+          );
+        }
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
