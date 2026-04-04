@@ -10,6 +10,7 @@ import type {
   SubscribeRequest,
   SubscribeResponse,
 } from '../../shared/types/api';
+import { requestJsonWithRetry } from '../utils/fetchWithRetry';
 
 type RequestResult<T> = {
   data: T | null;
@@ -109,7 +110,10 @@ export const useSubGoal = () => {
   }, [state?.recentSubscriber, showNotice]);
 
   const refresh = useCallback(async () => {
-    const result = await requestJson<RefreshResponse>('/api/refresh');
+    const result = await requestJsonWithRetry<RefreshResponse>('/api/refresh', undefined, {});
+    if (result.aborted) {
+      return null;
+    }
     if (result.error) {
       setError(result.error);
       return null;
@@ -120,8 +124,19 @@ export const useSubGoal = () => {
   }, []);
 
   useEffect(() => {
-    const init = async () => {
-      const result = await requestJson<InitResponse>('/api/init');
+    const controller = new AbortController();
+    const { signal } = controller;
+    let cancelled = false;
+
+    const runInit = async () => {
+      const result = await requestJsonWithRetry<InitResponse>(
+        '/api/init',
+        { signal },
+        { maxDurationMs: 5000 }
+      );
+      if (cancelled || result.aborted) {
+        return;
+      }
       if (result.error) {
         setError(result.error);
         setLoading(false);
@@ -131,7 +146,13 @@ export const useSubGoal = () => {
       setError(null);
       setLoading(false);
     };
-    void init();
+
+    void runInit();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
