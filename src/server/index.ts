@@ -16,6 +16,7 @@ import type {
   SubscribeResponse,
 } from '../shared/types/api';
 import type { SettingsClient } from './types';
+import { isLinkId } from './types';
 import { createGoalPost } from './core/post';
 import { dispatchPostAction } from './data/crosspostData';
 import {
@@ -23,15 +24,21 @@ import {
   eraseFromRecentSubscribers,
   getSubGoalData,
   registerNewSubGoalPost,
+  setSubredditDisplayNameForPost,
 } from './data/subGoalData';
+import {
+  getSavedSubredditDisplayName,
+  setSavedSubredditDisplayName,
+} from './data/subredditDisplayNameData';
 import { getSubscriberStats, setNewSubscriber, untrackSubscriberById, untrackSubscriberByUsername } from './data/subscriberStats';
-import { cancelUpdates, untrackPost } from './data/updaterData';
+import { cancelUpdates, getQueuedUpdates, getTrackedPosts, queueUpdate, untrackPost } from './data/updaterData';
 import { getAppSettings } from './settings';
 import { onAppChanged } from './triggers/appChanged';
 import { onModAction, type ModActionEvent } from './triggers/modAction';
 import { onPostsUpdaterJob } from './triggers/scheduler';
 import { getDefaultSubscriberGoal } from './utils/numberUtils';
 import { clearUserStickies, getSubredditIcon } from './utils/redditUtils';
+import { validateSubredditDisplayName } from './utils/subredditDisplayName';
 import { applyTextFallback } from './utils/textFallback';
 
 const app = express();
@@ -74,7 +81,7 @@ const buildState = async (
     appSettings,
     subreddit: {
       id: subreddit.id,
-      name: subreddit.name,
+      name: subGoalData.subredditDisplayName ?? subreddit.name,
       icon: subredditIcon,
       subscribers:
         options?.subscribersOverride ?? subreddit.numberOfSubscribers,
@@ -290,6 +297,9 @@ router.post('/api/debug/realtime', async (req, res): Promise<void> => {
 router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>) => {
   try {
     const subreddit = await reddit.getCurrentSubreddit();
+    const savedSubredditDisplayName = await getSavedSubredditDisplayName(redis);
+    const resolvedSubredditDisplayName =
+      savedSubredditDisplayName ?? subreddit.name;
     const appSettings = await getAppSettings(getSettingsClient());
     const defaultGoal = getDefaultSubscriberGoal(subreddit.numberOfSubscribers);
     const sourceSubredditIsNsfw =
@@ -321,9 +331,18 @@ router.post('/internal/menu/create-goal', async (_req, res: Response<UiResponse>
               name: 'postTitle',
               label: 'Post Title',
               type: 'string',
-              defaultValue: `Welcome to r/${subreddit.name}!`,
+              defaultValue: `Welcome to r/${resolvedSubredditDisplayName}!`,
               helpText:
                 'This will be used as the title of the post, you can customize it as you see fit.',
+              required: true,
+            },
+            {
+              name: 'subredditDisplayName',
+              label: 'Customize Subreddit Name Capitalization',
+              type: 'string',
+              defaultValue: resolvedSubredditDisplayName,
+              helpText:
+                'Only capitalization may be changed. All letters, numbers, and symbols must exactly match this subreddit name.',
               required: true,
             },
             {
@@ -352,6 +371,7 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
   const subscriberGoal = values.subscriberGoal;
   const requestedCrosspost = values.crosspost;
   const title = values.postTitle?.trim();
+  const subredditDisplayName = values.subredditDisplayName?.trim();
 
   try {
     const subreddit = await reddit.getCurrentSubreddit();
@@ -375,6 +395,15 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
       res.json({ showToast: 'Please provide a post title!' });
       return;
     }
+    const subredditDisplayNameValidationMessage = validateSubredditDisplayName(
+      subredditDisplayName,
+      subreddit.name
+    );
+    if (subredditDisplayNameValidationMessage) {
+      res.json({ showToast: subredditDisplayNameValidationMessage });
+      return;
+    }
+    const resolvedSubredditDisplayName = subredditDisplayName ?? subreddit.name;
 
     if (requestedCrosspost === undefined) {
       console.info(
@@ -397,9 +426,10 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
     await applyTextFallback(post, {
       goal: subscriberGoal,
       subscribers: subreddit.numberOfSubscribers,
-      subredditName: subreddit.name,
+      subredditName: resolvedSubredditDisplayName,
       completedTime: null,
     });
+    await setSavedSubredditDisplayName(redis, resolvedSubredditDisplayName);
 
     const crosspostDispatchResult = await registerNewSubGoalPost(
       reddit,
@@ -407,8 +437,36 @@ router.post('/internal/form/create-goal', async (req, res: Response<UiResponse>)
       appSettings,
       post,
       subscriberGoal,
-      resolvedCrosspost
+      resolvedCrosspost,
+      resolvedSubredditDisplayName
     );
+
+    const trackedPosts = await getTrackedPosts(redis);
+    const queuedPosts = await getQueuedUpdates(redis);
+    const activePostIds = [...new Set([...trackedPosts, ...queuedPosts])];
+    for (const activePostId of activePostIds) {
+      if (!isLinkId(activePostId)) {
+        continue;
+      }
+      try {
+        const activePost = await reddit.getPostById(activePostId);
+        if (activePost.subredditId !== subreddit.id) {
+          continue;
+        }
+        await setSubredditDisplayNameForPost(
+          redis,
+          activePostId,
+          resolvedSubredditDisplayName
+        );
+        await queueUpdate(redis, activePostId, new Date());
+      } catch (backfillError) {
+        console.warn(
+          `Failed to backfill subreddit display name for active post ${activePostId}: ${String(
+            backfillError
+          )}`
+        );
+      }
+    }
 
     await post.approve();
     await post.sticky();

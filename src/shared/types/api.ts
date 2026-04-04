@@ -72,6 +72,7 @@ export type CreateGoalFormValues = {
   subscriberGoal?: number;
   postTitle?: string;
   crosspost?: boolean;
+  subredditDisplayName?: string;
 };
 
 export type DeleteGoalFormValues = {

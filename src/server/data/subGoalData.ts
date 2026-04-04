@@ -8,11 +8,13 @@ export const subscriberGoalsKey = 'subscriber_goals';
 export const postGoalSuffix = '_goal';
 export const postRecentSubscriberSuffix = '_recent_subscriber';
 export const postCompletedTimeSuffix = '_completed_time';
+export const postSubredditDisplayNameSuffix = '_subreddit_display_name';
 
 export type SubGoalData = {
   goal: number;
   recentSubscriber: string | null;
   completedTime: number;
+  subredditDisplayName: string | null;
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient['submitCustomPost']>>;
@@ -26,18 +28,22 @@ export async function getSubGoalData(
   redis: RedisClient,
   postId: string
 ): Promise<SubGoalData> {
-  const [goal, recentSubscriber, completedTime] = (await redis.hMGet(
+  const [goal, recentSubscriber, completedTime, subredditDisplayName] = (await redis.hMGet(
     subscriberGoalsKey,
     [
       `${postId}${postGoalSuffix}`,
       `${postId}${postRecentSubscriberSuffix}`,
       `${postId}${postCompletedTimeSuffix}`,
+      `${postId}${postSubredditDisplayNameSuffix}`,
     ]
   )) as [string | null, string | null, string | null, string | null];
   return {
     goal: goal ? parseInt(goal) : 0,
     recentSubscriber: recentSubscriber ?? null,
     completedTime: completedTime ? parseInt(completedTime) : 0,
+    subredditDisplayName: subredditDisplayName && subredditDisplayName.length > 0
+      ? subredditDisplayName
+      : null,
   };
 }
 
@@ -50,6 +56,17 @@ export async function setSubGoalData(
     [`${postId}${postGoalSuffix}`]: data.goal.toString(),
     [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? '',
     [`${postId}${postCompletedTimeSuffix}`]: data.completedTime.toString(),
+    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName ?? '',
+  });
+}
+
+export async function setSubredditDisplayNameForPost(
+  redis: RedisClient,
+  postId: string,
+  subredditDisplayName: string
+): Promise<void> {
+  await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
   });
 }
 
@@ -78,12 +95,14 @@ export async function registerNewSubGoalPost(
   appSettings: AppSettings,
   post: RedditPost,
   goal: number,
-  crosspost: boolean
+  crosspost: boolean,
+  subredditDisplayName: string
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
     completedTime: 0,
+    subredditDisplayName,
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);

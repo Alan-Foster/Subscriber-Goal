@@ -52,7 +52,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       await applyTextFallback(post, {
         goal: subGoalData.goal,
         subscribers: subreddit.numberOfSubscribers,
-        subredditName: subreddit.name,
+        subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
         completedTime,
       });
 
