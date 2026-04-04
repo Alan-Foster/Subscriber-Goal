@@ -7,6 +7,7 @@ const mockReddit = {
   getCurrentSubreddit: vi.fn(),
   getPostById: vi.fn(),
   getSubredditInfoById: vi.fn(),
+  getNewPosts: vi.fn(),
   crosspost: vi.fn(),
 };
 
@@ -163,7 +164,11 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
+    mockReddit.getNewPosts.mockReset();
     mockReddit.crosspost.mockReset();
+    mockReddit.getNewPosts.mockReturnValue({
+      get: vi.fn().mockResolvedValue([]),
+    });
     safeGetWikiPageRevisionsMock.mockReset();
     loggedEvents.length = 0;
   });
@@ -191,6 +196,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       crosspostPersistencePartial: 0,
       crosspostPersistenceFailedAfterCreate: 0,
       crosspostsSkippedBySourceCooldown: 0,
+      crosspostsSkippedByInFlight: 0,
+      crosspostsSkippedByExistingDetection: 0,
     });
     expect(safeGetWikiPageRevisionsMock).not.toHaveBeenCalled();
     expect(
@@ -226,6 +233,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       crosspostPersistencePartial: 0,
       crosspostPersistenceFailedAfterCreate: 0,
       crosspostsSkippedBySourceCooldown: 0,
+      crosspostsSkippedByInFlight: 0,
+      crosspostsSkippedByExistingDetection: 0,
     });
     expect(safeGetWikiPageRevisionsMock).not.toHaveBeenCalled();
     expect(
@@ -720,5 +729,164 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     expect(mockReddit.crosspost).toHaveBeenCalledTimes(1);
     redisGlobalSetSpy.mockRestore();
     consoleErrorSpy.mockRestore();
+  });
+
+  it('skips when source create in-flight lock is held', async () => {
+    mockContext.subredditName = 'SubGoal';
+    await redisGlobalMock.set('crosspostCreateInFlight:t3_inflight', 'other-lock');
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_inflight',
+                reason: 'Post t3_inflight with goal 10',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_inflight',
+      subredditId: 't5_source',
+      subredditName: 'CorporateGifts',
+      createdAt: new Date(Date.now() - 60_000),
+      nsfw: false,
+    });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+
+    const summary = await processCrosspostDispatchQueue(
+      baseSettings,
+      'scheduler_posts_updater'
+    );
+
+    expect(summary.crosspostsCreated).toBe(0);
+    expect(summary.crosspostsSkippedByInFlight).toBe(1);
+    expect(mockReddit.crosspost).not.toHaveBeenCalled();
+    expect(
+      loggedEvents.some(
+        (event) =>
+          event.event === 'crosspost_attempt_skipped' &&
+          event.reason === 'source_create_inflight'
+      )
+    ).toBe(true);
+  });
+
+  it('detects existing target crosspost and skips duplicate creation', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_existing',
+                reason: 'Post t3_existing with goal 10',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_existing',
+      subredditId: 't5_source',
+      subredditName: 'CorporateGifts',
+      createdAt: new Date(Date.now() - 60_000),
+      nsfw: false,
+    });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+    mockReddit.getNewPosts.mockReturnValue({
+      get: vi.fn().mockResolvedValue([
+        {
+          id: 't3_existing_crosspost',
+          url: 'https://reddit.com/r/corporategifts/comments/existing/title/',
+          title: 'Visit r/corporategifts, they are trying to reach 10 subscribers!',
+          body: '',
+        },
+      ]),
+    });
+
+    const summary = await processCrosspostDispatchQueue(
+      baseSettings,
+      'scheduler_posts_updater'
+    );
+
+    expect(summary.crosspostsCreated).toBe(0);
+    expect(summary.crosspostsSkippedByExistingDetection).toBe(1);
+    expect(mockReddit.crosspost).not.toHaveBeenCalled();
+    expect(await redisMock.hGet('crosspostList', 't3_existing')).toBe(
+      't3_existing_crosspost'
+    );
+    expect(
+      loggedEvents.some(
+        (event) =>
+          event.event === 'crosspost_attempt_skipped' &&
+          event.reason === 'existing_crosspost_detected'
+      )
+    ).toBe(true);
+  });
+
+  it('treats INVALID_CROSSPOST_THING root_post_id as terminal skip and processes revision', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_invalid_crosspost_thing',
+                reason: 'Post t3_invalidroot with goal 10',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_invalidroot',
+      subredditId: 't5_source',
+      subredditName: 'CorporateGifts',
+      createdAt: new Date(Date.now() - 60_000),
+      nsfw: false,
+    });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+    mockReddit.crosspost.mockRejectedValue(
+      new Error(
+        "INVALID_CROSSPOST_THING: Your crosspost includes a link that isn't working. Double-check it and try again.: root_post_id"
+      )
+    );
+
+    const summary = await processCrosspostDispatchQueue(
+      baseSettings,
+      'scheduler_posts_updater'
+    );
+
+    expect(summary.crosspostsSkipped).toBe(1);
+    expect(summary.crosspostsFailed).toBe(0);
+    expect(await redisMock.hGet('processedRevisions', 'rev_invalid_crosspost_thing')).toBe(
+      't3_invalidroot'
+    );
+    expect(
+      loggedEvents.some(
+        (event) =>
+          event.event === 'crosspost_attempt_skipped' &&
+          event.reason === 'source_not_crosspostable'
+      )
+    ).toBe(true);
   });
 });

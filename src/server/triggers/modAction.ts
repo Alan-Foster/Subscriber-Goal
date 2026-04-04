@@ -67,6 +67,8 @@ export type CrosspostIngestionSummary = {
   crosspostPersistencePartial: number;
   crosspostPersistenceFailedAfterCreate: number;
   crosspostsSkippedBySourceCooldown: number;
+  crosspostsSkippedByInFlight: number;
+  crosspostsSkippedByExistingDetection: number;
   errorMessage?: string;
 };
 
@@ -85,6 +87,9 @@ const crosspostSourceCreateCooldownKeyPrefix = 'crosspostSourceCreateCooldown';
 const crosspostSourceCreateCooldownTtlMs = 60 * 60 * 1000;
 const crosspostTerminalRevisionKeyPrefix = 'crosspostTerminalRevision';
 const crosspostTerminalRevisionTtlMs = 30 * 24 * 60 * 60 * 1000;
+const crosspostCreateInFlightKeyPrefix = 'crosspostCreateInFlight';
+const crosspostCreateInFlightTtlMs = 90 * 1000;
+const crosspostTargetDuplicateScanLimit = 25;
 
 type CrosspostBookkeepingCleanupOptions = {
   retentionMs?: number;
@@ -111,6 +116,8 @@ function emptySummary(): CrosspostIngestionSummary {
     crosspostPersistencePartial: 0,
     crosspostPersistenceFailedAfterCreate: 0,
     crosspostsSkippedBySourceCooldown: 0,
+    crosspostsSkippedByInFlight: 0,
+    crosspostsSkippedByExistingDetection: 0,
   };
 }
 
@@ -118,7 +125,7 @@ const withErrorMessage = (errorMessage?: string): { errorMessage?: string } =>
   errorMessage ? { errorMessage } : {};
 
 const isPermanentCrosspostError = (errorMessage: string): boolean =>
-  /(OVER18_SUBREDDIT_CROSSPOST|SUBREDDIT_NOEXIST|INVALID_SUBREDDIT|FORBIDDEN|NOT_ALLOWED|is private|must be a moderator|doesn't allow crossposts|does not allow crossposts)/i.test(
+  /(OVER18_SUBREDDIT_CROSSPOST|SUBREDDIT_NOEXIST|INVALID_SUBREDDIT|FORBIDDEN|NOT_ALLOWED|INVALID_CROSSPOST_THING|root_post_id|link that isn't working|is private|must be a moderator|doesn't allow crossposts|does not allow crossposts)/i.test(
     errorMessage
   );
 
@@ -274,6 +281,72 @@ async function markTerminalRevisionWithLogging(
     );
     return false;
   }
+}
+
+const getCrosspostCreateInFlightKey = (sourcePostId: LinkId): string =>
+  `${crosspostCreateInFlightKeyPrefix}:${sourcePostId}`;
+
+async function acquireSourceCreateInFlightLock(
+  redisClient: RedisLockClient,
+  sourcePostId: LinkId
+): Promise<{ acquired: boolean; lockToken: string; lockKey: string }> {
+  const lockKey = getCrosspostCreateInFlightKey(sourcePostId);
+  const lockToken = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  await redisClient.set(lockKey, lockToken, {
+    nx: true,
+    expiration: new Date(Date.now() + crosspostCreateInFlightTtlMs),
+  });
+  const currentToken = await redisClient.get(lockKey);
+  return {
+    acquired: currentToken === lockToken,
+    lockToken,
+    lockKey,
+  };
+}
+
+async function releaseSourceCreateInFlightLock(
+  redisClient: RedisLockClient,
+  lockKey: string,
+  lockToken: string
+): Promise<void> {
+  const currentToken = await redisClient.get(lockKey);
+  if (currentToken === lockToken) {
+    await redisClient.del(lockKey);
+  }
+}
+
+async function findExistingTargetCrosspost(
+  sourcePostId: LinkId,
+  targetSubreddit: string
+): Promise<LinkId | undefined> {
+  try {
+    const sourceBase36 = sourcePostId.slice(3).toLowerCase();
+    const posts = await reddit
+      .getNewPosts({
+        subredditName: targetSubreddit,
+        limit: crosspostTargetDuplicateScanLimit,
+      })
+      .get(crosspostTargetDuplicateScanLimit);
+
+    for (const post of posts) {
+      const normalizedUrl = (post.url ?? '').toLowerCase();
+      const haystack = `${normalizedUrl}\n${post.title ?? ''}\n${post.body ?? ''}`.toLowerCase();
+      const urlReferencesSource = normalizedUrl.includes(`/comments/${sourceBase36}/`);
+      if (
+        (haystack.includes(sourcePostId.toLowerCase()) || urlReferencesSource) &&
+        isLinkId(post.id)
+      ) {
+        return post.id;
+      }
+    }
+  } catch (error) {
+    console.warn(
+      `[crosspost] existing-target detection failed; continuing: sourcePostId=${sourcePostId} targetSubreddit=${targetSubreddit} error=${toErrorMessage(
+        error
+      )}`
+    );
+  }
+  return undefined;
 }
 
 async function getCurrentHourlyCrosspostCount(
@@ -747,6 +820,57 @@ async function updateFromWikis(
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
+      const existingCrosspostId = await findExistingTargetCrosspost(
+        newPost.postId,
+        appSettings.promoSubreddit
+      );
+      if (existingCrosspostId) {
+        summary.crosspostsSkipped += 1;
+        summary.crosspostsSkippedByExistingDetection += 1;
+        logCrosspostEvent(
+          {
+            event: 'crosspost_attempt_skipped',
+            sourcePostId: newPost.postId,
+            targetSubreddit: appSettings.promoSubreddit,
+            crosspostId: existingCrosspostId,
+            reason: 'existing_crosspost_detected',
+            revisionId: newPost.revisionId,
+          },
+          'warn'
+        );
+        try {
+          await storeCorrespondingPost(redis, newPost.postId, existingCrosspostId);
+        } catch (storeDetectedMappingError) {
+          console.warn(
+            `[crosspost] failed to persist existing detected mapping: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${existingCrosspostId} error=${toErrorMessage(
+              storeDetectedMappingError
+            )}`
+          );
+        }
+        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+        continue;
+      }
+
+      const sourceCreateLock = await acquireSourceCreateInFlightLock(
+        redis.global,
+        newPost.postId
+      );
+      if (!sourceCreateLock.acquired) {
+        summary.crosspostsSkipped += 1;
+        summary.crosspostsSkippedByInFlight += 1;
+        logCrosspostEvent(
+          {
+            event: 'crosspost_attempt_skipped',
+            sourcePostId: newPost.postId,
+            targetSubreddit: appSettings.promoSubreddit,
+            reason: 'source_create_inflight',
+            revisionId: newPost.revisionId,
+          },
+          'warn'
+        );
+        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+        continue;
+      }
       logCrosspostEvent({
         event: 'crosspost_attempt_started',
         sourcePostId: newPost.postId,
@@ -776,6 +900,12 @@ async function updateFromWikis(
           'error'
         );
         throw error;
+      } finally {
+        await releaseSourceCreateInFlightLock(
+          redis.global,
+          sourceCreateLock.lockKey,
+          sourceCreateLock.lockToken
+        );
       }
       logCrosspostEvent({
         event: 'crosspost_attempt_succeeded',
@@ -797,8 +927,17 @@ async function updateFromWikis(
 
       let processedStored = false;
       let mappingStored = false;
+      let terminalStored = false;
+      let terminalStoreErrorMessage: string | undefined;
       let processedStoreErrorMessage: string | undefined;
       let mappingStoreErrorMessage: string | undefined;
+
+      try {
+        await markTerminalRevision(redis.global, newPost.revisionId);
+        terminalStored = true;
+      } catch (terminalStoreError) {
+        terminalStoreErrorMessage = toErrorMessage(terminalStoreError);
+      }
 
       try {
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
@@ -824,7 +963,7 @@ async function updateFromWikis(
         Date.now()
       );
 
-      if (processedStored && mappingStored) {
+      if (terminalStored && processedStored && mappingStored) {
         console.info(
           `[crosspost] created crosspost and marked processed: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspostId}`
         );
@@ -832,18 +971,17 @@ async function updateFromWikis(
       }
 
       const persistenceErrorMessage = [
+        terminalStoreErrorMessage,
         processedStoreErrorMessage,
         mappingStoreErrorMessage,
       ]
         .filter(Boolean)
         .join(' | ');
 
-      if (processedStored) {
+      if (terminalStored && processedStored) {
         summary.crosspostPersistencePartial += 1;
-        await markTerminalRevisionWithLogging(
-          newPost.revisionId,
-          newPost.postId,
-          'crosspost_persistence_partial'
+        console.info(
+          `[crosspost] terminal dedupe marked: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} reason=crosspost_persistence_partial`
         );
         logCrosspostEvent(
           {
@@ -863,13 +1001,16 @@ async function updateFromWikis(
         continue;
       }
 
+      if (!terminalStored) {
+        await markTerminalRevisionWithLogging(
+          newPost.revisionId,
+          newPost.postId,
+          'crosspost_persistence_failed_after_create'
+        );
+      }
+
       summary.crosspostsSkipped += 1;
       summary.crosspostPersistenceFailedAfterCreate += 1;
-      await markTerminalRevisionWithLogging(
-        newPost.revisionId,
-        newPost.postId,
-        'crosspost_persistence_failed_after_create'
-      );
       logCrosspostEvent(
         {
           event: 'crosspost_persistence_failed_after_create',
@@ -892,21 +1033,31 @@ async function updateFromWikis(
       const missingSourcePost = isMissingSourcePostError(errorMessage);
       if (permanentFailure || sourceSubredditIsNsfw || missingSourcePost) {
         summary.crosspostsSkipped += 1;
+        const skipReason = sourceSubredditIsNsfw
+          ? 'source_subreddit_nsfw'
+          : missingSourcePost
+            ? 'source_post_missing'
+            : /INVALID_CROSSPOST_THING|root_post_id|link that isn't working/i.test(
+                  errorMessage
+                )
+              ? 'source_not_crosspostable'
+              : 'target_policy_reject_or_denied';
         logCrosspostEvent(
           {
             event: 'crosspost_attempt_skipped',
             sourcePostId: newPost.postId,
             targetSubreddit: appSettings.promoSubreddit,
-            reason: sourceSubredditIsNsfw
-              ? 'source_subreddit_nsfw'
-              : missingSourcePost
-                ? 'source_post_missing'
-              : 'target_policy_reject_or_denied',
+            reason: skipReason,
             revisionId: newPost.revisionId,
             errorMessage,
           },
           'warn'
         );
+        if (skipReason === 'source_not_crosspostable') {
+          console.warn(
+            `[crosspost] terminal source-not-crosspostable; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId} error=${errorMessage}`
+          );
+        }
         if (missingSourcePost) {
           console.warn(
             `[crosspost] terminal missing source post; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId} error=${errorMessage}`
@@ -1316,6 +1467,9 @@ export async function processCrosspostDispatchQueue(
                 summary.crosspostPersistenceFailedAfterCreate,
               crosspostsSkippedBySourceCooldown:
                 summary.crosspostsSkippedBySourceCooldown,
+              crosspostsSkippedByInFlight: summary.crosspostsSkippedByInFlight,
+              crosspostsSkippedByExistingDetection:
+                summary.crosspostsSkippedByExistingDetection,
               ...withErrorMessage(summary.errorMessage),
               consecutiveFailures,
               ...logContext,
@@ -1349,6 +1503,9 @@ export async function processCrosspostDispatchQueue(
             summary.crosspostPersistenceFailedAfterCreate,
           crosspostsSkippedBySourceCooldown:
             summary.crosspostsSkippedBySourceCooldown,
+          crosspostsSkippedByInFlight: summary.crosspostsSkippedByInFlight,
+          crosspostsSkippedByExistingDetection:
+            summary.crosspostsSkippedByExistingDetection,
           ...withErrorMessage(summary.errorMessage),
           ...logContext,
         },
@@ -1394,6 +1551,9 @@ export async function processCrosspostDispatchQueue(
               summary.crosspostPersistenceFailedAfterCreate,
             crosspostsSkippedBySourceCooldown:
               summary.crosspostsSkippedBySourceCooldown,
+            crosspostsSkippedByInFlight: summary.crosspostsSkippedByInFlight,
+            crosspostsSkippedByExistingDetection:
+              summary.crosspostsSkippedByExistingDetection,
             ...withErrorMessage(summary.errorMessage),
             consecutiveFailures,
             ...logContext,
@@ -1423,6 +1583,9 @@ export async function processCrosspostDispatchQueue(
             summary.crosspostPersistenceFailedAfterCreate,
           crosspostsSkippedBySourceCooldown:
             summary.crosspostsSkippedBySourceCooldown,
+          crosspostsSkippedByInFlight: summary.crosspostsSkippedByInFlight,
+          crosspostsSkippedByExistingDetection:
+            summary.crosspostsSkippedByExistingDetection,
           ...withErrorMessage(summary.errorMessage),
           ...logContext,
         },

@@ -46,6 +46,8 @@ export type CrosspostLogPayload = {
   crosspostPersistencePartial?: number;
   crosspostPersistenceFailedAfterCreate?: number;
   crosspostsSkippedBySourceCooldown?: number;
+  crosspostsSkippedByInFlight?: number;
+  crosspostsSkippedByExistingDetection?: number;
 };
 
 export function toErrorMessage(error: unknown): string {
@@ -88,15 +90,31 @@ export function logCrosspostEvent(
       payload.crosspostPersistenceFailedAfterCreate ?? null,
     crosspostsSkippedBySourceCooldown:
       payload.crosspostsSkippedBySourceCooldown ?? null,
+    crosspostsSkippedByInFlight: payload.crosspostsSkippedByInFlight ?? null,
+    crosspostsSkippedByExistingDetection:
+      payload.crosspostsSkippedByExistingDetection ?? null,
   });
 
-  if (level === 'error') {
-    console.error(`[crosspost] ${logLine}`);
-    return;
+  try {
+    if (level === 'error') {
+      console.error(`[crosspost] ${logLine}`);
+      return;
+    }
+    if (level === 'warn') {
+      console.warn(`[crosspost] ${logLine}`);
+      return;
+    }
+    console.info(`[crosspost] ${logLine}`);
+  } catch {
+    try {
+      const fallbackLine = `[crosspost:fallback:${level}] ${logLine}\n`;
+      if (level === 'error') {
+        process.stderr.write(fallbackLine);
+      } else {
+        process.stdout.write(fallbackLine);
+      }
+    } catch {
+      // swallow logger failures to avoid affecting ingestion control flow
+    }
   }
-  if (level === 'warn') {
-    console.warn(`[crosspost] ${logLine}`);
-    return;
-  }
-  console.info(`[crosspost] ${logLine}`);
 }
