@@ -15,9 +15,6 @@ export const App = () => {
     loading,
     submitting,
     subscribe,
-    simulateSubscribe,
-    simulateIncrement,
-    sendDebugRealtime,
     setError,
     notice,
     showNotice,
@@ -29,9 +26,7 @@ export const App = () => {
   const confettiTimeoutRef = useRef<number | null>(null);
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
-  const [shareUsername, setShareUsername] = useState(true);
-  const showDebugControls = false;
-  const debugToggleRef = useRef(false);
+  const [shareUsername, setShareUsername] = useState(false);
 
   useEffect(() => {
     if (state?.completedTime) {
@@ -102,8 +97,11 @@ export const App = () => {
       showToast('Please log in to subscribe.');
       return;
     }
+    const effectiveShareUsername = state.subreddit.isNsfw
+      ? false
+      : shareUsername;
     const { state: updatedState, error: subscribeError } = await subscribe({
-      shareUsername,
+      shareUsername: effectiveShareUsername,
     });
     if (subscribeError) {
       showToast(subscribeError);
@@ -130,50 +128,14 @@ export const App = () => {
     if (returnNoticeTimeoutRef.current) {
       window.clearTimeout(returnNoticeTimeoutRef.current);
     }
-    const username = shareUsername ? state?.user?.username : null;
+    const effectiveShareUsername = state?.subreddit.isNsfw
+      ? false
+      : shareUsername;
+    const username = effectiveShareUsername ? state?.user?.username : null;
     const message = username ? `u/${username} just subscribed!` : 'New member just subscribed!';
     returnNoticeTimeoutRef.current = window.setTimeout(() => {
       showNotice(message);
     }, 80);
-  };
-
-  const handleDebugSubscribe = () => {
-    const updatedState = simulateSubscribe(shareUsername);
-    if (!updatedState) {
-      return;
-    }
-    void sendDebugRealtime({
-      nextCount: updatedState.subreddit.subscribers,
-      includeUsername: shareUsername,
-    });
-    if (updatedState.completedTime) {
-      setPage('completed');
-    } else {
-      setPage('thanks');
-    }
-    triggerConfetti({ durationMs: 2400 });
-    const noticeMessage = shareUsername
-      ? `u/${updatedState.user?.username ?? 'debug_user'} just subscribed!`
-      : 'New member just subscribed!';
-    showNotice(noticeMessage);
-    showToast({ text: 'Debug subscribe simulated.', appearance: 'success' });
-  };
-
-  const handleDebugIncrement = () => {
-    const updatedState = simulateIncrement();
-    if (!updatedState) {
-      return;
-    }
-    const includeUsername = debugToggleRef.current;
-    debugToggleRef.current = !debugToggleRef.current;
-    void sendDebugRealtime({
-      nextCount: updatedState.subreddit.subscribers,
-      includeUsername,
-    });
-    if (updatedState.completedTime) {
-      setPage('completed');
-    }
-    showToast({ text: 'Debug +1 simulated.', appearance: 'success' });
   };
 
   const handleCelebrate = () => {
@@ -221,24 +183,6 @@ export const App = () => {
 
   return (
     <div className="relative flex h-[320px] w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]">
-      {showDebugControls ? (
-        <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-1">
-          <button
-            className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={handleDebugIncrement}
-            disabled={!state}
-          >
-            +1
-          </button>
-          <button
-            className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={handleDebugSubscribe}
-            disabled={!state}
-          >
-            +Subscribe
-          </button>
-        </div>
-      ) : null}
       {content ?? (
         <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
           Unable to load Subscriber Goal data.

@@ -3,6 +3,7 @@ export type BasicSubredditData = {
   name: string;
   icon: string;
   subscribers: number;
+  isNsfw: boolean;
 };
 
 export type BasicUserData = {
@@ -50,11 +51,6 @@ export type SubscribeResponse = {
 
 export type SubscribeRequest = {
   shareUsername?: boolean;
-};
-
-export type DebugRealtimeRequest = {
-  nextCount: number;
-  includeUsername?: boolean;
 };
 
 export type RealtimeMessage = {

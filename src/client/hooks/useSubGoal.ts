@@ -1,7 +1,6 @@
 import { connectRealtime } from '@devvit/web/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  DebugRealtimeRequest,
   ErrorResponse,
   InitResponse,
   RealtimeMessage,
@@ -288,74 +287,6 @@ export const useSubGoal = () => {
     [submitting]
   );
 
-  const simulateSubscribe = useCallback(
-    (shareUsername: boolean): SubGoalState | null => {
-    if (!state) {
-      return null;
-    }
-    const nextSubscribers = state.subreddit.subscribers + 1;
-      const recentSubscriber = shareUsername
-        ? state.user?.username ?? 'debug_user'
-        : null;
-    const completedTime =
-      state.goal && nextSubscribers >= state.goal
-        ? Date.now()
-        : state.completedTime;
-
-    const nextState: SubGoalState = {
-      ...state,
-      subscribed: true,
-        recentSubscriber,
-      completedTime,
-      subreddit: {
-        ...state.subreddit,
-        subscribers: nextSubscribers,
-      },
-    };
-    setState(nextState);
-    return nextState;
-    },
-    [state]
-  );
-
-  const sendDebugRealtime = useCallback(
-    async (payload: DebugRealtimeRequest): Promise<string | null> => {
-      const result = await requestJson<{ status: string }>('/api/debug/realtime', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (result.error) {
-        setError(result.error);
-        return result.error;
-      }
-      return null;
-    },
-    []
-  );
-
-  const simulateIncrement = useCallback((): SubGoalState | null => {
-    if (!state) {
-      return null;
-    }
-    const nextSubscribers = state.subreddit.subscribers + 1;
-    const completedTime =
-      state.goal && nextSubscribers >= state.goal
-        ? Date.now()
-        : state.completedTime;
-
-    const nextState: SubGoalState = {
-      ...state,
-      completedTime,
-      subreddit: {
-        ...state.subreddit,
-        subscribers: nextSubscribers,
-      },
-    };
-    setState(nextState);
-    return nextState;
-  }, [state]);
-
   return {
     state,
     loading,
@@ -363,9 +294,6 @@ export const useSubGoal = () => {
     error,
     refresh,
     subscribe,
-    simulateSubscribe,
-    simulateIncrement,
-    sendDebugRealtime,
     setError,
     notice,
     showNotice,

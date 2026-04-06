@@ -5,7 +5,6 @@ import { createServer, context, getServerPort, reddit, redis, realtime } from '@
 import type {
   CreateGoalFormValues,
   DeleteGoalFormValues,
-  DebugRealtimeRequest,
   ErrorResponse,
   EraseDataFormValues,
   InitResponse,
@@ -40,6 +39,7 @@ import { getDefaultSubscriberGoal } from './utils/numberUtils';
 import { clearUserStickies, getSubredditIcon } from './utils/redditUtils';
 import { validateSubredditDisplayName } from './utils/subredditDisplayName';
 import { applyTextFallback } from './utils/textFallback';
+import { resolveShareUsername } from './utils/usernameSharePolicy';
 
 const app = express();
 
@@ -85,6 +85,7 @@ const buildState = async (
       icon: subredditIcon,
       subscribers:
         options?.subscribersOverride ?? subreddit.numberOfSubscribers,
+      isNsfw: (subreddit as { isNsfw?: boolean }).isNsfw === true,
     },
   };
 };
@@ -193,12 +194,18 @@ router.post('/api/subscribe', async (_req, res): Promise<void> => {
     await reddit.subscribeToCurrentSubreddit();
 
     const subreddit = await reddit.getCurrentSubreddit();
+    const sourceSubredditIsNsfw =
+      (subreddit as { isNsfw?: boolean }).isNsfw === true;
+    const effectiveShareUsername = resolveShareUsername(
+      shareUsername,
+      sourceSubredditIsNsfw
+    );
     const newSubscriberCount = subreddit.numberOfSubscribers + 1;
 
     await setNewSubscriber(redis, postId, newSubscriberCount, {
       id: userId,
       username,
-    }, shareUsername);
+    }, effectiveShareUsername);
 
     const subGoalData = await getSubGoalData(redis, postId);
     if (subGoalData.goal && newSubscriberCount >= subGoalData.goal) {
@@ -208,13 +215,15 @@ router.post('/api/subscribe', async (_req, res): Promise<void> => {
     const realtimeMessage: RealtimeMessage = {
       type: 'sub',
       newSubscriberCount,
-      ...(shareUsername ? { recentSubscriber: username } : {}),
+      ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
     };
     await realtime.send('subscriber_updates', realtimeMessage);
 
     const state = await buildState(postId, {
       subscribersOverride: newSubscriberCount,
-      ...(shareUsername ? { recentSubscriberOverride: username } : {}),
+      ...(effectiveShareUsername
+        ? { recentSubscriberOverride: username }
+        : {}),
     });
 
     res.json({
@@ -268,29 +277,6 @@ router.post('/internal/scheduler/posts-updater-job', async (_req, res): Promise<
   } catch (error) {
     console.error(`postsUpdaterJob error: ${String(error)}`);
     res.status(400).json({ status: 'error', message: 'Failed to run scheduler job' });
-  }
-});
-
-router.post('/api/debug/realtime', async (req, res): Promise<void> => {
-  const body = req.body as DebugRealtimeRequest;
-  if (!body || typeof body.nextCount !== 'number' || Number.isNaN(body.nextCount)) {
-    res.status(400).json({ status: 'error', message: 'nextCount is required' } satisfies ErrorResponse);
-    return;
-  }
-
-  const recentSubscriber = body.includeUsername ? 'debug_user' : undefined;
-  const message: RealtimeMessage = {
-    type: 'sub',
-    newSubscriberCount: body.nextCount,
-    ...(recentSubscriber ? { recentSubscriber } : {}),
-  };
-
-  try {
-    await realtime.send('subscriber_updates', message);
-    res.json({ status: 'ok' });
-  } catch (error) {
-    console.error('Failed to send debug realtime:', error);
-    res.status(400).json({ status: 'error', message: 'Failed to send debug realtime' } satisfies ErrorResponse);
   }
 });
 

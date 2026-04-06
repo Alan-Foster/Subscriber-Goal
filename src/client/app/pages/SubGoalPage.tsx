@@ -80,7 +80,7 @@ export const SubGoalPage = ({
       >
         Subscribe{state.subscribed ? 'd' : ''} to r/{state.subreddit.name}
       </button>
-      {state.subscribed ? (
+      {state.subscribed || state.subreddit.isNsfw ? (
         <div className="h-5" />
       ) : (
         <label
