@@ -18,7 +18,6 @@ const hoisted = vi.hoisted(() => ({
   loggedEvents: [] as Array<Record<string, unknown>>,
   redisState: {
     redisMock: undefined as unknown,
-    redisGlobalMock: undefined as unknown,
   },
 }));
 
@@ -112,7 +111,6 @@ class InMemoryRedis {
 }
 
 let redisMock: InMemoryRedis;
-let redisGlobalMock: InMemoryRedis;
 
 vi.mock('@devvit/web/server', () => ({
   reddit: hoisted.mockReddit,
@@ -137,20 +135,6 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).zRange(...args),
     zRem: (...args: [string, string[]]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zRem(...args),
-    global: {
-      get: (...args: [string]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).get(...args),
-      set: (...args: [string, string, SetOptions?]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).set(...args),
-      del: (...args: string[]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).del(...args),
-      zAdd: (...args: [string, ...ZEntry[]]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zAdd(...args),
-      zRange: (...args: [string, number, number]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zRange(...args),
-      zRem: (...args: [string, string[]]) =>
-        (hoisted.redisState.redisGlobalMock as InMemoryRedis).zRem(...args),
-    },
   },
   context: hoisted.mockContext,
 }));
@@ -183,9 +167,7 @@ const baseSettings: AppSettings = {
 describe('processCrosspostDispatchQueue ingestion guards', () => {
   beforeEach(() => {
     redisMock = new InMemoryRedis();
-    redisGlobalMock = new InMemoryRedis();
     hoisted.redisState.redisMock = redisMock;
-    hoisted.redisState.redisGlobalMock = redisGlobalMock;
     mockContext.subredditName = undefined;
     (
       mockContext as {
@@ -242,7 +224,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
   it('skips ingestion when lock is held by another worker', async () => {
     mockContext.subredditName = 'SubGoal';
-    await redisGlobalMock.set('crosspostIngestionLock:subgoal', 'held-by-other');
+    await redisMock.set('crosspostIngestionLock:subgoal', 'held-by-other');
 
     const summary = await processCrosspostDispatchQueue(
       baseSettings,
@@ -543,9 +525,9 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it('enforces hourly cap using global history', async () => {
+  it('enforces hourly cap using install history', async () => {
     mockContext.subredditName = 'SubGoal';
-    await redisGlobalMock.zAdd(
+    await redisMock.zAdd(
       'crosspostHourlyCreationHistory:subgoal',
       { member: 'old_1', score: Date.now() - 5000 },
       { member: 'old_2', score: Date.now() - 4000 }
@@ -589,7 +571,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
   it('skips and processes when source post is under create cooldown', async () => {
     mockContext.subredditName = 'SubGoal';
-    await redisGlobalMock.set('crosspostSourceCreateCooldown:t3_cool', '1');
+    await redisMock.set('crosspostSourceCreateCooldown:t3_cool', '1');
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subredditName: string, page: string) => {
         if (page === crosspostWikiPages.newPost) {
@@ -716,13 +698,13 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     vi.spyOn(redisMock, 'zAdd').mockImplementation(async () => {
       throw new Error('failed zset write');
     });
-    const redisGlobalSetSpy = vi
-      .spyOn(redisGlobalMock, 'set')
+    const redisSetSpy = vi
+      .spyOn(redisMock, 'set')
       .mockImplementation(async (key, value, options) => {
         if (key.startsWith('crosspostTerminalRevision:')) {
           throw new Error('failed terminal marker write');
         }
-        return InMemoryRedis.prototype.set.call(redisGlobalMock, key, value, options);
+        return InMemoryRedis.prototype.set.call(redisMock, key, value, options);
       });
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
@@ -740,7 +722,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         (event) => event.event === 'crosspost_persistence_failed_after_create'
       )
     ).toBe(true);
-    expect(redisGlobalSetSpy).toHaveBeenCalled();
+    expect(redisSetSpy).toHaveBeenCalled();
     expect(
       consoleErrorSpy.mock.calls.some((call) =>
         call.some(
@@ -759,13 +741,13 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(secondSummary.crosspostsCreated).toBe(0);
     expect(mockReddit.crosspost).toHaveBeenCalledTimes(1);
-    redisGlobalSetSpy.mockRestore();
+    redisSetSpy.mockRestore();
     consoleErrorSpy.mockRestore();
   });
 
   it('skips when source create in-flight lock is held', async () => {
     mockContext.subredditName = 'SubGoal';
-    await redisGlobalMock.set('crosspostCreateInFlight:t3_inflight', 'other-lock');
+    await redisMock.set('crosspostCreateInFlight:t3_inflight', 'other-lock');
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subredditName: string, page: string) => {
         if (page === crosspostWikiPages.newPost) {

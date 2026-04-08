@@ -245,6 +245,9 @@ router.post('/internal/triggers/on-app-install', async (_req, res): Promise<void
     res.json({ status: 'ok' });
   } catch (error) {
     console.error(`on-app-install error: ${String(error)}`);
+    if (error instanceof Error) {
+      console.error(error.stack ?? '(no stack)');
+    }
     res.status(400).json({ status: 'error', message: 'Failed to run install trigger' });
   }
 });

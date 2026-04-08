@@ -8,11 +8,6 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 - To view a live version of Subscriber Goal, visit [https://www.reddit.com/r/SubGoal](https://www.reddit.com/r/SubGoal)
 
-## AI Coding Instructions
-
-- Project-specific vibecoding instructions are stored in `.cursor/rules/vibecoding.mdc`.
-- The rule is scoped to TypeScript and TSX files (`**/*.ts`, `**/*.tsx`).
-
 
 
 ![An example of Subscriber Goal Posts](https://i.redd.it/zrkpv7gfg4af1.jpeg)
@@ -56,6 +51,8 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.11.4 - Fixed an installation bug, Devvit 0.12.18
+- 0.11.3 - Share username is now enabled by default (opt-out).
 - 0.11.2 - Customize subreddit name capitalization across app.
 - 0.11.1 - Double Crosspost Errors, fixed WSL and Github linter
 - 0.11.0 - Harden crosspost replay prevention and dedupe

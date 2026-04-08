@@ -268,7 +268,7 @@ async function markTerminalRevisionWithLogging(
   contextReason: 'crosspost_persistence_partial' | 'crosspost_persistence_failed_after_create'
 ): Promise<boolean> {
   try {
-    await markTerminalRevision(redis.global, revisionId);
+    await markTerminalRevision(redis, revisionId);
     console.info(
       `[crosspost] terminal dedupe marked: revisionId=${revisionId} sourcePostId=${sourcePostId} reason=${contextReason}`
     );
@@ -509,7 +509,7 @@ async function getNewPosts(
   for (const revision of result.revisions) {
     if (
       (await isProcessedRevision(redis, revision.id)) ||
-      (await isTerminalRevisionMarked(redis.global, revision.id))
+      (await isTerminalRevisionMarked(redis, revision.id))
     ) {
       continue;
     }
@@ -632,7 +632,7 @@ async function updateFromWikis(
     appSettings.promoSubreddit
   )}`;
   let hourlyCreatedCount = await getCurrentHourlyCrosspostCount(
-    redis.global,
+    redis,
     hourlyHistoryKey,
     nowMs
   );
@@ -804,7 +804,7 @@ async function updateFromWikis(
         await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
         continue;
       }
-      if (await hasSourceCreateCooldown(redis.global, newPost.postId)) {
+      if (await hasSourceCreateCooldown(redis, newPost.postId)) {
         summary.crosspostsSkipped += 1;
         summary.crosspostsSkippedBySourceCooldown += 1;
         logCrosspostEvent(
@@ -852,7 +852,7 @@ async function updateFromWikis(
       }
 
       const sourceCreateLock = await acquireSourceCreateInFlightLock(
-        redis.global,
+        redis,
         newPost.postId
       );
       if (!sourceCreateLock.acquired) {
@@ -902,7 +902,7 @@ async function updateFromWikis(
         throw error;
       } finally {
         await releaseSourceCreateInFlightLock(
-          redis.global,
+          redis,
           sourceCreateLock.lockKey,
           sourceCreateLock.lockToken
         );
@@ -916,7 +916,7 @@ async function updateFromWikis(
         revisionId: newPost.revisionId,
       });
       try {
-        await setSourceCreateCooldown(redis.global, newPost.postId);
+        await setSourceCreateCooldown(redis, newPost.postId);
       } catch (cooldownError) {
         console.warn(
           `[crosspost] failed to set source create cooldown: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} error=${toErrorMessage(
@@ -933,7 +933,7 @@ async function updateFromWikis(
       let mappingStoreErrorMessage: string | undefined;
 
       try {
-        await markTerminalRevision(redis.global, newPost.revisionId);
+        await markTerminalRevision(redis, newPost.revisionId);
         terminalStored = true;
       } catch (terminalStoreError) {
         terminalStoreErrorMessage = toErrorMessage(terminalStoreError);
@@ -957,7 +957,7 @@ async function updateFromWikis(
       summary.crosspostsCreatedThisRun += 1;
       hourlyCreatedCount += 1;
       await recordCrosspostCreation(
-        redis.global,
+        redis,
         hourlyHistoryKey,
         newPost.revisionId,
         Date.now()
@@ -1399,7 +1399,7 @@ export async function processCrosspostDispatchQueue(
   const lockKey = `${crosspostIngestionLockKeyPrefix}:${toNormalizedSubredditName(
     appSettings.promoSubreddit
   )}`;
-  const lock = await acquireCrosspostIngestionLock(redis.global, lockKey);
+  const lock = await acquireCrosspostIngestionLock(redis, lockKey);
   if (!lock.acquired) {
     logCrosspostEvent(
       {
@@ -1596,7 +1596,7 @@ export async function processCrosspostDispatchQueue(
     }
   } finally {
     await releaseCrosspostIngestionLock(
-      redis.global,
+      redis,
       lock.lockKey,
       lock.lockToken
     );
