@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 0.11.4 - Fixed an installation bug, Devvit 0.12.18
+- 0.11.4 - Fixed global redis error, Devvit 0.12.18
 - 0.11.3 - Share username is now enabled by default (opt-out).
 - 0.11.2 - Customize subreddit name capitalization across app.
 - 0.11.1 - Double Crosspost Errors, fixed WSL and Github linter
