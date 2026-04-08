@@ -119,5 +119,9 @@
         "cron": "*/1 * * * *"
       }
     }
+  },
+  "scripts": {
+    "dev": "npm run build:watch",
+    "build": "npm run build"
   }
 }

@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { crosspostWikiPages } from '../data/crosspostData';
+import {
+  crosspostWikiPages,
+  processedRevisionsByTimeKey,
+} from '../data/crosspostData';
 import type { AppSettings } from '../../shared/types/api';
 
 const hoisted = vi.hoisted(() => ({
@@ -695,9 +698,15 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     vi.spyOn(redisMock, 'hSet').mockImplementation(async () => {
       throw new Error('failed hash write');
     });
-    vi.spyOn(redisMock, 'zAdd').mockImplementation(async () => {
-      throw new Error('failed zset write');
-    });
+    const originalZAdd = redisMock.zAdd.bind(redisMock);
+    vi
+      .spyOn(redisMock, 'zAdd')
+      .mockImplementation(async (key: string, ...entries: ZEntry[]) => {
+        if (key === processedRevisionsByTimeKey) {
+          throw new Error('failed zset write');
+        }
+        return originalZAdd(key, ...entries);
+      });
     const redisSetSpy = vi
       .spyOn(redisMock, 'set')
       .mockImplementation(async (key, value, options) => {
