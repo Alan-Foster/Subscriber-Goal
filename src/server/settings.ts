@@ -4,11 +4,15 @@ import type { SettingsClient } from './types';
 export const defaultAppSettings: AppSettings = {
   promoSubreddit: 'SubGoal',
   crosspostAuthoritySubreddit: '',
-  crosspostMaxSourcePostAgeMinutes: 10,
+  crosspostMaxSourcePostAgeMinutes: 180,
   crosspostIngestionEnabled: true,
-  crosspostMaxRevisionAgeMinutes: 10,
+  crosspostMaxRevisionAgeMinutes: 180,
   maxCrosspostsPerRun: 5,
   maxCrosspostsPerHour: 30,
+  crosspostRetryWindowMinutes: 1440,
+  crosspostRetryBaseDelaySeconds: 60,
+  crosspostRetryMaxDelayMinutes: 30,
+  crosspostPendingBatchSize: 25,
 };
 
 const normalizeSubredditName = (value: string): string =>
@@ -86,6 +90,46 @@ export async function getAppSettings(settings?: SettingsClient): Promise<AppSett
       ? Math.floor(configuredMaxCrosspostsPerHour)
       : defaultAppSettings.maxCrosspostsPerHour;
 
+  const configuredRetryWindowMinutes =
+    typeof allSettings.crosspostRetryWindowMinutes === 'number'
+      ? allSettings.crosspostRetryWindowMinutes
+      : defaultAppSettings.crosspostRetryWindowMinutes;
+  const crosspostRetryWindowMinutes =
+    Number.isFinite(configuredRetryWindowMinutes) &&
+    configuredRetryWindowMinutes > 0
+      ? Math.floor(configuredRetryWindowMinutes)
+      : defaultAppSettings.crosspostRetryWindowMinutes;
+
+  const configuredRetryBaseDelaySeconds =
+    typeof allSettings.crosspostRetryBaseDelaySeconds === 'number'
+      ? allSettings.crosspostRetryBaseDelaySeconds
+      : defaultAppSettings.crosspostRetryBaseDelaySeconds;
+  const crosspostRetryBaseDelaySeconds =
+    Number.isFinite(configuredRetryBaseDelaySeconds) &&
+    configuredRetryBaseDelaySeconds > 0
+      ? Math.floor(configuredRetryBaseDelaySeconds)
+      : defaultAppSettings.crosspostRetryBaseDelaySeconds;
+
+  const configuredRetryMaxDelayMinutes =
+    typeof allSettings.crosspostRetryMaxDelayMinutes === 'number'
+      ? allSettings.crosspostRetryMaxDelayMinutes
+      : defaultAppSettings.crosspostRetryMaxDelayMinutes;
+  const crosspostRetryMaxDelayMinutes =
+    Number.isFinite(configuredRetryMaxDelayMinutes) &&
+    configuredRetryMaxDelayMinutes > 0
+      ? Math.floor(configuredRetryMaxDelayMinutes)
+      : defaultAppSettings.crosspostRetryMaxDelayMinutes;
+
+  const configuredPendingBatchSize =
+    typeof allSettings.crosspostPendingBatchSize === 'number'
+      ? allSettings.crosspostPendingBatchSize
+      : defaultAppSettings.crosspostPendingBatchSize;
+  const crosspostPendingBatchSize =
+    Number.isFinite(configuredPendingBatchSize) &&
+    configuredPendingBatchSize > 0
+      ? Math.floor(configuredPendingBatchSize)
+      : defaultAppSettings.crosspostPendingBatchSize;
+
   if (configuredAuthority !== crosspostAuthoritySubreddit) {
     console.warn(
       `[settings] normalized crosspostAuthoritySubreddit from "${configuredAuthority}" to "${crosspostAuthoritySubreddit}"`
@@ -116,6 +160,30 @@ export async function getAppSettings(settings?: SettingsClient): Promise<AppSett
     );
   }
 
+  if (configuredRetryWindowMinutes !== crosspostRetryWindowMinutes) {
+    console.warn(
+      `[settings] normalized crosspostRetryWindowMinutes from "${configuredRetryWindowMinutes}" to "${crosspostRetryWindowMinutes}"`
+    );
+  }
+
+  if (configuredRetryBaseDelaySeconds !== crosspostRetryBaseDelaySeconds) {
+    console.warn(
+      `[settings] normalized crosspostRetryBaseDelaySeconds from "${configuredRetryBaseDelaySeconds}" to "${crosspostRetryBaseDelaySeconds}"`
+    );
+  }
+
+  if (configuredRetryMaxDelayMinutes !== crosspostRetryMaxDelayMinutes) {
+    console.warn(
+      `[settings] normalized crosspostRetryMaxDelayMinutes from "${configuredRetryMaxDelayMinutes}" to "${crosspostRetryMaxDelayMinutes}"`
+    );
+  }
+
+  if (configuredPendingBatchSize !== crosspostPendingBatchSize) {
+    console.warn(
+      `[settings] normalized crosspostPendingBatchSize from "${configuredPendingBatchSize}" to "${crosspostPendingBatchSize}"`
+    );
+  }
+
   return {
     promoSubreddit,
     crosspostAuthoritySubreddit,
@@ -124,5 +192,9 @@ export async function getAppSettings(settings?: SettingsClient): Promise<AppSett
     crosspostMaxRevisionAgeMinutes,
     maxCrosspostsPerRun,
     maxCrosspostsPerHour,
+    crosspostRetryWindowMinutes,
+    crosspostRetryBaseDelaySeconds,
+    crosspostRetryMaxDelayMinutes,
+    crosspostPendingBatchSize,
   };
 }

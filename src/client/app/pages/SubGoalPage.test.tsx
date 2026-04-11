@@ -17,6 +17,10 @@ const baseState: SubGoalState = {
     crosspostMaxRevisionAgeMinutes: 10,
     maxCrosspostsPerRun: 5,
     maxCrosspostsPerHour: 30,
+    crosspostRetryWindowMinutes: 1440,
+    crosspostRetryBaseDelaySeconds: 60,
+    crosspostRetryMaxDelayMinutes: 30,
+    crosspostPendingBatchSize: 25,
   },
   subreddit: {
     id: 't5_test',

@@ -2,21 +2,27 @@ import { reddit, redis, context } from '@devvit/web/server';
 import type { AppSettings } from '../../shared/types/api';
 import { getAppSettings } from '../settings';
 import {
+  type PendingCrosspost,
+  countPendingCrossposts,
   crosspostListKey,
   crosspostWikiPages,
   dispatchPostAction,
+  getPendingCrosspost,
   getCorrespondingPost,
   hasCrosspost,
   isProcessedRevision,
+  listDuePendingCrossposts,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
   modToPostActionMap,
   parseNewPostDispatchReason,
   parsePostActionDispatchReason,
+  removePendingCrosspost,
   removeCorrespondingPost,
   removeProcessedRevisions,
   storeCorrespondingPost,
   storeProcessedRevision,
+  upsertPendingCrosspost,
 } from '../data/crosspostData';
 import { getTrackedPosts } from '../data/updaterData';
 import { safeGetWikiPageRevisions } from '../utils/redditUtils';
@@ -90,6 +96,7 @@ const crosspostTerminalRevisionTtlMs = 30 * 24 * 60 * 60 * 1000;
 const crosspostCreateInFlightKeyPrefix = 'crosspostCreateInFlight';
 const crosspostCreateInFlightTtlMs = 90 * 1000;
 const crosspostTargetDuplicateScanLimit = 25;
+const crosspostSchedulerDaisyChainMaxPasses = 3;
 
 type CrosspostBookkeepingCleanupOptions = {
   retentionMs?: number;
@@ -175,6 +182,39 @@ const getMaxCrosspostsPerHour = (appSettings: AppSettings): number =>
     ? Math.floor(appSettings.maxCrosspostsPerHour)
     : 30;
 
+const getCrosspostRetryWindowMs = (appSettings: AppSettings): number => {
+  const minutes =
+    Number.isFinite(appSettings.crosspostRetryWindowMinutes) &&
+    appSettings.crosspostRetryWindowMinutes > 0
+      ? Math.floor(appSettings.crosspostRetryWindowMinutes)
+      : 1440;
+  return minutes * 60 * 1000;
+};
+
+const getCrosspostRetryBaseDelayMs = (appSettings: AppSettings): number => {
+  const seconds =
+    Number.isFinite(appSettings.crosspostRetryBaseDelaySeconds) &&
+    appSettings.crosspostRetryBaseDelaySeconds > 0
+      ? Math.floor(appSettings.crosspostRetryBaseDelaySeconds)
+      : 60;
+  return seconds * 1000;
+};
+
+const getCrosspostRetryMaxDelayMs = (appSettings: AppSettings): number => {
+  const minutes =
+    Number.isFinite(appSettings.crosspostRetryMaxDelayMinutes) &&
+    appSettings.crosspostRetryMaxDelayMinutes > 0
+      ? Math.floor(appSettings.crosspostRetryMaxDelayMinutes)
+      : 30;
+  return minutes * 60 * 1000;
+};
+
+const getCrosspostPendingBatchSize = (appSettings: AppSettings): number =>
+  Number.isFinite(appSettings.crosspostPendingBatchSize) &&
+  appSettings.crosspostPendingBatchSize > 0
+    ? Math.floor(appSettings.crosspostPendingBatchSize)
+    : 25;
+
 const getPostCreatedAtMs = (post: {
   createdAt?: Date | string | number;
 }): number => {
@@ -192,6 +232,21 @@ const getPostCreatedAtMs = (post: {
   }
   return NaN;
 };
+
+const getNextRetryDelayMs = (
+  attemptCount: number,
+  baseDelayMs: number,
+  maxDelayMs: number
+): number => {
+  const exponentialDelay = baseDelayMs * 2 ** Math.max(0, attemptCount);
+  return Math.min(exponentialDelay, maxDelayMs);
+};
+
+const isRetryWindowExpired = (
+  pending: PendingCrosspost,
+  retryWindowMs: number,
+  nowMs: number
+): boolean => nowMs - pending.firstSeenMs >= retryWindowMs;
 
 async function acquireCrosspostIngestionLock(
   redisClient: RedisLockClient,
@@ -636,6 +691,10 @@ async function updateFromWikis(
     hourlyHistoryKey,
     nowMs
   );
+  const retryWindowMs = getCrosspostRetryWindowMs(appSettings);
+  const retryBaseDelayMs = getCrosspostRetryBaseDelayMs(appSettings);
+  const retryMaxDelayMs = getCrosspostRetryMaxDelayMs(appSettings);
+  const pendingBatchSize = getCrosspostPendingBatchSize(appSettings);
 
   const newPostBatch = await getNewPosts(appSettings);
   summary.revisionsFetched += newPostBatch.revisionsFetched;
@@ -651,238 +710,245 @@ async function updateFromWikis(
   const newPostIds = newPostBatch.events;
   summary.newPostsSeen = newPostIds.length;
   for (const newPost of newPostIds) {
-    let sourceSubredditIsNsfw = false;
     try {
-      const revisionDateMs = newPost.revisionDateMs;
-      if (typeof revisionDateMs !== 'number' || !Number.isFinite(revisionDateMs)) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'revision_age_unknown',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      const revisionAgeMs = nowMs - revisionDateMs;
-      if (revisionAgeMs > revisionFreshnessWindowMs) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'revision_too_old',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      if (summary.crosspostsCreatedThisRun >= maxCrosspostsPerRun) {
-        summary.crosspostsSkipped += 1;
-        summary.crosspostsBlockedByRunCap += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'crosspost_cap_per_run_reached',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      if (hourlyCreatedCount >= maxCrosspostsPerHour) {
-        summary.crosspostsSkipped += 1;
-        summary.crosspostsBlockedByHourlyCap += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'crosspost_cap_hourly_reached',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-
-      const post = await reddit.getPostById(newPost.postId);
-      if (!post) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'source_post_missing',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        console.info(
-          `[crosspost] source post missing; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId}`
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      const createdAtMs = getPostCreatedAtMs(post);
-      if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'source_post_age_unknown',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        console.warn(
-          `[crosspost] source post age unknown; terminal skip and mark processed: revisionId=${newPost.revisionId} postId=${newPost.postId} freshnessWindowMs=${sourcePostFreshnessWindowMs}`
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      const postAgeMs = Date.now() - createdAtMs;
-      if (postAgeMs > sourcePostFreshnessWindowMs) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'source_post_too_old',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        console.warn(
-          `[crosspost] stale source post; terminal skip and mark processed: revisionId=${newPost.revisionId} postId=${newPost.postId} ageMs=${postAgeMs} freshnessWindowMs=${sourcePostFreshnessWindowMs}`
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      const sourceSubredditInfo = await reddit.getSubredditInfoById(post.subredditId);
-      sourceSubredditIsNsfw = sourceSubredditInfo.isNsfw === true;
-      if (sourceSubredditIsNsfw) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent({
-          event: 'crosspost_attempt_skipped',
-          sourcePostId: newPost.postId,
-          targetSubreddit: appSettings.promoSubreddit,
-          reason: 'source_subreddit_nsfw',
-          revisionId: newPost.revisionId,
-        });
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      if (await hasCrosspost(redis, newPost.postId)) {
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent({
-          event: 'crosspost_attempt_skipped',
-          sourcePostId: newPost.postId,
-          targetSubreddit: appSettings.promoSubreddit,
-          reason: 'already_mapped',
-          revisionId: newPost.revisionId,
-        });
-        console.info(
-          `[crosspost] mapping already exists; skipping duplicate crosspost: revisionId=${newPost.revisionId} postId=${newPost.postId}`
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      if (await hasSourceCreateCooldown(redis, newPost.postId)) {
-        summary.crosspostsSkipped += 1;
-        summary.crosspostsSkippedBySourceCooldown += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'source_post_recently_crossposted',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-      const existingCrosspostId = await findExistingTargetCrosspost(
-        newPost.postId,
-        appSettings.promoSubreddit
-      );
-      if (existingCrosspostId) {
-        summary.crosspostsSkipped += 1;
-        summary.crosspostsSkippedByExistingDetection += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            crosspostId: existingCrosspostId,
-            reason: 'existing_crosspost_detected',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        try {
-          await storeCorrespondingPost(redis, newPost.postId, existingCrosspostId);
-        } catch (storeDetectedMappingError) {
-          console.warn(
-            `[crosspost] failed to persist existing detected mapping: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${existingCrosspostId} error=${toErrorMessage(
-              storeDetectedMappingError
-            )}`
-          );
-        }
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
-
-      const sourceCreateLock = await acquireSourceCreateInFlightLock(
+      const existing = await getPendingCrosspost(
         redis,
-        newPost.postId
+        appSettings.promoSubreddit,
+        newPost.revisionId
       );
-      if (!sourceCreateLock.acquired) {
-        summary.crosspostsSkipped += 1;
-        summary.crosspostsSkippedByInFlight += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: 'source_create_inflight',
-            revisionId: newPost.revisionId,
-          },
-          'warn'
-        );
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        continue;
-      }
+      await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
+        revisionId: newPost.revisionId,
+        postId: newPost.postId,
+        goal: newPost.goal,
+        firstSeenMs: existing?.firstSeenMs ?? nowMs,
+        nextAttemptMs: existing?.nextAttemptMs ?? nowMs,
+        attemptCount: existing?.attemptCount ?? 0,
+        lastError: existing?.lastError ?? null,
+        status: existing?.status ?? 'queued_for_crosspost',
+        ...(typeof newPost.revisionDateMs === 'number'
+          ? { revisionDateMs: newPost.revisionDateMs }
+          : {}),
+      });
+      await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
       logCrosspostEvent({
         event: 'crosspost_attempt_started',
         sourcePostId: newPost.postId,
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'dispatch_new_post',
+        reason: 'queued_for_crosspost',
         revisionId: newPost.revisionId,
       });
+    } catch (queueError) {
+      summary.crosspostsFailed += 1;
+      logCrosspostEvent(
+        {
+          event: 'crosspost_attempt_failed',
+          sourcePostId: newPost.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: 'queue_enqueue_failed',
+          revisionId: newPost.revisionId,
+          errorMessage: toErrorMessage(queueError),
+        },
+        'error'
+      );
+    }
+  }
+
+  const duePendingCrossposts = await listDuePendingCrossposts(
+    redis,
+    appSettings.promoSubreddit,
+    { nowMs, limit: pendingBatchSize }
+  );
+
+  const scheduleRetry = async (
+    pending: PendingCrosspost,
+    reason: string,
+    errorMessage?: string
+  ): Promise<void> => {
+    if (isRetryWindowExpired(pending, retryWindowMs, nowMs)) {
+      await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
+      summary.crosspostsSkipped += 1;
+      logCrosspostEvent(
+        {
+          event: 'crosspost_attempt_skipped',
+          sourcePostId: pending.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: `${reason}_retry_window_expired`,
+          revisionId: pending.revisionId,
+          ...(errorMessage ? { errorMessage } : {}),
+        },
+        'warn'
+      );
+      console.warn(
+        `[crosspost] crosspost_terminal_failed: revisionId=${pending.revisionId} postId=${pending.postId} reason=${reason}_retry_window_expired`
+      );
+      return;
+    }
+
+    const nextDelayMs = getNextRetryDelayMs(
+      pending.attemptCount,
+      retryBaseDelayMs,
+      retryMaxDelayMs
+    );
+    await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
+      ...pending,
+      attemptCount: pending.attemptCount + 1,
+      nextAttemptMs: nowMs + nextDelayMs,
+      lastError: errorMessage ?? reason,
+      status: 'crosspost_retrying',
+    });
+    summary.crosspostsSkipped += 1;
+    logCrosspostEvent(
+      {
+        event: 'crosspost_attempt_skipped',
+        sourcePostId: pending.postId,
+        targetSubreddit: appSettings.promoSubreddit,
+        reason,
+        revisionId: pending.revisionId,
+        ...(errorMessage ? { errorMessage } : {}),
+      },
+      'warn'
+    );
+    console.info(
+      `[crosspost] crosspost_retrying: revisionId=${pending.revisionId} postId=${pending.postId} reason=${reason} attempt=${pending.attemptCount + 1} nextAttemptMs=${nowMs + nextDelayMs}`
+    );
+  };
+
+  const markTerminalFailure = async (
+    pending: PendingCrosspost,
+    reason: string,
+    errorMessage?: string
+  ): Promise<void> => {
+    await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
+    summary.crosspostsSkipped += 1;
+    logCrosspostEvent(
+      {
+        event: 'crosspost_attempt_skipped',
+        sourcePostId: pending.postId,
+        targetSubreddit: appSettings.promoSubreddit,
+        reason,
+        revisionId: pending.revisionId,
+        ...(errorMessage ? { errorMessage } : {}),
+      },
+      'warn'
+    );
+    console.warn(
+      `[crosspost] crosspost_terminal_failed: revisionId=${pending.revisionId} postId=${pending.postId} reason=${reason}`
+    );
+  };
+
+  for (const pending of duePendingCrossposts) {
+    let sourceSubredditIsNsfw = false;
+    try {
+      const revisionDateMs = pending.revisionDateMs;
+      if (typeof revisionDateMs !== 'number' || !Number.isFinite(revisionDateMs)) {
+        await scheduleRetry(pending, 'revision_age_unknown');
+        continue;
+      }
+      const revisionAgeMs = nowMs - revisionDateMs;
+      if (revisionAgeMs > revisionFreshnessWindowMs) {
+        await scheduleRetry(pending, 'revision_too_old');
+        continue;
+      }
+      if (summary.crosspostsCreatedThisRun >= maxCrosspostsPerRun) {
+        summary.crosspostsBlockedByRunCap += 1;
+        await scheduleRetry(pending, 'crosspost_cap_per_run_reached');
+        continue;
+      }
+      if (hourlyCreatedCount >= maxCrosspostsPerHour) {
+        summary.crosspostsBlockedByHourlyCap += 1;
+        await scheduleRetry(pending, 'crosspost_cap_hourly_reached');
+        continue;
+      }
+
+      const post = await reddit.getPostById(pending.postId);
+      if (!post) {
+        await markTerminalFailure(pending, 'source_post_missing');
+        continue;
+      }
+      const createdAtMs = getPostCreatedAtMs(post);
+      if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) {
+        await scheduleRetry(pending, 'source_post_age_unknown');
+        continue;
+      }
+      const postAgeMs = Date.now() - createdAtMs;
+      if (postAgeMs > sourcePostFreshnessWindowMs) {
+        await scheduleRetry(pending, 'source_post_too_old');
+        continue;
+      }
+
+      const sourceSubredditInfo = await reddit.getSubredditInfoById(post.subredditId);
+      sourceSubredditIsNsfw = sourceSubredditInfo.isNsfw === true;
+      if (sourceSubredditIsNsfw) {
+        await markTerminalFailure(pending, 'source_subreddit_nsfw');
+        continue;
+      }
+      if (await hasCrosspost(redis, pending.postId)) {
+        await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
+        summary.crosspostsSkipped += 1;
+        logCrosspostEvent({
+          event: 'crosspost_attempt_skipped',
+          sourcePostId: pending.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: 'already_mapped',
+          revisionId: pending.revisionId,
+        });
+        continue;
+      }
+      if (await hasSourceCreateCooldown(redis, pending.postId)) {
+        summary.crosspostsSkippedBySourceCooldown += 1;
+        await scheduleRetry(pending, 'source_post_recently_crossposted');
+        continue;
+      }
+      const existingCrosspostId = await findExistingTargetCrosspost(
+        pending.postId,
+        appSettings.promoSubreddit
+      );
+      if (existingCrosspostId) {
+        summary.crosspostsSkippedByExistingDetection += 1;
+        try {
+          await storeCorrespondingPost(redis, pending.postId, existingCrosspostId);
+        } catch (storeDetectedMappingError) {
+          console.warn(
+            `[crosspost] failed to persist existing detected mapping: revisionId=${pending.revisionId} sourcePostId=${pending.postId} crosspostId=${existingCrosspostId} error=${toErrorMessage(
+              storeDetectedMappingError
+            )}`
+          );
+        }
+        await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
+        summary.crosspostsSkipped += 1;
+        logCrosspostEvent(
+          {
+            event: 'crosspost_attempt_skipped',
+            sourcePostId: pending.postId,
+            targetSubreddit: appSettings.promoSubreddit,
+            crosspostId: existingCrosspostId,
+            reason: 'existing_crosspost_detected',
+            revisionId: pending.revisionId,
+          },
+          'warn'
+        );
+        continue;
+      }
+
+      const sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
+      if (!sourceCreateLock.acquired) {
+        summary.crosspostsSkippedByInFlight += 1;
+        await scheduleRetry(pending, 'source_create_inflight');
+        continue;
+      }
+      logCrosspostEvent({
+        event: 'crosspost_attempt_started',
+        sourcePostId: pending.postId,
+        targetSubreddit: appSettings.promoSubreddit,
+        reason: 'dispatch_new_post',
+        revisionId: pending.revisionId,
+      });
+
       let crosspostId: string;
       try {
         const crosspost = await reddit.crosspost({
           subredditName: appSettings.promoSubreddit,
-          title: `Visit r/${post.subredditName}, they are trying to reach ${newPost.goal} subscribers!`,
+          title: `Visit r/${post.subredditName}, they are trying to reach ${pending.goal} subscribers!`,
           postId: post.id,
           nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });
@@ -891,10 +957,10 @@ async function updateFromWikis(
         logCrosspostEvent(
           {
             event: 'crosspost_attempt_failed',
-            sourcePostId: newPost.postId,
+            sourcePostId: pending.postId,
             targetSubreddit: appSettings.promoSubreddit,
             reason: 'dispatch_new_post',
-            revisionId: newPost.revisionId,
+            revisionId: pending.revisionId,
             errorMessage: toErrorMessage(error),
           },
           'error'
@@ -909,45 +975,37 @@ async function updateFromWikis(
       }
       logCrosspostEvent({
         event: 'crosspost_attempt_succeeded',
-        sourcePostId: newPost.postId,
+        sourcePostId: pending.postId,
         targetSubreddit: appSettings.promoSubreddit,
         crosspostId,
-        reason: 'dispatch_new_post',
-        revisionId: newPost.revisionId,
+        reason: 'crosspost_succeeded',
+        revisionId: pending.revisionId,
       });
+
       try {
-        await setSourceCreateCooldown(redis, newPost.postId);
+        await setSourceCreateCooldown(redis, pending.postId);
       } catch (cooldownError) {
         console.warn(
-          `[crosspost] failed to set source create cooldown: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} error=${toErrorMessage(
+          `[crosspost] failed to set source create cooldown: revisionId=${pending.revisionId} sourcePostId=${pending.postId} error=${toErrorMessage(
             cooldownError
           )}`
         );
       }
 
-      let processedStored = false;
-      let mappingStored = false;
       let terminalStored = false;
+      let mappingStored = false;
       let terminalStoreErrorMessage: string | undefined;
-      let processedStoreErrorMessage: string | undefined;
       let mappingStoreErrorMessage: string | undefined;
 
       try {
-        await markTerminalRevision(redis, newPost.revisionId);
+        await markTerminalRevision(redis, pending.revisionId);
         terminalStored = true;
       } catch (terminalStoreError) {
         terminalStoreErrorMessage = toErrorMessage(terminalStoreError);
       }
 
       try {
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
-        processedStored = true;
-      } catch (processedStoreError) {
-        processedStoreErrorMessage = toErrorMessage(processedStoreError);
-      }
-
-      try {
-        await storeCorrespondingPost(redis, newPost.postId, crosspostId);
+        await storeCorrespondingPost(redis, pending.postId, crosspostId);
         mappingStored = true;
       } catch (mappingStoreError) {
         mappingStoreErrorMessage = toErrorMessage(mappingStoreError);
@@ -956,121 +1014,73 @@ async function updateFromWikis(
       summary.crosspostsCreated += 1;
       summary.crosspostsCreatedThisRun += 1;
       hourlyCreatedCount += 1;
-      await recordCrosspostCreation(
-        redis,
-        hourlyHistoryKey,
-        newPost.revisionId,
-        Date.now()
-      );
+      await recordCrosspostCreation(redis, hourlyHistoryKey, pending.revisionId, Date.now());
+      await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
 
-      if (terminalStored && processedStored && mappingStored) {
-        console.info(
-          `[crosspost] created crosspost and marked processed: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspostId}`
-        );
+      if (terminalStored && mappingStored) {
         continue;
       }
 
       const persistenceErrorMessage = [
         terminalStoreErrorMessage,
-        processedStoreErrorMessage,
         mappingStoreErrorMessage,
       ]
         .filter(Boolean)
         .join(' | ');
 
-      if (terminalStored && processedStored) {
+      if (terminalStored) {
         summary.crosspostPersistencePartial += 1;
-        console.info(
-          `[crosspost] terminal dedupe marked: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} reason=crosspost_persistence_partial`
-        );
         logCrosspostEvent(
           {
             event: 'crosspost_persistence_partial',
-            sourcePostId: newPost.postId,
+            sourcePostId: pending.postId,
             targetSubreddit: appSettings.promoSubreddit,
             crosspostId,
             reason: 'crosspost_persistence_partial',
-            revisionId: newPost.revisionId,
+            revisionId: pending.revisionId,
             errorMessage: persistenceErrorMessage,
           },
           'warn'
         );
-        console.warn(
-          `[crosspost] crosspost created with partial persistence (processed stored, mapping missing): revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspostId} error=${persistenceErrorMessage}`
-        );
         continue;
       }
 
-      if (!terminalStored) {
-        await markTerminalRevisionWithLogging(
-          newPost.revisionId,
-          newPost.postId,
-          'crosspost_persistence_failed_after_create'
-        );
-      }
-
-      summary.crosspostsSkipped += 1;
+      await markTerminalRevisionWithLogging(
+        pending.revisionId,
+        pending.postId,
+        'crosspost_persistence_failed_after_create'
+      );
       summary.crosspostPersistenceFailedAfterCreate += 1;
       logCrosspostEvent(
         {
           event: 'crosspost_persistence_failed_after_create',
-          sourcePostId: newPost.postId,
+          sourcePostId: pending.postId,
           targetSubreddit: appSettings.promoSubreddit,
           crosspostId,
           reason: 'crosspost_persistence_failed_after_create',
-          revisionId: newPost.revisionId,
+          revisionId: pending.revisionId,
           errorMessage: persistenceErrorMessage,
         },
         'error'
       );
-      console.error(
-        `[crosspost] crosspost created but persistence failed; marked terminal fallback: revisionId=${newPost.revisionId} sourcePostId=${newPost.postId} crosspostId=${crosspostId} error=${persistenceErrorMessage}`
-      );
-      continue;
     } catch (e) {
       const errorMessage = toErrorMessage(e);
       const permanentFailure = isPermanentCrosspostError(errorMessage);
       const missingSourcePost = isMissingSourcePostError(errorMessage);
       if (permanentFailure || sourceSubredditIsNsfw || missingSourcePost) {
-        summary.crosspostsSkipped += 1;
-        const skipReason = sourceSubredditIsNsfw
+        const terminalReason = sourceSubredditIsNsfw
           ? 'source_subreddit_nsfw'
           : missingSourcePost
             ? 'source_post_missing'
-            : /INVALID_CROSSPOST_THING|root_post_id|link that isn't working/i.test(
-                  errorMessage
-                )
+            : /INVALID_CROSSPOST_THING|root_post_id|link that isn't working/i.test(errorMessage)
               ? 'source_not_crosspostable'
               : 'target_policy_reject_or_denied';
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
-            sourcePostId: newPost.postId,
-            targetSubreddit: appSettings.promoSubreddit,
-            reason: skipReason,
-            revisionId: newPost.revisionId,
-            errorMessage,
-          },
-          'warn'
-        );
-        if (skipReason === 'source_not_crosspostable') {
-          console.warn(
-            `[crosspost] terminal source-not-crosspostable; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId} error=${errorMessage}`
-          );
-        }
-        if (missingSourcePost) {
-          console.warn(
-            `[crosspost] terminal missing source post; marking processed: revisionId=${newPost.revisionId} postId=${newPost.postId} error=${errorMessage}`
-          );
-        }
-        await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
+        await markTerminalFailure(pending, terminalReason, errorMessage);
         continue;
       }
+
       summary.crosspostsFailed += 1;
-      console.error(
-        `[crosspost] error creating crosspost: revisionId=${newPost.revisionId} postId=${newPost.postId}`,
-        e
-      );
+      await scheduleRetry(pending, 'crosspost_attempt_failed', errorMessage);
     }
   }
 
@@ -1426,12 +1436,64 @@ export async function processCrosspostDispatchQueue(
         );
       }
 
-      const summary = await updateFromWikis(appSettings, {
-        sourcePostFreshnessWindowMs: freshnessWindowMs,
-        revisionFreshnessWindowMs,
-        maxCrosspostsPerRun,
-        maxCrosspostsPerHour,
-      });
+      const summary = emptySummary();
+      const runErrorMessages: string[] = [];
+      const maxPasses =
+        reason === 'scheduler_posts_updater'
+          ? crosspostSchedulerDaisyChainMaxPasses
+          : 1;
+      for (let pass = 1; pass <= maxPasses; pass += 1) {
+        const passSummary = await updateFromWikis(appSettings, {
+          sourcePostFreshnessWindowMs: freshnessWindowMs,
+          revisionFreshnessWindowMs,
+          maxCrosspostsPerRun,
+          maxCrosspostsPerHour,
+        });
+
+        summary.revisionsFetched += passSummary.revisionsFetched;
+        summary.newPostsSeen += passSummary.newPostsSeen;
+        summary.crosspostsCreated += passSummary.crosspostsCreated;
+        summary.crosspostsSkipped += passSummary.crosspostsSkipped;
+        summary.crosspostsFailed += passSummary.crosspostsFailed;
+        summary.actionsMirrored += passSummary.actionsMirrored;
+        summary.actionsFailed += passSummary.actionsFailed;
+        summary.crosspostsCreatedThisRun += passSummary.crosspostsCreatedThisRun;
+        summary.crosspostsBlockedByRunCap += passSummary.crosspostsBlockedByRunCap;
+        summary.crosspostsBlockedByHourlyCap += passSummary.crosspostsBlockedByHourlyCap;
+        summary.crosspostPersistencePartial += passSummary.crosspostPersistencePartial;
+        summary.crosspostPersistenceFailedAfterCreate +=
+          passSummary.crosspostPersistenceFailedAfterCreate;
+        summary.crosspostsSkippedBySourceCooldown +=
+          passSummary.crosspostsSkippedBySourceCooldown;
+        summary.crosspostsSkippedByInFlight +=
+          passSummary.crosspostsSkippedByInFlight;
+        summary.crosspostsSkippedByExistingDetection +=
+          passSummary.crosspostsSkippedByExistingDetection;
+
+        if (passSummary.status === 'failed') {
+          summary.status = 'failed';
+        } else if (passSummary.status === 'partial' && summary.status !== 'failed') {
+          summary.status = 'partial';
+        }
+        if (passSummary.errorMessage) {
+          runErrorMessages.push(passSummary.errorMessage);
+        }
+
+        const pendingDepth = await countPendingCrossposts(
+          redis,
+          appSettings.promoSubreddit
+        );
+        console.info(
+          `[crosspost] daisy-chain pass ${pass}/${maxPasses}: pendingDepth=${pendingDepth} status=${passSummary.status}`
+        );
+        if (pendingDepth === 0) {
+          break;
+        }
+      }
+      if (runErrorMessages.length > 0) {
+        summary.errorMessage = runErrorMessages.join(' | ');
+      }
+
       if (summary.status === 'success') {
         await redis.set(crosspostRetryDegradedCountKey, '0');
       } else {

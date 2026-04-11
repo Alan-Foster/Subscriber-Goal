@@ -19,6 +19,10 @@ export type AppSettings = {
   crosspostMaxRevisionAgeMinutes: number;
   maxCrosspostsPerRun: number;
   maxCrosspostsPerHour: number;
+  crosspostRetryWindowMinutes: number;
+  crosspostRetryBaseDelaySeconds: number;
+  crosspostRetryMaxDelayMinutes: number;
+  crosspostPendingBatchSize: number;
 };
 
 export type SubGoalState = {

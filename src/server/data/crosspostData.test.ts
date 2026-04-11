@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countPendingCrossposts,
   crosspostListKey,
+  getCrosspostPendingByRevisionKey,
+  getCrosspostPendingByTimeKey,
   getCorrespondingPost,
+  listDuePendingCrossposts,
   isProcessedRevision,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
+  removePendingCrosspost,
   removeCorrespondingPost,
   removeProcessedRevisions,
   storeCorrespondingPost,
   storeProcessedRevision,
+  upsertPendingCrosspost,
 } from './crosspostData';
 
 type ZEntry = { member: string; score: number };
@@ -135,5 +141,63 @@ describe('crosspostData bookkeeping primitives', () => {
       )
     ).toBeUndefined();
     expect(await redis.hGetAll(crosspostListKey)).toEqual({});
+  });
+
+  it('upsert/list/remove pending crossposts via due-time index', async () => {
+    const redis = new InMemoryRedis();
+    const targetSubreddit = 'SubGoal';
+    await upsertPendingCrosspost(
+      redis as unknown as Parameters<typeof upsertPendingCrosspost>[0],
+      targetSubreddit,
+      {
+        revisionId: 'rev_pending_1',
+        postId: 't3_source' as const,
+        goal: 50,
+        firstSeenMs: 1_000,
+        nextAttemptMs: 2_000,
+        attemptCount: 0,
+        lastError: null,
+        status: 'queued_for_crosspost',
+      }
+    );
+
+    const dueAt1500 = await listDuePendingCrossposts(
+      redis as unknown as Parameters<typeof listDuePendingCrossposts>[0],
+      targetSubreddit,
+      { nowMs: 1_500, limit: 10 }
+    );
+    expect(dueAt1500).toEqual([]);
+
+    const dueAt2500 = await listDuePendingCrossposts(
+      redis as unknown as Parameters<typeof listDuePendingCrossposts>[0],
+      targetSubreddit,
+      { nowMs: 2_500, limit: 10 }
+    );
+    expect(dueAt2500).toHaveLength(1);
+    expect(dueAt2500[0]?.revisionId).toBe('rev_pending_1');
+
+    expect(
+      await countPendingCrossposts(
+        redis as unknown as Parameters<typeof countPendingCrossposts>[0],
+        targetSubreddit
+      )
+    ).toBe(1);
+
+    await removePendingCrosspost(
+      redis as unknown as Parameters<typeof removePendingCrosspost>[0],
+      targetSubreddit,
+      'rev_pending_1'
+    );
+
+    expect(
+      await countPendingCrossposts(
+        redis as unknown as Parameters<typeof countPendingCrossposts>[0],
+        targetSubreddit
+      )
+    ).toBe(0);
+    expect(
+      await redis.hGet(getCrosspostPendingByRevisionKey(targetSubreddit), 'rev_pending_1')
+    ).toBeUndefined();
+    expect(await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1)).toEqual([]);
   });
 });

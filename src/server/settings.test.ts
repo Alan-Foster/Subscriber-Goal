@@ -18,9 +18,13 @@ describe('getAppSettings', () => {
       defaultAppSettings.crosspostMaxSourcePostAgeMinutes
     );
     expect(result.crosspostIngestionEnabled).toBe(true);
-    expect(result.crosspostMaxRevisionAgeMinutes).toBe(10);
+    expect(result.crosspostMaxRevisionAgeMinutes).toBe(180);
     expect(result.maxCrosspostsPerRun).toBe(5);
     expect(result.maxCrosspostsPerHour).toBe(30);
+    expect(result.crosspostRetryWindowMinutes).toBe(1440);
+    expect(result.crosspostRetryBaseDelaySeconds).toBe(60);
+    expect(result.crosspostRetryMaxDelayMinutes).toBe(30);
+    expect(result.crosspostPendingBatchSize).toBe(25);
   });
 
   it('uses explicit authority override when provided', async () => {
@@ -33,6 +37,10 @@ describe('getAppSettings', () => {
         crosspostMaxRevisionAgeMinutes: 15.1,
         maxCrosspostsPerRun: 7.9,
         maxCrosspostsPerHour: 42.4,
+        crosspostRetryWindowMinutes: 720.3,
+        crosspostRetryBaseDelaySeconds: 45.8,
+        crosspostRetryMaxDelayMinutes: 12.4,
+        crosspostPendingBatchSize: 99.6,
       }),
     };
 
@@ -45,5 +53,9 @@ describe('getAppSettings', () => {
     expect(result.crosspostMaxRevisionAgeMinutes).toBe(15);
     expect(result.maxCrosspostsPerRun).toBe(7);
     expect(result.maxCrosspostsPerHour).toBe(42);
+    expect(result.crosspostRetryWindowMinutes).toBe(720);
+    expect(result.crosspostRetryBaseDelaySeconds).toBe(45);
+    expect(result.crosspostRetryMaxDelayMinutes).toBe(12);
+    expect(result.crosspostPendingBatchSize).toBe(99);
   });
 });

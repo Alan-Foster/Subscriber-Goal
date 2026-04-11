@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   crosspostWikiPages,
+  getCrosspostPendingByRevisionKey,
   processedRevisionsByTimeKey,
 } from '../data/crosspostData';
 import type { AppSettings } from '../../shared/types/api';
@@ -165,6 +166,10 @@ const baseSettings: AppSettings = {
   crosspostMaxRevisionAgeMinutes: 10,
   maxCrosspostsPerRun: 5,
   maxCrosspostsPerHour: 30,
+  crosspostRetryWindowMinutes: 1440,
+  crosspostRetryBaseDelaySeconds: 60,
+  crosspostRetryMaxDelayMinutes: 30,
+  crosspostPendingBatchSize: 25,
 };
 
 describe('processCrosspostDispatchQueue ingestion guards', () => {
@@ -307,6 +312,89 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     expect(await redisMock.hGet('processedRevisions', 'rev_old')).toBe(
       't3_abc123'
     );
+    expect(
+      await redisMock.hGet(
+        getCrosspostPendingByRevisionKey('SubGoal'),
+        'rev_old'
+      )
+    ).toBeDefined();
+  });
+
+  it('expires retrying stale-source pending work after retry window', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_expire',
+                reason: 'Post t3_expire with goal 100',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_expire',
+      subredditId: 't5_source',
+      subredditName: 'CorporateGifts',
+      createdAt: new Date(Date.now() - 11 * 60 * 1000),
+      nsfw: false,
+    });
+
+    const first = await processCrosspostDispatchQueue(
+      {
+        ...baseSettings,
+        crosspostRetryWindowMinutes: 1,
+      },
+      'scheduler_posts_updater'
+    );
+    expect(first.crosspostsSkipped).toBeGreaterThan(0);
+    const pendingKey = getCrosspostPendingByRevisionKey('SubGoal');
+    const rawPending = await redisMock.hGet(pendingKey, 'rev_expire');
+    expect(rawPending).toBeDefined();
+    if (!rawPending) {
+      throw new Error('expected pending crosspost payload');
+    }
+    const parsedPending = JSON.parse(rawPending) as {
+      firstSeenMs: number;
+      nextAttemptMs: number;
+    };
+    await redisMock.hSet(pendingKey, {
+      rev_expire: JSON.stringify({
+        ...(JSON.parse(rawPending) as Record<string, unknown>),
+        firstSeenMs: parsedPending.firstSeenMs - 2 * 60 * 1000,
+        nextAttemptMs: Date.now(),
+      }),
+    });
+    await redisMock.zAdd('crosspostPendingByTime:subgoal', {
+      member: 'rev_expire',
+      score: Date.now(),
+    });
+
+    loggedEvents.length = 0;
+    const second = await processCrosspostDispatchQueue(
+      {
+        ...baseSettings,
+        crosspostRetryWindowMinutes: 1,
+      },
+      'scheduler_posts_updater'
+    );
+    expect(second.crosspostsSkipped).toBeGreaterThan(0);
+    expect(await redisMock.hGet(pendingKey, 'rev_expire')).toBeUndefined();
+    expect(
+      loggedEvents.some(
+        (event) =>
+          event.event === 'crosspost_attempt_skipped' &&
+          event.reason === 'source_post_too_old_retry_window_expired'
+      )
+    ).toBe(true);
   });
 
   it('treats seconds timestamps as valid and eligible for freshness checks', async () => {
@@ -695,9 +783,15 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
     mockReddit.crosspost.mockResolvedValue({ id: 't3_cross_total' });
 
-    vi.spyOn(redisMock, 'hSet').mockImplementation(async () => {
-      throw new Error('failed hash write');
-    });
+    const originalHSet = redisMock.hSet.bind(redisMock);
+    const hSetSpy = vi
+      .spyOn(redisMock, 'hSet')
+      .mockImplementation(async (key, fields) => {
+        if (key === 'crosspostList') {
+          throw new Error('failed mapping write');
+        }
+        return originalHSet(key, fields);
+      });
     const originalZAdd = redisMock.zAdd.bind(redisMock);
     vi
       .spyOn(redisMock, 'zAdd')
@@ -726,6 +820,13 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(firstSummary.crosspostsCreated).toBe(1);
     expect(firstSummary.crosspostPersistenceFailedAfterCreate).toBe(1);
+    expect(
+      hSetSpy.mock.calls.some(
+        (call) =>
+          typeof call[0] === 'string' &&
+          call[0] === getCrosspostPendingByRevisionKey('SubGoal')
+      )
+    ).toBe(true);
     expect(
       loggedEvents.some(
         (event) => event.event === 'crosspost_persistence_failed_after_create'

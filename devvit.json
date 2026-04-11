@@ -23,7 +23,7 @@
     "dir": "assets"
   },
   "settings": {
-    "global": {
+    "installation": {
       "promoSubreddit": {
         "type": "string",
         "label": "Promo Subreddit",
@@ -38,7 +38,7 @@
       "crosspostMaxSourcePostAgeMinutes": {
         "type": "number",
         "label": "Max Source Post Age for Crosspost (minutes)",
-        "defaultValue": 10,
+        "defaultValue": 180,
         "helpText": "Skip crossposting source posts older than this age."
       },
       "crosspostIngestionEnabled": {
@@ -50,7 +50,7 @@
       "crosspostMaxRevisionAgeMinutes": {
         "type": "number",
         "label": "Max Wiki Revision Age (minutes)",
-        "defaultValue": 10,
+        "defaultValue": 180,
         "helpText": "Skip revisions older than this age."
       },
       "maxCrosspostsPerRun": {
@@ -64,6 +64,30 @@
         "label": "Max Crossposts Per Hour",
         "defaultValue": 30,
         "helpText": "Hard rolling-hour cap for crossposts."
+      },
+      "crosspostRetryWindowMinutes": {
+        "type": "number",
+        "label": "Crosspost Retry Window (minutes)",
+        "defaultValue": 1440,
+        "helpText": "Retry pending crossposts within this window before terminal failure."
+      },
+      "crosspostRetryBaseDelaySeconds": {
+        "type": "number",
+        "label": "Crosspost Retry Base Delay (seconds)",
+        "defaultValue": 60,
+        "helpText": "Initial retry delay for pending crossposts."
+      },
+      "crosspostRetryMaxDelayMinutes": {
+        "type": "number",
+        "label": "Crosspost Retry Max Delay (minutes)",
+        "defaultValue": 30,
+        "helpText": "Upper bound for exponential retry backoff."
+      },
+      "crosspostPendingBatchSize": {
+        "type": "number",
+        "label": "Crosspost Pending Batch Size",
+        "defaultValue": 25,
+        "helpText": "Maximum pending crossposts to process per worker pass."
       }
     }
   },

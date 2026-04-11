@@ -98,6 +98,197 @@ export const wikiRevisionCutoffKey = 'revisionCutoff';
 export const processedRevisionsKey = 'processedRevisions';
 export const processedRevisionsByTimeKey = 'processedRevisionsByTime';
 export const crosspostListKey = 'crosspostList';
+export const crosspostPendingByTimeKeyPrefix = 'crosspostPendingByTime';
+export const crosspostPendingByRevisionKeyPrefix = 'crosspostPendingByRevision';
+
+export type PendingCrosspostStatus =
+  | 'queued_for_crosspost'
+  | 'crosspost_retrying'
+  | 'crosspost_terminal_failed'
+  | 'crosspost_succeeded';
+
+export type PendingCrosspost = {
+  revisionId: string;
+  postId: LinkId;
+  goal: number;
+  firstSeenMs: number;
+  nextAttemptMs: number;
+  attemptCount: number;
+  lastError: string | null;
+  status: PendingCrosspostStatus;
+  revisionDateMs?: number;
+};
+
+const toNormalizedSubredditName = (value: string): string =>
+  value.trim().replace(/^r\//i, '').toLowerCase();
+
+export const getCrosspostPendingByTimeKey = (targetSubreddit: string): string =>
+  `${crosspostPendingByTimeKeyPrefix}:${toNormalizedSubredditName(targetSubreddit)}`;
+
+export const getCrosspostPendingByRevisionKey = (
+  targetSubreddit: string
+): string =>
+  `${crosspostPendingByRevisionKeyPrefix}:${toNormalizedSubredditName(targetSubreddit)}`;
+
+function isPendingCrosspostStatus(value: unknown): value is PendingCrosspostStatus {
+  return (
+    value === 'queued_for_crosspost' ||
+    value === 'crosspost_retrying' ||
+    value === 'crosspost_terminal_failed' ||
+    value === 'crosspost_succeeded'
+  );
+}
+
+function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const candidate = value as Partial<PendingCrosspost>;
+  if (
+    typeof candidate.revisionId !== 'string' ||
+    typeof candidate.postId !== 'string' ||
+    typeof candidate.goal !== 'number' ||
+    !Number.isFinite(candidate.goal) ||
+    typeof candidate.firstSeenMs !== 'number' ||
+    !Number.isFinite(candidate.firstSeenMs) ||
+    typeof candidate.nextAttemptMs !== 'number' ||
+    !Number.isFinite(candidate.nextAttemptMs) ||
+    typeof candidate.attemptCount !== 'number' ||
+    !Number.isFinite(candidate.attemptCount) ||
+    !isPendingCrosspostStatus(candidate.status)
+  ) {
+    return undefined;
+  }
+
+  const normalized: PendingCrosspost = {
+    revisionId: candidate.revisionId,
+    postId: candidate.postId as LinkId,
+    goal: Math.floor(candidate.goal),
+    firstSeenMs: Math.floor(candidate.firstSeenMs),
+    nextAttemptMs: Math.floor(candidate.nextAttemptMs),
+    attemptCount: Math.max(0, Math.floor(candidate.attemptCount)),
+    lastError:
+      typeof candidate.lastError === 'string' && candidate.lastError.length > 0
+        ? candidate.lastError
+        : null,
+    status: candidate.status,
+  };
+
+  if (typeof candidate.revisionDateMs === 'number' && Number.isFinite(candidate.revisionDateMs)) {
+    normalized.revisionDateMs = Math.floor(candidate.revisionDateMs);
+  }
+
+  return normalized;
+}
+
+function serializePendingCrosspost(pending: PendingCrosspost): string {
+  return JSON.stringify(pending);
+}
+
+export async function getPendingCrosspost(
+  redis: RedisClient,
+  targetSubreddit: string,
+  revisionId: string
+): Promise<PendingCrosspost | undefined> {
+  const raw = await redis.hGet(
+    getCrosspostPendingByRevisionKey(targetSubreddit),
+    revisionId
+  );
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    return toPendingCrosspost(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+export async function upsertPendingCrosspost(
+  redis: RedisClient,
+  targetSubreddit: string,
+  pending: PendingCrosspost
+): Promise<void> {
+  const byRevisionKey = getCrosspostPendingByRevisionKey(targetSubreddit);
+  const byTimeKey = getCrosspostPendingByTimeKey(targetSubreddit);
+  const existing = await getPendingCrosspost(
+    redis,
+    targetSubreddit,
+    pending.revisionId
+  );
+  const merged: PendingCrosspost = existing
+    ? {
+        ...existing,
+        ...pending,
+        firstSeenMs: Math.min(existing.firstSeenMs, pending.firstSeenMs),
+      }
+    : pending;
+  await redis.hSet(byRevisionKey, {
+    [merged.revisionId]: serializePendingCrosspost(merged),
+  });
+  await redis.zAdd(byTimeKey, {
+    member: merged.revisionId,
+    score: merged.nextAttemptMs,
+  });
+}
+
+export async function removePendingCrosspost(
+  redis: RedisClient,
+  targetSubreddit: string,
+  revisionId: string
+): Promise<void> {
+  await redis.hDel(getCrosspostPendingByRevisionKey(targetSubreddit), [revisionId]);
+  await redis.zRem(getCrosspostPendingByTimeKey(targetSubreddit), [revisionId]);
+}
+
+export async function listDuePendingCrossposts(
+  redis: RedisClient,
+  targetSubreddit: string,
+  options: { nowMs?: number; limit?: number } = {}
+): Promise<PendingCrosspost[]> {
+  const nowMs = options.nowMs ?? Date.now();
+  const limit = Math.max(1, Math.floor(options.limit ?? 25));
+  const index = await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1);
+  const dueRevisionIds = index
+    .filter((entry) => Number(entry.score) <= nowMs)
+    .slice(0, limit)
+    .map((entry) => entry.member);
+  if (dueRevisionIds.length === 0) {
+    return [];
+  }
+  const hash = await redis.hGetAll(getCrosspostPendingByRevisionKey(targetSubreddit));
+  const due: PendingCrosspost[] = [];
+  const staleIndexMembers: string[] = [];
+  for (const revisionId of dueRevisionIds) {
+    const raw = hash[revisionId];
+    if (!raw) {
+      staleIndexMembers.push(revisionId);
+      continue;
+    }
+    try {
+      const parsed = toPendingCrosspost(JSON.parse(raw));
+      if (!parsed) {
+        staleIndexMembers.push(revisionId);
+        continue;
+      }
+      due.push(parsed);
+    } catch {
+      staleIndexMembers.push(revisionId);
+    }
+  }
+  if (staleIndexMembers.length > 0) {
+    await redis.zRem(getCrosspostPendingByTimeKey(targetSubreddit), staleIndexMembers);
+  }
+  return due;
+}
+
+export async function countPendingCrossposts(
+  redis: RedisClient,
+  targetSubreddit: string
+): Promise<number> {
+  const hash = await redis.hGetAll(getCrosspostPendingByRevisionKey(targetSubreddit));
+  return Object.keys(hash).length;
+}
 
 export async function storeRevisionCutoff(
   redis: RedisClient,
