@@ -94,7 +94,6 @@ export async function dispatchPostAction(
   });
 }
 
-export const wikiRevisionCutoffKey = 'revisionCutoff';
 export const processedRevisionsKey = 'processedRevisions';
 export const processedRevisionsByTimeKey = 'processedRevisionsByTime';
 export const crosspostListKey = 'crosspostList';
@@ -314,21 +313,6 @@ export async function countPendingCrossposts(
 ): Promise<number> {
   const hash = await redis.hGetAll(getCrosspostPendingByRevisionKey(targetSubreddit));
   return Object.keys(hash).length;
-}
-
-export async function storeRevisionCutoff(
-  redis: RedisClient,
-  cutoff: Date
-): Promise<void> {
-  await redis.set(wikiRevisionCutoffKey, cutoff.getTime().toString());
-}
-
-export async function getRevisionCutoff(redis: RedisClient): Promise<Date> {
-  const cutoff = await redis.get(wikiRevisionCutoffKey);
-  if (!cutoff) {
-    return new Date(0);
-  }
-  return new Date(parseInt(cutoff));
 }
 
 export async function storeProcessedRevision(

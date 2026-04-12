@@ -10,7 +10,6 @@ export type CrosspostLogEvent =
   | 'crosspost_retry_failed'
   | 'crosspost_retry_skipped'
   | 'crosspost_retry_degraded'
-  | 'crosspost_persistence_partial'
   | 'crosspost_persistence_failed_after_create'
   | 'crosspost_finalize_transaction_failed'
   | 'crosspost_reconciliation_started'
@@ -47,7 +46,6 @@ export type CrosspostLogPayload = {
   crosspostsCreatedThisRun?: number;
   crosspostsBlockedByRunCap?: number;
   crosspostsBlockedByHourlyCap?: number;
-  crosspostPersistencePartial?: number;
   crosspostPersistenceFailedAfterCreate?: number;
   crosspostsSkippedBySourceCooldown?: number;
   crosspostsSkippedByInFlight?: number;
@@ -91,7 +89,6 @@ export function logCrosspostEvent(
     crosspostsCreatedThisRun: payload.crosspostsCreatedThisRun ?? null,
     crosspostsBlockedByRunCap: payload.crosspostsBlockedByRunCap ?? null,
     crosspostsBlockedByHourlyCap: payload.crosspostsBlockedByHourlyCap ?? null,
-    crosspostPersistencePartial: payload.crosspostPersistencePartial ?? null,
     crosspostPersistenceFailedAfterCreate:
       payload.crosspostPersistenceFailedAfterCreate ?? null,
     crosspostsSkippedBySourceCooldown:

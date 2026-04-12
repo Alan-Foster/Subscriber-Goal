@@ -245,7 +245,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       crosspostsCreatedThisRun: 0,
       crosspostsBlockedByRunCap: 0,
       crosspostsBlockedByHourlyCap: 0,
-      crosspostPersistencePartial: 0,
       crosspostPersistenceFailedAfterCreate: 0,
       crosspostsSkippedBySourceCooldown: 0,
       crosspostsSkippedByInFlight: 0,
@@ -282,7 +281,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       crosspostsCreatedThisRun: 0,
       crosspostsBlockedByRunCap: 0,
       crosspostsBlockedByHourlyCap: 0,
-      crosspostPersistencePartial: 0,
       crosspostPersistenceFailedAfterCreate: 0,
       crosspostsSkippedBySourceCooldown: 0,
       crosspostsSkippedByInFlight: 0,
@@ -771,7 +769,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     );
 
     expect(summary.crosspostsCreated).toBe(0);
-    expect(summary.crosspostPersistencePartial).toBe(0);
     expect(summary.crosspostPersistenceFailedAfterCreate).toBe(1);
     expect(await redisMock.hGet('processedRevisions', 'rev_partial')).toBe(
       't3_partial'

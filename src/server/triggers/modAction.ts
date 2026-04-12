@@ -71,7 +71,6 @@ export type CrosspostIngestionSummary = {
   crosspostsCreatedThisRun: number;
   crosspostsBlockedByRunCap: number;
   crosspostsBlockedByHourlyCap: number;
-  crosspostPersistencePartial: number;
   crosspostPersistenceFailedAfterCreate: number;
   crosspostsSkippedBySourceCooldown: number;
   crosspostsSkippedByInFlight: number;
@@ -138,7 +137,6 @@ function emptySummary(): CrosspostIngestionSummary {
     crosspostsCreatedThisRun: 0,
     crosspostsBlockedByRunCap: 0,
     crosspostsBlockedByHourlyCap: 0,
-    crosspostPersistencePartial: 0,
     crosspostPersistenceFailedAfterCreate: 0,
     crosspostsSkippedBySourceCooldown: 0,
     crosspostsSkippedByInFlight: 0,
@@ -1578,7 +1576,6 @@ export async function processCrosspostDispatchQueue(
         summary.crosspostsCreatedThisRun += passSummary.crosspostsCreatedThisRun;
         summary.crosspostsBlockedByRunCap += passSummary.crosspostsBlockedByRunCap;
         summary.crosspostsBlockedByHourlyCap += passSummary.crosspostsBlockedByHourlyCap;
-        summary.crosspostPersistencePartial += passSummary.crosspostPersistencePartial;
         summary.crosspostPersistenceFailedAfterCreate +=
           passSummary.crosspostPersistenceFailedAfterCreate;
         summary.crosspostsSkippedBySourceCooldown +=
@@ -1642,7 +1639,6 @@ export async function processCrosspostDispatchQueue(
               crosspostsCreatedThisRun: summary.crosspostsCreatedThisRun,
               crosspostsBlockedByRunCap: summary.crosspostsBlockedByRunCap,
               crosspostsBlockedByHourlyCap: summary.crosspostsBlockedByHourlyCap,
-              crosspostPersistencePartial: summary.crosspostPersistencePartial,
               crosspostPersistenceFailedAfterCreate:
                 summary.crosspostPersistenceFailedAfterCreate,
               crosspostsSkippedBySourceCooldown:
@@ -1678,7 +1674,6 @@ export async function processCrosspostDispatchQueue(
           crosspostsCreatedThisRun: summary.crosspostsCreatedThisRun,
           crosspostsBlockedByRunCap: summary.crosspostsBlockedByRunCap,
           crosspostsBlockedByHourlyCap: summary.crosspostsBlockedByHourlyCap,
-          crosspostPersistencePartial: summary.crosspostPersistencePartial,
           crosspostPersistenceFailedAfterCreate:
             summary.crosspostPersistenceFailedAfterCreate,
           crosspostsSkippedBySourceCooldown:
@@ -1726,7 +1721,6 @@ export async function processCrosspostDispatchQueue(
             crosspostsCreatedThisRun: summary.crosspostsCreatedThisRun,
             crosspostsBlockedByRunCap: summary.crosspostsBlockedByRunCap,
             crosspostsBlockedByHourlyCap: summary.crosspostsBlockedByHourlyCap,
-            crosspostPersistencePartial: summary.crosspostPersistencePartial,
             crosspostPersistenceFailedAfterCreate:
               summary.crosspostPersistenceFailedAfterCreate,
             crosspostsSkippedBySourceCooldown:
@@ -1758,7 +1752,6 @@ export async function processCrosspostDispatchQueue(
           crosspostsCreatedThisRun: summary.crosspostsCreatedThisRun,
           crosspostsBlockedByRunCap: summary.crosspostsBlockedByRunCap,
           crosspostsBlockedByHourlyCap: summary.crosspostsBlockedByHourlyCap,
-          crosspostPersistencePartial: summary.crosspostPersistencePartial,
           crosspostPersistenceFailedAfterCreate:
             summary.crosspostPersistenceFailedAfterCreate,
           crosspostsSkippedBySourceCooldown:
