@@ -22,6 +22,9 @@
   "media": {
     "dir": "assets"
   },
+  "marketingAssets": {
+    "icon": "assets/icon.png"
+  },
   "settings": {
     "subreddit": {
       "promoSubreddit": {
