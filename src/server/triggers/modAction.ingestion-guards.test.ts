@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   crosspostWikiPages,
   getCrosspostPendingByRevisionKey,
-  processedRevisionsByTimeKey,
 } from '../data/crosspostData';
 import type { AppSettings } from '../../shared/types/api';
 
@@ -112,6 +111,36 @@ class InMemoryRedis {
       current.delete(member);
     }
   }
+
+  async watch(..._keys: string[]): Promise<{
+    multi(): Promise<void>;
+    set(key: string, value: string, options?: SetOptions): Promise<string>;
+    hSet(key: string, fields: Record<string, string>): Promise<void>;
+    hDel(key: string, fields: string[]): Promise<void>;
+    zRem(key: string, members: string[]): Promise<void>;
+    exec(): Promise<string>;
+  }> {
+    return {
+      multi: async (): Promise<void> => {
+        return;
+      },
+      set: async (key: string, value: string, options?: SetOptions): Promise<string> => {
+        return await this.set(key, value, options);
+      },
+      hSet: async (key: string, fields: Record<string, string>): Promise<void> => {
+        await this.hSet(key, fields);
+      },
+      hDel: async (key: string, fields: string[]): Promise<void> => {
+        await this.hDel(key, fields);
+      },
+      zRem: async (key: string, members: string[]): Promise<void> => {
+        await this.zRem(key, members);
+      },
+      exec: async (): Promise<string> => {
+        return 'OK';
+      },
+    };
+  }
 }
 
 let redisMock: InMemoryRedis;
@@ -139,6 +168,8 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).zRange(...args),
     zRem: (...args: [string, string[]]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zRem(...args),
+    watch: (...args: string[]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).watch(...args),
   },
   context: hoisted.mockContext,
 }));
@@ -702,7 +733,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it('records partial persistence when mapping write fails after create', async () => {
+  it('treats mapping persistence failure as unhealthy and retries reconciliation', async () => {
     mockContext.subredditName = 'SubGoal';
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subredditName: string, page: string) => {
@@ -739,14 +770,21 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       'scheduler_posts_updater'
     );
 
-    expect(summary.crosspostsCreated).toBe(1);
-    expect(summary.crosspostPersistencePartial).toBe(1);
-    expect(summary.crosspostPersistenceFailedAfterCreate).toBe(0);
+    expect(summary.crosspostsCreated).toBe(0);
+    expect(summary.crosspostPersistencePartial).toBe(0);
+    expect(summary.crosspostPersistenceFailedAfterCreate).toBe(1);
     expect(await redisMock.hGet('processedRevisions', 'rev_partial')).toBe(
       't3_partial'
     );
     expect(
-      loggedEvents.some((event) => event.event === 'crosspost_persistence_partial')
+      loggedEvents.some(
+        (event) => event.event === 'crosspost_finalize_transaction_failed'
+      )
+    ).toBe(true);
+    expect(
+      loggedEvents.some(
+        (event) => event.event === 'crosspost_persistence_failed_after_create'
+      )
     ).toBe(true);
 
     await redisMock.hDel('processedRevisions', ['rev_partial']);
@@ -792,15 +830,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         }
         return originalHSet(key, fields);
       });
-    const originalZAdd = redisMock.zAdd.bind(redisMock);
-    vi
-      .spyOn(redisMock, 'zAdd')
-      .mockImplementation(async (key: string, ...entries: ZEntry[]) => {
-        if (key === processedRevisionsByTimeKey) {
-          throw new Error('failed zset write');
-        }
-        return originalZAdd(key, ...entries);
-      });
     const redisSetSpy = vi
       .spyOn(redisMock, 'set')
       .mockImplementation(async (key, value, options) => {
@@ -809,16 +838,13 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         }
         return InMemoryRedis.prototype.set.call(redisMock, key, value, options);
       });
-    const consoleErrorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
 
     const firstSummary = await processCrosspostDispatchQueue(
       baseSettings,
       'scheduler_posts_updater'
     );
 
-    expect(firstSummary.crosspostsCreated).toBe(1);
+    expect(firstSummary.crosspostsCreated).toBe(0);
     expect(firstSummary.crosspostPersistenceFailedAfterCreate).toBe(1);
     expect(
       hSetSpy.mock.calls.some(
@@ -829,19 +855,15 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
     expect(
       loggedEvents.some(
+        (event) => event.event === 'crosspost_finalize_transaction_failed'
+      )
+    ).toBe(true);
+    expect(
+      loggedEvents.some(
         (event) => event.event === 'crosspost_persistence_failed_after_create'
       )
     ).toBe(true);
     expect(redisSetSpy).toHaveBeenCalled();
-    expect(
-      consoleErrorSpy.mock.calls.some((call) =>
-        call.some(
-          (arg) =>
-            typeof arg === 'string' &&
-            arg.includes('terminal dedupe mark failed')
-        )
-      )
-    ).toBe(true);
 
     loggedEvents.length = 0;
     const secondSummary = await processCrosspostDispatchQueue(
@@ -852,7 +874,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     expect(secondSummary.crosspostsCreated).toBe(0);
     expect(mockReddit.crosspost).toHaveBeenCalledTimes(1);
     redisSetSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
   });
 
   it('skips when source create in-flight lock is held', async () => {
@@ -955,8 +976,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     expect(
       loggedEvents.some(
         (event) =>
-          event.event === 'crosspost_attempt_skipped' &&
-          event.reason === 'existing_crosspost_detected'
+          event.event === 'crosspost_reconciliation_succeeded' &&
+          event.reason === 'reconciliation_mapping_backfilled'
       )
     ).toBe(true);
   });

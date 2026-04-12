@@ -12,6 +12,10 @@ export type CrosspostLogEvent =
   | 'crosspost_retry_degraded'
   | 'crosspost_persistence_partial'
   | 'crosspost_persistence_failed_after_create'
+  | 'crosspost_finalize_transaction_failed'
+  | 'crosspost_reconciliation_started'
+  | 'crosspost_reconciliation_succeeded'
+  | 'crosspost_reconciliation_failed'
   | 'wiki_fetch_started'
   | 'wiki_fetch_succeeded'
   | 'wiki_fetch_failed';
@@ -48,6 +52,8 @@ export type CrosspostLogPayload = {
   crosspostsSkippedBySourceCooldown?: number;
   crosspostsSkippedByInFlight?: number;
   crosspostsSkippedByExistingDetection?: number;
+  reconciliationAttemptCount?: number;
+  persistenceFailureReason?: string;
 };
 
 export function toErrorMessage(error: unknown): string {
@@ -93,6 +99,8 @@ export function logCrosspostEvent(
     crosspostsSkippedByInFlight: payload.crosspostsSkippedByInFlight ?? null,
     crosspostsSkippedByExistingDetection:
       payload.crosspostsSkippedByExistingDetection ?? null,
+    reconciliationAttemptCount: payload.reconciliationAttemptCount ?? null,
+    persistenceFailureReason: payload.persistenceFailureReason ?? null,
   });
 
   try {

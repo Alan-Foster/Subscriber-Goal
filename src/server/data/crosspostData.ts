@@ -104,6 +104,7 @@ export const crosspostPendingByRevisionKeyPrefix = 'crosspostPendingByRevision';
 export type PendingCrosspostStatus =
   | 'queued_for_crosspost'
   | 'crosspost_retrying'
+  | 'crosspost_reconciliation_pending'
   | 'crosspost_terminal_failed'
   | 'crosspost_succeeded';
 
@@ -117,6 +118,9 @@ export type PendingCrosspost = {
   lastError: string | null;
   status: PendingCrosspostStatus;
   revisionDateMs?: number;
+  createdCrosspostId?: LinkId;
+  persistenceFailureReason?: string;
+  reconciliationAttemptCount?: number;
 };
 
 const toNormalizedSubredditName = (value: string): string =>
@@ -134,6 +138,7 @@ function isPendingCrosspostStatus(value: unknown): value is PendingCrosspostStat
   return (
     value === 'queued_for_crosspost' ||
     value === 'crosspost_retrying' ||
+    value === 'crosspost_reconciliation_pending' ||
     value === 'crosspost_terminal_failed' ||
     value === 'crosspost_succeeded'
   );
@@ -176,6 +181,27 @@ function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
 
   if (typeof candidate.revisionDateMs === 'number' && Number.isFinite(candidate.revisionDateMs)) {
     normalized.revisionDateMs = Math.floor(candidate.revisionDateMs);
+  }
+  if (
+    typeof candidate.createdCrosspostId === 'string' &&
+    /^t3_[\w\d]+$/.test(candidate.createdCrosspostId)
+  ) {
+    normalized.createdCrosspostId = candidate.createdCrosspostId as LinkId;
+  }
+  if (
+    typeof candidate.persistenceFailureReason === 'string' &&
+    candidate.persistenceFailureReason.length > 0
+  ) {
+    normalized.persistenceFailureReason = candidate.persistenceFailureReason;
+  }
+  if (
+    typeof candidate.reconciliationAttemptCount === 'number' &&
+    Number.isFinite(candidate.reconciliationAttemptCount)
+  ) {
+    normalized.reconciliationAttemptCount = Math.max(
+      0,
+      Math.floor(candidate.reconciliationAttemptCount)
+    );
   }
 
   return normalized;

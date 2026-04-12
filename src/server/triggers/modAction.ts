@@ -8,6 +8,8 @@ import {
   crosspostWikiPages,
   dispatchPostAction,
   getPendingCrosspost,
+  getCrosspostPendingByRevisionKey,
+  getCrosspostPendingByTimeKey,
   getCorrespondingPost,
   hasCrosspost,
   isProcessedRevision,
@@ -20,7 +22,6 @@ import {
   removePendingCrosspost,
   removeCorrespondingPost,
   removeProcessedRevisions,
-  storeCorrespondingPost,
   storeProcessedRevision,
   upsertPendingCrosspost,
 } from '../data/crosspostData';
@@ -106,6 +107,23 @@ type CrosspostBookkeepingCleanupOptions = {
 };
 
 type RedisLockClient = Pick<RedisClient, 'get' | 'set' | 'del'>;
+
+type RedisFinalizeTransaction = {
+  multi(): Promise<void>;
+  set(
+    key: string,
+    value: string,
+    options?: { expiration?: Date; nx?: boolean }
+  ): Promise<unknown>;
+  hSet(key: string, fields: Record<string, string>): Promise<unknown>;
+  hDel(key: string, fields: string[]): Promise<unknown>;
+  zRem(key: string, members: string[]): Promise<unknown>;
+  exec(): Promise<unknown>;
+};
+
+type RedisTransactionCapable = RedisClient & {
+  watch: (...keys: string[]) => Promise<RedisFinalizeTransaction>;
+};
 
 function emptySummary(): CrosspostIngestionSummary {
   return {
@@ -248,6 +266,46 @@ const isRetryWindowExpired = (
   nowMs: number
 ): boolean => nowMs - pending.firstSeenMs >= retryWindowMs;
 
+async function finalizeCrosspostPersistenceAtomic(params: {
+  redisClient: RedisClient;
+  targetSubreddit: string;
+  sourcePostId: LinkId;
+  crosspostId: LinkId;
+  revisionId: string;
+}): Promise<void> {
+  const {
+    redisClient,
+    targetSubreddit,
+    sourcePostId,
+    crosspostId,
+    revisionId,
+  } = params;
+  const pendingRevisionKey = getCrosspostPendingByRevisionKey(targetSubreddit);
+  const pendingTimeKey = getCrosspostPendingByTimeKey(targetSubreddit);
+  const terminalKey = getTerminalRevisionKey(revisionId);
+
+  const transactionRedis = redisClient as unknown as RedisTransactionCapable;
+  if (typeof transactionRedis.watch !== 'function') {
+    throw new Error('redis_watch_not_supported');
+  }
+  const tx = await transactionRedis.watch(
+    terminalKey,
+    crosspostListKey,
+    pendingRevisionKey,
+    pendingTimeKey
+  );
+  await tx.multi();
+  await tx.set(terminalKey, '1', {
+    expiration: new Date(Date.now() + crosspostTerminalRevisionTtlMs),
+  });
+  await tx.hSet(crosspostListKey, {
+    [sourcePostId]: crosspostId,
+  });
+  await tx.hDel(pendingRevisionKey, [revisionId]);
+  await tx.zRem(pendingTimeKey, [revisionId]);
+  await tx.exec();
+}
+
 async function acquireCrosspostIngestionLock(
   redisClient: RedisLockClient,
   lockKey: string
@@ -306,36 +364,6 @@ async function isTerminalRevisionMarked(
 ): Promise<boolean> {
   const value = await redisClient.get(getTerminalRevisionKey(revisionId));
   return value === '1';
-}
-
-async function markTerminalRevision(
-  redisClient: Pick<RedisClient, 'set'>,
-  revisionId: string
-): Promise<void> {
-  await redisClient.set(getTerminalRevisionKey(revisionId), '1', {
-    expiration: new Date(Date.now() + crosspostTerminalRevisionTtlMs),
-  });
-}
-
-async function markTerminalRevisionWithLogging(
-  revisionId: string,
-  sourcePostId: LinkId,
-  contextReason: 'crosspost_persistence_partial' | 'crosspost_persistence_failed_after_create'
-): Promise<boolean> {
-  try {
-    await markTerminalRevision(redis, revisionId);
-    console.info(
-      `[crosspost] terminal dedupe marked: revisionId=${revisionId} sourcePostId=${sourcePostId} reason=${contextReason}`
-    );
-    return true;
-  } catch (error) {
-    console.error(
-      `[crosspost] terminal dedupe mark failed: revisionId=${revisionId} sourcePostId=${sourcePostId} reason=${contextReason} error=${toErrorMessage(
-        error
-      )}`
-    );
-    return false;
-  }
 }
 
 const getCrosspostCreateInFlightKey = (sourcePostId: LinkId): string =>
@@ -762,8 +790,19 @@ async function updateFromWikis(
   const scheduleRetry = async (
     pending: PendingCrosspost,
     reason: string,
-    errorMessage?: string
+    errorMessage?: string,
+    options?: {
+      createdCrosspostId?: LinkId;
+      persistenceFailureReason?: string;
+      forceReconciliation?: boolean;
+      incrementReconciliation?: boolean;
+    }
   ): Promise<void> => {
+    const nextReconciliationAttemptCount =
+      (pending.reconciliationAttemptCount ?? 0) +
+      (options?.incrementReconciliation ? 1 : 0);
+    const nextCreatedCrosspostId =
+      options?.createdCrosspostId ?? pending.createdCrosspostId;
     if (isRetryWindowExpired(pending, retryWindowMs, nowMs)) {
       await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
       summary.crosspostsSkipped += 1;
@@ -774,6 +813,15 @@ async function updateFromWikis(
           targetSubreddit: appSettings.promoSubreddit,
           reason: `${reason}_retry_window_expired`,
           revisionId: pending.revisionId,
+          ...(nextCreatedCrosspostId
+            ? { crosspostId: nextCreatedCrosspostId }
+            : {}),
+          ...(nextReconciliationAttemptCount > 0
+            ? { reconciliationAttemptCount: nextReconciliationAttemptCount }
+            : {}),
+          ...(options?.persistenceFailureReason
+            ? { persistenceFailureReason: options.persistenceFailureReason }
+            : {}),
           ...(errorMessage ? { errorMessage } : {}),
         },
         'warn'
@@ -794,7 +842,21 @@ async function updateFromWikis(
       attemptCount: pending.attemptCount + 1,
       nextAttemptMs: nowMs + nextDelayMs,
       lastError: errorMessage ?? reason,
-      status: 'crosspost_retrying',
+      status:
+        options?.forceReconciliation || nextCreatedCrosspostId
+          ? 'crosspost_reconciliation_pending'
+          : 'crosspost_retrying',
+      ...(nextCreatedCrosspostId
+        ? { createdCrosspostId: nextCreatedCrosspostId }
+        : {}),
+      ...(options?.persistenceFailureReason
+        ? { persistenceFailureReason: options.persistenceFailureReason }
+        : pending.persistenceFailureReason
+          ? { persistenceFailureReason: pending.persistenceFailureReason }
+          : {}),
+      ...(nextReconciliationAttemptCount > 0
+        ? { reconciliationAttemptCount: nextReconciliationAttemptCount }
+        : {}),
     });
     summary.crosspostsSkipped += 1;
     logCrosspostEvent(
@@ -804,6 +866,15 @@ async function updateFromWikis(
         targetSubreddit: appSettings.promoSubreddit,
         reason,
         revisionId: pending.revisionId,
+        ...(nextCreatedCrosspostId
+          ? { crosspostId: nextCreatedCrosspostId }
+          : {}),
+        ...(nextReconciliationAttemptCount > 0
+          ? { reconciliationAttemptCount: nextReconciliationAttemptCount }
+          : {}),
+        ...(options?.persistenceFailureReason
+          ? { persistenceFailureReason: options.persistenceFailureReason }
+          : {}),
         ...(errorMessage ? { errorMessage } : {}),
       },
       'warn'
@@ -827,6 +898,15 @@ async function updateFromWikis(
         targetSubreddit: appSettings.promoSubreddit,
         reason,
         revisionId: pending.revisionId,
+        ...(pending.createdCrosspostId
+          ? { crosspostId: pending.createdCrosspostId }
+          : {}),
+        ...(pending.reconciliationAttemptCount
+          ? { reconciliationAttemptCount: pending.reconciliationAttemptCount }
+          : {}),
+        ...(pending.persistenceFailureReason
+          ? { persistenceFailureReason: pending.persistenceFailureReason }
+          : {}),
         ...(errorMessage ? { errorMessage } : {}),
       },
       'warn'
@@ -836,7 +916,18 @@ async function updateFromWikis(
     );
   };
 
-  for (const pending of duePendingCrossposts) {
+  const reconciliationFirstPending = duePendingCrossposts.filter(
+    (pending) =>
+      pending.status === 'crosspost_reconciliation_pending' ||
+      Boolean(pending.createdCrosspostId)
+  );
+  const normalPending = duePendingCrossposts.filter(
+    (pending) =>
+      pending.status !== 'crosspost_reconciliation_pending' &&
+      !pending.createdCrosspostId
+  );
+
+  for (const pending of [...reconciliationFirstPending, ...normalPending]) {
     let sourceSubredditIsNsfw = false;
     try {
       const revisionDateMs = pending.revisionDateMs;
@@ -903,31 +994,73 @@ async function updateFromWikis(
         pending.postId,
         appSettings.promoSubreddit
       );
-      if (existingCrosspostId) {
-        summary.crosspostsSkippedByExistingDetection += 1;
+      const reconciliationCrosspostId =
+        pending.createdCrosspostId ?? existingCrosspostId;
+      if (reconciliationCrosspostId) {
+        logCrosspostEvent({
+          event: 'crosspost_reconciliation_started',
+          sourcePostId: pending.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          crosspostId: reconciliationCrosspostId,
+          reason: pending.createdCrosspostId
+            ? 'reconcile_from_saved_crosspost_id'
+            : 'reconcile_from_existing_detection',
+          revisionId: pending.revisionId,
+          ...(pending.reconciliationAttemptCount
+            ? { reconciliationAttemptCount: pending.reconciliationAttemptCount }
+            : {}),
+        });
         try {
-          await storeCorrespondingPost(redis, pending.postId, existingCrosspostId);
-        } catch (storeDetectedMappingError) {
-          console.warn(
-            `[crosspost] failed to persist existing detected mapping: revisionId=${pending.revisionId} sourcePostId=${pending.postId} crosspostId=${existingCrosspostId} error=${toErrorMessage(
-              storeDetectedMappingError
-            )}`
-          );
-        }
-        await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
-        summary.crosspostsSkipped += 1;
-        logCrosspostEvent(
-          {
-            event: 'crosspost_attempt_skipped',
+          await finalizeCrosspostPersistenceAtomic({
+            redisClient: redis,
+            targetSubreddit: appSettings.promoSubreddit,
+            sourcePostId: pending.postId,
+            crosspostId: reconciliationCrosspostId,
+            revisionId: pending.revisionId,
+          });
+          summary.crosspostsSkipped += 1;
+          summary.crosspostsSkippedByExistingDetection += 1;
+          logCrosspostEvent({
+            event: 'crosspost_reconciliation_succeeded',
             sourcePostId: pending.postId,
             targetSubreddit: appSettings.promoSubreddit,
-            crosspostId: existingCrosspostId,
-            reason: 'existing_crosspost_detected',
+            crosspostId: reconciliationCrosspostId,
+            reason: 'reconciliation_mapping_backfilled',
             revisionId: pending.revisionId,
-          },
-          'warn'
-        );
-        continue;
+            ...(pending.reconciliationAttemptCount
+              ? { reconciliationAttemptCount: pending.reconciliationAttemptCount }
+              : {}),
+          });
+          continue;
+        } catch (reconcileError) {
+          const reconcileErrorMessage = toErrorMessage(reconcileError);
+          logCrosspostEvent(
+            {
+              event: 'crosspost_reconciliation_failed',
+              sourcePostId: pending.postId,
+              targetSubreddit: appSettings.promoSubreddit,
+              crosspostId: reconciliationCrosspostId,
+              reason: 'reconciliation_finalize_failed',
+              revisionId: pending.revisionId,
+              ...(pending.reconciliationAttemptCount
+                ? { reconciliationAttemptCount: pending.reconciliationAttemptCount + 1 }
+                : { reconciliationAttemptCount: 1 }),
+              errorMessage: reconcileErrorMessage,
+            },
+            'warn'
+          );
+          await scheduleRetry(
+            pending,
+            'crosspost_reconciliation_failed',
+            reconcileErrorMessage,
+            {
+              createdCrosspostId: reconciliationCrosspostId,
+              forceReconciliation: true,
+              incrementReconciliation: true,
+            }
+          );
+          continue;
+        }
       }
 
       const sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
@@ -992,77 +1125,62 @@ async function updateFromWikis(
         );
       }
 
-      let terminalStored = false;
-      let mappingStored = false;
-      let terminalStoreErrorMessage: string | undefined;
-      let mappingStoreErrorMessage: string | undefined;
-
       try {
-        await markTerminalRevision(redis, pending.revisionId);
-        terminalStored = true;
-      } catch (terminalStoreError) {
-        terminalStoreErrorMessage = toErrorMessage(terminalStoreError);
-      }
-
-      try {
-        await storeCorrespondingPost(redis, pending.postId, crosspostId);
-        mappingStored = true;
-      } catch (mappingStoreError) {
-        mappingStoreErrorMessage = toErrorMessage(mappingStoreError);
-      }
-
-      summary.crosspostsCreated += 1;
-      summary.crosspostsCreatedThisRun += 1;
-      hourlyCreatedCount += 1;
-      await recordCrosspostCreation(redis, hourlyHistoryKey, pending.revisionId, Date.now());
-      await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
-
-      if (terminalStored && mappingStored) {
-        continue;
-      }
-
-      const persistenceErrorMessage = [
-        terminalStoreErrorMessage,
-        mappingStoreErrorMessage,
-      ]
-        .filter(Boolean)
-        .join(' | ');
-
-      if (terminalStored) {
-        summary.crosspostPersistencePartial += 1;
+        await finalizeCrosspostPersistenceAtomic({
+          redisClient: redis,
+          targetSubreddit: appSettings.promoSubreddit,
+          sourcePostId: pending.postId,
+          crosspostId: crosspostId as LinkId,
+          revisionId: pending.revisionId,
+        });
+        summary.crosspostsCreated += 1;
+        summary.crosspostsCreatedThisRun += 1;
+        hourlyCreatedCount += 1;
+        await recordCrosspostCreation(
+          redis,
+          hourlyHistoryKey,
+          pending.revisionId,
+          Date.now()
+        );
+      } catch (finalizeError) {
+        const finalizeErrorMessage = toErrorMessage(finalizeError);
+        summary.crosspostPersistenceFailedAfterCreate += 1;
         logCrosspostEvent(
           {
-            event: 'crosspost_persistence_partial',
+            event: 'crosspost_finalize_transaction_failed',
             sourcePostId: pending.postId,
             targetSubreddit: appSettings.promoSubreddit,
             crosspostId,
-            reason: 'crosspost_persistence_partial',
+            reason: 'crosspost_finalize_transaction_failed',
             revisionId: pending.revisionId,
-            errorMessage: persistenceErrorMessage,
+            errorMessage: finalizeErrorMessage,
           },
-          'warn'
+          'error'
         );
-        continue;
+        await scheduleRetry(
+          pending,
+          'crosspost_persistence_failed_after_create',
+          finalizeErrorMessage,
+          {
+            createdCrosspostId: crosspostId as LinkId,
+            persistenceFailureReason: 'crosspost_finalize_transaction_failed',
+            forceReconciliation: true,
+            incrementReconciliation: true,
+          }
+        );
+        logCrosspostEvent(
+          {
+            event: 'crosspost_persistence_failed_after_create',
+            sourcePostId: pending.postId,
+            targetSubreddit: appSettings.promoSubreddit,
+            crosspostId,
+            reason: 'crosspost_persistence_failed_after_create',
+            revisionId: pending.revisionId,
+            errorMessage: finalizeErrorMessage,
+          },
+          'error'
+        );
       }
-
-      await markTerminalRevisionWithLogging(
-        pending.revisionId,
-        pending.postId,
-        'crosspost_persistence_failed_after_create'
-      );
-      summary.crosspostPersistenceFailedAfterCreate += 1;
-      logCrosspostEvent(
-        {
-          event: 'crosspost_persistence_failed_after_create',
-          sourcePostId: pending.postId,
-          targetSubreddit: appSettings.promoSubreddit,
-          crosspostId,
-          reason: 'crosspost_persistence_failed_after_create',
-          revisionId: pending.revisionId,
-          errorMessage: persistenceErrorMessage,
-        },
-        'error'
-      );
     } catch (e) {
       const errorMessage = toErrorMessage(e);
       const permanentFailure = isPermanentCrosspostError(errorMessage);
