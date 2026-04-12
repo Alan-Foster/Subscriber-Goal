@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.11.9 - Experimental fixes for broken crossposting.
 - 0.11.8 - Fixed devvit.json scripts entries. Fixed lint errors
 - 0.11.6 - Fixed critical redis error preventing crossposts, Devvit 0.12.18
 - 0.11.3 - Share username is now enabled by default (opt-out).

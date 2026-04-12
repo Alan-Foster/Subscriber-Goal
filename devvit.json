@@ -23,7 +23,7 @@
     "dir": "assets"
   },
   "settings": {
-    "installation": {
+    "subreddit": {
       "promoSubreddit": {
         "type": "string",
         "label": "Promo Subreddit",
