@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.12.0 - Proper utilization of App Settings. Fixed stale-posts preventing crossposting. Devvit 0.12.19
 - 0.11.10 - Removed unused code, added app icon.
 - 0.11.9 - Experimental fixes for broken crossposting.
 - 0.11.8 - Fixed devvit.json scripts entries. Fixed lint errors

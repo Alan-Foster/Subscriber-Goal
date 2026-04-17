@@ -62,43 +62,20 @@ export function logCrosspostEvent(
   payload: CrosspostLogPayload,
   level: CrosspostLogLevel = 'info'
 ): void {
-  const logLine = JSON.stringify({
+  const compactPayload: Record<string, unknown> = {
     event: payload.event,
-    sourcePostId: payload.sourcePostId ?? null,
-    targetSubreddit: payload.targetSubreddit ?? null,
-    crosspostId: payload.crosspostId ?? null,
-    reason: payload.reason ?? null,
-    revisionId: payload.revisionId ?? null,
-    errorMessage: payload.errorMessage ?? null,
-    page: payload.page ?? null,
-    status: payload.status ?? null,
-    revisionsFetched: payload.revisionsFetched ?? null,
-    newPostsSeen: payload.newPostsSeen ?? null,
-    crosspostsCreated: payload.crosspostsCreated ?? null,
-    crosspostsSkipped: payload.crosspostsSkipped ?? null,
-    crosspostsFailed: payload.crosspostsFailed ?? null,
-    actionsMirrored: payload.actionsMirrored ?? null,
-    actionsFailed: payload.actionsFailed ?? null,
-    durationMs: payload.durationMs ?? null,
-    consecutiveFailures: payload.consecutiveFailures ?? null,
-    currentInstallSubreddit: payload.currentInstallSubreddit ?? null,
-    authoritySubreddit: payload.authoritySubreddit ?? null,
-    ingestionAllowed: payload.ingestionAllowed ?? null,
-    freshnessWindowMs: payload.freshnessWindowMs ?? null,
-    revisionFreshnessWindowMs: payload.revisionFreshnessWindowMs ?? null,
-    crosspostsCreatedThisRun: payload.crosspostsCreatedThisRun ?? null,
-    crosspostsBlockedByRunCap: payload.crosspostsBlockedByRunCap ?? null,
-    crosspostsBlockedByHourlyCap: payload.crosspostsBlockedByHourlyCap ?? null,
-    crosspostPersistenceFailedAfterCreate:
-      payload.crosspostPersistenceFailedAfterCreate ?? null,
-    crosspostsSkippedBySourceCooldown:
-      payload.crosspostsSkippedBySourceCooldown ?? null,
-    crosspostsSkippedByInFlight: payload.crosspostsSkippedByInFlight ?? null,
-    crosspostsSkippedByExistingDetection:
-      payload.crosspostsSkippedByExistingDetection ?? null,
-    reconciliationAttemptCount: payload.reconciliationAttemptCount ?? null,
-    persistenceFailureReason: payload.persistenceFailureReason ?? null,
-  });
+  };
+  for (const [key, value] of Object.entries(payload)) {
+    if (
+      key === 'event' ||
+      value === undefined ||
+      (typeof value === 'number' && value === 0)
+    ) {
+      continue;
+    }
+    compactPayload[key] = value;
+  }
+  const logLine = JSON.stringify(compactPayload);
 
   try {
     if (level === 'error') {

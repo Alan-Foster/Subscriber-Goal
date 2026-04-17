@@ -1,4 +1,4 @@
-import { context, reddit, redis } from '@devvit/web/server';
+import { reddit, redis, settings } from '@devvit/web/server';
 import { checkCompletionStatus, getSubGoalData } from '../data/subGoalData';
 import { cancelUpdates, getQueuedUpdates, queueUpdate } from '../data/updaterData';
 import { isLinkId } from '../types';
@@ -10,9 +10,7 @@ import { countPendingCrossposts } from '../data/crosspostData';
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
-  const appSettings = await getAppSettings(
-    (context as { settings?: { getAll<T>(): Promise<Partial<T>> } }).settings
-  );
+  const appSettings = await getAppSettings(settings);
   const ingestionSummary = await processCrosspostDispatchQueue(
     appSettings,
     'scheduler_posts_updater'

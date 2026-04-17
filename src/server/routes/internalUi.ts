@@ -1,13 +1,12 @@
 import type { Response, Router } from 'express';
 import type { UiResponse } from '@devvit/web/shared';
-import { context, reddit, redis } from '@devvit/web/server';
+import { context, reddit, redis, settings } from '@devvit/web/server';
 import type {
   CreateGoalFormValues,
   DeleteGoalFormValues,
   EraseDataFormValues,
 } from '../../shared/types/api';
 import { formNames, internalRoutes } from '../../shared/routes';
-import type { SettingsClient } from '../types';
 import { isLinkId } from '../types';
 import { createGoalPost } from '../core/post';
 import { dispatchPostAction } from '../data/crosspostData';
@@ -28,9 +27,6 @@ import { clearUserStickies } from '../utils/redditUtils';
 import { validateSubredditDisplayName } from '../utils/subredditDisplayName';
 import { applyTextFallback } from '../utils/textFallback';
 
-const getSettingsClient = (): SettingsClient | undefined =>
-  (context as { settings?: SettingsClient }).settings;
-
 export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.menu.createGoal,
@@ -40,7 +36,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const savedSubredditDisplayName = await getSavedSubredditDisplayName(redis);
         const resolvedSubredditDisplayName =
           savedSubredditDisplayName ?? subreddit.name;
-        const appSettings = await getAppSettings(getSettingsClient());
+        const appSettings = await getAppSettings(settings);
         const defaultGoal = getDefaultSubscriberGoal(subreddit.numberOfSubscribers);
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
@@ -118,7 +114,7 @@ export function registerInternalUiRoutes(router: Router): void {
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
-        const appSettings = await getAppSettings(getSettingsClient());
+        const appSettings = await getAppSettings(settings);
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
         const shouldCrosspostByDefault =
@@ -285,7 +281,7 @@ export function registerInternalUiRoutes(router: Router): void {
 
       try {
         const post = await reddit.getPostById(postId);
-        const appSettings = await getAppSettings(getSettingsClient());
+        const appSettings = await getAppSettings(settings);
         if (
           subredditName.toLowerCase() !== appSettings.promoSubreddit.toLowerCase()
         ) {

@@ -17,6 +17,11 @@ export type WikiRevisionsFetchResult = {
   durationMs: number;
 };
 
+function normalizeTimestampMs(value: number): number {
+  // Devvit may return timestamps in either seconds or milliseconds.
+  return value < 1_000_000_000_000 ? value * 1000 : value;
+}
+
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -95,12 +100,6 @@ export async function safeGetWikiPageRevisions(
   page: string
 ): Promise<WikiRevisionsFetchResult> {
   const startedAt = Date.now();
-  logCrosspostEvent({
-    event: 'wiki_fetch_started',
-    targetSubreddit: subredditName,
-    page,
-    reason: 'fetch_wiki_revisions',
-  });
 
   try {
     const listing = reddit.getWikiPageRevisions({
@@ -121,7 +120,7 @@ export async function safeGetWikiPageRevisions(
       if (maybeDate instanceof Date) {
         dateMs = maybeDate.getTime();
       } else if (typeof maybeDate === 'number') {
-        dateMs = maybeDate;
+        dateMs = normalizeTimestampMs(maybeDate);
       } else if (typeof maybeDate === 'string') {
         const parsed = Date.parse(maybeDate);
         if (!Number.isNaN(parsed)) {
@@ -136,14 +135,6 @@ export async function safeGetWikiPageRevisions(
       };
     });
     const durationMs = Date.now() - startedAt;
-    logCrosspostEvent({
-      event: 'wiki_fetch_succeeded',
-      targetSubreddit: subredditName,
-      page,
-      reason: 'fetch_wiki_revisions',
-      revisionsFetched: mapped.length,
-      durationMs,
-    });
     return {
       ok: true,
       revisions: mapped,

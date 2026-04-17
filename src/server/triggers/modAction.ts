@@ -1,4 +1,4 @@
-import { reddit, redis, context } from '@devvit/web/server';
+import { reddit, redis, context, settings } from '@devvit/web/server';
 import type { AppSettings } from '../../shared/types/api';
 import { getAppSettings } from '../settings';
 import {
@@ -93,6 +93,8 @@ const crosspostSourceCreateCooldownKeyPrefix = 'crosspostSourceCreateCooldown';
 const crosspostSourceCreateCooldownTtlMs = 60 * 60 * 1000;
 const crosspostTerminalRevisionKeyPrefix = 'crosspostTerminalRevision';
 const crosspostTerminalRevisionTtlMs = 30 * 24 * 60 * 60 * 1000;
+const crosspostUnexpectedRevisionLogKeyPrefix = 'crosspostUnexpectedRevisionLog';
+const crosspostUnexpectedRevisionLogTtlMs = 24 * 60 * 60 * 1000;
 const crosspostCreateInFlightKeyPrefix = 'crosspostCreateInFlight';
 const crosspostCreateInFlightTtlMs = 90 * 1000;
 const crosspostTargetDuplicateScanLimit = 25;
@@ -162,6 +164,10 @@ const isPermanentMirrorError = (errorMessage: string): boolean =>
 
 const toNormalizedSubredditName = (value: string): string =>
   value.trim().replace(/^r\//i, '').toLowerCase();
+
+const normalizeTimestampMs = (value: number): number =>
+  // Devvit may return timestamps in either seconds or milliseconds.
+  value < 1_000_000_000_000 ? value * 1000 : value;
 
 const getCrosspostAuthoritySubreddit = (appSettings: AppSettings): string =>
   toNormalizedSubredditName(
@@ -355,6 +361,28 @@ async function setSourceCreateCooldown(
 
 const getTerminalRevisionKey = (revisionId: string): string =>
   `${crosspostTerminalRevisionKeyPrefix}:${revisionId}`;
+
+const getUnexpectedRevisionLogKey = (
+  revisionId: string,
+  category: string
+): string => `${crosspostUnexpectedRevisionLogKeyPrefix}:${category}:${revisionId}`;
+
+async function shouldLogUnexpectedRevision(
+  redisClient: Pick<RedisClient, 'get' | 'set'>,
+  revisionId: string,
+  category: string
+): Promise<boolean> {
+  const key = getUnexpectedRevisionLogKey(revisionId, category);
+  const existing = await redisClient.get(key);
+  if (existing === '1') {
+    return false;
+  }
+  await redisClient.set(key, '1', {
+    nx: true,
+    expiration: new Date(Date.now() + crosspostUnexpectedRevisionLogTtlMs),
+  });
+  return (await redisClient.get(key)) === '1';
+}
 
 async function isTerminalRevisionMarked(
   redisClient: Pick<RedisClient, 'get'>,
@@ -597,16 +625,32 @@ async function getNewPosts(
 
     const parsedReason = parseNewPostDispatchReason(revision.reason);
     if (!parsedReason) {
-      console.warn(
-        `[crosspost] skipping revision with unexpected new-post reason: revisionId=${revision.id} reason=${revision.reason}`
-      );
+      if (
+        await shouldLogUnexpectedRevision(
+          redis,
+          revision.id,
+          'unexpected_new_post_reason'
+        )
+      ) {
+        console.warn(
+          `[crosspost] skipping revision with unexpected new-post reason: revisionId=${revision.id} reason=${revision.reason}`
+        );
+      }
       continue;
     }
     const { postId, goal } = parsedReason;
     if (!postId || Number.isNaN(goal) || !isLinkId(postId)) {
-      console.warn(
-        `[crosspost] skipping new-post revision with invalid payload: revisionId=${revision.id} postId=${postId} goal=${goal}`
-      );
+      if (
+        await shouldLogUnexpectedRevision(
+          redis,
+          revision.id,
+          'invalid_new_post_payload'
+        )
+      ) {
+        console.warn(
+          `[crosspost] skipping new-post revision with invalid payload: revisionId=${revision.id} postId=${postId} goal=${goal}`
+        );
+      }
       continue;
     }
 
@@ -662,16 +706,32 @@ async function getNewPostActions(
       actionType
     );
     if (!parsedReason) {
-      console.warn(
-        `[crosspost] skipping revision with unexpected action reason: revisionId=${revision.id} action=${actionType} reason=${revision.reason}`
-      );
+      if (
+        await shouldLogUnexpectedRevision(
+          redis,
+          revision.id,
+          `unexpected_action_reason_${actionType}`
+        )
+      ) {
+        console.warn(
+          `[crosspost] skipping revision with unexpected action reason: revisionId=${revision.id} action=${actionType} reason=${revision.reason}`
+        );
+      }
       continue;
     }
     const { postId } = parsedReason;
     if (!postId || !isLinkId(postId)) {
-      console.warn(
-        `[crosspost] skipping action revision with invalid post id: revisionId=${revision.id} action=${actionType} postId=${postId}`
-      );
+      if (
+        await shouldLogUnexpectedRevision(
+          redis,
+          revision.id,
+          `invalid_action_post_id_${actionType}`
+        )
+      ) {
+        console.warn(
+          `[crosspost] skipping action revision with invalid post id: revisionId=${revision.id} action=${actionType} postId=${postId}`
+        );
+      }
       continue;
     }
 
@@ -930,11 +990,18 @@ async function updateFromWikis(
     try {
       const revisionDateMs = pending.revisionDateMs;
       if (typeof revisionDateMs !== 'number' || !Number.isFinite(revisionDateMs)) {
+        console.info(
+          `[crosspost] revision freshness check: revisionId=${pending.revisionId} sourcePostId=${pending.postId} revisionDateMs=unknown nowMs=${nowMs} revisionFreshnessWindowMs=${revisionFreshnessWindowMs} result=unknown`
+        );
         await scheduleRetry(pending, 'revision_age_unknown');
         continue;
       }
-      const revisionAgeMs = nowMs - revisionDateMs;
+      const normalizedRevisionDateMs = normalizeTimestampMs(revisionDateMs);
+      const revisionAgeMs = nowMs - normalizedRevisionDateMs;
       if (revisionAgeMs > revisionFreshnessWindowMs) {
+        console.info(
+          `[crosspost] revision freshness check: revisionId=${pending.revisionId} sourcePostId=${pending.postId} revisionDateMs=${revisionDateMs} normalizedRevisionDateMs=${normalizedRevisionDateMs} revisionAgeMs=${revisionAgeMs} nowMs=${nowMs} revisionFreshnessWindowMs=${revisionFreshnessWindowMs} result=stale`
+        );
         await scheduleRetry(pending, 'revision_too_old');
         continue;
       }
@@ -956,11 +1023,17 @@ async function updateFromWikis(
       }
       const createdAtMs = getPostCreatedAtMs(post);
       if (!Number.isFinite(createdAtMs) || createdAtMs <= 0) {
+        console.info(
+          `[crosspost] source post freshness check: revisionId=${pending.revisionId} sourcePostId=${pending.postId} createdAtMs=unknown sourcePostFreshnessWindowMs=${sourcePostFreshnessWindowMs} result=unknown`
+        );
         await scheduleRetry(pending, 'source_post_age_unknown');
         continue;
       }
       const postAgeMs = Date.now() - createdAtMs;
       if (postAgeMs > sourcePostFreshnessWindowMs) {
+        console.info(
+          `[crosspost] source post freshness check: revisionId=${pending.revisionId} sourcePostId=${pending.postId} createdAtMs=${createdAtMs} postAgeMs=${postAgeMs} sourcePostFreshnessWindowMs=${sourcePostFreshnessWindowMs} result=stale`
+        );
         await scheduleRetry(pending, 'source_post_too_old');
         continue;
       }
@@ -1598,9 +1671,11 @@ export async function processCrosspostDispatchQueue(
           redis,
           appSettings.promoSubreddit
         );
-        console.info(
-          `[crosspost] daisy-chain pass ${pass}/${maxPasses}: pendingDepth=${pendingDepth} status=${passSummary.status}`
-        );
+        if (pendingDepth > 0 || passSummary.status !== 'success') {
+          console.info(
+            `[crosspost] daisy-chain pass ${pass}/${maxPasses}: pendingDepth=${pendingDepth} status=${passSummary.status}`
+          );
+        }
         if (pendingDepth === 0) {
           break;
         }
@@ -1777,9 +1852,7 @@ export async function processCrosspostDispatchQueue(
 }
 
 export async function onModAction(event: ModActionEvent): Promise<void> {
-  const appSettings = await getAppSettings(
-    (context as { settings?: { getAll<T>(): Promise<Partial<T>> } }).settings
-  );
+  const appSettings = await getAppSettings(settings);
   const subredditName =
     context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);

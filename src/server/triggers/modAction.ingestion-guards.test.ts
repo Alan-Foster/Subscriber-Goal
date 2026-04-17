@@ -260,6 +260,58 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
+  it('logs unexpected new-post revisions only once across repeated runs', async () => {
+    mockContext.subredditName = 'SubGoal';
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_redditArg: unknown, _subreddit: string, page: string) => ({
+        ok: true,
+        revisions:
+          page === crosspostWikiPages.newPost
+            ? [
+                {
+                  id: 'rev_create_page',
+                  reason: 'Create Page',
+                  dateMs: Date.now(),
+                },
+              ]
+            : [],
+        durationMs: 1,
+      })
+    );
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(
+      consoleWarnSpy.mock.calls.filter(([message]) =>
+        String(message).includes('unexpected new-post reason')
+      )
+    ).toHaveLength(1);
+    consoleWarnSpy.mockRestore();
+  });
+
+  it('suppresses daisy-chain pass logs when a successful pass clears the backlog', async () => {
+    mockContext.subredditName = 'SubGoal';
+    const consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_redditArg: unknown, _subreddit: string, _page: string) => ({
+        ok: true,
+        revisions: [],
+        durationMs: 1,
+      })
+    );
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(
+      consoleInfoSpy.mock.calls.some(([message]) =>
+        String(message).includes('daisy-chain pass')
+      )
+    ).toBe(false);
+    consoleInfoSpy.mockRestore();
+  });
+
   it('skips ingestion when lock is held by another worker', async () => {
     mockContext.subredditName = 'SubGoal';
     await redisMock.set('crosspostIngestionLock:subgoal', 'held-by-other');
