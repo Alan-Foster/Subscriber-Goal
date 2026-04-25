@@ -30,7 +30,7 @@ export const CompletedPage = ({
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
       />
-      <SubredditIcon iconUrl={state.subreddit.icon} size={100} onClick={onCelebrate} />
+      <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       <div className="text-2xl font-bold">
         r/{state.subreddit.name} reached{' '}
         {state.goal ? formatNumberUnlessExact(state.goal) : 'the goal'} subscribers!

@@ -22,7 +22,7 @@ export const ThanksPage = ({
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
       />
-      <SubredditIcon iconUrl={state.subreddit.icon} size={100} onClick={onCelebrate} />
+      <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       <div className="text-2xl font-bold">Thanks for Subscribing!</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         There are now {formatNumberUnlessExact(state.subreddit.subscribers)} subscribers

@@ -8,7 +8,6 @@ import type { AppSettings } from '../../shared/types/api';
 const hoisted = vi.hoisted(() => ({
   mockContext: {} as {
     subredditName?: string;
-    settings?: { getAll<T>(): Promise<Partial<T>> };
   },
   mockReddit: {
     getCurrentSubreddit: vi.fn(),
@@ -16,6 +15,9 @@ const hoisted = vi.hoisted(() => ({
     getSubredditInfoById: vi.fn(),
     getNewPosts: vi.fn(),
     crosspost: vi.fn(),
+  },
+  mockSettings: {
+    getAll: vi.fn(async () => ({} as Partial<AppSettings>)),
   },
   safeGetWikiPageRevisionsMock: vi.fn(),
   loggedEvents: [] as Array<Record<string, unknown>>,
@@ -26,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
 
 const mockContext = hoisted.mockContext;
 const mockReddit = hoisted.mockReddit;
+const mockSettings = hoisted.mockSettings;
 const safeGetWikiPageRevisionsMock = hoisted.safeGetWikiPageRevisionsMock;
 const loggedEvents = hoisted.loggedEvents;
 
@@ -172,6 +175,7 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).watch(...args),
   },
   context: hoisted.mockContext,
+  settings: hoisted.mockSettings,
 }));
 
 vi.mock('../utils/crosspostLogs', () => ({
@@ -208,11 +212,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     redisMock = new InMemoryRedis();
     hoisted.redisState.redisMock = redisMock;
     mockContext.subredditName = undefined;
-    (
-      mockContext as {
-        settings?: { getAll<T>(): Promise<Partial<T>> };
-      }
-    ).settings = undefined;
+    mockSettings.getAll.mockReset();
+    mockSettings.getAll.mockResolvedValue({});
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
@@ -569,16 +570,10 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
   it('onModAction wikirevise follows authority subreddit, not promo subreddit', async () => {
     mockContext.subredditName = 'AuthorityHub';
-    (
-      mockContext as {
-        settings?: { getAll<T>(): Promise<Partial<T>> };
-      }
-    ).settings = {
-      getAll: async () => ({
-        promoSubreddit: 'SubGoal',
-        crosspostAuthoritySubreddit: 'AuthorityHub',
-      }),
-    };
+    mockSettings.getAll.mockResolvedValue({
+      promoSubreddit: 'SubGoal',
+      crosspostAuthoritySubreddit: 'AuthorityHub',
+    });
     safeGetWikiPageRevisionsMock.mockResolvedValue({
       ok: true,
       revisions: [],

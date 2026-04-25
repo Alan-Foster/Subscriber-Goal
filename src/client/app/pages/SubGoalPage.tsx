@@ -35,11 +35,7 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
       />
       <div className="pt-6">
-        <SubredditIcon
-          iconUrl={state.subreddit.icon}
-          size={100}
-          onClick={iconAction}
-        />
+        <SubredditIcon iconUrl={state.subreddit.icon} onClick={iconAction} />
       </div>
       <div className="relative h-7 w-full">
         <div

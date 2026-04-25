@@ -8,7 +8,7 @@ type SubredditIconProps = {
 
 export const SubredditIcon = ({
   iconUrl,
-  size = 100,
+  size = 64,
   onClick,
 }: SubredditIconProps) => {
   const dimensionStyle = { width: size, height: size };
@@ -22,6 +22,8 @@ export const SubredditIcon = ({
           <img
             src={iconUrl}
             alt="Subreddit icon"
+            width={size}
+            height={size}
             className={`h-full w-full rounded-full object-cover ${
               onClick ? 'cursor-pointer' : ''
             }`}
