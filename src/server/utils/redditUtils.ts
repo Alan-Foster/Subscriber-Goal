@@ -46,12 +46,16 @@ async function withTimeout<T>(
 export async function getSubredditIcon(
   reddit: RedditClient,
   subredditId: string,
+  subredditSettings?: { communityIcon?: string },
   // Keep fallback app-owned to avoid external dependency for missing subreddit icons.
   // This replaces the prior remote redditforbusiness-derived fallback URL.
   defaultIconUrl: string = '/reddit_temp_logo.jpg'
 ): Promise<string> {
   if (!isSubredditId(subredditId)) {
     return defaultIconUrl;
+  }
+  if (subredditSettings?.communityIcon) {
+    return subredditSettings.communityIcon;
   }
   const subredditStyles = await reddit.getSubredditStyles(subredditId);
   return (

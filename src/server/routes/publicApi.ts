@@ -21,7 +21,11 @@ const buildState = async (
   options?: { subscribersOverride?: number; recentSubscriberOverride?: string }
 ): Promise<SubGoalState> => {
   const subreddit = await reddit.getCurrentSubreddit();
-  const subredditIcon = await getSubredditIcon(reddit, subreddit.id);
+  const subredditIcon = await getSubredditIcon(
+    reddit,
+    subreddit.id,
+    (subreddit as { settings?: { communityIcon?: string } }).settings
+  );
   const appSettings = await getAppSettings(settings);
   const subGoalData = await getSubGoalData(redis, postId);
 

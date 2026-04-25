@@ -3,6 +3,21 @@ import { getSubredditIcon, safeGetWikiPageRevisions } from './redditUtils';
 import * as crosspostLogs from './crosspostLogs';
 
 describe('getSubredditIcon', () => {
+  it('returns subreddit settings community icon when available', async () => {
+    const reddit = {
+      getSubredditStyles: vi.fn(),
+    };
+
+    const icon = await getSubredditIcon(
+      reddit as unknown as Parameters<typeof getSubredditIcon>[0],
+      't5_abc123',
+      { communityIcon: 'https://example.com/settings-community-icon.png' }
+    );
+
+    expect(icon).toBe('https://example.com/settings-community-icon.png');
+    expect(reddit.getSubredditStyles).not.toHaveBeenCalled();
+  });
+
   it('returns subreddit style icon when available', async () => {
     const reddit = {
       getSubredditStyles: vi.fn(async () => ({
