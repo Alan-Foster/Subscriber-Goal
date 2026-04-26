@@ -23,13 +23,19 @@ export const App = () => {
   const [page, setPage] = useState<PageName>('subGoal');
   const [showConfetti, setShowConfetti] = useState(false);
   const [confettiKey, setConfettiKey] = useState(0);
-  const [confettiPieces, setConfettiPieces] = useState(
+  const [confettiPieces, setConfettiPieces] = useState<number>(
     confettiPresets.default.pieceCount
   );
   const confettiTimeoutRef = useRef<number | null>(null);
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
   const [shareUsername, setShareUsername] = useState(true);
+
+  useEffect(() => {
+    if (state?.subreddit.isNsfw) {
+      setShareUsername(false);
+    }
+  }, [state?.subreddit.isNsfw]);
 
   useEffect(() => {
     if (state?.completedTime) {
