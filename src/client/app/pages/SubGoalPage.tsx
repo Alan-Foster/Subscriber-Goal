@@ -25,6 +25,7 @@ export const SubGoalPage = ({
   notice,
 }: SubGoalPageProps) => {
   const isDisabled = state.subscribed || isSubmitting;
+  const shouldShowSubscribeAttention = !isDisabled;
   const iconAction = state.subscribed ? onCelebrate : onSubscribe;
   const showNotice = Boolean(notice);
   const welcomeText = `Welcome to r/${state.subreddit.name}`;
@@ -70,7 +71,9 @@ export const SubGoalPage = ({
         />
       )}
       <button
-        className="cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60"
+        className={`relative cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+          shouldShowSubscribeAttention ? 'sg-subscribe-attention' : ''
+        }`}
         disabled={isDisabled}
         onClick={onSubscribe}
       >

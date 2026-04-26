@@ -55,6 +55,32 @@ body {
   animation-fill-mode: backwards;
 }
 
+.sg-subscribe-attention {
+  isolation: isolate;
+}
+
+.sg-subscribe-attention::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  z-index: -1;
+  border-radius: 9999px;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--sg-accent) 66%, transparent) 0%,
+    color-mix(in srgb, var(--sg-accent) 46%, transparent) 44%,
+    color-mix(in srgb, var(--sg-accent) 12%, transparent) 62%,
+    transparent 70%
+  );
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--sg-accent) 78%, transparent),
+    0 0 8px color-mix(in srgb, var(--sg-accent) 82%, transparent),
+    0 0 16px color-mix(in srgb, var(--sg-accent) 58%, transparent);
+  opacity: 0.95;
+  pointer-events: none;
+  animation: sg-subscribe-glow 1.8s ease-out infinite;
+}
+
 .confetti {
   position: absolute;
   inset: 0;
@@ -90,5 +116,28 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes sg-subscribe-glow {
+  0% {
+    opacity: 0.99;
+    transform: scaleX(0.98) scaleY(0.94);
+  }
+  68% {
+    opacity: 0.52;
+    transform: scaleX(1.03) scaleY(1.08);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1.05) scaleY(1.11);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-subscribe-attention::after {
+    animation: none;
+    opacity: 0.48;
+    transform: none;
   }
 }

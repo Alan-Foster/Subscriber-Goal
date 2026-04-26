@@ -45,10 +45,10 @@ vi.mock('../hooks/useSubGoal', () => ({
 import { App } from './App';
 
 describe('App', () => {
-  it('defaults username sharing to opt-in (unchecked)', () => {
+  it('defaults username sharing to enabled on SFW subreddits', () => {
     const html = renderToStaticMarkup(<App />);
 
     expect(html).toContain('Show my username when I subscribe');
-    expect(html).not.toContain('checked=""');
+    expect(html).toContain('checked=""');
   });
 });

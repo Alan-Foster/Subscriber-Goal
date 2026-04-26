@@ -63,4 +63,35 @@ describe('SubGoalPage', () => {
 
     expect(html).not.toContain('Show my username when I subscribe');
   });
+
+  it('adds attention glow when subscribe button is actionable', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage state={baseState} {...commonProps} />
+    );
+
+    expect(html).toContain('sg-subscribe-attention');
+  });
+
+  it('does not add attention glow after subscribing', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, subscribed: true }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).not.toContain('sg-subscribe-attention');
+  });
+
+  it('does not add attention glow while submitting', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={baseState}
+        {...commonProps}
+        isSubmitting
+      />
+    );
+
+    expect(html).not.toContain('sg-subscribe-attention');
+  });
 });
