@@ -1,5 +1,6 @@
 import { reddit, redis, context, settings } from '@devvit/web/server';
 import type { AppSettings } from '../../shared/types/api';
+import { formatSubscriberCount } from '../../shared/numberFormat';
 import { getAppSettings } from '../settings';
 import {
   type PendingCrosspost,
@@ -1152,7 +1153,7 @@ async function updateFromWikis(
       try {
         const crosspost = await reddit.crosspost({
           subredditName: appSettings.promoSubreddit,
-          title: `Visit r/${post.subredditName}, they are trying to reach ${pending.goal} subscribers!`,
+          title: `Visit r/${post.subredditName}, they are trying to reach ${formatSubscriberCount(pending.goal)} subscribers!`,
           postId: post.id,
           nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });

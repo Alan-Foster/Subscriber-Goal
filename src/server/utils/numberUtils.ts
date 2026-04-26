@@ -1,22 +1,8 @@
-export function formatNumberAlwaysRound(num: number): string {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(1)} M`;
-  }
-  if (num >= 10000) {
-    return `${(num / 1000).toFixed(1)} K`;
-  }
-  return num.toString();
-}
-
-export function formatNumberUnlessExact(num: number): string {
-  if (num >= 1000000 && num % 100000 === 0) {
-    return `${(num / 1000000).toFixed(1)} million`;
-  }
-  if (num >= 10000 && num % 1000 === 0) {
-    return `${(num / 1000).toFixed(1)} K`;
-  }
-  return num.toLocaleString();
-}
+export {
+  formatSubscriberCount,
+  formatSubscriberCount as formatNumberAlwaysRound,
+  formatSubscriberCount as formatNumberUnlessExact,
+} from '../../shared/numberFormat';
 
 export const getDefaultSubscriberGoal = (subscriberCount: number): number => {
   const thresholds = [

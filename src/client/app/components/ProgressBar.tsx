@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { formatNumberUnlessExact } from '../../utils/numberUtils';
+import { formatSubscriberCount } from '../../../shared/numberFormat';
 
 type ProgressBarProps = {
   start?: number;
@@ -49,7 +49,7 @@ export const ProgressBar = ({
       </div>
       {showText ? (
         <div className="absolute inset-0 flex items-center justify-center text-sm leading-5 font-bold text-[color:var(--sg-progress-text)]">
-          {current} / {formatNumberUnlessExact(end)}
+          {formatSubscriberCount(current)} / {formatSubscriberCount(end)}
         </div>
       ) : null}
     </div>

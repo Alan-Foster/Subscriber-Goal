@@ -1,3 +1,5 @@
+import { formatSubscriberCount } from '../../shared/numberFormat';
+
 export type TextFallbackProps = {
   goal: number;
   subscribers: number;
@@ -7,8 +9,8 @@ export type TextFallbackProps = {
 
 export const textFallbackMaker = (props: TextFallbackProps): string =>
   props.completedTime
-    ? `r/${props.subredditName} reached ${props.goal} subscribers!\n\nGoal reached at \`${props.completedTime.toISOString()}\`.`
-    : `Welcome to r/${props.subredditName}\n\n${props.subscribers} / ${props.goal} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.`;
+    ? `r/${props.subredditName} reached ${formatSubscriberCount(props.goal)} subscribers!\n\nGoal reached at \`${props.completedTime.toISOString()}\`.`
+    : `Welcome to r/${props.subredditName}\n\n${formatSubscriberCount(props.subscribers)} / ${formatSubscriberCount(props.goal)} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.`;
 
 type TextFallbackTarget = {
   setTextFallback: (payload: { text: string }) => Promise<void>;

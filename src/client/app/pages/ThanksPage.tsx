@@ -1,5 +1,5 @@
 import type { SubGoalState } from '../../../shared/types/api';
-import { formatNumberUnlessExact } from '../../utils/numberUtils';
+import { formatSubscriberCount } from '../../../shared/numberFormat';
 import { SubredditIcon } from '../components/SubredditIcon';
 import { TopButtons } from '../components/TopButtons';
 
@@ -25,7 +25,7 @@ export const ThanksPage = ({
       <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       <div className="text-2xl font-bold">Thanks for Subscribing!</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
-        There are now {formatNumberUnlessExact(state.subreddit.subscribers)} subscribers
+        There are now {formatSubscriberCount(state.subreddit.subscribers)} subscribers
         in the community!
       </div>
       <button

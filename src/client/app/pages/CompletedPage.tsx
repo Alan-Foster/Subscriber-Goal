@@ -1,6 +1,6 @@
 import { context } from '@devvit/web/client';
 import type { SubGoalState } from '../../../shared/types/api';
-import { formatNumberUnlessExact } from '../../utils/numberUtils';
+import { formatSubscriberCount } from '../../../shared/numberFormat';
 import { SubredditIcon } from '../components/SubredditIcon';
 import { TopButtons } from '../components/TopButtons';
 
@@ -33,7 +33,7 @@ export const CompletedPage = ({
       <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       <div className="text-2xl font-bold">
         r/{state.subreddit.name} reached{' '}
-        {state.goal ? formatNumberUnlessExact(state.goal) : 'the goal'} subscribers!
+        {state.goal ? formatSubscriberCount(state.goal) : 'the goal'} subscribers!
       </div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         {timeText && dateText

@@ -489,7 +489,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_secs',
-                reason: 'Post t3_secs with goal 100',
+                reason: 'Post t3_secs with goal 15000',
                 dateMs: Date.now(),
               },
             ],
@@ -517,6 +517,12 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(summary.crosspostsCreated).toBe(1);
     expect(summary.crosspostsSkipped).toBe(0);
+    expect(mockReddit.crosspost).toHaveBeenCalledWith({
+      subredditName: baseSettings.promoSubreddit,
+      title: 'Visit r/CorporateGifts, they are trying to reach 15k subscribers!',
+      postId: 't3_secs',
+      nsfw: false,
+    });
   });
 
   it('terminally skips when source post age is unknown/unparseable', async () => {
