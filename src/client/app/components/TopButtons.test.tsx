@@ -8,7 +8,7 @@ describe('TopButtons', () => {
       <TopButtons onVisitPromoSubPressed={vi.fn()} promoSubreddit="SubGoal" />
     );
 
-    expect(html).toContain('View Other Goals');
+    expect(html).toContain('View More Goals');
     expect(html).toContain('View other subscriber goals in r/SubGoal');
   });
 });
