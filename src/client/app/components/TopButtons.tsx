@@ -21,12 +21,13 @@ export const TopButtons = ({
     <div className="absolute right-4 top-4">
       <button
         type="button"
-        aria-label={`View r/${promoSubreddit}`}
+        aria-label={`View other subscriber goals in r/${promoSubreddit}`}
         className={`${
           shouldAnimate ? 'sg-fade-in' : ''
-        } cursor-pointer border-0 bg-transparent p-0 leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
+        } inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
         onClick={onVisitPromoSubPressed}
       >
+        <span>View More Goals</span>
         <svg
           width="20"
           height="20"
