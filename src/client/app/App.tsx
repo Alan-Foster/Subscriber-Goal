@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSubGoal } from '../hooks/useSubGoal';
 import { ConfettiBurst } from './components/ConfettiBurst';
 import { SkeletonPage } from './components/SkeletonPage';
+import { confettiPresets } from './confettiPresets';
 import { CompletedPage } from './pages/CompletedPage';
 import { SubGoalPage } from './pages/SubGoalPage';
 import { ThanksPage } from './pages/ThanksPage';
@@ -22,7 +23,9 @@ export const App = () => {
   const [page, setPage] = useState<PageName>('subGoal');
   const [showConfetti, setShowConfetti] = useState(false);
   const [confettiKey, setConfettiKey] = useState(0);
-  const [confettiPieces, setConfettiPieces] = useState(70);
+  const [confettiPieces, setConfettiPieces] = useState(
+    confettiPresets.default.pieceCount
+  );
   const confettiTimeoutRef = useRef<number | null>(null);
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
@@ -56,8 +59,8 @@ export const App = () => {
 
   const triggerConfetti = useCallback(
     ({
-      pieceCount = 70,
-      durationMs = 2600,
+      pieceCount = confettiPresets.default.pieceCount,
+      durationMs = confettiPresets.default.durationMs,
       allowRestart = true,
     }: {
       pieceCount?: number;
@@ -83,7 +86,7 @@ export const App = () => {
   useEffect(() => {
     if (page === 'completed') {
       if (!completedConfettiShownRef.current) {
-        triggerConfetti({ durationMs: 2800, allowRestart: false });
+        triggerConfetti(confettiPresets.completed);
         completedConfettiShownRef.current = true;
       }
     } else {
@@ -115,7 +118,7 @@ export const App = () => {
     } else {
       setPage('thanks');
     }
-    triggerConfetti({ durationMs: 2800 });
+    triggerConfetti(confettiPresets.subscribe);
     const noticeMessage = updatedState.recentSubscriber
       ? `u/${updatedState.recentSubscriber} just subscribed!`
       : 'New member just subscribed!';
@@ -139,7 +142,7 @@ export const App = () => {
   };
 
   const handleCelebrate = () => {
-    triggerConfetti({ pieceCount: 24, durationMs: 1800, allowRestart: false });
+    triggerConfetti(confettiPresets.logoCelebrate);
   };
 
   let content = null;
