@@ -30,7 +30,10 @@ export const SubGoalPage = ({
   const showNotice = Boolean(notice);
   const welcomeText = `Welcome to r/${state.subreddit.name}`;
   return (
-    <div className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
+    <div
+      className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"
+      data-sg-theme={state.colorTheme}
+    >
       <TopButtons
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}

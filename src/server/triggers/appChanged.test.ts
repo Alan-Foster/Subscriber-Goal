@@ -7,6 +7,7 @@ const hoisted = vi.hoisted(() => ({
   },
   getCurrentSubreddit: vi.fn(),
   ensureSavedSubredditDisplayName: vi.fn(),
+  initializeSubscriberStatsMigration: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
 }));
@@ -23,6 +24,10 @@ vi.mock('../data/subredditDisplayNameData', () => ({
   ensureSavedSubredditDisplayName: hoisted.ensureSavedSubredditDisplayName,
 }));
 
+vi.mock('../data/subscriberStats', () => ({
+  initializeSubscriberStatsMigration: hoisted.initializeSubscriberStatsMigration,
+}));
+
 vi.mock('../data/updaterData', () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdates: hoisted.queueUpdates,
@@ -36,9 +41,11 @@ describe('onAppChanged', () => {
     hoisted.context.subredditId = undefined;
     hoisted.getCurrentSubreddit.mockReset();
     hoisted.ensureSavedSubredditDisplayName.mockReset();
+    hoisted.initializeSubscriberStatsMigration.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
+    hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
   });
 
   it('skips gracefully when lifecycle trigger has no subreddit context', async () => {
@@ -46,6 +53,7 @@ describe('onAppChanged', () => {
 
     expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
+    expect(hoisted.initializeSubscriberStatsMigration).not.toHaveBeenCalled();
     expect(hoisted.queueUpdates).not.toHaveBeenCalled();
   });
 
@@ -58,6 +66,9 @@ describe('onAppChanged', () => {
     expect(hoisted.ensureSavedSubredditDisplayName).toHaveBeenCalledWith(
       expect.anything(),
       'SubGoal'
+    );
+    expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
+      expect.anything()
     );
   });
 

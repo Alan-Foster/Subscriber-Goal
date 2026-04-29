@@ -1,5 +1,6 @@
 import { context, reddit, redis } from '@devvit/web/server';
 import { ensureSavedSubredditDisplayName } from '../data/subredditDisplayNameData';
+import { initializeSubscriberStatsMigration } from '../data/subscriberStats';
 import { getTrackedPosts, queueUpdates } from '../data/updaterData';
 
 export async function onAppChanged(): Promise<void> {
@@ -24,6 +25,7 @@ export async function onAppChanged(): Promise<void> {
   }
 
   await ensureSavedSubredditDisplayName(redis, subredditName);
+  await initializeSubscriberStatsMigration(redis);
 
   const trackedPosts = await getTrackedPosts(redis);
   if (!trackedPosts.length) {

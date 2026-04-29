@@ -10,7 +10,7 @@
   --sg-text-muted: #64748b;
   --sg-border: #cbd5e1;
   --sg-border-strong: #0f172a;
-  --sg-accent: #d93a00;
+  --sg-accent: #ff4500;
   --sg-progress-track-bg: #ffffff;
   --sg-progress-text: #0f172a;
   --sg-button-text: #0f172a;
@@ -48,6 +48,40 @@ body,
 body {
   background: var(--sg-bg);
   color: var(--sg-text-primary);
+}
+
+[data-sg-theme='red'] {
+  --sg-accent: #ff4500;
+}
+
+[data-sg-theme='green'] {
+  --sg-accent: #22c55e;
+}
+
+[data-sg-theme='purple'] {
+  --sg-accent: #a78bfa;
+}
+
+[data-sg-theme='blue'] {
+  --sg-accent: #60a5fa;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-sg-theme='red'] {
+    --sg-accent: #ff4500;
+  }
+
+  [data-sg-theme='green'] {
+    --sg-accent: #22c55e;
+  }
+
+  [data-sg-theme='purple'] {
+    --sg-accent: #a78bfa;
+  }
+
+  [data-sg-theme='blue'] {
+    --sg-accent: #60a5fa;
+  }
 }
 
 .sg-fade-in {

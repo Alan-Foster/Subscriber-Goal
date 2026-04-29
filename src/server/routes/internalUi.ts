@@ -6,6 +6,10 @@ import type {
   DeleteGoalFormValues,
   EraseDataFormValues,
 } from '../../shared/types/api';
+import {
+  defaultSubGoalColorTheme,
+  resolveSubGoalColorTheme,
+} from '../../shared/subGoalColorTheme';
 import { formNames, internalRoutes } from '../../shared/routes';
 import { isLinkId } from '../types';
 import { createGoalPost } from '../core/post';
@@ -82,6 +86,21 @@ export function registerInternalUiRoutes(router: Router): void {
                   required: true,
                 },
                 {
+                  name: 'colorTheme',
+                  label: 'Button Color',
+                  type: 'select',
+                  defaultValue: [defaultSubGoalColorTheme],
+                  options: [
+                    { label: 'Red', value: 'red' },
+                    { label: 'Green', value: 'green' },
+                    { label: 'Purple', value: 'purple' },
+                    { label: 'Blue', value: 'blue' },
+                  ],
+                  helpText:
+                    'This controls the subscribe button, progress bar, and button glow color.',
+                  required: true,
+                },
+                {
                   name: 'crosspost',
                   label: `Auto-Crosspost to r/${appSettings.promoSubreddit} (Recommended)`,
                   type: 'boolean',
@@ -111,6 +130,7 @@ export function registerInternalUiRoutes(router: Router): void {
       const requestedCrosspost = values.crosspost;
       const title = values.postTitle?.trim();
       const subredditDisplayName = values.subredditDisplayName?.trim();
+      const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
@@ -177,7 +197,8 @@ export function registerInternalUiRoutes(router: Router): void {
           post,
           subscriberGoal,
           resolvedCrosspost,
-          resolvedSubredditDisplayName
+          resolvedSubredditDisplayName,
+          colorTheme
         );
 
         const trackedPosts = await getTrackedPosts(redis);

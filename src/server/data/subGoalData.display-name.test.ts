@@ -4,6 +4,7 @@ import {
   setSubGoalData,
   setSubredditDisplayNameForPost,
   subscriberGoalsKey,
+  postColorThemeSuffix,
   postSubredditDisplayNameSuffix,
 } from './subGoalData';
 
@@ -42,6 +43,7 @@ describe('subGoalData subreddit display name', () => {
         recentSubscriber: '',
         completedTime: 0,
         subredditDisplayName: 'Subscriber_Goal_Dev',
+        colorTheme: 'red',
       }
     );
 
@@ -62,6 +64,7 @@ describe('subGoalData subreddit display name', () => {
         recentSubscriber: '',
         completedTime: 0,
         subredditDisplayName: 'subscriber_goal_dev',
+        colorTheme: 'red',
       }
     );
 
@@ -82,5 +85,56 @@ describe('subGoalData subreddit display name', () => {
         `t3_post${postSubredditDisplayNameSuffix}`
       )
     ).toBe('Subscriber_Goal_Dev');
+  });
+
+  it('persists each supported color theme', async () => {
+    const redis = new InMemoryRedis();
+    for (const colorTheme of ['red', 'green', 'purple', 'blue'] as const) {
+      await setSubGoalData(
+        redis as unknown as Parameters<typeof setSubGoalData>[0],
+        `t3_${colorTheme}`,
+        {
+          goal: 10,
+          recentSubscriber: '',
+          completedTime: 0,
+          subredditDisplayName: 'subscriber_goal_dev',
+          colorTheme,
+        }
+      );
+
+      const data = await getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        `t3_${colorTheme}`
+      );
+      expect(data.colorTheme).toBe(colorTheme);
+      expect(
+        await redis.hGet(
+          subscriberGoalsKey,
+          `t3_${colorTheme}${postColorThemeSuffix}`
+        )
+      ).toBe(colorTheme);
+    }
+  });
+
+  it('defaults missing or invalid color themes to red', async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_missing_goal: '10',
+      t3_invalid_goal: '10',
+      [`t3_invalid${postColorThemeSuffix}`]: 'orange',
+    });
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        't3_missing'
+      )
+    ).resolves.toMatchObject({ colorTheme: 'red' });
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        't3_invalid'
+      )
+    ).resolves.toMatchObject({ colorTheme: 'red' });
   });
 });

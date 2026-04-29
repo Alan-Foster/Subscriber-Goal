@@ -6,6 +6,7 @@ const state: SubGoalState = {
   goal: 1000,
   recentSubscriber: null,
   completedTime: null,
+  colorTheme: 'red',
   subscribed: false,
   user: { id: 't2_user', username: 'alice' },
   appSettings: {

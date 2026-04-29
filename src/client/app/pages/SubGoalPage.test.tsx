@@ -7,6 +7,7 @@ const baseState: SubGoalState = {
   goal: 500,
   recentSubscriber: null,
   completedTime: null,
+  colorTheme: 'red',
   subscribed: false,
   user: { id: 't2_user', username: 'alice' },
   appSettings: {
@@ -70,6 +71,17 @@ describe('SubGoalPage', () => {
     );
 
     expect(html).toContain('sg-subscribe-attention');
+  });
+
+  it('renders the selected color theme', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, colorTheme: 'purple' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('data-sg-theme="purple"');
   });
 
   it('does not add attention glow after subscribing', () => {

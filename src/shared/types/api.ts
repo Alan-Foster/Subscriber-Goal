@@ -1,3 +1,5 @@
+import type { SubGoalColorTheme } from '../subGoalColorTheme';
+
 export type BasicSubredditData = {
   id: string;
   name: string;
@@ -29,6 +31,7 @@ export type SubGoalState = {
   goal: number | null;
   recentSubscriber: string | null;
   completedTime: number | null;
+  colorTheme: SubGoalColorTheme;
   subscribed: boolean;
   user: BasicUserData | null;
   appSettings: AppSettings;
@@ -73,6 +76,7 @@ export type CreateGoalFormValues = {
   postTitle?: string;
   crosspost?: boolean;
   subredditDisplayName?: string;
+  colorTheme?: string[];
 };
 
 export type DeleteGoalFormValues = {

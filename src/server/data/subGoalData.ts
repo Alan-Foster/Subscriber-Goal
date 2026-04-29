@@ -1,5 +1,10 @@
 import type { RedditClient, RedisClient } from '../types';
 import type { AppSettings } from '../../shared/types/api';
+import type { SubGoalColorTheme } from '../../shared/subGoalColorTheme';
+import {
+  defaultSubGoalColorTheme,
+  resolveSubGoalColorTheme,
+} from '../../shared/subGoalColorTheme';
 import { dispatchNewPost } from './crosspostData';
 import { queueUpdate, trackPost } from './updaterData';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
@@ -9,12 +14,14 @@ export const postGoalSuffix = '_goal';
 export const postRecentSubscriberSuffix = '_recent_subscriber';
 export const postCompletedTimeSuffix = '_completed_time';
 export const postSubredditDisplayNameSuffix = '_subreddit_display_name';
+export const postColorThemeSuffix = '_color_theme';
 
 export type SubGoalData = {
   goal: number;
   recentSubscriber: string | null;
   completedTime: number;
   subredditDisplayName: string | null;
+  colorTheme: SubGoalColorTheme;
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient['submitCustomPost']>>;
@@ -28,22 +35,29 @@ export async function getSubGoalData(
   redis: RedisClient,
   postId: string
 ): Promise<SubGoalData> {
-  const [goal, recentSubscriber, completedTime, subredditDisplayName] = (await redis.hMGet(
-    subscriberGoalsKey,
-    [
+  const [goal, recentSubscriber, completedTime, subredditDisplayName, colorTheme] =
+    (await redis.hMGet(subscriberGoalsKey, [
       `${postId}${postGoalSuffix}`,
       `${postId}${postRecentSubscriberSuffix}`,
       `${postId}${postCompletedTimeSuffix}`,
       `${postId}${postSubredditDisplayNameSuffix}`,
-    ]
-  )) as [string | null, string | null, string | null, string | null];
+      `${postId}${postColorThemeSuffix}`,
+    ])) as [
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+      string | null,
+    ];
   return {
     goal: goal ? parseInt(goal) : 0,
     recentSubscriber: recentSubscriber ?? null,
     completedTime: completedTime ? parseInt(completedTime) : 0,
-    subredditDisplayName: subredditDisplayName && subredditDisplayName.length > 0
-      ? subredditDisplayName
-      : null,
+    subredditDisplayName:
+      subredditDisplayName && subredditDisplayName.length > 0
+        ? subredditDisplayName
+        : null,
+    colorTheme: resolveSubGoalColorTheme(colorTheme),
   };
 }
 
@@ -57,6 +71,7 @@ export async function setSubGoalData(
     [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? '',
     [`${postId}${postCompletedTimeSuffix}`]: data.completedTime.toString(),
     [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName ?? '',
+    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(data.colorTheme),
   });
 }
 
@@ -96,13 +111,15 @@ export async function registerNewSubGoalPost(
   post: RedditPost,
   goal: number,
   crosspost: boolean,
-  subredditDisplayName: string
+  subredditDisplayName: string,
+  colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
     completedTime: 0,
     subredditDisplayName,
+    colorTheme,
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);

@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 0.13.0 - Final conversion from zrange to hget for data lookup. Custom button colors.
 - 0.12.5 - Add a subscribe button glow to drive higher button engagement. Share username is now opt-out.
 - 0.12.3 - Removal of decimals on any value below 9999 and 10k+ does not use hundreds decimals.
 - 0.12.2 - Adjusted subreddit icon scale to not be blurry. Devvit 0.12.20.

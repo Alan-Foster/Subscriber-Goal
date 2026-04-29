@@ -6,6 +6,7 @@ import { applyTextFallback } from '../utils/textFallback';
 import { getAppSettings } from '../settings';
 import { processCrosspostDispatchQueue } from './modAction';
 import { countPendingCrossposts } from '../data/crosspostData';
+import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
 
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
@@ -22,6 +23,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.info(
     `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} crosspostPersistenceFailedAfterCreate=${ingestionSummary.crosspostPersistenceFailedAfterCreate} crosspostsSkippedBySourceCooldown=${ingestionSummary.crosspostsSkippedBySourceCooldown} crosspostsSkippedByInFlight=${ingestionSummary.crosspostsSkippedByInFlight} crosspostsSkippedByExistingDetection=${ingestionSummary.crosspostsSkippedByExistingDetection} pendingDepth=${pendingDepth} error=${ingestionSummary.errorMessage ?? 'none'}`
   );
+  try {
+    await processSubscriberStatsMigrationBatch(redis);
+  } catch (error) {
+    console.error(`subscriberStatsMigration error: ${String(error)}`);
+  }
 
   const subreddit = await reddit.getCurrentSubreddit();
 
