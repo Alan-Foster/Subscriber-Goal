@@ -415,11 +415,20 @@ export function registerInternalUiRoutes(router: Router): void {
       }
 
       if (resolvedUserId) {
-        await untrackSubscriberById(redis, resolvedUserId);
+        await untrackSubscriberById(redis, resolvedUserId, resolvedUsername);
+      } else if (resolvedUsername) {
+        const result = await untrackSubscriberByUsername(redis, resolvedUsername);
+        if (result.status === 'partial') {
+          await eraseFromRecentSubscribers(redis, resolvedUsername);
+          res.json({
+            showToast:
+              'Recent subscriber references were erased where indexed. Subscriber stats could not be fully erased by username; please try again with the user ID if possible.',
+          });
+          return;
+        }
       }
 
       if (resolvedUsername) {
-        await untrackSubscriberByUsername(redis, resolvedUsername);
         await eraseFromRecentSubscribers(redis, resolvedUsername);
       }
 

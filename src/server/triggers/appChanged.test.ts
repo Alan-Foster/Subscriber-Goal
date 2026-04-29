@@ -7,6 +7,7 @@ const hoisted = vi.hoisted(() => ({
   },
   getCurrentSubreddit: vi.fn(),
   ensureSavedSubredditDisplayName: vi.fn(),
+  initializeRecentSubscriberIndexMigration: vi.fn(),
   initializeSubscriberStatsMigration: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
@@ -28,6 +29,11 @@ vi.mock('../data/subscriberStats', () => ({
   initializeSubscriberStatsMigration: hoisted.initializeSubscriberStatsMigration,
 }));
 
+vi.mock('../data/subGoalData', () => ({
+  initializeRecentSubscriberIndexMigration:
+    hoisted.initializeRecentSubscriberIndexMigration,
+}));
+
 vi.mock('../data/updaterData', () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdates: hoisted.queueUpdates,
@@ -41,11 +47,13 @@ describe('onAppChanged', () => {
     hoisted.context.subredditId = undefined;
     hoisted.getCurrentSubreddit.mockReset();
     hoisted.ensureSavedSubredditDisplayName.mockReset();
+    hoisted.initializeRecentSubscriberIndexMigration.mockReset();
     hoisted.initializeSubscriberStatsMigration.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
+    hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(undefined);
   });
 
   it('skips gracefully when lifecycle trigger has no subreddit context', async () => {
@@ -54,6 +62,7 @@ describe('onAppChanged', () => {
     expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
     expect(hoisted.initializeSubscriberStatsMigration).not.toHaveBeenCalled();
+    expect(hoisted.initializeRecentSubscriberIndexMigration).not.toHaveBeenCalled();
     expect(hoisted.queueUpdates).not.toHaveBeenCalled();
   });
 
@@ -68,6 +77,9 @@ describe('onAppChanged', () => {
       'SubGoal'
     );
     expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
+      expect.anything()
+    );
+    expect(hoisted.initializeRecentSubscriberIndexMigration).toHaveBeenCalledWith(
       expect.anything()
     );
   });

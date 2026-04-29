@@ -163,17 +163,24 @@ export const isMissingSourcePostError = (errorMessage: string): boolean =>
 const isPermanentMirrorError = (errorMessage: string): boolean =>
   /only allowed inside (the )?current subreddit/i.test(errorMessage);
 
-const toNormalizedSubredditName = (value: string): string =>
+export const toNormalizedSubredditName = (value: string): string =>
   value.trim().replace(/^r\//i, '').toLowerCase();
 
 const normalizeTimestampMs = (value: number): number =>
   // Devvit may return timestamps in either seconds or milliseconds.
   value < 1_000_000_000_000 ? value * 1000 : value;
 
-const getCrosspostAuthoritySubreddit = (appSettings: AppSettings): string =>
+export const getCrosspostAuthoritySubreddit = (appSettings: AppSettings): string =>
   toNormalizedSubredditName(
     appSettings.crosspostAuthoritySubreddit || appSettings.promoSubreddit
   );
+
+export const isCrosspostAuthorityInstall = (
+  appSettings: AppSettings,
+  subredditName: string
+): boolean =>
+  toNormalizedSubredditName(subredditName) ===
+  getCrosspostAuthoritySubreddit(appSettings);
 
 const getCrosspostMaxSourcePostAgeMs = (appSettings: AppSettings): number => {
   const minutes =
@@ -1583,6 +1590,7 @@ export async function processCrosspostDispatchQueue(
   }
 
   if (!ingestionAllowed) {
+    const logLevel = reason === 'scheduler_posts_updater' ? 'info' : 'warn';
     logCrosspostEvent(
       {
         event: 'crosspost_retry_skipped',
@@ -1591,7 +1599,7 @@ export async function processCrosspostDispatchQueue(
         status: 'success',
         ...logContext,
       },
-      'warn'
+      logLevel
     );
     return emptySummary();
   }

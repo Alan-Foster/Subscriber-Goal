@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  recentSubscriberPostsByUsernameKey,
+  subscriberGoalsKey,
+} from './subGoalData';
+import {
   getSubscriberStats,
   initializeSubscriberStatsMigration,
   processSubscriberStatsMigrationBatch,
   setNewSubscriber,
+  subscriberStatsErasedUserIdsKey,
   subscriberStatsByUserIdKey,
+  subscriberStatsLegacyMembersByUserIdKey,
   subscriberStatsKey,
   subscriberStatsMigrationStateKey,
+  subscriberStatsUsernameToUserIdKey,
+  untrackSubscriberById,
+  untrackSubscriberByUsername,
 } from './subscriberStats';
 
 type ZEntry = { member: string; score: number };
@@ -49,6 +58,16 @@ class InMemoryRedis {
     return Object.fromEntries(map.entries());
   }
 
+  async hDel(key: string, fields: string[]): Promise<void> {
+    const map = this.hashes.get(key);
+    if (!map) {
+      return;
+    }
+    for (const field of fields) {
+      map.delete(field);
+    }
+  }
+
   async hLen(key: string): Promise<number> {
     return this.hashes.get(key)?.size ?? 0;
   }
@@ -88,6 +107,16 @@ class InMemoryRedis {
 
   async zCard(key: string): Promise<number> {
     return this.sortedSets.get(key)?.size ?? 0;
+  }
+
+  async zRem(key: string, members: string[]): Promise<void> {
+    const current = this.sortedSets.get(key);
+    if (!current) {
+      return;
+    }
+    for (const member of members) {
+      current.delete(member);
+    }
   }
 
   private sortedEntries(key: string): ZEntry[] {
@@ -189,9 +218,97 @@ describe('subscriberStats direct lookup', () => {
     expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_user')).toBe(
       't2_user:TestUser:124:1000'
     );
+    expect(await redis.hGet(subscriberStatsUsernameToUserIdKey, 'testuser')).toBe(
+      't2_user'
+    );
+    expect(
+      await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, 't2_user')
+    ).toBe(JSON.stringify(['t2_user:TestUser:124']));
+    expect(
+      await redis.hGet(recentSubscriberPostsByUsernameKey, 'testuser')
+    ).toBe(JSON.stringify(['t3_post']));
     expect(await redis.zRange(subscriberStatsKey, 0, -1)).toEqual([
       { member: 't2_user:TestUser:124', score: 1_000 },
     ]);
+  });
+
+  it('erases by user id without scanning legacy subscriber stats', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2_000);
+    await redis.hSet(subscriberStatsByUserIdKey, {
+      t2_user: 't2_user:TestUser:124:1000',
+    });
+    await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+      testuser: 't2_user',
+    });
+    await redis.hSet(subscriberStatsLegacyMembersByUserIdKey, {
+      t2_user: JSON.stringify(['t2_user:TestUser:124']),
+    });
+    await redis.zAdd(subscriberStatsKey, {
+      member: 't2_user:TestUser:124',
+      score: 1_000,
+    });
+
+    await expect(
+      untrackSubscriberById(
+        redis as unknown as Parameters<typeof untrackSubscriberById>[0],
+        't2_user'
+      )
+    ).resolves.toEqual({ status: 'complete', userIds: ['t2_user'] });
+
+    expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_user')).toBeUndefined();
+    expect(
+      await redis.hGet(subscriberStatsUsernameToUserIdKey, 'testuser')
+    ).toBeUndefined();
+    expect(
+      await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, 't2_user')
+    ).toBeUndefined();
+    expect(await redis.hGet(subscriberStatsErasedUserIdsKey, 't2_user')).toBe(
+      '2000'
+    );
+    expect(await redis.zCard(subscriberStatsKey)).toBe(0);
+    expect(redis.zRangeCalls).toBe(0);
+  });
+
+  it('erases by username through the username index and returns partial when missing', async () => {
+    await redis.hSet(subscriberStatsByUserIdKey, {
+      t2_user: 't2_user:TestUser:124:1000',
+    });
+    await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+      testuser: 't2_user',
+    });
+
+    await expect(
+      untrackSubscriberByUsername(
+        redis as unknown as Parameters<typeof untrackSubscriberByUsername>[0],
+        'TestUser'
+      )
+    ).resolves.toEqual({ status: 'complete', userIds: ['t2_user'] });
+    await expect(
+      untrackSubscriberByUsername(
+        redis as unknown as Parameters<typeof untrackSubscriberByUsername>[0],
+        'MissingUser'
+      )
+    ).resolves.toEqual({ status: 'partial', userIds: [] });
+    expect(redis.zRangeCalls).toBe(0);
+  });
+
+  it('does not allow erased users to be re-added', async () => {
+    await redis.hSet(subscriberStatsErasedUserIdsKey, {
+      t2_user: '2000',
+    });
+
+    await expect(
+      setNewSubscriber(
+        redis as unknown as Parameters<typeof setNewSubscriber>[0],
+        't3_post',
+        124,
+        { id: 't2_user', username: 'TestUser' },
+        true
+      )
+    ).resolves.toBe(false);
+
+    expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
+    expect(await redis.hGetAll(subscriberGoalsKey)).toEqual({});
   });
 });
 
@@ -269,6 +386,12 @@ describe('subscriberStats migration', () => {
     expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_a')).toBe(
       't2_a:Alice:10:100'
     );
+    expect(await redis.hGet(subscriberStatsUsernameToUserIdKey, 'alice')).toBe(
+      't2_a'
+    );
+    expect(await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, 't2_a')).toBe(
+      JSON.stringify(['t2_a:Alice:10'])
+    );
     expect(await redis.hGetAll(subscriberStatsMigrationStateKey)).toMatchObject({
       status: 'running',
       cursor: '2',
@@ -294,6 +417,12 @@ describe('subscriberStats migration', () => {
 
     expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_b')).toBe(
       't2_b:Bob:99:999'
+    );
+    expect(await redis.hGet(subscriberStatsUsernameToUserIdKey, 'bob')).toBe(
+      't2_b'
+    );
+    expect(await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, 't2_b')).toBe(
+      JSON.stringify(['t2_b:Bob:20:250'])
     );
     expect(await redis.hGetAll(subscriberStatsMigrationStateKey)).toMatchObject({
       status: 'complete',
@@ -345,5 +474,37 @@ describe('subscriberStats migration', () => {
     );
 
     expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
+  });
+
+  it('skips tombstoned users and removes their legacy members during migration', async () => {
+    await redis.zAdd(subscriberStatsKey, {
+      member: 't2_erased:ErasedUser:10',
+      score: 100,
+    });
+    await redis.hSet(subscriberStatsErasedUserIdsKey, {
+      t2_erased: '500',
+    });
+    await redis.hSet(subscriberStatsMigrationStateKey, {
+      version: 'user_id_hash_v1',
+      status: 'pending',
+      cursor: '0',
+      nextRunAt: '0',
+      scannedTotal: '0',
+      migratedTotal: '0',
+      skippedMalformedTotal: '0',
+      skippedExistingTotal: '0',
+      lastRunAt: '0',
+    });
+
+    await processSubscriberStatsMigrationBatch(
+      redis as unknown as Parameters<typeof processSubscriberStatsMigrationBatch>[0],
+      {
+        nowMs: 1_000,
+        batchSize: 2,
+      }
+    );
+
+    expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_erased')).toBeUndefined();
+    expect(await redis.zCard(subscriberStatsKey)).toBe(0);
   });
 });

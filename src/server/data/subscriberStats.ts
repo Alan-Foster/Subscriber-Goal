@@ -1,9 +1,18 @@
 import type { RedisClient } from '../types';
 import type { BasicUserData } from './basicData';
-import { postRecentSubscriberSuffix, subscriberGoalsKey } from './subGoalData';
+import {
+  addRecentSubscriberPostIndex,
+  postRecentSubscriberSuffix,
+  subscriberGoalsKey,
+} from './subGoalData';
 
 export const subscriberStatsKey = 'subscriber_stats';
 export const subscriberStatsByUserIdKey = 'subscriber_stats_by_user_id';
+export const subscriberStatsUsernameToUserIdKey =
+  'subscriber_stats_username_to_user_id';
+export const subscriberStatsLegacyMembersByUserIdKey =
+  'subscriber_stats_legacy_members_by_user_id';
+export const subscriberStatsErasedUserIdsKey = 'subscriber_stats_erased_user_ids';
 export const subscriberStatsMigrationStateKey = 'subscriber_stats_migration_state';
 export const subscriberStatsMigrationVersion = 'user_id_hash_v1';
 
@@ -30,14 +39,6 @@ export function isSubscriberStats(object: unknown): object is SubscriberStats {
     typeof subStats.subscribers === 'number'
   );
 }
-
-const getMatchingSubscribers = async (
-  redis: RedisClient,
-  match: (member: string) => boolean
-) => {
-  const allSubscribers = await redis.zRange(subscriberStatsKey, 0, -1);
-  return allSubscribers.filter((record) => match(record.member));
-};
 
 type ParsedSubscriberMember = {
   id: string;
@@ -67,6 +68,71 @@ const parseSubscriberMember = (member: string): ParsedSubscriberMember | undefin
 
 const serializeSubscriberStats = (subStats: SubscriberStats): string =>
   `${subStats.id}:${subStats.username}:${subStats.subscribers}:${subStats.timestamp}`;
+
+const serializeLegacySubscriberMember = (subStats: SubscriberStats): string =>
+  `${subStats.id}:${subStats.username}:${subStats.subscribers}`;
+
+const normalizeUsername = (username: string): string => username.trim().toLowerCase();
+
+const parseStringList = (raw: string | undefined): string[] => {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((value): value is string => typeof value === 'string');
+  } catch {
+    return [];
+  }
+};
+
+const stringifyStringList = (values: string[]): string =>
+  JSON.stringify([...new Set(values)]);
+
+const addLegacySubscriberMemberIndex = async (
+  redis: RedisClient,
+  userId: string,
+  legacyMember: string
+): Promise<void> => {
+  const existing = parseStringList(
+    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId)
+  );
+  if (existing.includes(legacyMember)) {
+    return;
+  }
+  await redis.hSet(subscriberStatsLegacyMembersByUserIdKey, {
+    [userId]: stringifyStringList([...existing, legacyMember]),
+  });
+};
+
+const deleteSubscriberIndexes = async (
+  redis: RedisClient,
+  userId: string,
+  usernames: string[]
+): Promise<void> => {
+  await redis.hDel(subscriberStatsByUserIdKey, [userId]);
+  await redis.hDel(subscriberStatsLegacyMembersByUserIdKey, [userId]);
+  const normalizedUsernames = [
+    ...new Set(
+      usernames
+        .map((username) => normalizeUsername(username))
+        .filter((username) => username.length > 0)
+    ),
+  ];
+  if (normalizedUsernames.length > 0) {
+    await redis.hDel(subscriberStatsUsernameToUserIdKey, [
+      ...normalizedUsernames,
+    ]);
+  }
+};
+
+export type SubscriberErasureResult = {
+  status: 'complete' | 'partial';
+  userIds: string[];
+};
 
 export async function getSubscriberStats(
   redis: RedisClient,
@@ -105,31 +171,45 @@ export async function setNewSubscriber(
   user: BasicUserData,
   shareUsername: boolean
 ): Promise<boolean> {
+  const erased = await redis.hGet(subscriberStatsErasedUserIdsKey, user.id);
+  if (erased) {
+    return false;
+  }
   const alreadySubscribed = await isTrackedSubscriber(redis, user.id);
   if (alreadySubscribed) {
     return false;
   }
 
   const now = Date.now();
+  const subscriberStats = {
+    id: user.id,
+    username: user.username,
+    subscribers: currentSubscribers,
+    timestamp: now,
+  };
+  const indexedMember = serializeSubscriberStats(subscriberStats);
+  const legacyMember = serializeLegacySubscriberMember(subscriberStats);
   const indexed = await redis.hSetNX(
     subscriberStatsByUserIdKey,
     user.id,
-    serializeSubscriberStats({
-      id: user.id,
-      username: user.username,
-      subscribers: currentSubscribers,
-      timestamp: now,
-    })
+    indexedMember
   );
   if (indexed === 0) {
     return false;
   }
+  await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+    [normalizeUsername(user.username)]: user.id,
+  });
+  await addLegacySubscriberMemberIndex(redis, user.id, legacyMember);
 
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postRecentSubscriberSuffix}`]: shareUsername ? user.username : '',
   });
+  if (shareUsername) {
+    await addRecentSubscriberPostIndex(redis, user.username, postId);
+  }
   await redis.zAdd(subscriberStatsKey, {
-    member: `${user.id}:${user.username}:${currentSubscribers}`,
+    member: legacyMember,
     score: now,
   });
   return true;
@@ -295,6 +375,18 @@ export async function processSubscriberStatsMigrationBatch(
       continue;
     }
 
+    const tombstoned = await redis.hGet(subscriberStatsErasedUserIdsKey, parsed.id);
+    if (tombstoned) {
+      await redis.zRem(subscriberStatsKey, [record.member]);
+      skippedExisting += 1;
+      continue;
+    }
+
+    await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+      [normalizeUsername(parsed.username)]: parsed.id,
+    });
+    await addLegacySubscriberMemberIndex(redis, parsed.id, record.member);
+
     const stored = await redis.hSetNX(
       subscriberStatsByUserIdKey,
       parsed.id,
@@ -349,40 +441,51 @@ export async function processSubscriberStatsMigrationBatch(
 
 export async function untrackSubscriberById(
   redis: RedisClient,
-  userId: string
-): Promise<void> {
-  await redis.hDel(subscriberStatsByUserIdKey, [userId]);
-  const foundRecords = await getMatchingSubscribers(redis, (member) =>
-    member.startsWith(`${userId}:`)
-  );
+  userId: string,
+  knownUsername?: string
+): Promise<SubscriberErasureResult> {
+  const indexedRecord = await redis.hGet(subscriberStatsByUserIdKey, userId);
+  const parsed = indexedRecord ? parseSubscriberMember(indexedRecord) : undefined;
+  await redis.hSet(subscriberStatsErasedUserIdsKey, {
+    [userId]: String(Date.now()),
+  });
 
-  if (foundRecords.length > 0) {
-    await redis.zRem(
-      subscriberStatsKey,
-      foundRecords.map((record) => record.member)
+  const legacyMembers = parseStringList(
+    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId)
+  );
+  if (parsed) {
+    legacyMembers.push(
+      serializeLegacySubscriberMember({
+        id: parsed.id,
+        username: parsed.username,
+        subscribers: parsed.subscribers,
+        timestamp: parsed.timestamp ?? Date.now(),
+      })
     );
   }
+  const uniqueLegacyMembers = [...new Set(legacyMembers)];
+  if (uniqueLegacyMembers.length > 0) {
+    await redis.zRem(subscriberStatsKey, uniqueLegacyMembers);
+  }
+  const usernamesToDelete = [
+    ...(parsed ? [parsed.username] : []),
+    ...(knownUsername ? [knownUsername] : []),
+    ...uniqueLegacyMembers
+      .map((member) => parseSubscriberMember(member)?.username)
+      .filter((username): username is string => Boolean(username)),
+  ];
+  await deleteSubscriberIndexes(redis, userId, usernamesToDelete);
+  return { status: 'complete', userIds: [userId] };
 }
 
 export async function untrackSubscriberByUsername(
   redis: RedisClient,
   username: string
-): Promise<void> {
-  const matchToken = `:${username}:`;
-  const foundRecords = await getMatchingSubscribers(redis, (member) =>
-    member.includes(matchToken)
-  );
-
-  if (foundRecords.length > 0) {
-    const userIds = foundRecords
-      .map((record) => parseSubscriberMember(record.member)?.id)
-      .filter((id): id is string => Boolean(id));
-    if (userIds.length > 0) {
-      await redis.hDel(subscriberStatsByUserIdKey, userIds);
-    }
-    await redis.zRem(
-      subscriberStatsKey,
-      foundRecords.map((record) => record.member)
-    );
+): Promise<SubscriberErasureResult> {
+  const normalized = normalizeUsername(username);
+  const userId = await redis.hGet(subscriberStatsUsernameToUserIdKey, normalized);
+  if (!userId) {
+    return { status: 'partial', userIds: [] };
   }
+  return await untrackSubscriberById(redis, userId, username);
 }

@@ -78,6 +78,10 @@ class InMemoryRedis {
     return Object.fromEntries(map.entries());
   }
 
+  async hLen(key: string): Promise<number> {
+    return this.hashes.get(key)?.size ?? 0;
+  }
+
   async hDel(key: string, fields: string[]): Promise<void> {
     const map = this.hashes.get(key);
     if (!map) {
@@ -163,6 +167,8 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).hGet(...args),
     hGetAll: (...args: [string]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).hGetAll(...args),
+    hLen: (...args: [string]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hLen(...args),
     hDel: (...args: [string, string[]]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).hDel(...args),
     zAdd: (...args: [string, ...ZEntry[]]) =>
@@ -181,8 +187,8 @@ vi.mock('@devvit/web/server', () => ({
 vi.mock('../utils/crosspostLogs', () => ({
   toErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
-  logCrosspostEvent: (payload: Record<string, unknown>) => {
-    hoisted.loggedEvents.push(payload);
+  logCrosspostEvent: (payload: Record<string, unknown>, level = 'info') => {
+    hoisted.loggedEvents.push({ ...payload, __level: level });
   },
 }));
 
@@ -256,7 +262,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       loggedEvents.some(
         (event) =>
           event.event === 'crosspost_retry_skipped' &&
-          event.reason === 'non_authority'
+          event.reason === 'non_authority' &&
+          event.__level === 'info'
       )
     ).toBe(true);
   });

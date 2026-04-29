@@ -311,8 +311,7 @@ export async function countPendingCrossposts(
   redis: RedisClient,
   targetSubreddit: string
 ): Promise<number> {
-  const hash = await redis.hGetAll(getCrosspostPendingByRevisionKey(targetSubreddit));
-  return Object.keys(hash).length;
+  return await redis.hLen(getCrosspostPendingByRevisionKey(targetSubreddit));
 }
 
 export async function storeProcessedRevision(

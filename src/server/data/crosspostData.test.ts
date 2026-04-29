@@ -22,6 +22,8 @@ type ZEntry = { member: string; score: number };
 class InMemoryRedis {
   private hashes = new Map<string, Map<string, string>>();
   private sortedSets = new Map<string, Map<string, number>>();
+  hGetAllCalls = 0;
+  hLenCalls = 0;
 
   async hSet(key: string, fields: Record<string, string>): Promise<void> {
     const current = this.hashes.get(key) ?? new Map<string, string>();
@@ -36,8 +38,14 @@ class InMemoryRedis {
   }
 
   async hGetAll(key: string): Promise<Record<string, string>> {
+    this.hGetAllCalls += 1;
     const map = this.hashes.get(key) ?? new Map<string, string>();
     return Object.fromEntries(map.entries());
+  }
+
+  async hLen(key: string): Promise<number> {
+    this.hLenCalls += 1;
+    return this.hashes.get(key)?.size ?? 0;
   }
 
   async hDel(key: string, fields: string[]): Promise<void> {
@@ -199,5 +207,32 @@ describe('crosspostData bookkeeping primitives', () => {
       await redis.hGet(getCrosspostPendingByRevisionKey(targetSubreddit), 'rev_pending_1')
     ).toBeUndefined();
     expect(await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1)).toEqual([]);
+  });
+
+  it('counts pending crossposts with hLen instead of hGetAll', async () => {
+    const redis = new InMemoryRedis();
+    await upsertPendingCrosspost(
+      redis as unknown as Parameters<typeof upsertPendingCrosspost>[0],
+      'SubGoal',
+      {
+        revisionId: 'rev_1',
+        postId: 't3_post',
+        goal: 10,
+        firstSeenMs: 100,
+        nextAttemptMs: 100,
+        attemptCount: 0,
+        lastError: null,
+        status: 'queued_for_crosspost',
+      }
+    );
+
+    await expect(
+      countPendingCrossposts(
+        redis as unknown as Parameters<typeof countPendingCrossposts>[0],
+        'SubGoal'
+      )
+    ).resolves.toBe(1);
+    expect(redis.hLenCalls).toBeGreaterThan(0);
+    expect(redis.hGetAllCalls).toBe(0);
   });
 });
