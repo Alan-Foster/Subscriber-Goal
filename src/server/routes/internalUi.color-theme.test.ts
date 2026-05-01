@@ -13,7 +13,6 @@ const hoisted = vi.hoisted(() => ({
     getPostById: vi.fn(),
   },
   redis: {},
-  settings: {},
   getAppSettings: vi.fn(),
   getSavedSubredditDisplayName: vi.fn(),
   setSavedSubredditDisplayName: vi.fn(),
@@ -31,7 +30,6 @@ vi.mock('@devvit/web/server', () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
   redis: hoisted.redis,
-  settings: hoisted.settings,
 }));
 
 vi.mock('../settings', () => ({
@@ -99,7 +97,7 @@ describe('internalUi color theme create goal routes', () => {
       isNsfw: false,
     });
     hoisted.reddit.getAppUser.mockResolvedValue({ username: 'subscriber-goal' });
-    hoisted.getAppSettings.mockResolvedValue({ promoSubreddit: 'SubGoal' });
+    hoisted.getAppSettings.mockReturnValue({ promoSubreddit: 'SubGoal' });
     hoisted.getSavedSubredditDisplayName.mockResolvedValue(undefined);
     hoisted.createGoalPost.mockResolvedValue({
       id: 't3_newpost',

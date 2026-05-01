@@ -1,4 +1,4 @@
-import type { AppSettings } from '../../shared/types/api';
+import type { ServerAppSettings } from '../settings';
 import type { LinkId, RedditClient, RedisClient } from '../types';
 
 export type PostActionType = 'remove' | 'approve' | 'delete';
@@ -58,7 +58,7 @@ export function parsePostActionDispatchReason(
 
 export async function dispatchNewPost(
   reddit: RedditClient,
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   postId: string,
   goal: number
 ): Promise<void> {
@@ -77,7 +77,7 @@ export async function dispatchNewPost(
 
 export async function dispatchPostAction(
   reddit: RedditClient,
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   postId: string,
   action: PostActionType
 ): Promise<void> {

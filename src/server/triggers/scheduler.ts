@@ -1,4 +1,4 @@
-import { context, reddit, redis, settings } from '@devvit/web/server';
+import { context, reddit, redis } from '@devvit/web/server';
 import {
   checkCompletionStatus,
   getSubGoalData,
@@ -18,7 +18,7 @@ import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
-  const appSettings = await getAppSettings(settings);
+  const appSettings = getAppSettings();
   const currentSubredditName =
     context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
   if (isCrosspostAuthorityInstall(appSettings, currentSubredditName)) {

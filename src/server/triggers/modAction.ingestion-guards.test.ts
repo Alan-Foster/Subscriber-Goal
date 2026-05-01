@@ -3,7 +3,7 @@ import {
   crosspostWikiPages,
   getCrosspostPendingByRevisionKey,
 } from '../data/crosspostData';
-import type { AppSettings } from '../../shared/types/api';
+import type { ServerAppSettings } from '../settings';
 
 const hoisted = vi.hoisted(() => ({
   mockContext: {} as {
@@ -16,9 +16,6 @@ const hoisted = vi.hoisted(() => ({
     getNewPosts: vi.fn(),
     crosspost: vi.fn(),
   },
-  mockSettings: {
-    getAll: vi.fn(async () => ({} as Partial<AppSettings>)),
-  },
   safeGetWikiPageRevisionsMock: vi.fn(),
   loggedEvents: [] as Array<Record<string, unknown>>,
   redisState: {
@@ -28,7 +25,6 @@ const hoisted = vi.hoisted(() => ({
 
 const mockContext = hoisted.mockContext;
 const mockReddit = hoisted.mockReddit;
-const mockSettings = hoisted.mockSettings;
 const safeGetWikiPageRevisionsMock = hoisted.safeGetWikiPageRevisionsMock;
 const loggedEvents = hoisted.loggedEvents;
 
@@ -181,7 +177,6 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).watch(...args),
   },
   context: hoisted.mockContext,
-  settings: hoisted.mockSettings,
 }));
 
 vi.mock('../utils/crosspostLogs', () => ({
@@ -199,7 +194,7 @@ vi.mock('../utils/redditUtils', () => ({
 
 import { onModAction, processCrosspostDispatchQueue } from './modAction';
 
-const baseSettings: AppSettings = {
+const baseSettings: ServerAppSettings = {
   promoSubreddit: 'SubGoal',
   crosspostAuthoritySubreddit: 'SubGoal',
   crosspostMaxSourcePostAgeMinutes: 10,
@@ -218,8 +213,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     redisMock = new InMemoryRedis();
     hoisted.redisState.redisMock = redisMock;
     mockContext.subredditName = undefined;
-    mockSettings.getAll.mockReset();
-    mockSettings.getAll.mockResolvedValue({});
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
@@ -581,12 +574,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     );
   });
 
-  it('onModAction wikirevise follows authority subreddit, not promo subreddit', async () => {
-    mockContext.subredditName = 'AuthorityHub';
-    mockSettings.getAll.mockResolvedValue({
-      promoSubreddit: 'SubGoal',
-      crosspostAuthoritySubreddit: 'AuthorityHub',
-    });
+  it('onModAction wikirevise only runs from r/SubGoal', async () => {
+    mockContext.subredditName = 'SubGoal';
     safeGetWikiPageRevisionsMock.mockResolvedValue({
       ok: true,
       revisions: [],

@@ -11,16 +11,6 @@ const state: SubGoalState = {
   user: { id: 't2_user', username: 'alice' },
   appSettings: {
     promoSubreddit: 'SubGoal',
-    crosspostAuthoritySubreddit: 'SubGoal',
-    crosspostMaxSourcePostAgeMinutes: 10,
-    crosspostIngestionEnabled: true,
-    crosspostMaxRevisionAgeMinutes: 10,
-    maxCrosspostsPerRun: 5,
-    maxCrosspostsPerHour: 30,
-    crosspostRetryWindowMinutes: 1440,
-    crosspostRetryBaseDelaySeconds: 60,
-    crosspostRetryMaxDelayMinutes: 30,
-    crosspostPendingBatchSize: 25,
   },
   subreddit: {
     id: 't5_test',

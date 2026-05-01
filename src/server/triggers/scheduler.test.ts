@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSettings } from '../../shared/types/api';
+import type { ServerAppSettings } from '../settings';
 
 const emptyCrosspostSummary = {
   status: 'success' as const,
@@ -19,7 +19,7 @@ const emptyCrosspostSummary = {
   crosspostsSkippedByExistingDetection: 0,
 };
 
-const baseSettings: AppSettings = {
+const baseSettings: ServerAppSettings = {
   promoSubreddit: 'SubGoal',
   crosspostAuthoritySubreddit: 'SubGoal',
   crosspostMaxSourcePostAgeMinutes: 10,
@@ -58,7 +58,6 @@ vi.mock('@devvit/web/server', () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
   redis: {},
-  settings: {},
 }));
 
 vi.mock('../settings', () => ({
@@ -67,7 +66,7 @@ vi.mock('../settings', () => ({
 
 vi.mock('./modAction', () => ({
   isCrosspostAuthorityInstall: (
-    appSettings: AppSettings,
+    appSettings: ServerAppSettings,
     subredditName: string
   ): boolean =>
     subredditName.trim().replace(/^r\//i, '').toLowerCase() ===
@@ -118,7 +117,7 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.processSubscriberStatsMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.getQueuedUpdates.mockReset();
-    hoisted.getAppSettings.mockResolvedValue(baseSettings);
+    hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(emptyCrosspostSummary);
     hoisted.countPendingCrossposts.mockResolvedValue(0);
     hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);

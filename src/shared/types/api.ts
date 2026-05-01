@@ -13,18 +13,8 @@ export type BasicUserData = {
   username: string;
 };
 
-export type AppSettings = {
+export type PublicAppSettings = {
   promoSubreddit: string;
-  crosspostAuthoritySubreddit: string;
-  crosspostMaxSourcePostAgeMinutes: number;
-  crosspostIngestionEnabled: boolean;
-  crosspostMaxRevisionAgeMinutes: number;
-  maxCrosspostsPerRun: number;
-  maxCrosspostsPerHour: number;
-  crosspostRetryWindowMinutes: number;
-  crosspostRetryBaseDelaySeconds: number;
-  crosspostRetryMaxDelayMinutes: number;
-  crosspostPendingBatchSize: number;
 };
 
 export type SubGoalState = {
@@ -34,7 +24,7 @@ export type SubGoalState = {
   colorTheme: SubGoalColorTheme;
   subscribed: boolean;
   user: BasicUserData | null;
-  appSettings: AppSettings;
+  appSettings: PublicAppSettings;
   subreddit: BasicSubredditData;
 };
 

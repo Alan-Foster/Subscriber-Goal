@@ -10,6 +10,7 @@ describe('devvit.json route alignment', () => {
     triggers: Record<string, string>;
     scheduler: { tasks: { 'posts-updater-job': { endpoint: string } } };
     menu: { items: Array<{ endpoint: string; label: string }> };
+    settings?: { subreddit?: Record<string, unknown> };
   };
 
   it('maps forms to the same internal endpoints', () => {
@@ -36,5 +37,9 @@ describe('devvit.json route alignment', () => {
     expect(endpoints.has(internalRoutes.menu.createGoal)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.deleteGoal)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.eraseData)).toBe(true);
+  });
+
+  it('does not expose subreddit installation settings', () => {
+    expect(devvitConfig.settings?.subreddit).toBeUndefined();
   });
 });

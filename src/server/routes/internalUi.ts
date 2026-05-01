@@ -1,6 +1,6 @@
 import type { Response, Router } from 'express';
 import type { UiResponse } from '@devvit/web/shared';
-import { context, reddit, redis, settings } from '@devvit/web/server';
+import { context, reddit, redis } from '@devvit/web/server';
 import type {
   CreateGoalFormValues,
   DeleteGoalFormValues,
@@ -40,7 +40,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const savedSubredditDisplayName = await getSavedSubredditDisplayName(redis);
         const resolvedSubredditDisplayName =
           savedSubredditDisplayName ?? subreddit.name;
-        const appSettings = await getAppSettings(settings);
+        const appSettings = getAppSettings();
         const defaultGoal = getDefaultSubscriberGoal(subreddit.numberOfSubscribers);
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
@@ -134,7 +134,7 @@ export function registerInternalUiRoutes(router: Router): void {
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
-        const appSettings = await getAppSettings(settings);
+        const appSettings = getAppSettings();
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
         const shouldCrosspostByDefault =
@@ -302,7 +302,7 @@ export function registerInternalUiRoutes(router: Router): void {
 
       try {
         const post = await reddit.getPostById(postId);
-        const appSettings = await getAppSettings(settings);
+        const appSettings = getAppSettings();
         if (
           subredditName.toLowerCase() !== appSettings.promoSubreddit.toLowerCase()
         ) {

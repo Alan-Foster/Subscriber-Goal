@@ -1,5 +1,5 @@
 import type { RedditClient, RedisClient } from '../types';
-import type { AppSettings } from '../../shared/types/api';
+import type { ServerAppSettings } from '../settings';
 import type { SubGoalColorTheme } from '../../shared/subGoalColorTheme';
 import {
   defaultSubGoalColorTheme,
@@ -238,7 +238,7 @@ export async function checkCompletionStatus(
 export async function registerNewSubGoalPost(
   reddit: RedditClient,
   redis: RedisClient,
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   post: RedditPost,
   goal: number,
   crosspost: boolean,

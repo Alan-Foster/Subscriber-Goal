@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import { context, reddit, redis, realtime, settings } from '@devvit/web/server';
+import { context, reddit, redis, realtime } from '@devvit/web/server';
 import type {
   ErrorResponse,
   InitResponse,
@@ -10,7 +10,7 @@ import type {
   SubscribeResponse,
 } from '../../shared/types/api';
 import { apiRoutes } from '../../shared/routes';
-import { getAppSettings } from '../settings';
+import { getPublicAppSettings } from '../settings';
 import { checkCompletionStatus, getSubGoalData } from '../data/subGoalData';
 import { getSubscriberStats, setNewSubscriber } from '../data/subscriberStats';
 import { getSubredditIcon } from '../utils/redditUtils';
@@ -26,7 +26,7 @@ const buildState = async (
     subreddit.id,
     (subreddit as { settings?: { communityIcon?: string } }).settings
   );
-  const appSettings = await getAppSettings(settings);
+  const appSettings = getPublicAppSettings();
   const subGoalData = await getSubGoalData(redis, postId);
 
   const username = context.userId ? await reddit.getCurrentUsername() : null;

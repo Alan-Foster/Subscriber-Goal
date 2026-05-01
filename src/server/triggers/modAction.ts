@@ -1,5 +1,5 @@
-import { reddit, redis, context, settings } from '@devvit/web/server';
-import type { AppSettings } from '../../shared/types/api';
+import { reddit, redis, context } from '@devvit/web/server';
+import type { ServerAppSettings } from '../settings';
 import { formatSubscriberCount } from '../../shared/numberFormat';
 import { getAppSettings } from '../settings';
 import {
@@ -170,19 +170,23 @@ const normalizeTimestampMs = (value: number): number =>
   // Devvit may return timestamps in either seconds or milliseconds.
   value < 1_000_000_000_000 ? value * 1000 : value;
 
-export const getCrosspostAuthoritySubreddit = (appSettings: AppSettings): string =>
+export const getCrosspostAuthoritySubreddit = (
+  appSettings: ServerAppSettings
+): string =>
   toNormalizedSubredditName(
     appSettings.crosspostAuthoritySubreddit || appSettings.promoSubreddit
   );
 
 export const isCrosspostAuthorityInstall = (
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   subredditName: string
 ): boolean =>
   toNormalizedSubredditName(subredditName) ===
   getCrosspostAuthoritySubreddit(appSettings);
 
-const getCrosspostMaxSourcePostAgeMs = (appSettings: AppSettings): number => {
+const getCrosspostMaxSourcePostAgeMs = (
+  appSettings: ServerAppSettings
+): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostMaxSourcePostAgeMinutes) &&
     appSettings.crosspostMaxSourcePostAgeMinutes > 0
@@ -191,7 +195,9 @@ const getCrosspostMaxSourcePostAgeMs = (appSettings: AppSettings): number => {
   return minutes * 60 * 1000;
 };
 
-const getCrosspostMaxRevisionAgeMs = (appSettings: AppSettings): number => {
+const getCrosspostMaxRevisionAgeMs = (
+  appSettings: ServerAppSettings
+): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostMaxRevisionAgeMinutes) &&
     appSettings.crosspostMaxRevisionAgeMinutes > 0
@@ -200,19 +206,19 @@ const getCrosspostMaxRevisionAgeMs = (appSettings: AppSettings): number => {
   return minutes * 60 * 1000;
 };
 
-const getMaxCrosspostsPerRun = (appSettings: AppSettings): number =>
+const getMaxCrosspostsPerRun = (appSettings: ServerAppSettings): number =>
   Number.isFinite(appSettings.maxCrosspostsPerRun) &&
   appSettings.maxCrosspostsPerRun > 0
     ? Math.floor(appSettings.maxCrosspostsPerRun)
     : 5;
 
-const getMaxCrosspostsPerHour = (appSettings: AppSettings): number =>
+const getMaxCrosspostsPerHour = (appSettings: ServerAppSettings): number =>
   Number.isFinite(appSettings.maxCrosspostsPerHour) &&
   appSettings.maxCrosspostsPerHour > 0
     ? Math.floor(appSettings.maxCrosspostsPerHour)
     : 30;
 
-const getCrosspostRetryWindowMs = (appSettings: AppSettings): number => {
+const getCrosspostRetryWindowMs = (appSettings: ServerAppSettings): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostRetryWindowMinutes) &&
     appSettings.crosspostRetryWindowMinutes > 0
@@ -221,7 +227,9 @@ const getCrosspostRetryWindowMs = (appSettings: AppSettings): number => {
   return minutes * 60 * 1000;
 };
 
-const getCrosspostRetryBaseDelayMs = (appSettings: AppSettings): number => {
+const getCrosspostRetryBaseDelayMs = (
+  appSettings: ServerAppSettings
+): number => {
   const seconds =
     Number.isFinite(appSettings.crosspostRetryBaseDelaySeconds) &&
     appSettings.crosspostRetryBaseDelaySeconds > 0
@@ -230,7 +238,9 @@ const getCrosspostRetryBaseDelayMs = (appSettings: AppSettings): number => {
   return seconds * 1000;
 };
 
-const getCrosspostRetryMaxDelayMs = (appSettings: AppSettings): number => {
+const getCrosspostRetryMaxDelayMs = (
+  appSettings: ServerAppSettings
+): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostRetryMaxDelayMinutes) &&
     appSettings.crosspostRetryMaxDelayMinutes > 0
@@ -239,7 +249,9 @@ const getCrosspostRetryMaxDelayMs = (appSettings: AppSettings): number => {
   return minutes * 60 * 1000;
 };
 
-const getCrosspostPendingBatchSize = (appSettings: AppSettings): number =>
+const getCrosspostPendingBatchSize = (
+  appSettings: ServerAppSettings
+): number =>
   Number.isFinite(appSettings.crosspostPendingBatchSize) &&
   appSettings.crosspostPendingBatchSize > 0
     ? Math.floor(appSettings.crosspostPendingBatchSize)
@@ -601,7 +613,7 @@ export async function cleanupCrosspostBookkeeping(
 }
 
 async function getNewPosts(
-  appSettings: AppSettings
+  appSettings: ServerAppSettings
 ): Promise<{
   events: NewPostEvent[];
   revisionsFetched: number;
@@ -681,7 +693,7 @@ async function getNewPosts(
 }
 
 async function getNewPostActions(
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   actionType: 'remove' | 'approve' | 'delete'
 ): Promise<{
   events: PostActionEvent[];
@@ -758,7 +770,7 @@ async function getNewPostActions(
 }
 
 async function updateFromWikis(
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   options: {
     sourcePostFreshnessWindowMs: number;
     revisionFreshnessWindowMs: number;
@@ -1545,7 +1557,7 @@ async function updateFromWikis(
 }
 
 export async function processCrosspostDispatchQueue(
-  appSettings: AppSettings,
+  appSettings: ServerAppSettings,
   reason: string
 ): Promise<CrosspostIngestionSummary> {
   const crosspostIngestionEnabled = appSettings.crosspostIngestionEnabled !== false;
@@ -1861,7 +1873,7 @@ export async function processCrosspostDispatchQueue(
 }
 
 export async function onModAction(event: ModActionEvent): Promise<void> {
-  const appSettings = await getAppSettings(settings);
+  const appSettings = getAppSettings();
   const subredditName =
     context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);
