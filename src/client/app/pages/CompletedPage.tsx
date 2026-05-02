@@ -15,14 +15,23 @@ export const CompletedPage = ({
   onVisitPromoSub,
   onCelebrate,
 }: CompletedPageProps) => {
-  const { locale, timezone } =
+  const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate
-    ? completedDate.toLocaleTimeString(locale ?? 'en', { timeZone: timezone ?? 'UTC' })
+    ? new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone ?? 'UTC',
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(completedDate)
     : null;
   const dateText = completedDate
-    ? completedDate.toLocaleDateString(locale ?? 'en', { timeZone: timezone ?? 'UTC' })
+    ? new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone ?? 'UTC',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(completedDate)
     : null;
 
   return (
