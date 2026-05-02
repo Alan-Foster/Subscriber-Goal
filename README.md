@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 1.0.0 - Official Launch - all previous installations force-updated to 1.0.0.
 - 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Fixed package drift. Devvit 0.12.22
 - 0.13.1 - Reduce scheduler work on non-authority installs, removed full Redis scans from admin erasure paths. Devvit 0.12.21
 - 0.13.0 - Final conversion from zrange to hget for data lookup. Custom button colors.
