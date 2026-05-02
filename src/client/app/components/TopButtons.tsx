@@ -27,7 +27,7 @@ export const TopButtons = ({
         } inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
         onClick={onVisitPromoSubPressed}
       >
-        <span>View More Goals</span>
+        <span>r/{promoSubreddit}</span>
         <svg
           width="20"
           height="20"
