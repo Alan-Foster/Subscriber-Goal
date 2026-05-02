@@ -79,7 +79,7 @@
     }
   },
   "scripts": {
-    "dev": "npm run build:watch",
-    "build": "npm run build"
+    "dev": "vite build --watch",
+    "build": "vite build"
   }
 }
