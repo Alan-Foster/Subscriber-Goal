@@ -15,7 +15,8 @@ export const CompletedPage = ({
   onVisitPromoSub,
   onCelebrate,
 }: CompletedPageProps) => {
-  const { locale, timezone } = context as { locale?: string; timezone?: string };
+  const { locale, timezone } =
+    (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate
     ? completedDate.toLocaleTimeString(locale ?? 'en', { timeZone: timezone ?? 'UTC' })

@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Devvit 0.12.22
+- 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Fixed package drift. Devvit 0.12.22
 - 0.13.1 - Reduce scheduler work on non-authority installs, removed full Redis scans from admin erasure paths. Devvit 0.12.21
 - 0.13.0 - Final conversion from zrange to hget for data lookup. Custom button colors.
 - 0.12.5 - Add a subscribe button glow to drive higher button engagement. Share username is now opt-out.
