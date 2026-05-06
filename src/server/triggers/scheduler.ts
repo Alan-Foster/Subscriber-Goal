@@ -14,6 +14,7 @@ import {
 } from './modAction';
 import { countPendingCrossposts } from '../data/crosspostData';
 import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
+import { processDueAutoCreateNextGoals } from '../core/autoCreateNextGoal';
 
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
@@ -62,6 +63,25 @@ export async function onPostsUpdaterJob(): Promise<void> {
   } catch (error) {
     console.error(`recentSubscriberIndexMigration error: ${String(error)}`);
   }
+  try {
+    const autoCreateSummary = await processDueAutoCreateNextGoals({
+      reddit,
+      redis,
+      appSettings,
+    });
+    if (
+      autoCreateSummary.due > 0 ||
+      autoCreateSummary.created > 0 ||
+      autoCreateSummary.skipped > 0 ||
+      autoCreateSummary.failed > 0
+    ) {
+      console.info(
+        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed}`
+      );
+    }
+  } catch (error) {
+    console.error(`autoCreateNextGoal error: ${String(error)}`);
+  }
 
   const subreddit = await reddit.getCurrentSubreddit();
 
@@ -80,7 +100,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       }
 
       if (subreddit.numberOfSubscribers >= subGoalData.goal && !subGoalData.completedTime) {
-        await checkCompletionStatus(reddit, redis, postId);
+        subGoalData.completedTime = await checkCompletionStatus(reddit, redis, postId);
       }
 
       const completedTime = subGoalData.completedTime

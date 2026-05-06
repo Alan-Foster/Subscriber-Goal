@@ -46,6 +46,7 @@ const hoisted = vi.hoisted(() => ({
   countPendingCrossposts: vi.fn(),
   processSubscriberStatsMigrationBatch: vi.fn(),
   processRecentSubscriberIndexMigrationBatch: vi.fn(),
+  processDueAutoCreateNextGoals: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   cancelUpdates: vi.fn(),
@@ -103,6 +104,10 @@ vi.mock('../utils/textFallback', () => ({
   applyTextFallback: hoisted.applyTextFallback,
 }));
 
+vi.mock('../core/autoCreateNextGoal', () => ({
+  processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
+}));
+
 import { onPostsUpdaterJob } from './scheduler';
 
 describe('onPostsUpdaterJob crosspost scheduling', () => {
@@ -116,12 +121,19 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.countPendingCrossposts.mockReset();
     hoisted.processSubscriberStatsMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
+    hoisted.processDueAutoCreateNextGoals.mockReset();
     hoisted.getQueuedUpdates.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(emptyCrosspostSummary);
     hoisted.countPendingCrossposts.mockResolvedValue(0);
     hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);
     hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(undefined);
+    hoisted.processDueAutoCreateNextGoals.mockResolvedValue({
+      due: 0,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+    });
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: 'CorporateGifts',

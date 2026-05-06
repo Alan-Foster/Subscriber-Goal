@@ -19,6 +19,7 @@ const hoisted = vi.hoisted(() => ({
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
   setSubredditDisplayNameForPost: vi.fn(),
+  cancelAllAutoCreateNextGoals: vi.fn(),
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('../core/post', () => ({
 }));
 
 vi.mock('../data/subGoalData', () => ({
+  cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   eraseFromRecentSubscribers: vi.fn(),
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
@@ -142,6 +144,18 @@ describe('internalUi color theme create goal routes', () => {
         { label: 'Blue', value: 'blue' },
       ],
     });
+    expect(fields.find((field) => field.name === 'autoCreateNextGoal')).toMatchObject({
+      type: 'boolean',
+      defaultValue: true,
+    });
+    expect(fields.map((field) => field.name)).toEqual([
+      'subscriberGoal',
+      'postTitle',
+      'subredditDisplayName',
+      'colorTheme',
+      'crosspost',
+      'autoCreateNextGoal',
+    ]);
   });
 
   it('passes the selected color theme when creating a goal post', async () => {
@@ -156,6 +170,7 @@ describe('internalUi color theme create goal routes', () => {
           subredditDisplayName: 'ExampleSub',
           crosspost: false,
           colorTheme: ['blue'],
+          autoCreateNextGoal: false,
         },
       } as Request,
       res
@@ -169,7 +184,11 @@ describe('internalUi color theme create goal routes', () => {
       200,
       false,
       'ExampleSub',
-      'blue'
+      'blue',
+      false
+    );
+    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
+      hoisted.redis
     );
   });
 });

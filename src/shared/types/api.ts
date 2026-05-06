@@ -67,6 +67,7 @@ export type CreateGoalFormValues = {
   crosspost?: boolean;
   subredditDisplayName?: string;
   colorTheme?: string[];
+  autoCreateNextGoal?: boolean;
 };
 
 export type DeleteGoalFormValues = {

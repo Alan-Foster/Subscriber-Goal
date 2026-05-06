@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   addRecentSubscriberPostIndex,
+  autoCreateNextGoalQueueKey,
+  cancelAutoCreateNextGoal,
+  checkCompletionStatus,
   eraseFromRecentSubscribers,
+  getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
+  scheduleAutoCreateNextGoal,
   setSubGoalData,
   setSubredditDisplayNameForPost,
   subscriberGoalsKey,
@@ -65,6 +70,25 @@ class InMemoryRedis {
     this.sortedSets.set(key, current);
   }
 
+  async zRange(key: string, start: number, end: number): Promise<ZEntry[]> {
+    const current = this.sortedSets.get(key) ?? new Map<string, number>();
+    const sorted = [...current.entries()]
+      .map(([member, score]) => ({ member, score }))
+      .sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
+    const normalizedEnd = end < 0 ? sorted.length - 1 : end;
+    return sorted.slice(start, normalizedEnd + 1);
+  }
+
+  async zRem(key: string, members: string[]): Promise<void> {
+    const current = this.sortedSets.get(key);
+    if (!current) {
+      return;
+    }
+    for (const member of members) {
+      current.delete(member);
+    }
+  }
+
   async zScan(
     key: string,
     cursor: number,
@@ -94,6 +118,7 @@ describe('subGoalData subreddit display name', () => {
         completedTime: 0,
         subredditDisplayName: 'Subscriber_Goal_Dev',
         colorTheme: 'red',
+        autoCreateNextGoal: true,
       }
     );
 
@@ -102,6 +127,7 @@ describe('subGoalData subreddit display name', () => {
       't3_post'
     );
     expect(data.subredditDisplayName).toBe('Subscriber_Goal_Dev');
+    expect(data.autoCreateNextGoal).toBe(true);
   });
 
   it('updates display name independently for a post', async () => {
@@ -115,6 +141,7 @@ describe('subGoalData subreddit display name', () => {
         completedTime: 0,
         subredditDisplayName: 'subscriber_goal_dev',
         colorTheme: 'red',
+        autoCreateNextGoal: false,
       }
     );
 
@@ -149,6 +176,7 @@ describe('subGoalData subreddit display name', () => {
           completedTime: 0,
           subredditDisplayName: 'subscriber_goal_dev',
           colorTheme,
+          autoCreateNextGoal: false,
         }
       );
 
@@ -186,6 +214,116 @@ describe('subGoalData subreddit display name', () => {
         't3_invalid'
       )
     ).resolves.toMatchObject({ colorTheme: 'red' });
+  });
+
+  it('defaults missing auto-create settings to disabled', async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_missing_goal: '10',
+    });
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        't3_missing'
+      )
+    ).resolves.toMatchObject({ autoCreateNextGoal: false });
+  });
+
+  it('queues, reads, and clears due auto-create jobs', async () => {
+    const redis = new InMemoryRedis();
+
+    await scheduleAutoCreateNextGoal(
+      redis as unknown as Parameters<typeof scheduleAutoCreateNextGoal>[0],
+      't3_auto',
+      1_000
+    );
+
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: 't3_auto', score: 86_401_000 },
+    ]);
+    await expect(
+      getDueAutoCreateNextGoalPostIds(
+        redis as unknown as Parameters<typeof getDueAutoCreateNextGoalPostIds>[0],
+        86_400_999
+      )
+    ).resolves.toEqual([]);
+    await expect(
+      getDueAutoCreateNextGoalPostIds(
+        redis as unknown as Parameters<typeof getDueAutoCreateNextGoalPostIds>[0],
+        86_401_000
+      )
+    ).resolves.toEqual(['t3_auto']);
+
+    await cancelAutoCreateNextGoal(
+      redis as unknown as Parameters<typeof cancelAutoCreateNextGoal>[0],
+      't3_auto'
+    );
+
+    await expect(
+      getDueAutoCreateNextGoalPostIds(
+        redis as unknown as Parameters<typeof getDueAutoCreateNextGoalPostIds>[0],
+        86_401_000
+      )
+    ).resolves.toEqual([]);
+  });
+
+  it('queues auto-create when an enabled goal reaches completion', async () => {
+    const redis = new InMemoryRedis();
+    const reddit = {
+      getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+    };
+    await setSubGoalData(
+      redis as unknown as Parameters<typeof setSubGoalData>[0],
+      't3_post',
+      {
+        goal: 10,
+        recentSubscriber: '',
+        completedTime: 0,
+        subredditDisplayName: 'subscriber_goal_dev',
+        colorTheme: 'red',
+        autoCreateNextGoal: true,
+      }
+    );
+
+    await expect(
+      checkCompletionStatus(
+        reddit as unknown as Parameters<typeof checkCompletionStatus>[0],
+        redis as unknown as Parameters<typeof checkCompletionStatus>[1],
+        't3_post'
+      )
+    ).resolves.toBeGreaterThan(0);
+
+    const queued = await redis.zRange(autoCreateNextGoalQueueKey, 0, -1);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.member).toBe('t3_post');
+  });
+
+  it('does not queue auto-create when a disabled goal reaches completion', async () => {
+    const redis = new InMemoryRedis();
+    const reddit = {
+      getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+    };
+    await setSubGoalData(
+      redis as unknown as Parameters<typeof setSubGoalData>[0],
+      't3_post',
+      {
+        goal: 10,
+        recentSubscriber: '',
+        completedTime: 0,
+        subredditDisplayName: 'subscriber_goal_dev',
+        colorTheme: 'red',
+        autoCreateNextGoal: false,
+      }
+    );
+
+    await checkCompletionStatus(
+      reddit as unknown as Parameters<typeof checkCompletionStatus>[0],
+      redis as unknown as Parameters<typeof checkCompletionStatus>[1],
+      't3_post'
+    );
+
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
   });
 
   it('clears indexed recent subscriber fields without scanning all goal records', async () => {

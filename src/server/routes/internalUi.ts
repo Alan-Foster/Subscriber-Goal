@@ -11,25 +11,17 @@ import {
   resolveSubGoalColorTheme,
 } from '../../shared/subGoalColorTheme';
 import { formNames, internalRoutes } from '../../shared/routes';
-import { isLinkId } from '../types';
-import { createGoalPost } from '../core/post';
+import { createSubscriberGoal } from '../core/createSubscriberGoal';
 import { dispatchPostAction } from '../data/crosspostData';
 import {
   eraseFromRecentSubscribers,
-  registerNewSubGoalPost,
-  setSubredditDisplayNameForPost,
 } from '../data/subGoalData';
-import {
-  getSavedSubredditDisplayName,
-  setSavedSubredditDisplayName,
-} from '../data/subredditDisplayNameData';
+import { getSavedSubredditDisplayName } from '../data/subredditDisplayNameData';
 import { untrackSubscriberById, untrackSubscriberByUsername } from '../data/subscriberStats';
-import { cancelUpdates, getQueuedUpdates, getTrackedPosts, queueUpdate, untrackPost } from '../data/updaterData';
+import { cancelUpdates, untrackPost } from '../data/updaterData';
 import { getAppSettings } from '../settings';
 import { getDefaultSubscriberGoal } from '../utils/numberUtils';
-import { clearUserStickies } from '../utils/redditUtils';
 import { validateSubredditDisplayName } from '../utils/subredditDisplayName';
-import { applyTextFallback } from '../utils/textFallback';
 
 export function registerInternalUiRoutes(router: Router): void {
   router.post(
@@ -108,6 +100,14 @@ export function registerInternalUiRoutes(router: Router): void {
                   defaultValue: shouldCrosspost,
                   disabled: !shouldCrosspost,
                 },
+                {
+                  name: 'autoCreateNextGoal',
+                  label: 'Create a New Subscriber Goal 24 Hours after Goal Success',
+                  type: 'boolean',
+                  helpText:
+                    'Once your goal milestone is reached, a new goal with the next milestone will be automatically created.',
+                  defaultValue: true,
+                },
               ],
             },
           },
@@ -131,6 +131,7 @@ export function registerInternalUiRoutes(router: Router): void {
       const title = values.postTitle?.trim();
       const subredditDisplayName = values.subredditDisplayName?.trim();
       const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
+      const autoCreateNextGoal = values.autoCreateNextGoal !== false;
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
@@ -170,66 +171,20 @@ export function registerInternalUiRoutes(router: Router): void {
           );
         }
 
-        const appUser = await reddit.getAppUser();
-        if (!appUser?.username) {
-          res.json({ showToast: 'Could not resolve app user.' });
-          return;
-        }
-        await clearUserStickies(reddit, appUser.username);
-
-        const post = await createGoalPost({
-          title,
-          subredditName: subreddit.name,
-        });
-
-        await applyTextFallback(post, {
-          goal: subscriberGoal,
-          subscribers: subreddit.numberOfSubscribers,
-          subredditName: resolvedSubredditDisplayName,
-          completedTime: null,
-        });
-        await setSavedSubredditDisplayName(redis, resolvedSubredditDisplayName);
-
-        const crosspostDispatchResult = await registerNewSubGoalPost(
+        const { post, crosspostDispatchResult } = await createSubscriberGoal({
           reddit,
           redis,
           appSettings,
-          post,
-          subscriberGoal,
-          resolvedCrosspost,
-          resolvedSubredditDisplayName,
-          colorTheme
-        );
-
-        const trackedPosts = await getTrackedPosts(redis);
-        const queuedPosts = await getQueuedUpdates(redis);
-        const activePostIds = [...new Set([...trackedPosts, ...queuedPosts])];
-        for (const activePostId of activePostIds) {
-          if (!isLinkId(activePostId)) {
-            continue;
-          }
-          try {
-            const activePost = await reddit.getPostById(activePostId);
-            if (activePost.subredditId !== subreddit.id) {
-              continue;
-            }
-            await setSubredditDisplayNameForPost(
-              redis,
-              activePostId,
-              resolvedSubredditDisplayName
-            );
-            await queueUpdate(redis, activePostId, new Date());
-          } catch (backfillError) {
-            console.warn(
-              `Failed to backfill subreddit display name for active post ${activePostId}: ${String(
-                backfillError
-              )}`
-            );
-          }
-        }
-
-        await post.approve();
-        await post.sticky();
+          options: {
+            title,
+            goal: subscriberGoal,
+            subredditDisplayName: resolvedSubredditDisplayName,
+            crosspost: resolvedCrosspost,
+            colorTheme,
+            autoCreateNextGoal,
+            cancelPendingAutoCreateGoals: true,
+          },
+        });
 
         console.info(
           `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${resolvedCrosspost}`
