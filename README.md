@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.1.0 - Added New Goal toggle that can create a new goal 24 hours after success.
+- 1.1.1 - Added New Goal toggle that can create a new goal 24 hours after success.
 - 1.0.1 - Official Launch - all previous installations force-updated to 1.0.0.
 - 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Fixed package drift. Devvit 0.12.22
 - 0.13.1 - Reduce scheduler work on non-authority installs, removed full Redis scans from admin erasure paths. Devvit 0.12.21
