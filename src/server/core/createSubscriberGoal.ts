@@ -1,6 +1,7 @@
 import type { ServerAppSettings } from '../settings';
 import type { RedditClient, RedisClient } from '../types';
 import type { SubGoalColorTheme } from '../../shared/subGoalColorTheme';
+import type { SubGoalLanguage } from '../../shared/subGoalPostI18n';
 import { createGoalPost } from './post';
 import {
   cancelAllAutoCreateNextGoals,
@@ -21,6 +22,7 @@ type CreateSubscriberGoalOptions = {
   crosspost: boolean;
   colorTheme: SubGoalColorTheme;
   autoCreateNextGoal: boolean;
+  language: SubGoalLanguage;
   cancelPendingAutoCreateGoals?: boolean;
 };
 
@@ -57,7 +59,8 @@ export async function createSubscriberGoal({
     goal: options.goal,
     subscribers: subreddit.numberOfSubscribers,
     subredditName: options.subredditDisplayName,
-    completedTime: null
+    completedTime: null,
+    language: options.language
   });
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
 
@@ -70,7 +73,8 @@ export async function createSubscriberGoal({
     options.crosspost,
     options.subredditDisplayName,
     options.colorTheme,
-    options.autoCreateNextGoal
+    options.autoCreateNextGoal,
+    options.language
   );
 
   const trackedPosts = await getTrackedPosts(redis);

@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
+import type { SubGoalLanguage } from '../../../shared/subGoalPostI18n';
+import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
 
 type TopButtonsProps = {
   onVisitPromoSubPressed: () => void;
   promoSubreddit: string;
+  language: SubGoalLanguage;
 };
 
 let hasAnimatedOnce = false;
@@ -10,8 +13,10 @@ let hasAnimatedOnce = false;
 export const TopButtons = ({
   onVisitPromoSubPressed,
   promoSubreddit,
+  language,
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
+  const messages = getSubGoalPostMessages(language);
 
   useEffect(() => {
     hasAnimatedOnce = true;
@@ -21,7 +26,7 @@ export const TopButtons = ({
     <div className="absolute right-4 top-4">
       <button
         type="button"
-        aria-label={`View other subscriber goals in r/${promoSubreddit}`}
+        aria-label={messages.promoAriaLabel({ promoSubreddit })}
         className={`${
           shouldAnimate ? 'sg-fade-in' : ''
         } inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}

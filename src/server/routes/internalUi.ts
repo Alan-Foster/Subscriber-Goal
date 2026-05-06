@@ -10,6 +10,13 @@ import {
   defaultSubGoalColorTheme,
   resolveSubGoalColorTheme,
 } from '../../shared/subGoalColorTheme';
+import {
+  defaultSubGoalLanguage,
+  getSubGoalPostMessages,
+  resolveSubGoalLanguage,
+  subGoalLanguages,
+  subGoalPostMessages,
+} from '../../shared/subGoalPostI18n';
 import { formNames, internalRoutes } from '../../shared/routes';
 import { createSubscriberGoal } from '../core/createSubscriberGoal';
 import { dispatchPostAction } from '../data/crosspostData';
@@ -34,6 +41,11 @@ export function registerInternalUiRoutes(router: Router): void {
           savedSubredditDisplayName ?? subreddit.name;
         const appSettings = getAppSettings();
         const defaultGoal = getDefaultSubscriberGoal(subreddit.numberOfSubscribers);
+        const defaultPostTitle = getSubGoalPostMessages(
+          defaultSubGoalLanguage
+        ).defaultPostTitle({
+          subredditName: resolvedSubredditDisplayName,
+        });
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
         const shouldCrosspost =
@@ -63,7 +75,7 @@ export function registerInternalUiRoutes(router: Router): void {
                   name: 'postTitle',
                   label: 'Post Title',
                   type: 'string',
-                  defaultValue: `Welcome to r/${resolvedSubredditDisplayName}!`,
+                  defaultValue: defaultPostTitle,
                   helpText:
                     'This will be used as the title of the post, you can customize it as you see fit.',
                   required: true,
@@ -90,6 +102,19 @@ export function registerInternalUiRoutes(router: Router): void {
                   ],
                   helpText:
                     'This controls the subscribe button, progress bar, and button glow color.',
+                  required: true,
+                },
+                {
+                  name: 'language',
+                  label: 'Language',
+                  type: 'select',
+                  defaultValue: [defaultSubGoalLanguage],
+                  options: subGoalLanguages.map((language) => ({
+                    label: subGoalPostMessages[language].languageLabel,
+                    value: language,
+                  })),
+                  helpText:
+                    'This controls the language used in the subscriber goal post.',
                   required: true,
                 },
                 {
@@ -132,6 +157,7 @@ export function registerInternalUiRoutes(router: Router): void {
       const subredditDisplayName = values.subredditDisplayName?.trim();
       const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
       const autoCreateNextGoal = values.autoCreateNextGoal !== false;
+      const language = resolveSubGoalLanguage(values.language?.[0]);
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
@@ -164,6 +190,17 @@ export function registerInternalUiRoutes(router: Router): void {
           return;
         }
         const resolvedSubredditDisplayName = subredditDisplayName ?? subreddit.name;
+        const englishDefaultTitle = getSubGoalPostMessages(
+          defaultSubGoalLanguage
+        ).defaultPostTitle({
+          subredditName: resolvedSubredditDisplayName,
+        });
+        const resolvedTitle =
+          title === englishDefaultTitle
+            ? getSubGoalPostMessages(language).defaultPostTitle({
+                subredditName: resolvedSubredditDisplayName,
+              })
+            : title;
 
         if (requestedCrosspost === undefined) {
           console.info(
@@ -176,12 +213,13 @@ export function registerInternalUiRoutes(router: Router): void {
           redis,
           appSettings,
           options: {
-            title,
+            title: resolvedTitle,
             goal: subscriberGoal,
             subredditDisplayName: resolvedSubredditDisplayName,
             crosspost: resolvedCrosspost,
             colorTheme,
             autoCreateNextGoal,
+            language,
             cancelPendingAutoCreateGoals: true,
           },
         });

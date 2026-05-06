@@ -1,4 +1,5 @@
 import type { SubGoalState } from '../../../shared/types/api';
+import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
 import { ProgressBar } from '../components/ProgressBar';
 import { SubredditIcon } from '../components/SubredditIcon';
 import { TopButtons } from '../components/TopButtons';
@@ -28,7 +29,8 @@ export const SubGoalPage = ({
   const shouldShowSubscribeAttention = !isDisabled;
   const iconAction = state.subscribed ? onCelebrate : onSubscribe;
   const showNotice = Boolean(notice);
-  const welcomeText = `Welcome to r/${state.subreddit.name}`;
+  const messages = getSubGoalPostMessages(state.language);
+  const welcomeText = messages.welcome({ subredditName: state.subreddit.name });
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"
@@ -37,6 +39,7 @@ export const SubGoalPage = ({
       <TopButtons
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
+        language={state.language}
       />
       <div className="pt-6">
         <SubredditIcon iconUrl={state.subreddit.icon} onClick={iconAction} />
@@ -80,7 +83,9 @@ export const SubGoalPage = ({
         disabled={isDisabled}
         onClick={onSubscribe}
       >
-        Subscribe{state.subscribed ? 'd' : ''} to r/{state.subreddit.name}
+        {state.subscribed
+          ? messages.subscribedButton({ subredditName: state.subreddit.name })
+          : messages.subscribeButton({ subredditName: state.subreddit.name })}
       </button>
       {state.subscribed || state.subreddit.isNsfw ? (
         <div className="h-5" />
@@ -97,7 +102,7 @@ export const SubGoalPage = ({
             disabled={isDisabled}
             onChange={(event) => onShareUsernameChange(event.target.checked)}
           />
-          Show my username when I subscribe
+          {messages.shareUsernameLabel}
         </label>
       )}
       <div className="h-5" />

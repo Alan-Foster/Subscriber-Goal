@@ -23,4 +23,16 @@ describe('textFallbackMaker', () => {
       })
     ).toContain('reached 1.5m subscribers!');
   });
+
+  it('renders Spanish fallback text', () => {
+    expect(
+      textFallbackMaker({
+        goal: 15000,
+        subscribers: 12632,
+        subredditName: 'PakStartups',
+        completedTime: null,
+        language: 'es',
+      })
+    ).toContain('12632 / 15k suscriptores.');
+  });
 });

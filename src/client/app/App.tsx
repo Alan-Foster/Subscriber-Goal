@@ -1,5 +1,6 @@
 import { navigateTo, showToast } from '@devvit/web/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
 import { useSubGoal } from '../hooks/useSubGoal';
 import { ConfettiBurst } from './components/ConfettiBurst';
 import { SkeletonPage } from './components/SkeletonPage';
@@ -30,6 +31,7 @@ export const App = () => {
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
   const [shareUsername, setShareUsername] = useState(true);
+  const messages = getSubGoalPostMessages(state?.language);
 
   useEffect(() => {
     if (state?.subreddit.isNsfw) {
@@ -102,8 +104,8 @@ export const App = () => {
 
   const handleSubscribe = async () => {
     if (!state?.user) {
-      setError('Please log in to subscribe.');
-      showToast('Please log in to subscribe.');
+      setError(messages.loginRequired);
+      showToast(messages.loginRequired);
       return;
     }
     const effectiveShareUsername = state.subreddit.isNsfw
@@ -113,7 +115,9 @@ export const App = () => {
       shareUsername: effectiveShareUsername,
     });
     if (subscribeError) {
-      showToast(subscribeError);
+      showToast(
+        state.language === 'en' ? subscribeError : messages.subscribeErrorToast
+      );
       return;
     }
     if (!updatedState) {
@@ -125,11 +129,11 @@ export const App = () => {
       setPage('thanks');
     }
     triggerConfetti(confettiPresets.subscribe);
-    const noticeMessage = updatedState.recentSubscriber
-      ? `u/${updatedState.recentSubscriber} just subscribed!`
-      : 'New member just subscribed!';
+    const noticeMessage = messages.subscriberNotice({
+      username: updatedState.recentSubscriber,
+    });
     showNotice(noticeMessage);
-    showToast({ text: 'Thanks for subscribing!', appearance: 'success' });
+    showToast({ text: messages.subscribeSuccessToast, appearance: 'success' });
   };
 
   const handleReturnToSubGoal = () => {
@@ -140,8 +144,8 @@ export const App = () => {
     const effectiveShareUsername = state?.subreddit.isNsfw
       ? false
       : shareUsername;
-    const username = effectiveShareUsername ? state?.user?.username : null;
-    const message = username ? `u/${username} just subscribed!` : 'New member just subscribed!';
+    const username = effectiveShareUsername ? state?.user?.username ?? null : null;
+    const message = messages.subscriberNotice({ username });
     returnNoticeTimeoutRef.current = window.setTimeout(() => {
       showNotice(message);
     }, 80);
@@ -194,7 +198,7 @@ export const App = () => {
     <div className="relative flex h-[320px] w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]">
       {content ?? (
         <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
-          Unable to load Subscriber Goal data.
+          {messages.loadError}
         </div>
       )}
       {showConfetti ? (

@@ -8,6 +8,7 @@ const baseState: SubGoalState = {
   recentSubscriber: null,
   completedTime: null,
   colorTheme: 'red',
+  language: 'en',
   subscribed: false,
   user: { id: 't2_user', username: 'alice' },
   appSettings: {
@@ -39,6 +40,19 @@ describe('SubGoalPage', () => {
     );
 
     expect(html).toContain('Show my username when I subscribe');
+  });
+
+  it('renders Spanish post text', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, language: 'es' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('Bienvenido a r/ExampleSub');
+    expect(html).toContain('Suscribirse a r/ExampleSub');
+    expect(html).toContain('Mostrar mi nombre de usuario cuando me suscriba');
   });
 
   it('hides username share control on NSFW subreddits', () => {

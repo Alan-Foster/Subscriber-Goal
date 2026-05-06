@@ -5,10 +5,26 @@ import { TopButtons } from './TopButtons';
 describe('TopButtons', () => {
   it('shows the promo subreddit link text and accessible label', () => {
     const html = renderToStaticMarkup(
-      <TopButtons onVisitPromoSubPressed={vi.fn()} promoSubreddit="SubGoal" />
+      <TopButtons
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+      />
     );
 
     expect(html).toContain('r/SubGoal');
     expect(html).toContain('View other subscriber goals in r/SubGoal');
+  });
+
+  it('localizes the accessible label', () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="es"
+      />
+    );
+
+    expect(html).toContain('Ver otras metas de suscriptores en r/SubGoal');
   });
 });

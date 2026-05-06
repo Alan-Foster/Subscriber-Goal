@@ -47,7 +47,8 @@ describe('processDueAutoCreateNextGoals', () => {
       completedTime: 1_000,
       subredditDisplayName: 'ExampleSub',
       colorTheme: 'purple',
-      autoCreateNextGoal: true
+      autoCreateNextGoal: true,
+      language: 'en'
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: 'examplesub',
@@ -96,6 +97,7 @@ describe('processDueAutoCreateNextGoals', () => {
         crosspost: true,
         colorTheme: 'purple',
         autoCreateNextGoal: true,
+        language: 'en',
         cancelPendingAutoCreateGoals: true
       }
     });
@@ -123,6 +125,34 @@ describe('processDueAutoCreateNextGoals', () => {
     );
   });
 
+  it('inherits Spanish and uses the localized default title', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 5,
+      recentSubscriber: '',
+      completedTime: 1_000,
+      subredditDisplayName: 'ExampleSub',
+      colorTheme: 'blue',
+      autoCreateNextGoal: true,
+      language: 'es'
+    });
+
+    await processDueAutoCreateNextGoals({
+      reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+      redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+      appSettings: baseSettings
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          title: '¡Bienvenido a r/ExampleSub!',
+          language: 'es'
+        })
+      })
+    );
+  });
+
   it('skips stale due jobs whose source goal is not completed', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -131,7 +161,8 @@ describe('processDueAutoCreateNextGoals', () => {
       completedTime: 0,
       subredditDisplayName: 'ExampleSub',
       colorTheme: 'purple',
-      autoCreateNextGoal: true
+      autoCreateNextGoal: true,
+      language: 'en'
     });
 
     await expect(

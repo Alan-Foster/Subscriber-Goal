@@ -1,16 +1,29 @@
 import { formatSubscriberCount } from '../../shared/numberFormat';
+import type { SubGoalLanguage } from '../../shared/subGoalPostI18n';
+import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
 
 export type TextFallbackProps = {
   goal: number;
   subscribers: number;
   subredditName: string;
   completedTime: Date | null;
+  language?: SubGoalLanguage;
 };
 
-export const textFallbackMaker = (props: TextFallbackProps): string =>
-  props.completedTime
-    ? `r/${props.subredditName} reached ${formatSubscriberCount(props.goal)} subscribers!\n\nGoal reached at \`${props.completedTime.toISOString()}\`.`
-    : `Welcome to r/${props.subredditName}\n\n${formatSubscriberCount(props.subscribers)} / ${formatSubscriberCount(props.goal)} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.`;
+export const textFallbackMaker = (props: TextFallbackProps): string => {
+  const messages = getSubGoalPostMessages(props.language);
+  return props.completedTime
+    ? messages.fallbackCompleted({
+        subredditName: props.subredditName,
+        goalText: formatSubscriberCount(props.goal),
+        completedIso: props.completedTime.toISOString(),
+      })
+    : messages.fallbackActive({
+        subredditName: props.subredditName,
+        subscribersText: formatSubscriberCount(props.subscribers),
+        goalText: formatSubscriberCount(props.goal),
+      });
+};
 
 type TextFallbackTarget = {
   setTextFallback: (payload: { text: string }) => Promise<void>;

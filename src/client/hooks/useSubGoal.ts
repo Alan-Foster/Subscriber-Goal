@@ -9,6 +9,7 @@ import type {
   SubscribeRequest,
   SubscribeResponse,
 } from '../../shared/types/api';
+import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
 import { requestJsonWithRetry } from '../utils/fetchWithRetry';
 
 type RequestResult<T> = {
@@ -58,6 +59,7 @@ export const useSubGoal = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
+  const messages = getSubGoalPostMessages(state?.language);
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -79,9 +81,9 @@ export const useSubGoal = () => {
       typeof message.recentSubscriber === 'string' && message.recentSubscriber.length > 0
         ? message.recentSubscriber
         : null;
-    const noticeMessage = recentSubscriber
-      ? `u/${recentSubscriber} just subscribed!`
-      : 'New member just subscribed!';
+    const noticeMessage = messages.subscriberNotice({
+      username: recentSubscriber,
+    });
     showNotice(noticeMessage);
     setState((prev) => {
       if (!prev) {
@@ -101,7 +103,7 @@ export const useSubGoal = () => {
         },
       };
     });
-  }, [showNotice]);
+  }, [messages, showNotice]);
 
   useEffect(
     () => () => {
@@ -116,8 +118,8 @@ export const useSubGoal = () => {
     if (!state?.recentSubscriber) {
       return;
     }
-    showNotice(`u/${state.recentSubscriber} just subscribed!`);
-  }, [state?.recentSubscriber, showNotice]);
+    showNotice(messages.subscriberNotice({ username: state.recentSubscriber }));
+  }, [messages, state?.recentSubscriber, showNotice]);
 
   const refresh = useCallback(async () => {
     const result = await requestJsonWithRetry<RefreshResponse>('/api/refresh', undefined, {});

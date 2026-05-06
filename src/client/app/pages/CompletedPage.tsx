@@ -1,6 +1,7 @@
 import { context } from '@devvit/web/client';
 import type { SubGoalState } from '../../../shared/types/api';
 import { formatSubscriberCount } from '../../../shared/numberFormat';
+import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
 import { SubredditIcon } from '../components/SubredditIcon';
 import { TopButtons } from '../components/TopButtons';
 
@@ -17,16 +18,17 @@ export const CompletedPage = ({
 }: CompletedPageProps) => {
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
+  const messages = getSubGoalPostMessages(state.language);
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate
-    ? new Intl.DateTimeFormat('en-US', {
+    ? new Intl.DateTimeFormat(messages.intlLocale, {
         timeZone: timezone ?? 'UTC',
         hour: 'numeric',
         minute: '2-digit',
       }).format(completedDate)
     : null;
   const dateText = completedDate
-    ? new Intl.DateTimeFormat('en-US', {
+    ? new Intl.DateTimeFormat(messages.intlLocale, {
         timeZone: timezone ?? 'UTC',
         month: 'long',
         day: 'numeric',
@@ -39,16 +41,21 @@ export const CompletedPage = ({
       <TopButtons
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
+        language={state.language}
       />
       <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       <div className="text-2xl font-bold">
-        r/{state.subreddit.name} reached{' '}
-        {state.goal ? formatSubscriberCount(state.goal) : 'the goal'} subscribers!
+        {messages.completedTitle({
+          subredditName: state.subreddit.name,
+          goalText: state.goal
+            ? formatSubscriberCount(state.goal)
+            : messages.completedGoalFallback,
+        })}
       </div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         {timeText && dateText
-          ? `Goal reached at ${timeText} on ${dateText}`
-          : 'Goal reached just now!'}
+          ? messages.completedReachedAt({ timeText, dateText })
+          : messages.completedJustNow}
       </div>
     </div>
   );

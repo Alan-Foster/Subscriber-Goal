@@ -117,6 +117,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
         subscribers: subreddit.numberOfSubscribers,
         subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
         completedTime,
+        language: subGoalData.language,
       });
 
       if (subGoalData.completedTime) {

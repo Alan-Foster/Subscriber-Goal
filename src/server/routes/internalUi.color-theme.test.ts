@@ -1,11 +1,11 @@
-import type { Request, Response, Router } from 'express';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { internalRoutes } from '../../shared/routes';
+import type { Request, Response, Router } from "express";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { internalRoutes } from "../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({
   context: {
-    subredditName: 'ExampleSub',
-    userId: 't2_mod',
+    subredditName: "ExampleSub",
+    userId: "t2_mod",
   },
   reddit: {
     getCurrentSubreddit: vi.fn(),
@@ -27,38 +27,38 @@ const hoisted = vi.hoisted(() => ({
   applyTextFallback: vi.fn(),
 }));
 
-vi.mock('@devvit/web/server', () => ({
+vi.mock("@devvit/web/server", () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
   redis: hoisted.redis,
 }));
 
-vi.mock('../settings', () => ({
+vi.mock("../settings", () => ({
   getAppSettings: hoisted.getAppSettings,
 }));
 
-vi.mock('../core/post', () => ({
+vi.mock("../core/post", () => ({
   createGoalPost: hoisted.createGoalPost,
 }));
 
-vi.mock('../data/subGoalData', () => ({
+vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   eraseFromRecentSubscribers: vi.fn(),
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
 }));
 
-vi.mock('../data/subredditDisplayNameData', () => ({
+vi.mock("../data/subredditDisplayNameData", () => ({
   getSavedSubredditDisplayName: hoisted.getSavedSubredditDisplayName,
   setSavedSubredditDisplayName: hoisted.setSavedSubredditDisplayName,
 }));
 
-vi.mock('../data/subscriberStats', () => ({
+vi.mock("../data/subscriberStats", () => ({
   untrackSubscriberById: vi.fn(),
   untrackSubscriberByUsername: vi.fn(),
 }));
 
-vi.mock('../data/updaterData', () => ({
+vi.mock("../data/updaterData", () => ({
   cancelUpdates: vi.fn(),
   getQueuedUpdates: hoisted.getQueuedUpdates,
   getTrackedPosts: hoisted.getTrackedPosts,
@@ -66,15 +66,15 @@ vi.mock('../data/updaterData', () => ({
   untrackPost: vi.fn(),
 }));
 
-vi.mock('../utils/redditUtils', () => ({
+vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
 }));
 
-vi.mock('../utils/textFallback', () => ({
+vi.mock("../utils/textFallback", () => ({
   applyTextFallback: hoisted.applyTextFallback,
 }));
 
-import { registerInternalUiRoutes } from './internalUi';
+import { registerInternalUiRoutes } from "./internalUi";
 
 type RouteHandler = (req: Request, res: Response) => void | Promise<void>;
 
@@ -89,32 +89,34 @@ function createRouteHarness(): Map<string, RouteHandler> {
   return routes;
 }
 
-describe('internalUi color theme create goal routes', () => {
+describe("internalUi color theme create goal routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: 't5_example',
-      name: 'ExampleSub',
+      id: "t5_example",
+      name: "ExampleSub",
       numberOfSubscribers: 100,
       isNsfw: false,
     });
-    hoisted.reddit.getAppUser.mockResolvedValue({ username: 'subscriber-goal' });
-    hoisted.getAppSettings.mockReturnValue({ promoSubreddit: 'SubGoal' });
+    hoisted.reddit.getAppUser.mockResolvedValue({
+      username: "subscriber-goal",
+    });
+    hoisted.getAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSavedSubredditDisplayName.mockResolvedValue(undefined);
     hoisted.createGoalPost.mockResolvedValue({
-      id: 't3_newpost',
-      subredditName: 'ExampleSub',
-      subredditId: 't5_example',
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      id: "t3_newpost",
+      subredditName: "ExampleSub",
+      subredditId: "t5_example",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
       approve: vi.fn(),
       sticky: vi.fn(),
     });
-    hoisted.registerNewSubGoalPost.mockResolvedValue({ status: 'skipped' });
+    hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
   });
 
-  it('adds a red-default color theme select to the create goal form', async () => {
+  it("adds a red-default color theme select to the create goal form", async () => {
     const routes = createRouteHarness();
     const json = vi.fn();
     const res = { json } as unknown as Response;
@@ -134,31 +136,48 @@ describe('internalUi color theme create goal routes', () => {
       };
     };
     const fields = response.showForm.form.fields;
-    expect(fields.find((field) => field.name === 'colorTheme')).toMatchObject({
-      type: 'select',
-      defaultValue: ['red'],
+    expect(fields.find((field) => field.name === "colorTheme")).toMatchObject({
+      type: "select",
+      defaultValue: ["red"],
       options: [
-        { label: 'Red', value: 'red' },
-        { label: 'Green', value: 'green' },
-        { label: 'Purple', value: 'purple' },
-        { label: 'Blue', value: 'blue' },
+        { label: "Red", value: "red" },
+        { label: "Green", value: "green" },
+        { label: "Purple", value: "purple" },
+        { label: "Blue", value: "blue" },
       ],
     });
-    expect(fields.find((field) => field.name === 'autoCreateNextGoal')).toMatchObject({
-      type: 'boolean',
+    expect(
+      fields.find((field) => field.name === "autoCreateNextGoal"),
+    ).toMatchObject({
+      type: "boolean",
       defaultValue: true,
     });
+    expect(fields.find((field) => field.name === "language")).toMatchObject({
+      type: "select",
+      defaultValue: ["en"],
+      options: [
+        { label: "Deutsch", value: "de" },
+        { label: "English", value: "en" },
+        { label: "Español", value: "es" },
+        { label: "Français", value: "fr" },
+        { label: "Italiano", value: "it" },
+        { label: "Nederlands", value: "nl" },
+        { label: "Português", value: "pt" },
+        { label: "Română", value: "ro" },
+      ],
+    });
     expect(fields.map((field) => field.name)).toEqual([
-      'subscriberGoal',
-      'postTitle',
-      'subredditDisplayName',
-      'colorTheme',
-      'crosspost',
-      'autoCreateNextGoal',
+      "subscriberGoal",
+      "postTitle",
+      "subredditDisplayName",
+      "colorTheme",
+      "language",
+      "crosspost",
+      "autoCreateNextGoal",
     ]);
   });
 
-  it('passes the selected color theme when creating a goal post', async () => {
+  it("passes the selected color theme when creating a goal post", async () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
@@ -166,29 +185,56 @@ describe('internalUi color theme create goal routes', () => {
       {
         body: {
           subscriberGoal: 200,
-          postTitle: 'Welcome!',
-          subredditDisplayName: 'ExampleSub',
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
           crosspost: false,
-          colorTheme: ['blue'],
+          colorTheme: ["blue"],
           autoCreateNextGoal: false,
+          language: ["es"],
         },
       } as Request,
-      res
+      res,
     );
 
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       hoisted.reddit,
       hoisted.redis,
       expect.anything(),
-      expect.objectContaining({ id: 't3_newpost' }),
+      expect.objectContaining({ id: "t3_newpost" }),
       200,
       false,
-      'ExampleSub',
-      'blue',
-      false
+      "ExampleSub",
+      "blue",
+      false,
+      "es",
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
-      hoisted.redis
+      hoisted.redis,
     );
+  });
+
+  it("localizes the default post title when Spanish is selected", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome to r/ExampleSub!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["es"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "¡Bienvenido a r/ExampleSub!",
+      subredditName: "ExampleSub",
+    });
   });
 });

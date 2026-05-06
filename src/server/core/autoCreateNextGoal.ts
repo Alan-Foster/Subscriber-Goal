@@ -7,6 +7,7 @@ import {
 } from '../data/subGoalData';
 import { getDefaultSubscriberGoal } from '../utils/numberUtils';
 import { createSubscriberGoal } from './createSubscriberGoal';
+import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -48,6 +49,7 @@ export async function processDueAutoCreateNextGoals({
 
       const subreddit = await reddit.getCurrentSubreddit();
       const subredditDisplayName = sourceGoalData.subredditDisplayName ?? subreddit.name;
+      const messages = getSubGoalPostMessages(sourceGoalData.language);
       const sourceSubredditIsNsfw = (subreddit as { isNsfw?: boolean }).isNsfw === true;
       const crosspost =
         !sourceSubredditIsNsfw &&
@@ -58,12 +60,13 @@ export async function processDueAutoCreateNextGoals({
         redis,
         appSettings,
         options: {
-          title: `Welcome to r/${subredditDisplayName}!`,
+          title: messages.defaultPostTitle({ subredditName: subredditDisplayName }),
           goal: getDefaultSubscriberGoal(subreddit.numberOfSubscribers),
           subredditDisplayName,
           crosspost,
           colorTheme: sourceGoalData.colorTheme,
           autoCreateNextGoal: true,
+          language: sourceGoalData.language,
           cancelPendingAutoCreateGoals: true
         }
       });

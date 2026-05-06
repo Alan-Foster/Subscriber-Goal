@@ -15,6 +15,7 @@ const baseState: SubGoalState = {
   recentSubscriber: null,
   completedTime: new Date('2026-04-29T19:32:30.000Z').getTime(),
   colorTheme: 'red',
+  language: 'en',
   subscribed: true,
   user: { id: 't2_user', username: 'alice' },
   appSettings: {
@@ -43,6 +44,18 @@ describe('CompletedPage', () => {
     expect(html).toContain('Goal reached at 3:32 PM on April 29, 2026');
     expect(html).not.toContain('3:32:30');
     expect(html).not.toContain('4/29/2026');
+  });
+
+  it('renders Spanish completed text', () => {
+    const html = renderToStaticMarkup(
+      <CompletedPage
+        state={{ ...baseState, language: 'es' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('¡r/indianActressClass alcanzó 10 suscriptores!');
+    expect(html).toContain('Meta alcanzada');
   });
 
   it('uses the just-now fallback when completed time is missing', () => {
