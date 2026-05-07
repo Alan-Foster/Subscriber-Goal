@@ -20,14 +20,34 @@ describe("subGoalPostI18n", () => {
 
   it("lists supported languages in dropdown order and keeps English as the default", () => {
     expect(subGoalLanguages).toEqual([
+      "id",
+      "bs",
+      "ca",
+      "da",
       "de",
       "en",
       "es",
+      "et",
       "fr",
+      "hr",
+      "is",
       "it",
+      "lv",
+      "lt",
+      "hu",
       "nl",
+      "nb",
+      "pl",
       "pt",
       "ro",
+      "sq",
+      "sk",
+      "sl",
+      "fi",
+      "sv",
+      "tl",
+      "tr",
+      "yo",
     ]);
     expect(defaultSubGoalLanguage).toBe("en");
     expect(
@@ -35,14 +55,34 @@ describe("subGoalPostI18n", () => {
         (language) => subGoalPostMessages[language].languageLabel,
       ),
     ).toEqual([
+      "Bahasa Indonesia",
+      "Bosanski",
+      "Català",
+      "Dansk",
       "Deutsch",
       "English",
       "Español",
+      "Eesti",
       "Français",
+      "Hrvatski",
+      "Íslenska",
       "Italiano",
+      "Latviešu",
+      "Lietuvių",
+      "Magyar",
       "Nederlands",
+      "Norsk Bokmål",
+      "Polski",
       "Português",
       "Română",
+      "Shqip",
+      "Slovenčina",
+      "Slovenščina",
+      "Suomi",
+      "Svenska",
+      "Tagalog",
+      "Türkçe",
+      "Yorùbá",
     ]);
   });
 
@@ -59,6 +99,9 @@ describe("subGoalPostI18n", () => {
     expect(messages.defaultPostTitle({ subredditName: "Ejemplo" })).toBe(
       "¡Bienvenido a r/Ejemplo!",
     );
+    expect(messages.thanksBody({ subscribersText: "15k" })).toBe(
+      "¡Ahora hay 15k suscriptores en la comunidad!",
+    );
     expect(
       messages.completedTitle({ subredditName: "Ejemplo", goalText: "15k" }),
     ).toBe("¡r/Ejemplo alcanzó 15k suscriptores!");
@@ -67,31 +110,105 @@ describe("subGoalPostI18n", () => {
     );
   });
 
+  it("keeps the Indonesian subscribed state distinct from the subscribe action", () => {
+    const messages = getSubGoalPostMessages("id");
+
+    expect(messages.subscribeButton({ subredditName: "Contoh" })).toBe(
+      "Berlangganan ke r/Contoh",
+    );
+    expect(messages.subscribedButton({ subredditName: "Contoh" })).toBe(
+      "Sudah berlangganan ke r/Contoh",
+    );
+    expect(messages.subscribedButton({ subredditName: "Contoh" })).not.toBe(
+      messages.subscribeButton({ subredditName: "Contoh" }),
+    );
+  });
+
+  it("renders the corrected Yoruba load error", () => {
+    expect(getSubGoalPostMessages("yo").loadError).toBe(
+      "Kò le ṣàkójọpọ̀ data Subscriber Goal.",
+    );
+  });
+
   it.each([
+    [
+      "ca",
+      "Benvingut a r/Exemple!",
+      "r/Exemple ha arribat a 15k subscriptors!",
+    ],
     [
       "de",
       "Willkommen bei r/Beispiel!",
       "r/Beispiel hat 15k Abonnenten erreicht!",
     ],
     ["fr", "Bienvenue sur r/Exemple !", "r/Exemple a atteint 15k abonnés !"],
+    [
+      "is",
+      "Velkomin í r/Dæmi!",
+      "r/Dæmi náði 15k áskrifendum!",
+    ],
     ["it", "Benvenuto in r/Esempio!", "r/Esempio ha raggiunto 15k iscritti!"],
+    [
+      "lv",
+      "Laipni lūdzam r/Piemērs!",
+      "r/Piemērs sasniedza 15k abonentus!",
+    ],
+    [
+      "lt",
+      "Sveiki atvykę į r/Pavyzdys!",
+      "r/Pavyzdys pasiekė 15k prenumeratorių!",
+    ],
     [
       "nl",
       "Welkom bij r/Voorbeeld!",
       "r/Voorbeeld heeft 15k abonnees bereikt!",
     ],
+    [
+      "nb",
+      "Velkommen til r/Eksempel!",
+      "r/Eksempel nådde 15k abonnenter!",
+    ],
     ["pt", "Bem-vindo ao r/Exemplo!", "r/Exemplo alcançou 15k inscritos!"],
     ["ro", "Bun venit pe r/Exemplu!", "r/Exemplu a atins 15k abonați!"],
+    [
+      "sk",
+      "Vitajte v r/Príklad!",
+      "r/Príklad dosiahol 15k odberateľov!",
+    ],
+    [
+      "sl",
+      "Dobrodošli v r/Primer!",
+      "r/Primer je dosegel 15k naročnikov!",
+    ],
+    [
+      "tr",
+      "r/Örnek topluluğuna hoş geldiniz!",
+      "r/Örnek 15k aboneye ulaştı!",
+    ],
+    [
+      "yo",
+      "Ẹ káàbọ̀ sí r/Àpẹẹrẹ!",
+      "r/Àpẹẹrẹ ti dé 15k alabapin!",
+    ],
   ] as const)(
     "renders representative %s dynamic post messages",
     (language, expectedTitle, expectedCompletedTitle) => {
       const subredditNameByLanguage = {
+        ca: "Exemple",
         de: "Beispiel",
         fr: "Exemple",
+        is: "Dæmi",
         it: "Esempio",
+        lv: "Piemērs",
+        lt: "Pavyzdys",
         nl: "Voorbeeld",
+        nb: "Eksempel",
         pt: "Exemplo",
         ro: "Exemplu",
+        sk: "Príklad",
+        sl: "Primer",
+        tr: "Örnek",
+        yo: "Àpẹẹrẹ",
       }[language];
       const messages = getSubGoalPostMessages(language);
 

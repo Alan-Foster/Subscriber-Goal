@@ -63,12 +63,25 @@ export function registerInternalUiRoutes(router: Router): void {
               description: 'This will create a new subscriber goal post in the subreddit.',
               fields: [
                 {
+                  name: 'language',
+                  label: 'Language',
+                  type: 'select',
+                  defaultValue: [defaultSubGoalLanguage],
+                  options: subGoalLanguages.map((language) => ({
+                    label: subGoalPostMessages[language].languageLabel,
+                    value: language,
+                  })),
+                  helpText:
+                    'This controls the language used in the subscriber goal post.',
+                  required: true,
+                },
+                {
                   name: 'subscriberGoal',
                   label: 'Enter your Subscriber Goal',
                   type: 'number',
                   defaultValue: defaultGoal,
                   helpText:
-                    'The default goal is a suggestion on your current subscriber count, you may set it to any number greater than your current subscriber count.',
+                    'The default goal is a suggestion on your current subscriber count. Set it to any number greater than your current subscriber count.',
                   required: true,
                 },
                 {
@@ -102,19 +115,6 @@ export function registerInternalUiRoutes(router: Router): void {
                   ],
                   helpText:
                     'This controls the subscribe button, progress bar, and button glow color.',
-                  required: true,
-                },
-                {
-                  name: 'language',
-                  label: 'Language',
-                  type: 'select',
-                  defaultValue: [defaultSubGoalLanguage],
-                  options: subGoalLanguages.map((language) => ({
-                    label: subGoalPostMessages[language].languageLabel,
-                    value: language,
-                  })),
-                  helpText:
-                    'This controls the language used in the subscriber goal post.',
                   required: true,
                 },
                 {

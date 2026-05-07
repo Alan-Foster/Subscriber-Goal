@@ -36,10 +36,13 @@ describe('CompletedPage', () => {
     onCelebrate: vi.fn(),
   };
 
-  it('formats the completed time without seconds and with a month name', () => {
-    const html = renderToStaticMarkup(
-      <CompletedPage state={baseState} {...commonProps} />
+  const renderCompletedPage = (language: SubGoalState['language']) =>
+    renderToStaticMarkup(
+      <CompletedPage state={{ ...baseState, language }} {...commonProps} />
     );
+
+  it('formats the completed time without seconds and with a month name', () => {
+    const html = renderCompletedPage('en');
 
     expect(html).toContain('Goal reached at 3:32 PM on April 29, 2026');
     expect(html).not.toContain('3:32:30');
@@ -56,6 +59,36 @@ describe('CompletedPage', () => {
 
     expect(html).toContain('¡r/indianActressClass alcanzó 10 suscriptores!');
     expect(html).toContain('Meta alcanzada');
+  });
+
+  it.each([
+    ['es', 'abril'],
+    ['fr', 'avril'],
+    ['de', '29. April 2026'],
+    ['tr', 'Nisan'],
+    ['id', 'April'],
+  ] as const)(
+    'renders the completed date with a localized Gregorian month for %s',
+    (language, expectedDateText) => {
+      const html = renderCompletedPage(language);
+
+      expect(html).toContain(expectedDateText);
+      expect(html).not.toContain('4/29/2026');
+      expect(html).not.toContain('29/4/2026');
+    }
+  );
+
+  it('renders the Yoruba completed date with the runtime Gregorian month text', () => {
+    const html = renderCompletedPage('yo');
+    const expectedDateText = new Intl.DateTimeFormat('yo-NG-u-ca-gregory', {
+      timeZone: 'America/New_York',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(baseState.completedTime ?? 0));
+
+    expect(html).toContain(expectedDateText);
+    expect(html).not.toContain('4/29/2026');
   });
 
   it('uses the just-now fallback when completed time is missing', () => {

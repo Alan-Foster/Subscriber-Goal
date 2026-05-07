@@ -11,6 +11,8 @@ type CompletedPageProps = {
   onCelebrate: () => void;
 };
 
+const getGregorianLocale = (locale: string): string => `${locale}-u-ca-gregory`;
+
 export const CompletedPage = ({
   state,
   onVisitPromoSub,
@@ -19,16 +21,17 @@ export const CompletedPage = ({
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const messages = getSubGoalPostMessages(state.language);
+  const gregorianLocale = getGregorianLocale(messages.intlLocale);
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate
-    ? new Intl.DateTimeFormat(messages.intlLocale, {
+    ? new Intl.DateTimeFormat(gregorianLocale, {
         timeZone: timezone ?? 'UTC',
         hour: 'numeric',
         minute: '2-digit',
       }).format(completedDate)
     : null;
   const dateText = completedDate
-    ? new Intl.DateTimeFormat(messages.intlLocale, {
+    ? new Intl.DateTimeFormat(gregorianLocale, {
         timeZone: timezone ?? 'UTC',
         month: 'long',
         day: 'numeric',

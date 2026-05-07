@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 1.2.3 - Subscriber Goal is now available in 28 total languages! Wow!
 - 1.2.1 - Subscriber Goal is now available in 7 other languages.
 - 1.1.1 - Added Auto-Launch New Goal toggle that can create a new goal 24 hours after success.
 - 1.0.1 - Official Launch - all previous installations force-updated to 1.0.0.
