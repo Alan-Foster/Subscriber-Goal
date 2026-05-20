@@ -1,6 +1,9 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "subscriber-goal",
+  "dev": {
+    "subreddit": "subscriber_goal_dev"
+  },
   "post": {
     "dir": "dist/client",
     "entrypoints": {
