@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   getSubGoalData: vi.fn(),
   createSubscriberGoal: vi.fn(),
   reddit: {
+    getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn()
   },
   redis: {}
@@ -54,6 +55,10 @@ describe('processDueAutoCreateNextGoals', () => {
       name: 'examplesub',
       numberOfSubscribers: 12,
       isNsfw: false
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: 't3_source',
+      removedByCategory: undefined
     });
     hoisted.createSubscriberGoal.mockResolvedValue({
       post: { id: 't3_next' },
@@ -164,6 +169,45 @@ describe('processDueAutoCreateNextGoals', () => {
       autoCreateNextGoal: true,
       language: 'en'
     });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
+      })
+    ).resolves.toEqual({ due: 1, created: 0, skipped: 1, failed: 0 });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
+  });
+
+  it('skips due jobs whose source post has been removed', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: 't3_source',
+      removedByCategory: 'moderator'
+    });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
+      })
+    ).resolves.toEqual({ due: 1, created: 0, skipped: 1, failed: 0 });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[autoCreateNextGoal] skipping inactive source post: sourcePostId=t3_source reason=removedByCategory:moderator'
+    );
+  });
+
+  it('skips due jobs whose source post is missing', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.reddit.getPostById.mockRejectedValue(new Error('post has been deleted'));
 
     await expect(
       processDueAutoCreateNextGoals({

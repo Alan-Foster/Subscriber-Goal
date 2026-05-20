@@ -1,10 +1,16 @@
 import { context, reddit, redis } from '@devvit/web/server';
 import {
+  cancelAutoCreateNextGoal,
   checkCompletionStatus,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
 } from '../data/subGoalData';
-import { cancelUpdates, getQueuedUpdates, queueUpdate } from '../data/updaterData';
+import {
+  cancelUpdates,
+  getQueuedUpdates,
+  queueUpdate,
+  untrackPost,
+} from '../data/updaterData';
 import { isLinkId } from '../types';
 import { applyTextFallback } from '../utils/textFallback';
 import { getAppSettings } from '../settings';
@@ -15,6 +21,17 @@ import {
 import { countPendingCrossposts } from '../data/crosspostData';
 import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
 import { processDueAutoCreateNextGoals } from '../core/autoCreateNextGoal';
+import {
+  getTerminalRemovedByCategory,
+  isMissingPostError,
+} from '../utils/postStatus';
+
+async function cleanupInactivePost(postId: string, reason: string): Promise<void> {
+  await cancelUpdates(redis, postId);
+  await untrackPost(redis, postId);
+  await cancelAutoCreateNextGoal(redis, postId);
+  console.info(`[updater] cleaned up inactive post: postId=${postId} reason=${reason}`);
+}
 
 export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
@@ -96,6 +113,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const subGoalData = await getSubGoalData(redis, postId);
       if (!subGoalData.goal) {
         console.error(`Missing subGoalData for post ${postId}`);
+        await cleanupInactivePost(postId, 'missing_goal_data');
         continue;
       }
 
@@ -108,10 +126,18 @@ export async function onPostsUpdaterJob(): Promise<void> {
         : null;
       if (!isLinkId(postId)) {
         console.error(`Skipping invalid post id in scheduler queue: ${postId}`);
-        await cancelUpdates(redis, postId);
+        await cleanupInactivePost(postId, 'invalid_post_id');
         continue;
       }
       const post = await reddit.getPostById(postId);
+      const removedByCategory = getTerminalRemovedByCategory(post);
+      if (removedByCategory) {
+        await cleanupInactivePost(
+          postId,
+          `removedByCategory:${removedByCategory}`
+        );
+        continue;
+      }
       await applyTextFallback(post, {
         goal: subGoalData.goal,
         subscribers: subreddit.numberOfSubscribers,
@@ -127,6 +153,10 @@ export async function onPostsUpdaterJob(): Promise<void> {
 
       await queueUpdate(redis, postId, new Date());
     } catch (e) {
+      if (isLinkId(postId) && isMissingPostError(e)) {
+        await cleanupInactivePost(postId, 'missing_post');
+        continue;
+      }
       console.error(`Error updating post ${postId}: ${String(e)}`);
     }
   }

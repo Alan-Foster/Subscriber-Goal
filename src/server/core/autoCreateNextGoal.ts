@@ -8,6 +8,11 @@ import {
 import { getDefaultSubscriberGoal } from '../utils/numberUtils';
 import { createSubscriberGoal } from './createSubscriberGoal';
 import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
+import {
+  getTerminalRemovedByCategory,
+  isMissingPostError,
+} from '../utils/postStatus';
+import { isLinkId } from '../types';
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -37,6 +42,14 @@ export async function processDueAutoCreateNextGoals({
 
   for (const sourcePostId of duePostIds) {
     try {
+      if (!isLinkId(sourcePostId)) {
+        summary.skipped += 1;
+        console.info(
+          `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=invalid_post_id`
+        );
+        continue;
+      }
+
       const sourceGoalData = await getSubGoalData(redis, sourcePostId);
       if (
         !sourceGoalData.goal ||
@@ -45,6 +58,27 @@ export async function processDueAutoCreateNextGoals({
       ) {
         summary.skipped += 1;
         continue;
+      }
+
+      try {
+        const sourcePost = await reddit.getPostById(sourcePostId);
+        const removedByCategory = getTerminalRemovedByCategory(sourcePost);
+        if (removedByCategory) {
+          summary.skipped += 1;
+          console.info(
+            `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=removedByCategory:${removedByCategory}`
+          );
+          continue;
+        }
+      } catch (sourcePostError) {
+        if (isMissingPostError(sourcePostError)) {
+          summary.skipped += 1;
+          console.info(
+            `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=missing_post`
+          );
+          continue;
+        }
+        throw sourcePostError;
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
