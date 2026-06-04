@@ -29,7 +29,6 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
-  applyTextFallback: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -73,10 +72,6 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
-}));
-
-vi.mock("../utils/textFallback", () => ({
-  applyTextFallback: hoisted.applyTextFallback,
 }));
 
 import { registerInternalUiRoutes } from "./internalUi";
@@ -279,6 +274,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "¡Bienvenido a r/ExampleSub!",
       subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 suscriptores."),
     });
   });
 
@@ -305,6 +301,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
       submitAsUser: true,
     });
   });
@@ -332,6 +329,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
     });
   });
 
@@ -358,6 +356,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
     });
   });
 

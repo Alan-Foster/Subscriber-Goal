@@ -16,7 +16,6 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
-  applyTextFallback: vi.fn(),
 }));
 
 vi.mock("./post", () => ({
@@ -43,10 +42,6 @@ vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
 }));
 
-vi.mock("../utils/textFallback", () => ({
-  applyTextFallback: hoisted.applyTextFallback,
-}));
-
 import { createSubscriberGoal } from "./createSubscriberGoal";
 
 const createPost = ({
@@ -66,7 +61,9 @@ const createPost = ({
   isStickied,
 });
 
-const createGoal = () =>
+const createGoal = (
+  options: Partial<Parameters<typeof createSubscriberGoal>[0]["options"]> = {},
+) =>
   createSubscriberGoal({
     reddit: hoisted.reddit as never,
     redis: hoisted.redis as never,
@@ -83,6 +80,7 @@ const createGoal = () =>
       autoCreateNextGoal: true,
       language: "en",
       cancelPendingAutoCreateGoals: true,
+      ...options,
     },
   });
 
@@ -109,6 +107,11 @@ describe("createSubscriberGoal sticky handling", () => {
 
     const result = await createGoal();
 
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
+    });
     expect(post.approve).toHaveBeenCalled();
     expect(post.sticky).toHaveBeenCalledWith();
     expect(post.isStickied).toHaveBeenCalledWith();
@@ -117,6 +120,22 @@ describe("createSubscriberGoal sticky handling", () => {
       status: "pinned",
       verifiedStickied: true,
     });
+  });
+
+  it("passes runAs creation through with fallback text without post-creation fallback updates", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    const result = await createGoal({ submitAsUser: true });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      submitAsUser: true,
+    });
+    expect(result.post).toBe(post);
+    expect(result.stickyResult.status).toBe("pinned");
   });
 
   it("returns not_pinned when sticky throws but verification can still run", async () => {

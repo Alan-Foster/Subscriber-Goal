@@ -22,11 +22,13 @@ describe("createGoalPost", () => {
     await createGoalPost({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: "Fallback text",
     });
 
     expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: { text: "Fallback text" },
     });
   });
 
@@ -34,12 +36,14 @@ describe("createGoalPost", () => {
     await createGoalPost({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: "Fallback text",
       submitAsUser: true,
     });
 
     expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      textFallback: { text: "Fallback text" },
       runAs: "USER",
       userGeneratedContent: {
         text: "Subscriber Goal post: Welcome!",

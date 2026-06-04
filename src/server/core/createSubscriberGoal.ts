@@ -17,7 +17,7 @@ import {
 } from "../data/updaterData";
 import { isLinkId } from "../types";
 import { clearUserStickies } from "../utils/redditUtils";
-import { applyTextFallback } from "../utils/textFallback";
+import { textFallbackMaker } from "../utils/textFallback";
 import { toErrorMessage } from "../utils/crosspostLogs";
 
 type CreateSubscriberGoalOptions = {
@@ -63,19 +63,21 @@ export async function createSubscriberGoal({
 
   await clearUserStickies(reddit, appUser.username);
 
-  const post = await createGoalPost({
-    title: options.title,
-    subredditName: subreddit.name,
-    ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
-  });
-
-  await applyTextFallback(post, {
+  const textFallback = textFallbackMaker({
     goal: options.goal,
     subscribers: subreddit.numberOfSubscribers,
     subredditName: options.subredditDisplayName,
     completedTime: null,
     language: options.language,
   });
+
+  const post = await createGoalPost({
+    title: options.title,
+    subredditName: subreddit.name,
+    textFallback,
+    ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
+  });
+
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
 
   const crosspostDispatchResult = await registerNewSubGoalPost(
