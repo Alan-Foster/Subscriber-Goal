@@ -1,0 +1,173 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const hoisted = vi.hoisted(() => ({
+  reddit: {
+    getCurrentSubreddit: vi.fn(),
+    getAppUser: vi.fn(),
+    getPostById: vi.fn(),
+  },
+  redis: {},
+  createGoalPost: vi.fn(),
+  registerNewSubGoalPost: vi.fn(),
+  setSubredditDisplayNameForPost: vi.fn(),
+  setSavedSubredditDisplayName: vi.fn(),
+  cancelAllAutoCreateNextGoals: vi.fn(),
+  getTrackedPosts: vi.fn(),
+  getQueuedUpdates: vi.fn(),
+  queueUpdate: vi.fn(),
+  clearUserStickies: vi.fn(),
+  applyTextFallback: vi.fn(),
+}));
+
+vi.mock("./post", () => ({
+  createGoalPost: hoisted.createGoalPost,
+}));
+
+vi.mock("../data/subGoalData", () => ({
+  cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
+  registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
+  setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
+}));
+
+vi.mock("../data/subredditDisplayNameData", () => ({
+  setSavedSubredditDisplayName: hoisted.setSavedSubredditDisplayName,
+}));
+
+vi.mock("../data/updaterData", () => ({
+  getQueuedUpdates: hoisted.getQueuedUpdates,
+  getTrackedPosts: hoisted.getTrackedPosts,
+  queueUpdate: hoisted.queueUpdate,
+}));
+
+vi.mock("../utils/redditUtils", () => ({
+  clearUserStickies: hoisted.clearUserStickies,
+}));
+
+vi.mock("../utils/textFallback", () => ({
+  applyTextFallback: hoisted.applyTextFallback,
+}));
+
+import { createSubscriberGoal } from "./createSubscriberGoal";
+
+const createPost = ({
+  sticky = vi.fn(),
+  isStickied = vi.fn(() => true),
+}: {
+  sticky?: ReturnType<typeof vi.fn>;
+  isStickied?: ReturnType<typeof vi.fn>;
+} = {}) => ({
+  id: "t3_newpost",
+  title: "Welcome!",
+  subredditId: "t5_example",
+  subredditName: "ExampleSub",
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  approve: vi.fn(),
+  sticky,
+  isStickied,
+});
+
+const createGoal = () =>
+  createSubscriberGoal({
+    reddit: hoisted.reddit as never,
+    redis: hoisted.redis as never,
+    appSettings: {
+      promoSubreddit: "SubGoal",
+      crosspostAuthoritySubreddit: "SubGoal",
+    },
+    options: {
+      title: "Welcome!",
+      goal: 200,
+      subredditDisplayName: "ExampleSub",
+      crosspost: false,
+      colorTheme: "red",
+      autoCreateNextGoal: true,
+      language: "en",
+      cancelPendingAutoCreateGoals: true,
+    },
+  });
+
+describe("createSubscriberGoal sticky handling", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      isNsfw: false,
+    });
+    hoisted.reddit.getAppUser.mockResolvedValue({
+      username: "subscriber-goal",
+    });
+    hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
+    hoisted.getTrackedPosts.mockResolvedValue([]);
+    hoisted.getQueuedUpdates.mockResolvedValue([]);
+  });
+
+  it("returns pinned when sticky succeeds and verification confirms the post is stickied", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    const result = await createGoal();
+
+    expect(post.approve).toHaveBeenCalled();
+    expect(post.sticky).toHaveBeenCalledWith();
+    expect(post.isStickied).toHaveBeenCalledWith();
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "pinned",
+      verifiedStickied: true,
+    });
+  });
+
+  it("returns not_pinned when sticky throws but verification can still run", async () => {
+    const post = createPost({
+      sticky: vi.fn(async () => {
+        throw new Error("sticky slots full");
+      }),
+      isStickied: vi.fn(() => false),
+    });
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    const result = await createGoal();
+
+    expect(post.isStickied).toHaveBeenCalled();
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "not_pinned",
+      errorMessage: "sticky slots full",
+      verifiedStickied: false,
+    });
+  });
+
+  it("returns not_pinned when sticky does not throw but verification returns false", async () => {
+    const post = createPost({
+      isStickied: vi.fn(() => false),
+    });
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    const result = await createGoal();
+
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "not_pinned",
+      verifiedStickied: false,
+    });
+  });
+
+  it("returns not_pinned when sticky verification throws", async () => {
+    const post = createPost({
+      isStickied: vi.fn(() => {
+        throw new Error("verification unavailable");
+      }),
+    });
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    const result = await createGoal();
+
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "not_pinned",
+      errorMessage: "verification unavailable",
+    });
+  });
+});

@@ -11,6 +11,11 @@ const hoisted = vi.hoisted(() => ({
     getCurrentSubreddit: vi.fn(),
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
+    getCurrentUsername: vi.fn(),
+    modMail: {
+      createModNotification: vi.fn(),
+    },
+    sendPrivateMessage: vi.fn(),
   },
   redis: {},
   getAppSettings: vi.fn(),
@@ -101,6 +106,11 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
     });
+    hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
+    hoisted.reddit.modMail.createModNotification.mockResolvedValue(
+      "modmail-id",
+    );
+    hoisted.reddit.sendPrivateMessage.mockResolvedValue(undefined);
     hoisted.getAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSavedSubredditDisplayName.mockResolvedValue(undefined);
     hoisted.createGoalPost.mockResolvedValue({
@@ -108,8 +118,11 @@ describe("internalUi color theme create goal routes", () => {
       subredditName: "ExampleSub",
       subredditId: "t5_example",
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      title: "Welcome!",
+      permalink: "/r/ExampleSub/comments/newpost/welcome/",
       approve: vi.fn(),
       sticky: vi.fn(),
+      isStickied: vi.fn(() => true),
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.getTrackedPosts.mockResolvedValue([]);
@@ -255,6 +268,103 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "¡Bienvenido a r/ExampleSub!",
       subredditName: "ExampleSub",
+    });
+  });
+
+  it("notifies moderators and returns a partial-success toast when the new goal cannot be pinned", async () => {
+    hoisted.createGoalPost.mockResolvedValue({
+      id: "t3_newpost",
+      subredditName: "ExampleSub",
+      subredditId: "t5_example",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      title: "Welcome!",
+      permalink: "/r/ExampleSub/comments/newpost/welcome/",
+      approve: vi.fn(),
+      sticky: vi.fn(),
+      isStickied: vi.fn(() => false),
+    });
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalledWith({
+      subredditId: "t5_example",
+      subject: "Action Required - SubGoal Not Pinned in r/ExampleSub",
+      bodyMarkdown: expect.stringContaining(
+        "The new Subscriber Goal post was created successfully",
+      ),
+    });
+    expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalledWith({
+      to: "ExampleMod",
+      subject: "Action Required - SubGoal Not Pinned in r/ExampleSub",
+      text: expect.stringContaining(
+        "https://reddit.com/r/ExampleSub/comments/newpost/welcome/",
+      ),
+    });
+    expect(res.json).toHaveBeenCalledWith({
+      showToast:
+        "Subscriber Goal post created, but it could not be pinned. Manual moderator action is required.",
+      navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
+    });
+  });
+
+  it("logs notification failures without breaking partial-success creation", async () => {
+    hoisted.createGoalPost.mockResolvedValue({
+      id: "t3_newpost",
+      subredditName: "ExampleSub",
+      subredditId: "t5_example",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      title: "Welcome!",
+      approve: vi.fn(),
+      sticky: vi.fn(() => {
+        throw new Error("sticky slots full");
+      }),
+      isStickied: vi.fn(() => false),
+    });
+    hoisted.reddit.modMail.createModNotification.mockRejectedValue(
+      new Error("modmail unavailable"),
+    );
+    hoisted.reddit.sendPrivateMessage.mockRejectedValue(
+      new Error("dm unavailable"),
+    );
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalled();
+    expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      showToast:
+        "Subscriber Goal post created, but it could not be pinned. Manual moderator action is required.",
+      navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
     });
   });
 });
