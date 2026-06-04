@@ -142,6 +142,8 @@ describe("internalUi color theme create goal routes", () => {
           fields: Array<{
             name: string;
             type: string;
+            label?: string;
+            helpText?: string;
             defaultValue?: unknown;
             options?: Array<{ label: string; value: string }>;
           }>;
@@ -199,6 +201,14 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Yorùbá", value: "yo" },
       ],
     });
+    expect(
+      fields.find((field) => field.name === "customDeveloperField"),
+    ).toMatchObject({
+      type: "string",
+      label: "Custom Developer Field",
+      helpText:
+        "This field is for developers and testing only. Please leave this field empty",
+    });
     expect(fields.map((field) => field.name)).toEqual([
       "language",
       "subscriberGoal",
@@ -207,6 +217,7 @@ describe("internalUi color theme create goal routes", () => {
       "colorTheme",
       "crosspost",
       "autoCreateNextGoal",
+      "customDeveloperField",
     ]);
   });
 
@@ -267,6 +278,85 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "¡Bienvenido a r/ExampleSub!",
+      subredditName: "ExampleSub",
+    });
+  });
+
+  it("passes submitAsUser when the custom developer field is exactly runAs", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: " runAs ",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      submitAsUser: true,
+    });
+  });
+
+  it("does not pass submitAsUser when the custom developer field is empty", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: "   ",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+    });
+  });
+
+  it("ignores wrong-case custom developer commands", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: "RunAs",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
       subredditName: "ExampleSub",
     });
   });

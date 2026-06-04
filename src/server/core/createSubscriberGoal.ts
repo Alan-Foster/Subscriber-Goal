@@ -29,6 +29,7 @@ type CreateSubscriberGoalOptions = {
   autoCreateNextGoal: boolean;
   language: SubGoalLanguage;
   cancelPendingAutoCreateGoals?: boolean;
+  submitAsUser?: boolean;
 };
 
 export type CreateSubscriberGoalResult = {
@@ -65,6 +66,7 @@ export async function createSubscriberGoal({
   const post = await createGoalPost({
     title: options.title,
     subredditName: subreddit.name,
+    ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
   });
 
   await applyTextFallback(post, {

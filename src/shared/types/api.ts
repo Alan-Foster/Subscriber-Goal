@@ -1,5 +1,5 @@
-import type { SubGoalColorTheme } from '../subGoalColorTheme';
-import type { SubGoalLanguage } from '../subGoalPostI18n';
+import type { SubGoalColorTheme } from "../subGoalColorTheme";
+import type { SubGoalLanguage } from "../subGoalPostI18n";
 
 export type BasicSubredditData = {
   id: string;
@@ -31,19 +31,19 @@ export type SubGoalState = {
 };
 
 export type InitResponse = {
-  type: 'init';
+  type: "init";
   postId: string;
   state: SubGoalState;
 };
 
 export type RefreshResponse = {
-  type: 'refresh';
+  type: "refresh";
   postId: string;
   state: SubGoalState;
 };
 
 export type SubscribeResponse = {
-  type: 'subscribe';
+  type: "subscribe";
   postId: string;
   state: SubGoalState;
 };
@@ -53,13 +53,13 @@ export type SubscribeRequest = {
 };
 
 export type RealtimeMessage = {
-  type: 'sub';
+  type: "sub";
   newSubscriberCount: number;
   recentSubscriber?: string | null;
 };
 
 export type ErrorResponse = {
-  status: 'error';
+  status: "error";
   message: string;
 };
 
@@ -71,6 +71,7 @@ export type CreateGoalFormValues = {
   colorTheme?: string[];
   autoCreateNextGoal?: boolean;
   language?: string[];
+  customDeveloperField?: string;
 };
 
 export type DeleteGoalFormValues = {

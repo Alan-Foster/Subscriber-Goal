@@ -141,6 +141,13 @@ export function registerInternalUiRoutes(router: Router): void {
                     "Once your goal milestone is reached, a new goal with the next milestone will be automatically created.",
                   defaultValue: true,
                 },
+                {
+                  name: "customDeveloperField",
+                  label: "Custom Developer Field",
+                  type: "string",
+                  helpText:
+                    "This field is for developers and testing only. Please leave this field empty",
+                },
               ],
             },
           },
@@ -166,6 +173,14 @@ export function registerInternalUiRoutes(router: Router): void {
       const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
       const autoCreateNextGoal = values.autoCreateNextGoal !== false;
       const language = resolveSubGoalLanguage(values.language?.[0]);
+      const customDeveloperCommand = values.customDeveloperField?.trim();
+      const submitAsUser = customDeveloperCommand === "runAs";
+
+      if (customDeveloperCommand && !submitAsUser) {
+        console.info(
+          `[developerField] ignored unknown create-goal command: command=${customDeveloperCommand}`,
+        );
+      }
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
@@ -233,6 +248,7 @@ export function registerInternalUiRoutes(router: Router): void {
               autoCreateNextGoal,
               language,
               cancelPendingAutoCreateGoals: true,
+              submitAsUser,
             },
           });
 
