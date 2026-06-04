@@ -1,5 +1,5 @@
 import type { Request, Response, Router } from "express";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { internalRoutes } from "../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({
@@ -122,6 +122,10 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("adds a red-default color theme select to the create goal form", async () => {
@@ -361,6 +365,7 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it("notifies moderators and returns a partial-success toast when the new goal cannot be pinned", async () => {
+    vi.useFakeTimers();
     hoisted.createGoalPost.mockResolvedValue({
       id: "t3_newpost",
       subredditName: "ExampleSub",
@@ -375,7 +380,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    const responsePromise = routes.get(internalRoutes.forms.createGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -389,6 +394,8 @@ describe("internalUi color theme create goal routes", () => {
       } as Request,
       res,
     );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await responsePromise;
 
     expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalledWith({
       subredditId: "t5_example",
@@ -412,6 +419,7 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it("logs notification failures without breaking partial-success creation", async () => {
+    vi.useFakeTimers();
     hoisted.createGoalPost.mockResolvedValue({
       id: "t3_newpost",
       subredditName: "ExampleSub",
@@ -433,7 +441,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    const responsePromise = routes.get(internalRoutes.forms.createGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -447,6 +455,8 @@ describe("internalUi color theme create goal routes", () => {
       } as Request,
       res,
     );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await responsePromise;
 
     expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalled();
     expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalled();

@@ -84,6 +84,10 @@ const createGoal = (
     },
   });
 
+const noRetryStickyVerification = {
+  stickyVerification: { maxWaitMs: 0, intervalMs: 1 },
+};
+
 describe("createSubscriberGoal sticky handling", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -99,6 +103,7 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
+    hoisted.reddit.getPostById.mockResolvedValue(undefined);
   });
 
   it("returns pinned when sticky succeeds and verification confirms the post is stickied", async () => {
@@ -138,7 +143,61 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(result.stickyResult.status).toBe("pinned");
   });
 
-  it("returns not_pinned when sticky throws but verification can still run", async () => {
+  it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {
+    const refetchedBeforePropagation = createPost({
+      isStickied: vi.fn(() => false),
+    });
+    const refetchedAfterPropagation = createPost({
+      isStickied: vi.fn(() => true),
+    });
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById
+      .mockResolvedValueOnce(refetchedBeforePropagation)
+      .mockResolvedValueOnce(refetchedAfterPropagation);
+
+    const result = await createGoal({
+      stickyVerification: { maxWaitMs: 5, intervalMs: 1 },
+    });
+
+    expect(refetchedBeforePropagation.isStickied).toHaveBeenCalled();
+    expect(refetchedAfterPropagation.isStickied).toHaveBeenCalled();
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "pinned",
+      verifiedStickied: true,
+    });
+  });
+
+  it("returns pinned when sticky throws but delayed verification confirms the post is stickied", async () => {
+    const refetchedBeforePropagation = createPost({
+      isStickied: vi.fn(() => false),
+    });
+    const refetchedAfterPropagation = createPost({
+      isStickied: vi.fn(() => true),
+    });
+    const post = createPost({
+      sticky: vi.fn(async () => {
+        throw new Error("sticky slots full");
+      }),
+    });
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById
+      .mockResolvedValueOnce(refetchedBeforePropagation)
+      .mockResolvedValueOnce(refetchedAfterPropagation);
+
+    const result = await createGoal({
+      stickyVerification: { maxWaitMs: 5, intervalMs: 1 },
+    });
+
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "pinned",
+      verifiedStickied: true,
+    });
+  });
+
+  it("returns not_pinned when sticky throws and verification never confirms success", async () => {
     const post = createPost({
       sticky: vi.fn(async () => {
         throw new Error("sticky slots full");
@@ -147,7 +206,7 @@ describe("createSubscriberGoal sticky handling", () => {
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal();
+    const result = await createGoal(noRetryStickyVerification);
 
     expect(post.isStickied).toHaveBeenCalled();
     expect(result.post).toBe(post);
@@ -164,7 +223,7 @@ describe("createSubscriberGoal sticky handling", () => {
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal();
+    const result = await createGoal(noRetryStickyVerification);
 
     expect(result.post).toBe(post);
     expect(result.stickyResult).toEqual({
@@ -181,12 +240,29 @@ describe("createSubscriberGoal sticky handling", () => {
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal();
+    const result = await createGoal(noRetryStickyVerification);
 
     expect(result.post).toBe(post);
     expect(result.stickyResult).toEqual({
       status: "not_pinned",
       errorMessage: "verification unavailable",
+    });
+  });
+
+  it("falls back to the original post when verification refetch fails", async () => {
+    const post = createPost({
+      isStickied: vi.fn(() => true),
+    });
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockRejectedValue(new Error("not ready"));
+
+    const result = await createGoal();
+
+    expect(post.isStickied).toHaveBeenCalled();
+    expect(result.post).toBe(post);
+    expect(result.stickyResult).toEqual({
+      status: "pinned",
+      verifiedStickied: true,
     });
   });
 });

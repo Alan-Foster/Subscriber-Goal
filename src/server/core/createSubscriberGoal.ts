@@ -30,6 +30,7 @@ type CreateSubscriberGoalOptions = {
   language: SubGoalLanguage;
   cancelPendingAutoCreateGoals?: boolean;
   submitAsUser?: boolean;
+  stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
 export type CreateSubscriberGoalResult = {
@@ -42,6 +43,14 @@ export type StickyResult = {
   status: "pinned" | "not_pinned";
   errorMessage?: string;
   verifiedStickied?: boolean;
+};
+
+const STICKY_VERIFICATION_MAX_WAIT_MS = 30_000;
+const STICKY_VERIFICATION_INTERVAL_MS = 5_000;
+
+type StickyVerificationOptions = {
+  maxWaitMs: number;
+  intervalMs: number;
 };
 
 export async function createSubscriberGoal({
@@ -121,7 +130,14 @@ export async function createSubscriberGoal({
   }
 
   await post.approve();
-  const stickyResult = await stickyAndVerifyPost(post, subreddit.name);
+  const stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
+    maxWaitMs:
+      options.stickyVerification?.maxWaitMs ??
+      STICKY_VERIFICATION_MAX_WAIT_MS,
+    intervalMs:
+      options.stickyVerification?.intervalMs ??
+      STICKY_VERIFICATION_INTERVAL_MS,
+  });
 
   if (options.cancelPendingAutoCreateGoals) {
     await cancelAllAutoCreateNextGoals(redis);
@@ -130,11 +146,18 @@ export async function createSubscriberGoal({
   return { post, crosspostDispatchResult, stickyResult };
 }
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 async function stickyAndVerifyPost(
+  reddit: RedditClient,
   post: Awaited<ReturnType<typeof createGoalPost>>,
   subredditName: string,
+  verificationOptions: StickyVerificationOptions,
 ): Promise<StickyResult> {
   let stickyErrorMessage: string | undefined;
+  let lastVerificationErrorMessage: string | undefined;
+  let lastVerifiedStickied: boolean | undefined;
 
   console.info(
     `[sticky] attempting to sticky new Subscriber Goal: subreddit=${subredditName} postId=${post.id}`,
@@ -151,40 +174,83 @@ async function stickyAndVerifyPost(
     );
   }
 
-  const verifier = (post as { isStickied?: () => boolean | Promise<boolean> })
-    .isStickied;
-  if (typeof verifier !== "function") {
-    const errorMessage =
-      stickyErrorMessage ??
-      "Unable to verify sticky status because post.isStickied is unavailable.";
-    console.warn(
-      `[sticky] sticky verification unavailable: subreddit=${subredditName} postId=${post.id} error=${errorMessage}`,
-    );
-    return { status: "not_pinned", errorMessage };
-  }
+  const startedAt = Date.now();
+  let attempt = 1;
+  while (true) {
+    const elapsedMs = Date.now() - startedAt;
+    let postToVerify = post;
+    let refetched = false;
 
-  try {
-    const verifiedStickied = await Promise.resolve(verifier.call(post));
-    console.info(
-      `[sticky] sticky verification result: subreddit=${subredditName} postId=${post.id} verifiedStickied=${verifiedStickied}`,
-    );
-    if (!stickyErrorMessage && verifiedStickied) {
-      return { status: "pinned", verifiedStickied };
+    try {
+      const refetchedPost = await reddit.getPostById(post.id);
+      if (
+        typeof (
+          refetchedPost as { isStickied?: () => boolean | Promise<boolean> }
+        )?.isStickied === "function"
+      ) {
+        postToVerify = refetchedPost;
+        refetched = true;
+      }
+    } catch (error) {
+      const refetchErrorMessage = toErrorMessage(error);
+      lastVerificationErrorMessage = refetchErrorMessage;
+      console.warn(
+        `[sticky] sticky verification refetch failed: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} error=${refetchErrorMessage}`,
+      );
     }
 
-    return {
-      status: "not_pinned",
-      ...(stickyErrorMessage ? { errorMessage: stickyErrorMessage } : {}),
-      verifiedStickied,
-    };
-  } catch (error) {
-    const verificationErrorMessage = toErrorMessage(error);
-    const errorMessage = stickyErrorMessage
-      ? `${stickyErrorMessage}; verification failed: ${verificationErrorMessage}`
-      : verificationErrorMessage;
-    console.warn(
-      `[sticky] sticky verification failed: subreddit=${subredditName} postId=${post.id} error=${verificationErrorMessage}`,
+    const verifier = (
+      postToVerify as { isStickied?: () => boolean | Promise<boolean> }
+    ).isStickied;
+    if (typeof verifier !== "function") {
+      lastVerificationErrorMessage =
+        "Unable to verify sticky status because post.isStickied is unavailable.";
+      console.warn(
+        `[sticky] sticky verification unavailable: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
+      );
+    } else {
+      try {
+        const verifiedStickied = await Promise.resolve(
+          verifier.call(postToVerify),
+        );
+        lastVerifiedStickied = verifiedStickied;
+        console.info(
+          `[sticky] sticky verification result: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} verifiedStickied=${verifiedStickied}`,
+        );
+        if (verifiedStickied) {
+          return { status: "pinned", verifiedStickied };
+        }
+      } catch (error) {
+        lastVerificationErrorMessage = toErrorMessage(error);
+        console.warn(
+          `[sticky] sticky verification failed: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
+        );
+      }
+    }
+
+    if (elapsedMs >= verificationOptions.maxWaitMs) {
+      break;
+    }
+
+    await sleep(
+      Math.min(
+        verificationOptions.intervalMs,
+        verificationOptions.maxWaitMs - elapsedMs,
+      ),
     );
-    return { status: "not_pinned", errorMessage };
+    attempt += 1;
   }
+
+  const errorMessage =
+    stickyErrorMessage && lastVerificationErrorMessage
+      ? `${stickyErrorMessage}; verification failed: ${lastVerificationErrorMessage}`
+      : (stickyErrorMessage ?? lastVerificationErrorMessage);
+
+  return {
+    status: "not_pinned",
+    ...(errorMessage ? { errorMessage } : {}),
+    ...(lastVerifiedStickied !== undefined
+      ? { verifiedStickied: lastVerifiedStickied }
+      : {}),
+  };
 }
