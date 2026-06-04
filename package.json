@@ -19,10 +19,10 @@
     "type-check": "tsc --build"
   },
   "dependencies": {
-    "@devvit/start": "0.12.24",
-    "@devvit/web": "0.12.24",
+    "@devvit/start": "0.13.2",
+    "@devvit/web": "0.13.2",
     "clsx": "2.1.1",
-    "devvit": "0.12.24",
+    "devvit": "0.13.2",
     "express": "5.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -47,11 +47,11 @@
     "typescript": "5.8.3",
     "typescript-eslint": "8.53.0",
     "vite": "7.3.2",
-    "vitest": "4.0.16"
+    "vitest": "^4.1.8"
   },
   "overrides": {
     "protobufjs": "7.5.8",
-    "tmp": "0.2.4",
+    "tmp": "0.2.6",
     "ws": "8.20.1"
   }
 }
