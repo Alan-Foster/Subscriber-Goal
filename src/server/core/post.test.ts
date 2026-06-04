@@ -7,9 +7,13 @@ const hoisted = vi.hoisted(() => ({
 }));
 
 vi.mock("@devvit/web/server", () => ({
+  EntrypointHeight: {
+    REGULAR: 1,
+  },
   reddit: hoisted.reddit,
 }));
 
+import { EntrypointHeight } from "@devvit/web/server";
 import { createGoalPost } from "./post";
 
 describe("createGoalPost", () => {
@@ -28,6 +32,8 @@ describe("createGoalPost", () => {
     expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      entry: "default",
+      styles: { height: EntrypointHeight.REGULAR },
       textFallback: { text: "Fallback text" },
     });
   });
@@ -43,6 +49,8 @@ describe("createGoalPost", () => {
     expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
+      entry: "default",
+      styles: { height: EntrypointHeight.REGULAR },
       textFallback: { text: "Fallback text" },
       runAs: "USER",
       userGeneratedContent: {

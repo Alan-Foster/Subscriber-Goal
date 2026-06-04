@@ -1,4 +1,4 @@
-import { reddit } from "@devvit/web/server";
+import { EntrypointHeight, reddit } from "@devvit/web/server";
 
 type CreateGoalPostParams = {
   title: string;
@@ -16,6 +16,8 @@ export const createGoalPost = async ({
   return await reddit.submitCustomPost({
     title,
     subredditName,
+    entry: "default",
+    styles: { height: EntrypointHeight.REGULAR },
     textFallback: { text: textFallback },
     ...(submitAsUser
       ? {
