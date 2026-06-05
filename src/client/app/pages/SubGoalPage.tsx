@@ -30,7 +30,8 @@ export const SubGoalPage = ({
   const iconAction = state.subscribed ? onCelebrate : onSubscribe;
   const showNotice = Boolean(notice);
   const messages = getSubGoalPostMessages(state.language);
-  const welcomeText = messages.welcome({ subredditName: state.subreddit.name });
+  const welcomeText =
+    state.headerText ?? messages.welcome({ subredditName: state.subreddit.name });
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"

@@ -15,6 +15,7 @@ import {
   setSubredditDisplayNameForPost,
   subscriberGoalsKey,
   postColorThemeSuffix,
+  postHeaderTextSuffix,
   postSubredditDisplayNameSuffix,
 } from "./subGoalData";
 import { postsKey } from "./updaterData";
@@ -114,6 +115,7 @@ describe("subGoalData subreddit display name", () => {
         recentSubscriber: "",
         completedTime: 0,
         subredditDisplayName: "Subscriber_Goal_Dev",
+        headerText: "Custom Header",
         colorTheme: "red",
         autoCreateNextGoal: true,
         language: "es",
@@ -125,8 +127,12 @@ describe("subGoalData subreddit display name", () => {
       "t3_post",
     );
     expect(data.subredditDisplayName).toBe("Subscriber_Goal_Dev");
+    expect(data.headerText).toBe("Custom Header");
     expect(data.autoCreateNextGoal).toBe(true);
     expect(data.language).toBe("es");
+    expect(
+      await redis.hGet(subscriberGoalsKey, `t3_post${postHeaderTextSuffix}`),
+    ).toBe("Custom Header");
   });
 
   it("updates display name independently for a post", async () => {

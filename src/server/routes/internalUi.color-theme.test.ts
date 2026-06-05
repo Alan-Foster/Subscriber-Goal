@@ -250,6 +250,7 @@ describe("internalUi color theme create goal routes", () => {
       "blue",
       false,
       "es",
+      undefined,
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
@@ -310,6 +311,48 @@ describe("internalUi color theme create goal routes", () => {
     });
   });
 
+  it("passes submitAsUser and headerText when multiple developer commands are provided", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField:
+            'runAs, header="This post uses runAs and Custom Header"',
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      submitAsUser: true,
+    });
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      expect.anything(),
+      expect.objectContaining({ id: "t3_newpost" }),
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+      "This post uses runAs and Custom Header",
+    );
+  });
+
   it("does not pass submitAsUser when the custom developer field is empty", async () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
@@ -362,6 +405,46 @@ describe("internalUi color theme create goal routes", () => {
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
     });
+  });
+
+  it("ignores unknown developer commands without blocking creation", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: 'unknown, header="Custom Header"',
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: expect.stringContaining("100 / 200 subscribers."),
+    });
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      expect.anything(),
+      expect.objectContaining({ id: "t3_newpost" }),
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+      "Custom Header",
+    );
   });
 
   it("notifies moderators and returns a partial-success toast when the new goal cannot be pinned", async () => {

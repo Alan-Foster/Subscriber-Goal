@@ -30,6 +30,7 @@ type CreateSubscriberGoalOptions = {
   language: SubGoalLanguage;
   cancelPendingAutoCreateGoals?: boolean;
   submitAsUser?: boolean;
+  headerText?: string;
   stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
@@ -100,6 +101,7 @@ export async function createSubscriberGoal({
     options.colorTheme,
     options.autoCreateNextGoal,
     options.language,
+    options.headerText,
   );
 
   const trackedPosts = await getTrackedPosts(redis);

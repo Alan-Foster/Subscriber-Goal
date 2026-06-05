@@ -14,6 +14,7 @@ const baseState: SubGoalState = {
   goal: 10,
   recentSubscriber: null,
   completedTime: new Date('2026-04-29T19:32:30.000Z').getTime(),
+  headerText: null,
   colorTheme: 'red',
   language: 'en',
   subscribed: true,

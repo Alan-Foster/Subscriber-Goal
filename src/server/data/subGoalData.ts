@@ -19,6 +19,7 @@ export const postGoalSuffix = '_goal';
 export const postRecentSubscriberSuffix = '_recent_subscriber';
 export const postCompletedTimeSuffix = '_completed_time';
 export const postSubredditDisplayNameSuffix = '_subreddit_display_name';
+export const postHeaderTextSuffix = '_header_text';
 export const postColorThemeSuffix = '_color_theme';
 export const postAutoCreateNextGoalSuffix = '_auto_create_next_goal';
 export const postLanguageSuffix = '_language';
@@ -37,6 +38,7 @@ export type SubGoalData = {
   recentSubscriber: string | null;
   completedTime: number;
   subredditDisplayName: string | null;
+  headerText?: string | null;
   colorTheme: SubGoalColorTheme;
   autoCreateNextGoal: boolean;
   language: SubGoalLanguage;
@@ -181,6 +183,7 @@ export async function getSubGoalData(
     recentSubscriber,
     completedTime,
     subredditDisplayName,
+    headerText,
     colorTheme,
     autoCreateNextGoal,
     language,
@@ -189,10 +192,12 @@ export async function getSubGoalData(
     `${postId}${postRecentSubscriberSuffix}`,
     `${postId}${postCompletedTimeSuffix}`,
     `${postId}${postSubredditDisplayNameSuffix}`,
+    `${postId}${postHeaderTextSuffix}`,
     `${postId}${postColorThemeSuffix}`,
     `${postId}${postAutoCreateNextGoalSuffix}`,
     `${postId}${postLanguageSuffix}`,
   ])) as [
+    string | null,
     string | null,
     string | null,
     string | null,
@@ -209,6 +214,7 @@ export async function getSubGoalData(
       subredditDisplayName && subredditDisplayName.length > 0
         ? subredditDisplayName
         : null,
+    headerText: headerText && headerText.length > 0 ? headerText : null,
     colorTheme: resolveSubGoalColorTheme(colorTheme),
     autoCreateNextGoal: autoCreateNextGoal === 'true',
     language: resolveSubGoalLanguage(language),
@@ -225,6 +231,7 @@ export async function setSubGoalData(
     [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? '',
     [`${postId}${postCompletedTimeSuffix}`]: data.completedTime.toString(),
     [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName ?? '',
+    [`${postId}${postHeaderTextSuffix}`]: data.headerText ?? '',
     [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(data.colorTheme),
     [`${postId}${postAutoCreateNextGoalSuffix}`]: data.autoCreateNextGoal
       ? 'true'
@@ -313,13 +320,15 @@ export async function registerNewSubGoalPost(
   subredditDisplayName: string,
   colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
   autoCreateNextGoal = false,
-  language: SubGoalLanguage = defaultSubGoalLanguage
+  language: SubGoalLanguage = defaultSubGoalLanguage,
+  headerText?: string
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
     recentSubscriber: '',
     completedTime: 0,
     subredditDisplayName,
+    headerText: headerText ?? null,
     colorTheme,
     autoCreateNextGoal,
     language,

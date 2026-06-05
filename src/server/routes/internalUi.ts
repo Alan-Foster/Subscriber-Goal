@@ -31,6 +31,7 @@ import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import { notifyStickyFailure } from "../utils/stickyFailureNotifications";
 import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
+import { parseDeveloperCommands } from "../utils/developerCommands";
 
 export function registerInternalUiRoutes(router: Router): void {
   router.post(
@@ -173,13 +174,17 @@ export function registerInternalUiRoutes(router: Router): void {
       const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
       const autoCreateNextGoal = values.autoCreateNextGoal !== false;
       const language = resolveSubGoalLanguage(values.language?.[0]);
-      const customDeveloperCommand = values.customDeveloperField?.trim();
-      const submitAsUser = customDeveloperCommand === "runAs";
+      const developerCommands = parseDeveloperCommands(
+        values.customDeveloperField,
+      );
 
-      if (customDeveloperCommand && !submitAsUser) {
+      for (const command of developerCommands.ignoredCommands) {
         console.info(
-          `[developerField] ignored unknown create-goal command: command=${customDeveloperCommand}`,
+          `[developerField] ignored unknown create-goal command: command=${command}`,
         );
+      }
+      for (const warning of developerCommands.warnings) {
+        console.warn(`[developerField] ${warning}`);
       }
 
       try {
@@ -248,7 +253,10 @@ export function registerInternalUiRoutes(router: Router): void {
               autoCreateNextGoal,
               language,
               cancelPendingAutoCreateGoals: true,
-              submitAsUser,
+              submitAsUser: developerCommands.submitAsUser,
+              ...(developerCommands.headerText
+                ? { headerText: developerCommands.headerText }
+                : {}),
             },
           });
 

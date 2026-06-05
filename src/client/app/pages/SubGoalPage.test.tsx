@@ -7,6 +7,7 @@ const baseState: SubGoalState = {
   goal: 500,
   recentSubscriber: null,
   completedTime: null,
+  headerText: null,
   colorTheme: 'red',
   language: 'en',
   subscribed: false,
@@ -53,6 +54,18 @@ describe('SubGoalPage', () => {
     expect(html).toContain('Bienvenido a r/ExampleSub');
     expect(html).toContain('Suscribirse a r/ExampleSub');
     expect(html).toContain('Mostrar mi nombre de usuario cuando me suscriba');
+  });
+
+  it('renders custom header text when provided', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, headerText: 'This is a Custom Message' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('This is a Custom Message');
+    expect(html).not.toContain('Welcome to r/ExampleSub');
   });
 
   it('hides username share control on NSFW subreddits', () => {

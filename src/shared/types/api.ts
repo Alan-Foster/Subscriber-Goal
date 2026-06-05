@@ -22,6 +22,7 @@ export type SubGoalState = {
   goal: number | null;
   recentSubscriber: string | null;
   completedTime: number | null;
+  headerText: string | null;
   colorTheme: SubGoalColorTheme;
   language: SubGoalLanguage;
   subscribed: boolean;
