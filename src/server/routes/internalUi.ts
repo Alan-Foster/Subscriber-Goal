@@ -11,6 +11,10 @@ import {
   resolveSubGoalColorTheme,
 } from "../../shared/subGoalColorTheme";
 import {
+  defaultSubGoalPostHeight,
+  resolveSubGoalPostHeight,
+} from "../../shared/subGoalPostHeight";
+import {
   defaultSubGoalLanguage,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
@@ -130,6 +134,19 @@ export function registerInternalUiRoutes(router: Router): void {
                   required: true,
                 },
                 {
+                  name: "postHeight",
+                  label: "Post Height",
+                  type: "select",
+                  defaultValue: [defaultSubGoalPostHeight],
+                  options: [
+                    { label: "Regular", value: "regular" },
+                    { label: "Short (no logo)", value: "short" },
+                  ],
+                  helpText:
+                    "Short posts reduce feed height and hide the subreddit logo.",
+                  required: true,
+                },
+                {
                   name: "crosspost",
                   label: `Auto-Crosspost to r/${appSettings.promoSubreddit} (Recommended)`,
                   type: "boolean",
@@ -176,6 +193,7 @@ export function registerInternalUiRoutes(router: Router): void {
       const title = values.postTitle?.trim();
       const subredditDisplayName = values.subredditDisplayName?.trim();
       const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
+      const postHeight = resolveSubGoalPostHeight(values.postHeight?.[0]);
       const autoCreateNextGoal = values.autoCreateNextGoal !== false;
       const language = resolveSubGoalLanguage(values.language?.[0]);
       const developerCommands = parseDeveloperCommands(
@@ -259,6 +277,7 @@ export function registerInternalUiRoutes(router: Router): void {
               subredditDisplayName: resolvedSubredditDisplayName,
               crosspost: resolvedCrosspost,
               colorTheme,
+              postHeight,
               autoCreateNextGoal,
               language,
               cancelPendingAutoCreateGoals: true,

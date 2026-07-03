@@ -21,6 +21,7 @@ export const CompletedPage = ({
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const messages = getSubGoalPostMessages(state.language);
+  const isShort = state.postHeight === 'short';
   const gregorianLocale = getGregorianLocale(messages.intlLocale);
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate
@@ -46,7 +47,9 @@ export const CompletedPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
+      {isShort ? null : (
+        <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
+      )}
       <div className="text-2xl font-bold">
         {messages.completedTitle({
           subredditName: state.subreddit.name,

@@ -10,6 +10,11 @@ import {
   defaultSubGoalLanguage,
   resolveSubGoalLanguage,
 } from '../../shared/subGoalPostI18n';
+import type { SubGoalPostHeight } from '../../shared/subGoalPostHeight';
+import {
+  defaultSubGoalPostHeight,
+  resolveSubGoalPostHeight,
+} from '../../shared/subGoalPostHeight';
 import { dispatchNewPost } from './crosspostData';
 import { postsKey, queueUpdate, trackPost } from './updaterData';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
@@ -23,6 +28,7 @@ export const postHeaderTextSuffix = '_header_text';
 export const postColorThemeSuffix = '_color_theme';
 export const postAutoCreateNextGoalSuffix = '_auto_create_next_goal';
 export const postLanguageSuffix = '_language';
+export const postHeightSuffix = '_post_height';
 export const autoCreateNextGoalQueueKey = 'auto_create_next_goal_queue';
 export const recentSubscriberPostsByUsernameKey = 'recent_subscriber_posts_by_username';
 export const recentSubscriberIndexMigrationStateKey =
@@ -42,6 +48,7 @@ export type SubGoalData = {
   colorTheme: SubGoalColorTheme;
   autoCreateNextGoal: boolean;
   language: SubGoalLanguage;
+  postHeight: SubGoalPostHeight;
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient['submitCustomPost']>>;
@@ -187,6 +194,7 @@ export async function getSubGoalData(
     colorTheme,
     autoCreateNextGoal,
     language,
+    postHeight,
   ] = (await redis.hMGet(subscriberGoalsKey, [
     `${postId}${postGoalSuffix}`,
     `${postId}${postRecentSubscriberSuffix}`,
@@ -196,7 +204,9 @@ export async function getSubGoalData(
     `${postId}${postColorThemeSuffix}`,
     `${postId}${postAutoCreateNextGoalSuffix}`,
     `${postId}${postLanguageSuffix}`,
+    `${postId}${postHeightSuffix}`,
   ])) as [
+    string | null,
     string | null,
     string | null,
     string | null,
@@ -218,6 +228,7 @@ export async function getSubGoalData(
     colorTheme: resolveSubGoalColorTheme(colorTheme),
     autoCreateNextGoal: autoCreateNextGoal === 'true',
     language: resolveSubGoalLanguage(language),
+    postHeight: resolveSubGoalPostHeight(postHeight),
   };
 }
 
@@ -237,6 +248,7 @@ export async function setSubGoalData(
       ? 'true'
       : 'false',
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
+    [`${postId}${postHeightSuffix}`]: resolveSubGoalPostHeight(data.postHeight),
   });
 }
 
@@ -321,7 +333,8 @@ export async function registerNewSubGoalPost(
   colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
   autoCreateNextGoal = false,
   language: SubGoalLanguage = defaultSubGoalLanguage,
-  headerText?: string
+  headerText?: string,
+  postHeight: SubGoalPostHeight = defaultSubGoalPostHeight
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
@@ -332,6 +345,7 @@ export async function registerNewSubGoalPost(
     colorTheme,
     autoCreateNextGoal,
     language,
+    postHeight,
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);

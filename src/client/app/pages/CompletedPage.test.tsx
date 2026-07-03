@@ -16,6 +16,7 @@ const baseState: SubGoalState = {
   completedTime: new Date('2026-04-29T19:32:30.000Z').getTime(),
   headerText: null,
   colorTheme: 'red',
+  postHeight: 'regular',
   language: 'en',
   subscribed: true,
   user: { id: 't2_user', username: 'alice' },
@@ -101,5 +102,21 @@ describe('CompletedPage', () => {
     );
 
     expect(html).toContain('Goal reached just now!');
+  });
+
+  it('hides the subreddit logo for short posts', () => {
+    const html = renderToStaticMarkup(
+      <CompletedPage
+        state={{ ...baseState, postHeight: 'short' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).toContain('gap-4 px-4 py-6');
+    expect(html).not.toContain('max-sm:pt-8');
+    expect(html).toContain('text-2xl font-bold');
+    expect(html).toContain('text-lg font-semibold');
+    expect(html).toContain('r/indianActressClass reached 10 subscribers!');
   });
 });

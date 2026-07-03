@@ -2,7 +2,9 @@ import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
-import { createGoalPost } from "./post";
+import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
+import { defaultSubGoalPostHeight } from "../../shared/subGoalPostHeight";
+import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 import {
   cancelAllAutoCreateNextGoals,
   registerNewSubGoalPost,
@@ -26,6 +28,7 @@ type CreateSubscriberGoalOptions = {
   subredditDisplayName: string;
   crosspost: boolean;
   colorTheme: SubGoalColorTheme;
+  postHeight: SubGoalPostHeight;
   autoCreateNextGoal: boolean;
   language: SubGoalLanguage;
   cancelPendingAutoCreateGoals?: boolean;
@@ -90,8 +93,10 @@ export async function createSubscriberGoal({
     title: options.title,
     subredditName: subreddit.name,
     textFallback,
+    postHeight: options.postHeight,
     ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
   });
+  await applyGoalPostFrameStyle(post, options.postHeight);
 
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
 
@@ -107,6 +112,7 @@ export async function createSubscriberGoal({
     options.autoCreateNextGoal,
     options.language,
     options.headerText,
+    options.postHeight ?? defaultSubGoalPostHeight,
   );
 
   const trackedPosts = await getTrackedPosts(redis);

@@ -191,11 +191,15 @@ export const App = () => {
   }
 
   if (loading) {
-    return <SkeletonPage />;
+    return <SkeletonPage postHeight={state?.postHeight} />;
   }
 
+  const appHeightClass = state?.postHeight === 'short' ? 'h-[234px]' : 'h-[320px]';
+
   return (
-    <div className="relative flex h-[320px] w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]">
+    <div
+      className={`relative flex ${appHeightClass} w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
+    >
       {content ?? (
         <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
           {messages.loadError}

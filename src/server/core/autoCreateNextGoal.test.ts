@@ -56,6 +56,7 @@ describe('processDueAutoCreateNextGoals', () => {
       completedTime: 1_000,
       subredditDisplayName: 'ExampleSub',
       colorTheme: 'purple',
+      postHeight: 'short',
       autoCreateNextGoal: true,
       language: 'en'
     });
@@ -115,6 +116,7 @@ describe('processDueAutoCreateNextGoals', () => {
         subredditDisplayName: 'ExampleSub',
         crosspost: true,
         colorTheme: 'purple',
+        postHeight: 'short',
         autoCreateNextGoal: true,
         language: 'en',
         cancelPendingAutoCreateGoals: true
@@ -153,6 +155,7 @@ describe('processDueAutoCreateNextGoals', () => {
       completedTime: 1_000,
       subredditDisplayName: 'ExampleSub',
       colorTheme: 'blue',
+      postHeight: 'regular',
       autoCreateNextGoal: true,
       language: 'es'
     });
@@ -181,6 +184,7 @@ describe('processDueAutoCreateNextGoals', () => {
       completedTime: 0,
       subredditDisplayName: 'ExampleSub',
       colorTheme: 'purple',
+      postHeight: 'regular',
       autoCreateNextGoal: true,
       language: 'en'
     });

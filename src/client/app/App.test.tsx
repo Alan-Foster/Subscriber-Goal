@@ -8,6 +8,7 @@ const state: SubGoalState = {
   completedTime: null,
   headerText: null,
   colorTheme: 'red',
+  postHeight: 'regular',
   language: 'en',
   subscribed: false,
   user: { id: 't2_user', username: 'alice' },
@@ -43,5 +44,14 @@ describe('App', () => {
 
     expect(html).toContain('Show my username when I subscribe');
     expect(html).toContain('checked=""');
+  });
+
+  it('uses the compact shell height for short posts', () => {
+    state.postHeight = 'short';
+    const html = renderToStaticMarkup(<App />);
+    state.postHeight = 'regular';
+
+    expect(html).toContain('h-[234px]');
+    expect(html).not.toContain('alt="Subreddit icon"');
   });
 });

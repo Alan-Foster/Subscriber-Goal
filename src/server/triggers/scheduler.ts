@@ -21,6 +21,7 @@ import {
 import { countPendingCrossposts } from '../data/crosspostData';
 import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
 import { processDueAutoCreateNextGoals } from '../core/autoCreateNextGoal';
+import { applyGoalPostFrameStyle } from '../core/post';
 import {
   getTerminalRemovedByCategory,
   isMissingPostError,
@@ -145,6 +146,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
         completedTime,
         language: subGoalData.language,
       });
+      await applyGoalPostFrameStyle(post, subGoalData.postHeight);
 
       if (subGoalData.completedTime) {
         await cancelUpdates(redis, postId);

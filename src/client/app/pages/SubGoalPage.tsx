@@ -30,6 +30,7 @@ export const SubGoalPage = ({
   const iconAction = state.subscribed ? onCelebrate : onSubscribe;
   const showNotice = Boolean(notice);
   const messages = getSubGoalPostMessages(state.language);
+  const isShort = state.postHeight === 'short';
   const welcomeText =
     state.headerText ?? messages.welcome({ subredditName: state.subreddit.name });
   return (
@@ -42,9 +43,18 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      <div className="pt-6">
-        <SubredditIcon iconUrl={state.subreddit.icon} onClick={iconAction} />
-      </div>
+      {isShort ? null : (
+        <div className="pt-6">
+          <SubredditIcon iconUrl={state.subreddit.icon} onClick={iconAction} />
+        </div>
+      )}
+      {isShort ? (
+        <>
+          <div className="h-4" />
+          <div className="h-4" />
+          <div className="h-4" />
+        </>
+      ) : null}
       <div className="relative h-7 w-full">
         <div
           className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${

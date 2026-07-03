@@ -16,6 +16,7 @@ import {
   subscriberGoalsKey,
   postColorThemeSuffix,
   postHeaderTextSuffix,
+  postHeightSuffix,
   postSubredditDisplayNameSuffix,
 } from "./subGoalData";
 import { postsKey } from "./updaterData";
@@ -117,6 +118,7 @@ describe("subGoalData subreddit display name", () => {
         subredditDisplayName: "Subscriber_Goal_Dev",
         headerText: "Custom Header",
         colorTheme: "red",
+        postHeight: "short",
         autoCreateNextGoal: true,
         language: "es",
       },
@@ -130,6 +132,7 @@ describe("subGoalData subreddit display name", () => {
     expect(data.headerText).toBe("Custom Header");
     expect(data.autoCreateNextGoal).toBe(true);
     expect(data.language).toBe("es");
+    expect(data.postHeight).toBe("short");
     expect(
       await redis.hGet(subscriberGoalsKey, `t3_post${postHeaderTextSuffix}`),
     ).toBe("Custom Header");
@@ -146,6 +149,7 @@ describe("subGoalData subreddit display name", () => {
         completedTime: 0,
         subredditDisplayName: "subscriber_goal_dev",
         colorTheme: "red",
+        postHeight: "regular",
         autoCreateNextGoal: false,
         language: "en",
       },
@@ -182,6 +186,7 @@ describe("subGoalData subreddit display name", () => {
           completedTime: 0,
           subredditDisplayName: "subscriber_goal_dev",
           colorTheme,
+          postHeight: "regular",
           autoCreateNextGoal: false,
           language: "en",
         },
@@ -221,6 +226,28 @@ describe("subGoalData subreddit display name", () => {
         "t3_invalid",
       ),
     ).resolves.toMatchObject({ colorTheme: "red" });
+  });
+
+  it("defaults missing or invalid post heights to regular", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_missing_goal: "10",
+      t3_invalid_goal: "10",
+      [`t3_invalid${postHeightSuffix}`]: "tiny",
+    });
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_missing",
+      ),
+    ).resolves.toMatchObject({ postHeight: "regular" });
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_invalid",
+      ),
+    ).resolves.toMatchObject({ postHeight: "regular" });
   });
 
   it("defaults missing auto-create settings to disabled", async () => {
@@ -317,6 +344,7 @@ describe("subGoalData subreddit display name", () => {
         completedTime: 0,
         subredditDisplayName: "subscriber_goal_dev",
         colorTheme: "red",
+        postHeight: "regular",
         autoCreateNextGoal: true,
         language: "en",
       },
@@ -349,6 +377,7 @@ describe("subGoalData subreddit display name", () => {
         completedTime: 0,
         subredditDisplayName: "subscriber_goal_dev",
         colorTheme: "red",
+        postHeight: "regular",
         autoCreateNextGoal: false,
         language: "en",
       },

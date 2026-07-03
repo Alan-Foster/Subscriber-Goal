@@ -103,6 +103,7 @@ export async function processDueAutoCreateNextGoals({
           subredditDisplayName,
           crosspost,
           colorTheme: sourceGoalData.colorTheme,
+          postHeight: sourceGoalData.postHeight,
           autoCreateNextGoal: true,
           language: sourceGoalData.language,
           cancelPendingAutoCreateGoals: true

@@ -9,6 +9,7 @@ const baseState: SubGoalState = {
   completedTime: null,
   headerText: null,
   colorTheme: 'red',
+  postHeight: 'regular',
   language: 'en',
   subscribed: false,
   user: { id: 't2_user', username: 'alice' },
@@ -99,6 +100,22 @@ describe('SubGoalPage', () => {
     );
 
     expect(html).toContain('data-sg-theme="purple"');
+  });
+
+  it('hides the subreddit logo for short posts', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, postHeight: 'short' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).toContain('gap-6 px-4 py-6');
+    expect(html.match(/h-4/g)).toHaveLength(3);
+    expect(html).not.toContain('max-sm:pt-8');
+    expect(html).toContain('Welcome to r/ExampleSub');
+    expect(html).toContain('Subscribe to r/ExampleSub');
   });
 
   it('does not add attention glow after subscribing', () => {

@@ -30,6 +30,7 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
+  applyGoalPostFrameStyle: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -43,6 +44,7 @@ vi.mock("../settings", () => ({
 }));
 
 vi.mock("../core/post", () => ({
+  applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
   createGoalPost: hoisted.createGoalPost,
 }));
 
@@ -171,6 +173,14 @@ describe("internalUi color theme create goal routes", () => {
       type: "boolean",
       defaultValue: true,
     });
+    expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
+      type: "select",
+      defaultValue: ["regular"],
+      options: [
+        { label: "Regular", value: "regular" },
+        { label: "Short (no logo)", value: "short" },
+      ],
+    });
     expect(fields.find((field) => field.name === "language")).toMatchObject({
       type: "select",
       defaultValue: ["en"],
@@ -219,6 +229,7 @@ describe("internalUi color theme create goal routes", () => {
       "postTitle",
       "subredditDisplayName",
       "colorTheme",
+      "postHeight",
       "crosspost",
       "autoCreateNextGoal",
       "customDeveloperField",
@@ -237,6 +248,7 @@ describe("internalUi color theme create goal routes", () => {
           subredditDisplayName: "ExampleSub",
           crosspost: false,
           colorTheme: ["blue"],
+          postHeight: ["short"],
           autoCreateNextGoal: false,
           language: ["es"],
         },
@@ -256,6 +268,7 @@ describe("internalUi color theme create goal routes", () => {
       false,
       "es",
       undefined,
+      "short",
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
@@ -285,6 +298,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "¡Bienvenido a r/ExampleSub!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 suscriptores."),
+      postHeight: "regular",
     });
   });
 
@@ -312,6 +326,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
       submitAsUser: true,
     });
   });
@@ -463,6 +478,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
       submitAsUser: true,
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
@@ -477,6 +493,7 @@ describe("internalUi color theme create goal routes", () => {
       true,
       "en",
       "This post uses runAs and Custom Header",
+      "regular",
     );
   });
 
@@ -504,6 +521,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
     });
   });
 
@@ -531,6 +549,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
     });
   });
 
@@ -558,6 +577,7 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       hoisted.reddit,
@@ -571,6 +591,7 @@ describe("internalUi color theme create goal routes", () => {
       true,
       "en",
       "Custom Header",
+      "regular",
     );
   });
 

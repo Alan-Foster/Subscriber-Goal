@@ -55,6 +55,7 @@ const hoisted = vi.hoisted(() => ({
   getSubGoalData: vi.fn(),
   checkCompletionStatus: vi.fn(),
   applyTextFallback: vi.fn(),
+  applyGoalPostFrameStyle: vi.fn(),
 }));
 
 vi.mock('@devvit/web/server', () => ({
@@ -112,6 +113,10 @@ vi.mock('../core/autoCreateNextGoal', () => ({
   processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
 }));
 
+vi.mock('../core/post', () => ({
+  applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
+}));
+
 import { onPostsUpdaterJob } from './scheduler';
 
 describe('onPostsUpdaterJob crosspost scheduling', () => {
@@ -134,6 +139,7 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.getSubGoalData.mockReset();
     hoisted.checkCompletionStatus.mockReset();
     hoisted.applyTextFallback.mockReset();
+    hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(emptyCrosspostSummary);
     hoisted.countPendingCrossposts.mockResolvedValue(0);
@@ -152,6 +158,7 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
       completedTime: 0,
       subredditDisplayName: 'CorporateGifts',
       colorTheme: 'red',
+      postHeight: 'regular',
       autoCreateNextGoal: true,
       language: 'en',
     });
@@ -266,9 +273,44 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
       't3_active',
       expect.any(Date)
     );
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't3_active' }),
+      'regular'
+    );
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.untrackPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+  });
+
+  it('repairs short post frame styles for active queued posts', async () => {
+    hoisted.context.subredditName = 'CorporateGifts';
+    hoisted.getQueuedUpdates.mockResolvedValue(['t3_short']);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 12,
+      recentSubscriber: '',
+      completedTime: 0,
+      subredditDisplayName: 'CorporateGifts',
+      colorTheme: 'red',
+      postHeight: 'short',
+      autoCreateNextGoal: true,
+      language: 'en',
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: 't3_short',
+      removedByCategory: undefined,
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't3_short' }),
+      'short'
+    );
+    expect(hoisted.queueUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      't3_short',
+      expect.any(Date)
+    );
   });
 
   it('cleans up missing posts returned as deleted/not-found errors', async () => {
@@ -333,6 +375,7 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
       completedTime: 0,
       subredditDisplayName: 'CorporateGifts',
       colorTheme: 'red',
+      postHeight: 'regular',
       autoCreateNextGoal: true,
       language: 'en',
     });

@@ -84,6 +84,7 @@ describe("publicApi routes", () => {
       subredditDisplayName: "ExampleSub",
       headerText: "Custom Header",
       colorTheme: "red",
+      postHeight: "short",
       autoCreateNextGoal: true,
       language: "en",
     });
@@ -98,5 +99,6 @@ describe("publicApi routes", () => {
 
     const response = json.mock.calls[0]?.[0] as InitResponse;
     expect(response.state.headerText).toBe("Custom Header");
+    expect(response.state.postHeight).toBe("short");
   });
 });

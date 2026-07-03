@@ -8,13 +8,14 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@devvit/web/server", () => ({
   EntrypointHeight: {
+    HEIGHT_UNSPECIFIED: 0,
     REGULAR: 1,
   },
   reddit: hoisted.reddit,
 }));
 
 import { EntrypointHeight } from "@devvit/web/server";
-import { createGoalPost } from "./post";
+import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 
 describe("createGoalPost", () => {
   beforeEach(() => {
@@ -57,5 +58,63 @@ describe("createGoalPost", () => {
         text: "Subscriber Goal post: Welcome!",
       },
     });
+  });
+
+  it("submits short posts with regular height before post-creation style repair", async () => {
+    await createGoalPost({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: "Fallback text",
+      postHeight: "short",
+    });
+
+    expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      entry: "default",
+      styles: { height: EntrypointHeight.REGULAR },
+      textFallback: { text: "Fallback text" },
+    });
+  });
+
+  it("applies heightPixels through post-creation styles for short posts", async () => {
+    const post = {
+      id: "t3_newpost",
+      setCustomPostStyles: vi.fn(),
+    };
+
+    await applyGoalPostFrameStyle(post, "short");
+
+    expect(post.setCustomPostStyles).toHaveBeenCalledWith({
+      height: EntrypointHeight.HEIGHT_UNSPECIFIED,
+      heightPixels: 234,
+    });
+  });
+
+  it("does not apply post-creation styles for regular posts", async () => {
+    const post = {
+      id: "t3_newpost",
+      setCustomPostStyles: vi.fn(),
+    };
+
+    await applyGoalPostFrameStyle(post, "regular");
+
+    expect(post.setCustomPostStyles).not.toHaveBeenCalled();
+  });
+
+  it("logs and continues when short post style application fails", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const post = {
+      id: "t3_newpost",
+      setCustomPostStyles: vi.fn(async () => {
+        throw new Error("style denied");
+      }),
+    };
+
+    await expect(applyGoalPostFrameStyle(post, "short")).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[postHeight] failed to apply short post height: postId=t3_newpost error=Error: style denied",
+    );
   });
 });

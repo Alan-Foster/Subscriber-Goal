@@ -16,9 +16,11 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
+  applyGoalPostFrameStyle: vi.fn(),
 }));
 
 vi.mock("./post", () => ({
+  applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
   createGoalPost: hoisted.createGoalPost,
 }));
 
@@ -77,6 +79,7 @@ const createGoal = (
       subredditDisplayName: "ExampleSub",
       crosspost: false,
       colorTheme: "red",
+      postHeight: "regular",
       autoCreateNextGoal: true,
       language: "en",
       cancelPendingAutoCreateGoals: true,
@@ -101,6 +104,7 @@ describe("createSubscriberGoal sticky handling", () => {
       username: "subscriber-goal",
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
+    hoisted.applyGoalPostFrameStyle.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.reddit.getPostById.mockResolvedValue(undefined);
@@ -116,8 +120,13 @@ describe("createSubscriberGoal sticky handling", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
     });
     expect(post.approve).toHaveBeenCalled();
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
+      post,
+      "regular",
+    );
     expect(post.sticky).toHaveBeenCalledWith(1);
     expect(post.isStickied).toHaveBeenCalledWith();
     expect(result.post).toBe(post);
@@ -168,10 +177,37 @@ describe("createSubscriberGoal sticky handling", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
+      postHeight: "regular",
       submitAsUser: true,
     });
     expect(result.post).toBe(post);
     expect(result.stickyResult.status).toBe("pinned");
+  });
+
+  it("applies short post frame styles after creating the post", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    await createGoal({ postHeight: "short" });
+
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
+      post,
+      "short",
+    );
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      post,
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+      undefined,
+      "short",
+    );
   });
 
   it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {

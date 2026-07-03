@@ -46,6 +46,7 @@ const buildState = async (
     completedTime: subGoalData.completedTime ? subGoalData.completedTime : null,
     headerText: subGoalData.headerText ?? null,
     colorTheme: subGoalData.colorTheme,
+    postHeight: subGoalData.postHeight,
     language: subGoalData.language,
     subscribed,
     user,

@@ -1,4 +1,5 @@
 import type { SubGoalColorTheme } from "../subGoalColorTheme";
+import type { SubGoalPostHeight } from "../subGoalPostHeight";
 import type { SubGoalLanguage } from "../subGoalPostI18n";
 
 export type BasicSubredditData = {
@@ -24,6 +25,7 @@ export type SubGoalState = {
   completedTime: number | null;
   headerText: string | null;
   colorTheme: SubGoalColorTheme;
+  postHeight: SubGoalPostHeight;
   language: SubGoalLanguage;
   subscribed: boolean;
   user: BasicUserData | null;
@@ -70,6 +72,7 @@ export type CreateGoalFormValues = {
   crosspost?: boolean;
   subredditDisplayName?: string;
   colorTheme?: string[];
+  postHeight?: string[];
   autoCreateNextGoal?: boolean;
   language?: string[];
   customDeveloperField?: string;

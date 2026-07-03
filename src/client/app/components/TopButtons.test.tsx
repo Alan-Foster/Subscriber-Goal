@@ -14,6 +14,8 @@ describe('TopButtons', () => {
 
     expect(html).toContain('r/SubGoal');
     expect(html).toContain('View other subscriber goals in r/SubGoal');
+    expect(html).toContain('absolute right-4 top-4');
+    expect(html).not.toContain('max-sm:top-6');
   });
 
   it('localizes the accessible label', () => {
