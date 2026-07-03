@@ -49,6 +49,18 @@ export function buildStickyFailureMessage({
   };
 }
 
+export function getPostUrl(post: {
+  permalink?: string;
+  url?: string;
+}): string | undefined {
+  const postUrl = post.permalink || post.url;
+  if (!postUrl) {
+    return undefined;
+  }
+
+  return postUrl.startsWith("http") ? postUrl : `https://reddit.com${postUrl}`;
+}
+
 export async function notifyStickyFailure({
   reddit,
   subredditId,

@@ -118,13 +118,44 @@ describe("createSubscriberGoal sticky handling", () => {
       textFallback: expect.stringContaining("100 / 200 subscribers."),
     });
     expect(post.approve).toHaveBeenCalled();
-    expect(post.sticky).toHaveBeenCalledWith();
+    expect(post.sticky).toHaveBeenCalledWith(1);
     expect(post.isStickied).toHaveBeenCalledWith();
     expect(result.post).toBe(post);
     expect(result.stickyResult).toEqual({
       status: "pinned",
       verifiedStickied: true,
     });
+  });
+
+  it("passes existing tracked and queued post ids to sticky cleanup before creating the new post", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked", "invalid"]);
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_queued", "t3_tracked"]);
+    hoisted.reddit.getPostById.mockImplementation(async (postId) => ({
+      id: postId,
+      subredditId: "t5_example",
+      isStickied: vi.fn(() => true),
+    }));
+
+    await createGoal();
+
+    expect(hoisted.clearUserStickies).toHaveBeenCalledWith(
+      hoisted.reddit,
+      "subscriber-goal",
+      {
+        knownPostIds: ["t3_tracked", "invalid", "t3_queued"],
+        subreddit: {
+          id: "t5_example",
+          name: "ExampleSub",
+          numberOfSubscribers: 100,
+          isNsfw: false,
+        },
+      },
+    );
+    expect(hoisted.clearUserStickies.mock.invocationCallOrder[0]).toBeLessThan(
+      hoisted.createGoalPost.mock.invocationCallOrder[0],
+    );
   });
 
   it("passes runAs creation through with fallback text without post-creation fallback updates", async () => {

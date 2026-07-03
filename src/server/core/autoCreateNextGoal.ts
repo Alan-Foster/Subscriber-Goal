@@ -13,6 +13,10 @@ import {
   isMissingPostError,
 } from '../utils/postStatus';
 import { isLinkId } from '../types';
+import {
+  getPostUrl,
+  notifyStickyFailure,
+} from '../utils/stickyFailureNotifications';
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -89,7 +93,7 @@ export async function processDueAutoCreateNextGoals({
         !sourceSubredditIsNsfw &&
         subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
 
-      await createSubscriberGoal({
+      const { post, stickyResult } = await createSubscriberGoal({
         reddit,
         redis,
         appSettings,
@@ -104,6 +108,19 @@ export async function processDueAutoCreateNextGoals({
           cancelPendingAutoCreateGoals: true
         }
       });
+      if (stickyResult.status === 'not_pinned') {
+        console.warn(
+          `[autoCreateNextGoal] created next goal but failed to pin it: sourcePostId=${sourcePostId} postId=${post.id} subreddit=${subreddit.name} error=${stickyResult.errorMessage ?? 'none'}`
+        );
+        await notifyStickyFailure({
+          reddit,
+          subredditId: subreddit.id,
+          subredditName: subreddit.name,
+          postTitle: post.title,
+          postUrl: getPostUrl(post),
+          errorMessage: stickyResult.errorMessage,
+        });
+      }
       summary.created += 1;
       break;
     } catch (error) {

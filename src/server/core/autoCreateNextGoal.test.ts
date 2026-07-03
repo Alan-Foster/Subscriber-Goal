@@ -21,6 +21,7 @@ const hoisted = vi.hoisted(() => ({
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
   createSubscriberGoal: vi.fn(),
+  notifyStickyFailure: vi.fn(),
   reddit: {
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn()
@@ -38,6 +39,13 @@ vi.mock('./createSubscriberGoal', () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal
 }));
 
+vi.mock('../utils/stickyFailureNotifications', () => ({
+  getPostUrl: vi.fn((post: { permalink?: string; url?: string }) =>
+    post.permalink ? `https://reddit.com${post.permalink}` : post.url
+  ),
+  notifyStickyFailure: hoisted.notifyStickyFailure
+}));
+
 describe('processDueAutoCreateNextGoals', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -52,6 +60,7 @@ describe('processDueAutoCreateNextGoals', () => {
       language: 'en'
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: 't5_example',
       name: 'examplesub',
       numberOfSubscribers: 12,
       isNsfw: false
@@ -61,8 +70,13 @@ describe('processDueAutoCreateNextGoals', () => {
       removedByCategory: undefined
     });
     hoisted.createSubscriberGoal.mockResolvedValue({
-      post: { id: 't3_next' },
-      crosspostDispatchResult: { status: 'success' }
+      post: {
+        id: 't3_next',
+        title: 'Welcome to r/ExampleSub!',
+        permalink: '/r/examplesub/comments/next'
+      },
+      crosspostDispatchResult: { status: 'success' },
+      stickyResult: { status: 'pinned', verifiedStickied: true }
     });
   });
 
@@ -112,6 +126,7 @@ describe('processDueAutoCreateNextGoals', () => {
   it('disables crossposting for NSFW subreddits', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: 't5_example',
       name: 'examplesub',
       numberOfSubscribers: 12,
       isNsfw: true
@@ -234,5 +249,44 @@ describe('processDueAutoCreateNextGoals', () => {
     ).resolves.toEqual({ due: 1, created: 0, skipped: 0, failed: 1 });
 
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
+  });
+
+  it('notifies moderators when an auto-created goal cannot be pinned', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.createSubscriberGoal.mockResolvedValue({
+      post: {
+        id: 't3_next',
+        title: 'Welcome to r/ExampleSub!',
+        permalink: '/r/examplesub/comments/next'
+      },
+      crosspostDispatchResult: { status: 'success' },
+      stickyResult: {
+        status: 'not_pinned',
+        errorMessage: 'sticky slots full',
+        verifiedStickied: false
+      }
+    });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
+      })
+    ).resolves.toEqual({ due: 1, created: 1, skipped: 0, failed: 0 });
+
+    expect(hoisted.notifyStickyFailure).toHaveBeenCalledWith({
+      reddit: hoisted.reddit,
+      subredditId: 't5_example',
+      subredditName: 'examplesub',
+      postTitle: 'Welcome to r/ExampleSub!',
+      postUrl: 'https://reddit.com/r/examplesub/comments/next',
+      errorMessage: 'sticky slots full'
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[autoCreateNextGoal] created next goal but failed to pin it: sourcePostId=t3_source postId=t3_next subreddit=examplesub error=sticky slots full'
+    );
+    warnSpy.mockRestore();
   });
 });

@@ -1,4 +1,4 @@
-import { isSubredditId, type RedditClient } from '../types';
+import { isLinkId, isSubredditId, type RedditClient } from '../types';
 import { logCrosspostEvent, toErrorMessage } from './crosspostLogs';
 
 export type WikiPageRevision = {
@@ -66,32 +66,87 @@ export async function getSubredditIcon(
 
 export async function clearUserStickies(
   reddit: RedditClient,
-  username: string
+  username: string,
+  options: {
+    knownPostIds?: string[];
+    subreddit?: { id: string; name: string };
+  } = {}
 ): Promise<void> {
-  const subreddit = await reddit.getCurrentSubreddit();
-  const hotPosts = await reddit
-    .getHotPosts({ limit: 100, subredditName: subreddit.name })
-    .get(100);
-  const stickyPosts = hotPosts.filter(
-    (post) => post.stickied && post.authorName === username
-  );
+  const subreddit = options.subreddit ?? (await reddit.getCurrentSubreddit());
+  const seenPostIds = new Set<string>();
+  let unstickiedCount = 0;
 
-  for (const post of stickyPosts) {
+  const unstickyIfAppOwned = async (
+    post: Awaited<ReturnType<RedditClient['getPostById']>>,
+    source: 'known_post' | 'hot_post'
+  ): Promise<void> => {
+    if (seenPostIds.has(post.id)) {
+      return;
+    }
+    seenPostIds.add(post.id);
+
+    if (post.subredditId !== subreddit.id || post.authorName !== username) {
+      return;
+    }
+
+    let isStickied = post.stickied;
+    const verifier = (post as { isStickied?: () => boolean | Promise<boolean> })
+      .isStickied;
+    if (!isStickied && typeof verifier === 'function') {
+      try {
+        isStickied = await Promise.resolve(verifier.call(post));
+      } catch (error) {
+        console.warn(
+          `[sticky] failed to verify existing app-owned sticky: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
+            error
+          )}`
+        );
+      }
+    }
+
+    if (!isStickied) {
+      return;
+    }
+
     try {
       await post.unsticky();
+      unstickiedCount += 1;
       console.info(
-        `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id}`
+        `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source}`
       );
     } catch (error) {
       console.warn(
-        `[sticky] failed to unsticky app-owned post: subreddit=${subreddit.name} postId=${post.id} error=${toErrorMessage(
+        `[sticky] failed to unsticky app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
+          error
+        )}`
+      );
+    }
+  };
+
+  for (const postId of [...new Set(options.knownPostIds ?? [])]) {
+    if (!isLinkId(postId)) {
+      continue;
+    }
+    try {
+      await unstickyIfAppOwned(await reddit.getPostById(postId), 'known_post');
+    } catch (error) {
+      console.warn(
+        `[sticky] failed to fetch known app-owned sticky candidate: subreddit=${subreddit.name} postId=${postId} error=${toErrorMessage(
           error
         )}`
       );
     }
   }
 
-  if (stickyPosts.length === 0) {
+  const hotPosts = await reddit
+    .getHotPosts({ limit: 100, subredditName: subreddit.name })
+    .get(100);
+
+  for (const post of hotPosts) {
+    await unstickyIfAppOwned(post, 'hot_post');
+  }
+
+  if (unstickiedCount === 0) {
     console.info(
       `[sticky] no existing app-owned stickies found: subreddit=${subreddit.name}`
     );

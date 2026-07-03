@@ -29,7 +29,10 @@ import {
 import { cancelUpdates, untrackPost } from "../data/updaterData";
 import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
-import { notifyStickyFailure } from "../utils/stickyFailureNotifications";
+import {
+  getPostUrl,
+  notifyStickyFailure,
+} from "../utils/stickyFailureNotifications";
 import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { toErrorMessage } from "../utils/crosspostLogs";
@@ -507,18 +510,6 @@ async function resolveCurrentUsername(): Promise<string | undefined> {
   }
 
   return undefined;
-}
-
-function getPostUrl(post: {
-  permalink?: string;
-  url?: string;
-}): string | undefined {
-  const postUrl = post.permalink || post.url;
-  if (!postUrl) {
-    return undefined;
-  }
-
-  return postUrl.startsWith("http") ? postUrl : `https://reddit.com${postUrl}`;
 }
 
 async function submitExperimentalSelfPost(

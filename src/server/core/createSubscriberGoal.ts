@@ -71,7 +71,12 @@ export async function createSubscriberGoal({
     throw new Error("Could not resolve app user.");
   }
 
-  await clearUserStickies(reddit, appUser.username);
+  const existingTrackedPosts = await getTrackedPosts(redis);
+  const existingQueuedPosts = await getQueuedUpdates(redis);
+  await clearUserStickies(reddit, appUser.username, {
+    knownPostIds: [...new Set([...existingTrackedPosts, ...existingQueuedPosts])],
+    subreddit,
+  });
 
   const textFallback = textFallbackMaker({
     goal: options.goal,
@@ -165,7 +170,7 @@ async function stickyAndVerifyPost(
     `[sticky] attempting to sticky new Subscriber Goal: subreddit=${subredditName} postId=${post.id}`,
   );
   try {
-    await post.sticky();
+    await post.sticky(1);
     console.info(
       `[sticky] sticky call completed: subreddit=${subredditName} postId=${post.id}`,
     );

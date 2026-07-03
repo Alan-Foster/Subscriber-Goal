@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getSubredditIcon, safeGetWikiPageRevisions } from './redditUtils';
+import {
+  clearUserStickies,
+  getSubredditIcon,
+  safeGetWikiPageRevisions,
+} from './redditUtils';
 import * as crosspostLogs from './crosspostLogs';
 
 describe('getSubredditIcon', () => {
@@ -62,6 +66,123 @@ describe('getSubredditIcon', () => {
 
     expect(icon).toBe('/reddit_temp_logo.jpg');
     expect(reddit.getSubredditStyles).not.toHaveBeenCalled();
+  });
+});
+
+const createPost = ({
+  id = 't3_post',
+  subredditId = 't5_abc123',
+  authorName = 'subscriber-goal',
+  stickied = true,
+  isStickied = vi.fn(() => stickied),
+}: {
+  id?: string;
+  subredditId?: string;
+  authorName?: string;
+  stickied?: boolean;
+  isStickied?: ReturnType<typeof vi.fn>;
+} = {}) => ({
+  id,
+  subredditId,
+  authorName,
+  stickied,
+  isStickied,
+  unsticky: vi.fn(),
+});
+
+describe('clearUserStickies', () => {
+  it('unstickies a known tracked app-owned post even when it is absent from hot posts', async () => {
+    const knownPost = createPost({ id: 't3_known' });
+    const reddit = {
+      getPostById: vi.fn(async () => knownPost),
+      getHotPosts: vi.fn(() => ({
+        get: vi.fn(async () => []),
+      })),
+    };
+
+    await clearUserStickies(
+      reddit as unknown as Parameters<typeof clearUserStickies>[0],
+      'subscriber-goal',
+      {
+        knownPostIds: ['t3_known'],
+        subreddit: { id: 't5_abc123', name: 'ExampleSub' },
+      }
+    );
+
+    expect(reddit.getPostById).toHaveBeenCalledWith('t3_known');
+    expect(knownPost.unsticky).toHaveBeenCalledOnce();
+  });
+
+  it('does not unsticky known posts owned by another author', async () => {
+    const knownPost = createPost({ authorName: 'other-mod' });
+    const reddit = {
+      getPostById: vi.fn(async () => knownPost),
+      getHotPosts: vi.fn(() => ({
+        get: vi.fn(async () => []),
+      })),
+    };
+
+    await clearUserStickies(
+      reddit as unknown as Parameters<typeof clearUserStickies>[0],
+      'subscriber-goal',
+      {
+        knownPostIds: ['t3_known'],
+        subreddit: { id: 't5_abc123', name: 'ExampleSub' },
+      }
+    );
+
+    expect(knownPost.unsticky).not.toHaveBeenCalled();
+  });
+
+  it('does not unsticky known posts from another subreddit', async () => {
+    const knownPost = createPost({ subredditId: 't5_other' });
+    const reddit = {
+      getPostById: vi.fn(async () => knownPost),
+      getHotPosts: vi.fn(() => ({
+        get: vi.fn(async () => []),
+      })),
+    };
+
+    await clearUserStickies(
+      reddit as unknown as Parameters<typeof clearUserStickies>[0],
+      'subscriber-goal',
+      {
+        knownPostIds: ['t3_known'],
+        subreddit: { id: 't5_abc123', name: 'ExampleSub' },
+      }
+    );
+
+    expect(knownPost.unsticky).not.toHaveBeenCalled();
+  });
+
+  it('logs known-post refetch failures without blocking sticky cleanup', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const hotPost = createPost({ id: 't3_hot' });
+    const reddit = {
+      getPostById: vi.fn(async () => {
+        throw new Error('missing');
+      }),
+      getHotPosts: vi.fn(() => ({
+        get: vi.fn(async () => [hotPost]),
+      })),
+    };
+
+    await clearUserStickies(
+      reddit as unknown as Parameters<typeof clearUserStickies>[0],
+      'subscriber-goal',
+      {
+        knownPostIds: ['t3_known'],
+        subreddit: { id: 't5_abc123', name: 'ExampleSub' },
+      }
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[sticky] failed to fetch known app-owned sticky candidate:'
+      )
+    );
+    expect(hotPost.unsticky).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
   });
 });
 
