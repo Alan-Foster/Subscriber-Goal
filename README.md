@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 1.4.4 - Fixed a bug with sticky not replacing completed goals. Devvit 0.13.6. Updated Overrides.
 - 1.4.3 - Added more developer special code commands.
 - 1.4.1 - Subscriber Goal provides a warning via Modmail and DM when it cannot pin a post. Menu item developer special-code field. Devvit 0.13.2
 - 1.3.1 - Fixed issue with cron trying to update deleted / removed goals. Updated overrides. Devvit 0.12.24

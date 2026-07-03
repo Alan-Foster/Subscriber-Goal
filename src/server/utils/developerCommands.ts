@@ -2,6 +2,7 @@ const headerMaxLength = 120;
 
 export type DeveloperCommandResult = {
   submitAsUser: boolean;
+  selfPost: boolean;
   headerText?: string;
   ignoredCommands: string[];
   warnings: string[];
@@ -9,6 +10,7 @@ export type DeveloperCommandResult = {
 
 const emptyResult = (): DeveloperCommandResult => ({
   submitAsUser: false,
+  selfPost: false,
   ignoredCommands: [],
   warnings: [],
 });
@@ -61,6 +63,11 @@ export const parseDeveloperCommands = (
 
     if (command === "runAs") {
       result.submitAsUser = true;
+      continue;
+    }
+
+    if (command === "selfPost") {
+      result.selfPost = true;
       continue;
     }
 

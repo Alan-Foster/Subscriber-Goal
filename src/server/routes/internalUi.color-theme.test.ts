@@ -12,6 +12,7 @@ const hoisted = vi.hoisted(() => ({
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
     getCurrentUsername: vi.fn(),
+    submitPost: vi.fn(),
     modMail: {
       createModNotification: vi.fn(),
     },
@@ -102,6 +103,10 @@ describe("internalUi color theme create goal routes", () => {
       username: "subscriber-goal",
     });
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
+    hoisted.reddit.submitPost.mockResolvedValue({
+      id: "t3_selfpost",
+      permalink: "/user/ExampleMod/comments/selfpost/subscriber_goal_test/",
+    });
     hoisted.reddit.modMail.createModNotification.mockResolvedValue(
       "modmail-id",
     );
@@ -308,6 +313,128 @@ describe("internalUi color theme create goal routes", () => {
       subredditName: "ExampleSub",
       textFallback: expect.stringContaining("100 / 200 subscribers."),
       submitAsUser: true,
+    });
+  });
+
+  it("submits a selfPost to the executing user's personal feed and skips normal goal creation", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: "selfPost",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith({
+      subredditName: "u_ExampleMod",
+      title: "Subscriber Goal test for r/ExampleSub",
+      text: expect.stringContaining("Source subreddit: r/ExampleSub"),
+      runAs: "USER",
+    });
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("Subscriber count: 100"),
+      }),
+    );
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("Executor: u/ExampleMod"),
+      }),
+    );
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("Target: r/u_ExampleMod"),
+      }),
+    );
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("Created via Devvit runAs: USER."),
+      }),
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.clearUserStickies).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      showToast: "Experimental selfPost submitted to r/u_ExampleMod.",
+      navigateTo:
+        "https://reddit.com/user/ExampleMod/comments/selfpost/subscriber_goal_test/",
+    });
+  });
+
+  it("returns a selfPost failure toast when the executing username is unavailable", async () => {
+    hoisted.reddit.getCurrentUsername.mockResolvedValue(undefined);
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: "selfPost",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.reddit.submitPost).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      showToast:
+        "The selfPost developer command requires an authenticated Reddit user.",
+    });
+  });
+
+  it("returns a selfPost failure toast when submitting to the user feed fails", async () => {
+    hoisted.reddit.submitPost.mockRejectedValue(new Error("user feed denied"));
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: false,
+          colorTheme: ["red"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+          customDeveloperField: "selfPost",
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.reddit.submitPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subredditName: "u_ExampleMod",
+        runAs: "USER",
+      }),
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      showToast:
+        "Experimental selfPost to r/u_ExampleMod failed: user feed denied",
     });
   });
 

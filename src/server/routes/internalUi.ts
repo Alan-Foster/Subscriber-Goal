@@ -32,6 +32,7 @@ import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import { notifyStickyFailure } from "../utils/stickyFailureNotifications";
 import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
+import { toErrorMessage } from "../utils/crosspostLogs";
 
 export function registerInternalUiRoutes(router: Router): void {
   router.post(
@@ -189,6 +190,11 @@ export function registerInternalUiRoutes(router: Router): void {
 
       try {
         const subreddit = await reddit.getCurrentSubreddit();
+        if (developerCommands.selfPost) {
+          await submitExperimentalSelfPost(subreddit, res);
+          return;
+        }
+
         const appSettings = getAppSettings();
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
@@ -513,4 +519,63 @@ function getPostUrl(post: {
   }
 
   return postUrl.startsWith("http") ? postUrl : `https://reddit.com${postUrl}`;
+}
+
+async function submitExperimentalSelfPost(
+  subreddit: { name: string; numberOfSubscribers: number },
+  res: Response<UiResponse>,
+): Promise<void> {
+  let username: string | undefined;
+  try {
+    username = await reddit.getCurrentUsername();
+  } catch (error) {
+    console.warn(
+      `[developerField:selfPost] failed to resolve current username: subreddit=${subreddit.name} userId=${context.userId ?? "unknown"} error=${toErrorMessage(error)}`,
+    );
+  }
+
+  if (!username) {
+    res.json({
+      showToast:
+        "The selfPost developer command requires an authenticated Reddit user.",
+    });
+    return;
+  }
+
+  const targetSubreddit = `u_${username}`;
+  const title = `Subscriber Goal test for r/${subreddit.name}`;
+  const text =
+    "This is an experimental Subscriber Goal self-post test.\n\n" +
+    `Source subreddit: r/${subreddit.name}\n` +
+    `Subscriber count: ${subreddit.numberOfSubscribers}\n` +
+    `Executor: u/${username}\n` +
+    `Target: r/${targetSubreddit}\n` +
+    "Created via Devvit runAs: USER.";
+
+  try {
+    const post = await reddit.submitPost({
+      subredditName: targetSubreddit,
+      title,
+      text,
+      runAs: "USER",
+    });
+    const postUrl =
+      getPostUrl(post) ??
+      (post.id
+        ? `https://reddit.com/r/${targetSubreddit}/comments/${post.id}`
+        : undefined);
+
+    res.json({
+      showToast: `Experimental selfPost submitted to r/${targetSubreddit}.`,
+      ...(postUrl ? { navigateTo: postUrl } : {}),
+    });
+  } catch (error) {
+    const errorMessage = toErrorMessage(error);
+    console.error(
+      `[developerField:selfPost] submit failed: sourceSubreddit=${subreddit.name} targetSubreddit=${targetSubreddit} userId=${context.userId ?? "unknown"} error=${errorMessage}`,
+    );
+    res.json({
+      showToast: `Experimental selfPost to r/${targetSubreddit} failed: ${errorMessage}`,
+    });
+  }
 }

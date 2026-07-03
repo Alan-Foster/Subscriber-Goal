@@ -5,6 +5,25 @@ describe("parseDeveloperCommands", () => {
   it("parses runAs", () => {
     expect(parseDeveloperCommands("runAs")).toMatchObject({
       submitAsUser: true,
+      selfPost: false,
+      ignoredCommands: [],
+      warnings: [],
+    });
+  });
+
+  it("parses selfPost", () => {
+    expect(parseDeveloperCommands("selfPost")).toMatchObject({
+      selfPost: true,
+      submitAsUser: false,
+      ignoredCommands: [],
+      warnings: [],
+    });
+  });
+
+  it("parses selfPost and runAs together", () => {
+    expect(parseDeveloperCommands("selfPost, runAs")).toMatchObject({
+      selfPost: true,
+      submitAsUser: true,
       ignoredCommands: [],
       warnings: [],
     });
@@ -13,6 +32,7 @@ describe("parseDeveloperCommands", () => {
   it("parses a quoted header command", () => {
     expect(parseDeveloperCommands('header="Custom Message"')).toMatchObject({
       submitAsUser: false,
+      selfPost: false,
       headerText: "Custom Message",
       ignoredCommands: [],
       warnings: [],
@@ -46,9 +66,10 @@ describe("parseDeveloperCommands", () => {
   });
 
   it("keeps wrong-case commands ignored", () => {
-    expect(parseDeveloperCommands('RunAs, Header="Nope"')).toMatchObject({
+    expect(parseDeveloperCommands('RunAs, SelfPost, Header="Nope"')).toMatchObject({
       submitAsUser: false,
-      ignoredCommands: ["RunAs", 'Header="Nope"'],
+      selfPost: false,
+      ignoredCommands: ["RunAs", "SelfPost", 'Header="Nope"'],
     });
   });
 
