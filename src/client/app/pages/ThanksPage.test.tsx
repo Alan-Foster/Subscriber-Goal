@@ -60,4 +60,20 @@ describe('ThanksPage', () => {
     expect(html).toContain('text-lg font-semibold');
     expect(html).toContain('Thanks for Subscribing!');
   });
+
+  it('uses compact tiny thanks layout without the title', () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, postHeight: 'tiny' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('View other subscriber goals in r/SubGoal');
+    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).not.toContain('Thanks for Subscribing!');
+    expect(html).toContain('There are now 10 subscribers in the community!');
+    expect(html).toContain('Return to Previous Page');
+    expect(html).toContain('gap-2 px-4 py-3');
+  });
 });

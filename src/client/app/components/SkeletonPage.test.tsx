@@ -11,4 +11,15 @@ describe('SkeletonPage', () => {
     expect(html).not.toContain('max-sm:pt-8');
     expect(html).not.toContain('h-[100px] w-[100px]');
   });
+
+  it('uses tiny height with only the button placeholder', () => {
+    const html = renderToStaticMarkup(<SkeletonPage postHeight="tiny" />);
+
+    expect(html).toContain('h-[120px]');
+    expect(html).not.toContain('h-[100px] w-[100px]');
+    expect(html).not.toContain('w-48');
+    expect(html).not.toContain('w-[70%]');
+    expect(html).toContain('h-9 w-56');
+    expect(html).not.toContain('w-40');
+  });
 });

@@ -2,6 +2,7 @@ import type { RedisClient } from '../types';
 import type { BasicUserData } from './basicData';
 import {
   addRecentSubscriberPostIndex,
+  eraseFromRecentSubscribers,
   postRecentSubscriberSuffix,
   subscriberGoalsKey,
 } from './subGoalData';
@@ -171,10 +172,6 @@ export async function setNewSubscriber(
   user: BasicUserData,
   shareUsername: boolean
 ): Promise<boolean> {
-  const erased = await redis.hGet(subscriberStatsErasedUserIdsKey, user.id);
-  if (erased) {
-    return false;
-  }
   const alreadySubscribed = await isTrackedSubscriber(redis, user.id);
   if (alreadySubscribed) {
     return false;
@@ -213,6 +210,21 @@ export async function setNewSubscriber(
     score: now,
   });
   return true;
+}
+
+export async function clearLegacySubscriberErasureTombstones(
+  redis: RedisClient
+): Promise<number> {
+  const tombstones = await redis.hGetAll(subscriberStatsErasedUserIdsKey);
+  const userIds = Object.keys(tombstones);
+  if (userIds.length === 0) {
+    return 0;
+  }
+  await redis.hDel(subscriberStatsErasedUserIdsKey, userIds);
+  console.info(
+    `[subscriberStatsErasure] cleared legacy tombstones: count=${userIds.length}`
+  );
+  return userIds.length;
 }
 
 type SubscriberStatsMigrationStatus = 'pending' | 'running' | 'complete';
@@ -375,13 +387,6 @@ export async function processSubscriberStatsMigrationBatch(
       continue;
     }
 
-    const tombstoned = await redis.hGet(subscriberStatsErasedUserIdsKey, parsed.id);
-    if (tombstoned) {
-      await redis.zRem(subscriberStatsKey, [record.member]);
-      skippedExisting += 1;
-      continue;
-    }
-
     await redis.hSet(subscriberStatsUsernameToUserIdKey, {
       [normalizeUsername(parsed.username)]: parsed.id,
     });
@@ -446,13 +451,21 @@ export async function untrackSubscriberById(
 ): Promise<SubscriberErasureResult> {
   const indexedRecord = await redis.hGet(subscriberStatsByUserIdKey, userId);
   const parsed = indexedRecord ? parseSubscriberMember(indexedRecord) : undefined;
-  await redis.hSet(subscriberStatsErasedUserIdsKey, {
-    [userId]: String(Date.now()),
-  });
 
   const legacyMembers = parseStringList(
     await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId)
   );
+  let cursor = 0;
+  do {
+    const result = await redis.zScan(subscriberStatsKey, cursor, undefined, 100);
+    cursor = result.cursor;
+    legacyMembers.push(
+      ...result.members
+        .filter((member) => parseSubscriberMember(member.member)?.id === userId)
+        .map((member) => member.member)
+    );
+  } while (cursor !== 0);
+
   if (parsed) {
     legacyMembers.push(
       serializeLegacySubscriberMember({
@@ -475,6 +488,10 @@ export async function untrackSubscriberById(
       .filter((username): username is string => Boolean(username)),
   ];
   await deleteSubscriberIndexes(redis, userId, usernamesToDelete);
+  await redis.hDel(subscriberStatsErasedUserIdsKey, [userId]);
+  for (const username of usernamesToDelete) {
+    await eraseFromRecentSubscribers(redis, username);
+  }
   return { status: 'complete', userIds: [userId] };
 }
 

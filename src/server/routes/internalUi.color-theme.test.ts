@@ -1,6 +1,6 @@
 import type { Request, Response, Router } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { internalRoutes } from "../../shared/routes";
+import { formNames, internalRoutes } from "../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({
   context: {
@@ -26,6 +26,9 @@ const hoisted = vi.hoisted(() => ({
   registerNewSubGoalPost: vi.fn(),
   setSubredditDisplayNameForPost: vi.fn(),
   cancelAllAutoCreateNextGoals: vi.fn(),
+  eraseFromRecentSubscribers: vi.fn(),
+  untrackSubscriberById: vi.fn(),
+  untrackSubscriberByUsername: vi.fn(),
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
@@ -50,7 +53,7 @@ vi.mock("../core/post", () => ({
 
 vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
-  eraseFromRecentSubscribers: vi.fn(),
+  eraseFromRecentSubscribers: hoisted.eraseFromRecentSubscribers,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
 }));
@@ -61,8 +64,8 @@ vi.mock("../data/subredditDisplayNameData", () => ({
 }));
 
 vi.mock("../data/subscriberStats", () => ({
-  untrackSubscriberById: vi.fn(),
-  untrackSubscriberByUsername: vi.fn(),
+  untrackSubscriberById: hoisted.untrackSubscriberById,
+  untrackSubscriberByUsername: hoisted.untrackSubscriberByUsername,
 }));
 
 vi.mock("../data/updaterData", () => ({
@@ -95,6 +98,8 @@ function createRouteHarness(): Map<string, RouteHandler> {
 describe("internalUi color theme create goal routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    hoisted.context.subredditName = "ExampleSub";
+    hoisted.context.userId = "t2_mod";
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -127,12 +132,133 @@ describe("internalUi color theme create goal routes", () => {
       isStickied: vi.fn(() => true),
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
+    hoisted.untrackSubscriberById.mockResolvedValue({
+      status: "complete",
+      userIds: ["t2_mod"],
+    });
+    hoisted.untrackSubscriberByUsername.mockResolvedValue({
+      status: "complete",
+      userIds: ["t2_user"],
+    });
+    hoisted.eraseFromRecentSubscribers.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("shows a self-erasure form with only a confirmation field", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.menu.eraseMyData)?.({} as Request, res);
+
+    const response = json.mock.calls[0]?.[0] as {
+      showForm: {
+        name: string;
+        form: {
+          title: string;
+          fields: Array<{ name: string; type: string; label?: string }>;
+        };
+      };
+    };
+    expect(response.showForm.name).toBe(formNames.eraseMyData);
+    expect(response.showForm.form.title).toBe("Sub Goal - Erase My User Data");
+    expect(response.showForm.form.fields).toEqual([
+      expect.objectContaining({
+        name: "confirm",
+        type: "boolean",
+        label: "Remove all of my Sub Goal user data",
+      }),
+    ]);
+  });
+
+  it("keeps moderator erasure fields available for username or user id", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.menu.eraseData)?.({} as Request, res);
+
+    const response = json.mock.calls[0]?.[0] as {
+      showForm: {
+        name: string;
+        form: {
+          title: string;
+          fields: Array<{ name: string }>;
+        };
+      };
+    };
+    expect(response.showForm.name).toBe(formNames.eraseData);
+    expect(response.showForm.form.title).toBe(
+      "Sub Goal - Erase Another User's Data",
+    );
+    expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
+      "username",
+      "userId",
+      "confirm",
+    ]);
+  });
+
+  it("rejects self-erasure without confirmation", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.eraseMyData)?.(
+      { body: { confirm: false } } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast:
+        "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+    });
+    expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
+  });
+
+  it("rejects self-erasure when the user is not logged in", async () => {
+    hoisted.context.userId = undefined as unknown as string;
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.eraseMyData)?.(
+      { body: { confirm: true } } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: "Please log in to erase your Sub Goal user data.",
+    });
+    expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
+  });
+
+  it("erases the current user's data from the self-erasure form", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.eraseMyData)?.(
+      { body: { confirm: true } } as Request,
+      res,
+    );
+
+    expect(hoisted.untrackSubscriberById).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t2_mod",
+      "ExampleMod",
+    );
+    expect(hoisted.eraseFromRecentSubscribers).toHaveBeenCalledWith(
+      hoisted.redis,
+      "ExampleMod",
+    );
+    expect(json).toHaveBeenCalledWith({
+      showToast: "Your Sub Goal user data has been erased.",
+    });
   });
 
   it("adds a red-default color theme select to the create goal form", async () => {
@@ -179,6 +305,7 @@ describe("internalUi color theme create goal routes", () => {
       options: [
         { label: "Regular", value: "regular" },
         { label: "Short (no logo)", value: "short" },
+        { label: "Tiny (Subscribe button only)", value: "tiny" },
       ],
     });
     expect(fields.find((field) => field.name === "language")).toMatchObject({
@@ -225,11 +352,11 @@ describe("internalUi color theme create goal routes", () => {
     });
     expect(fields.map((field) => field.name)).toEqual([
       "language",
+      "postHeight",
       "subscriberGoal",
       "postTitle",
       "subredditDisplayName",
       "colorTheme",
-      "postHeight",
       "crosspost",
       "autoCreateNextGoal",
       "customDeveloperField",
@@ -272,6 +399,47 @@ describe("internalUi color theme create goal routes", () => {
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
+    );
+  });
+
+  it("stores tiny post height while suppressing crosspost and auto-create settings", async () => {
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          crosspost: true,
+          colorTheme: ["red"],
+          postHeight: ["tiny"],
+          autoCreateNextGoal: true,
+          language: ["en"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postHeight: "tiny",
+      }),
+    );
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      expect.anything(),
+      expect.objectContaining({ id: "t3_newpost" }),
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      false,
+      "en",
+      undefined,
+      "tiny",
     );
   });
 

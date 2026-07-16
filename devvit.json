@@ -55,18 +55,25 @@
         "endpoint": "/internal/menu/delete-goal"
       },
       {
-        "label": "Sub Goal - Erase a User's Data",
-        "description": "Erase subscriber data for a specific user",
+        "label": "Sub Goal - Erase Another User's Data",
+        "description": "Moderator tool to erase subscriber data for a specific user",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/erase-data"
+      },
+      {
+        "label": "Sub Goal - Erase My User Data",
+        "description": "Erase your own Sub Goal user data",
+        "location": "subreddit",
+        "endpoint": "/internal/menu/erase-my-data"
       }
     ]
   },
   "forms": {
     "createGoalForm": "/internal/form/create-goal",
     "deleteGoalForm": "/internal/form/delete-goal",
-    "eraseDataForm": "/internal/form/erase-data"
+    "eraseDataForm": "/internal/form/erase-data",
+    "eraseMyDataForm": "/internal/form/erase-my-data"
   },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",

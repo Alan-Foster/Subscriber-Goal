@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,
@@ -10,6 +10,7 @@ import {
   processRecentSubscriberIndexMigrationBatch,
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
+  registerNewSubGoalPost,
   scheduleAutoCreateNextGoal,
   setSubGoalData,
   setSubredditDisplayNameForPost,
@@ -233,7 +234,7 @@ describe("subGoalData subreddit display name", () => {
     await redis.hSet(subscriberGoalsKey, {
       t3_missing_goal: "10",
       t3_invalid_goal: "10",
-      [`t3_invalid${postHeightSuffix}`]: "tiny",
+      [`t3_invalid${postHeightSuffix}`]: "compact",
     });
 
     await expect(
@@ -248,6 +249,46 @@ describe("subGoalData subreddit display name", () => {
         "t3_invalid",
       ),
     ).resolves.toMatchObject({ postHeight: "regular" });
+  });
+
+  it("persists tiny post height and skips crossposting with a tiny reason", async () => {
+    const redis = new InMemoryRedis();
+    const getCurrentSubreddit = vi.fn();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const result = await registerNewSubGoalPost(
+      { getCurrentSubreddit } as never,
+      redis as unknown as Parameters<typeof registerNewSubGoalPost>[1],
+      { promoSubreddit: "SubGoal" } as never,
+      {
+        id: "t3_tiny",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      } as never,
+      10,
+      true,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+      undefined,
+      "tiny",
+    );
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_tiny",
+      ),
+    ).resolves.toMatchObject({
+      postHeight: "tiny",
+      autoCreateNextGoal: true,
+    });
+    expect(result).toEqual({ status: "skipped" });
+    expect(getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"reason":"tiny_post_height"'),
+    );
+    infoSpy.mockRestore();
   });
 
   it("defaults missing auto-create settings to disabled", async () => {

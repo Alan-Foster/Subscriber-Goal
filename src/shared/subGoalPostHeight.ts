@@ -1,10 +1,11 @@
-export const subGoalPostHeights = ['regular', 'short'] as const;
+export const subGoalPostHeights = ['regular', 'short', 'tiny'] as const;
 
 export type SubGoalPostHeight = (typeof subGoalPostHeights)[number];
 
 export const defaultSubGoalPostHeight: SubGoalPostHeight = 'regular';
 
 export const shortSubGoalPostHeightPixels = 234;
+export const tinySubGoalPostHeightPixels = 120;
 
 export function resolveSubGoalPostHeight(value: unknown): SubGoalPostHeight {
   return typeof value === 'string' &&

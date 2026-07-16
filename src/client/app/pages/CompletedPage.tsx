@@ -21,7 +21,7 @@ export const CompletedPage = ({
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const messages = getSubGoalPostMessages(state.language);
-  const isShort = state.postHeight === 'short';
+  const isShort = state.postHeight === 'short' || state.postHeight === 'tiny';
   const gregorianLocale = getGregorianLocale(messages.intlLocale);
   const completedDate = state.completedTime ? new Date(state.completedTime) : null;
   const timeText = completedDate

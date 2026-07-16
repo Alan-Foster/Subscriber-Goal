@@ -4,6 +4,7 @@ import {
   subscriberGoalsKey,
 } from './subGoalData';
 import {
+  clearLegacySubscriberErasureTombstones,
   getSubscriberStats,
   initializeSubscriberStatsMigration,
   processSubscriberStatsMigrationBatch,
@@ -232,8 +233,7 @@ describe('subscriberStats direct lookup', () => {
     ]);
   });
 
-  it('erases by user id without scanning legacy subscriber stats', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(2_000);
+  it('completely purges by user id without writing a tombstone', async () => {
     await redis.hSet(subscriberStatsByUserIdKey, {
       t2_user: 't2_user:TestUser:124:1000',
     });
@@ -246,6 +246,19 @@ describe('subscriberStats direct lookup', () => {
     await redis.zAdd(subscriberStatsKey, {
       member: 't2_user:TestUser:124',
       score: 1_000,
+    });
+    await redis.zAdd(subscriberStatsKey, {
+      member: 't2_user:OldName:100',
+      score: 900,
+    });
+    await redis.hSet(subscriberStatsErasedUserIdsKey, {
+      t2_user: '2000',
+    });
+    await redis.hSet(recentSubscriberPostsByUsernameKey, {
+      testuser: JSON.stringify(['t3_post']),
+    });
+    await redis.hSet(subscriberGoalsKey, {
+      t3_post_recent_subscriber: 'TestUser',
     });
 
     await expect(
@@ -262,10 +275,14 @@ describe('subscriberStats direct lookup', () => {
     expect(
       await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, 't2_user')
     ).toBeUndefined();
-    expect(await redis.hGet(subscriberStatsErasedUserIdsKey, 't2_user')).toBe(
-      '2000'
-    );
+    expect(await redis.hGet(subscriberStatsErasedUserIdsKey, 't2_user')).toBeUndefined();
     expect(await redis.zCard(subscriberStatsKey)).toBe(0);
+    expect(
+      await redis.hGet(recentSubscriberPostsByUsernameKey, 'testuser')
+    ).toBeUndefined();
+    expect(await redis.hGet(subscriberGoalsKey, 't3_post_recent_subscriber')).toBe(
+      ''
+    );
     expect(redis.zRangeCalls).toBe(0);
   });
 
@@ -292,10 +309,17 @@ describe('subscriberStats direct lookup', () => {
     expect(redis.zRangeCalls).toBe(0);
   });
 
-  it('does not allow erased users to be re-added', async () => {
+  it('allows users to be re-added after legacy tombstones are cleared', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
     await redis.hSet(subscriberStatsErasedUserIdsKey, {
       t2_user: '2000',
     });
+
+    await untrackSubscriberById(
+      redis as unknown as Parameters<typeof untrackSubscriberById>[0],
+      't2_user',
+      'TestUser'
+    );
 
     await expect(
       setNewSubscriber(
@@ -305,10 +329,29 @@ describe('subscriberStats direct lookup', () => {
         { id: 't2_user', username: 'TestUser' },
         true
       )
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
 
-    expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
-    expect(await redis.hGetAll(subscriberGoalsKey)).toEqual({});
+    expect(await redis.hGet(subscriberStatsErasedUserIdsKey, 't2_user')).toBeUndefined();
+    expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_user')).toBe(
+      't2_user:TestUser:124:1000'
+    );
+  });
+
+  it('clears all legacy erasure tombstones', async () => {
+    await redis.hSet(subscriberStatsErasedUserIdsKey, {
+      t2_a: '1000',
+      t2_b: '2000',
+    });
+
+    await expect(
+      clearLegacySubscriberErasureTombstones(
+        redis as unknown as Parameters<
+          typeof clearLegacySubscriberErasureTombstones
+        >[0]
+      )
+    ).resolves.toBe(2);
+
+    expect(await redis.hGetAll(subscriberStatsErasedUserIdsKey)).toEqual({});
   });
 });
 
@@ -476,7 +519,7 @@ describe('subscriberStats migration', () => {
     expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
   });
 
-  it('skips tombstoned users and removes their legacy members during migration', async () => {
+  it('migrates legacy subscriber records without consulting tombstones', async () => {
     await redis.zAdd(subscriberStatsKey, {
       member: 't2_erased:ErasedUser:10',
       score: 100,
@@ -504,7 +547,9 @@ describe('subscriberStats migration', () => {
       }
     );
 
-    expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_erased')).toBeUndefined();
-    expect(await redis.zCard(subscriberStatsKey)).toBe(0);
+    expect(await redis.hGet(subscriberStatsByUserIdKey, 't2_erased')).toBe(
+      't2_erased:ErasedUser:10:100'
+    );
+    expect(await redis.zCard(subscriberStatsKey)).toBe(1);
   });
 });

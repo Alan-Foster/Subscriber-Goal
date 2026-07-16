@@ -9,7 +9,9 @@ describe("devvit.json route alignment", () => {
     forms: Record<string, string>;
     triggers: Record<string, string>;
     scheduler: { tasks: { "posts-updater-job": { endpoint: string } } };
-    menu: { items: Array<{ endpoint: string; label: string }> };
+    menu: {
+      items: Array<{ endpoint: string; label: string; forUserType?: string }>;
+    };
     permissions: { reddit?: { asUser?: string[] } };
     settings?: { subreddit?: Record<string, unknown> };
   };
@@ -23,6 +25,9 @@ describe("devvit.json route alignment", () => {
     );
     expect(devvitConfig.forms[formNames.eraseData]).toBe(
       internalRoutes.forms.eraseData,
+    );
+    expect(devvitConfig.forms[formNames.eraseMyData]).toBe(
+      internalRoutes.forms.eraseMyData,
     );
   });
 
@@ -52,6 +57,25 @@ describe("devvit.json route alignment", () => {
     expect(endpoints.has(internalRoutes.menu.createGoal)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.deleteGoal)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.eraseData)).toBe(true);
+    expect(endpoints.has(internalRoutes.menu.eraseMyData)).toBe(true);
+  });
+
+  it("keeps moderator and self-erasure menu visibility distinct", () => {
+    const moderatorEraseItem = devvitConfig.menu.items.find(
+      (item) => item.endpoint === internalRoutes.menu.eraseData,
+    );
+    const selfEraseItem = devvitConfig.menu.items.find(
+      (item) => item.endpoint === internalRoutes.menu.eraseMyData,
+    );
+
+    expect(moderatorEraseItem).toMatchObject({
+      label: "Sub Goal - Erase Another User's Data",
+      forUserType: "moderator",
+    });
+    expect(selfEraseItem).toMatchObject({
+      label: "Sub Goal - Erase My User Data",
+    });
+    expect(selfEraseItem).not.toHaveProperty("forUserType");
   });
 
   it("does not expose subreddit installation settings", () => {

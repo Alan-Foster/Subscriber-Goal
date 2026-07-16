@@ -108,7 +108,7 @@ export const App = () => {
       showToast(messages.loginRequired);
       return;
     }
-    const effectiveShareUsername = state.subreddit.isNsfw
+    const effectiveShareUsername = state.subreddit.isNsfw || state.postHeight === 'tiny'
       ? false
       : shareUsername;
     const { state: updatedState, error: subscribeError } = await subscribe({
@@ -141,7 +141,7 @@ export const App = () => {
     if (returnNoticeTimeoutRef.current) {
       window.clearTimeout(returnNoticeTimeoutRef.current);
     }
-    const effectiveShareUsername = state?.subreddit.isNsfw
+    const effectiveShareUsername = state?.subreddit.isNsfw || state?.postHeight === 'tiny'
       ? false
       : shareUsername;
     const username = effectiveShareUsername ? state?.user?.username ?? null : null;
@@ -194,7 +194,12 @@ export const App = () => {
     return <SkeletonPage postHeight={state?.postHeight} />;
   }
 
-  const appHeightClass = state?.postHeight === 'short' ? 'h-[234px]' : 'h-[320px]';
+  const appHeightClass =
+    state?.postHeight === 'tiny'
+      ? 'h-[120px]'
+      : state?.postHeight === 'short'
+        ? 'h-[234px]'
+        : 'h-[320px]';
 
   return (
     <div

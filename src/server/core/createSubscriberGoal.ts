@@ -99,6 +99,11 @@ export async function createSubscriberGoal({
   await applyGoalPostFrameStyle(post, options.postHeight);
 
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
+  const isTinyPost = options.postHeight === "tiny";
+  const effectiveCrosspost = isTinyPost ? false : options.crosspost;
+  const effectiveAutoCreateNextGoal = isTinyPost
+    ? false
+    : options.autoCreateNextGoal;
 
   const crosspostDispatchResult = await registerNewSubGoalPost(
     reddit,
@@ -106,10 +111,10 @@ export async function createSubscriberGoal({
     appSettings,
     post,
     options.goal,
-    options.crosspost,
+    effectiveCrosspost,
     options.subredditDisplayName,
     options.colorTheme,
-    options.autoCreateNextGoal,
+    effectiveAutoCreateNextGoal,
     options.language,
     options.headerText,
     options.postHeight ?? defaultSubGoalPostHeight,

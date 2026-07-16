@@ -3,6 +3,7 @@ import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import {
   resolveSubGoalPostHeight,
   shortSubGoalPostHeightPixels,
+  tinySubGoalPostHeightPixels,
 } from "../../shared/subGoalPostHeight";
 
 type CreateGoalPostParams = {
@@ -48,12 +49,17 @@ export async function applyGoalPostFrameStyle(
   post: CustomPostStyleTarget,
   postHeight: SubGoalPostHeight,
 ): Promise<void> {
-  if (resolveSubGoalPostHeight(postHeight) !== "short") {
+  const resolvedPostHeight = resolveSubGoalPostHeight(postHeight);
+  if (resolvedPostHeight === "regular") {
     return;
   }
+  const heightPixels =
+    resolvedPostHeight === "tiny"
+      ? tinySubGoalPostHeightPixels
+      : shortSubGoalPostHeightPixels;
   if (typeof post.setCustomPostStyles !== "function") {
     console.warn(
-      `[postHeight] cannot apply short post height; post.setCustomPostStyles is unavailable: postId=${post.id ?? "unknown"}`,
+      `[postHeight] cannot apply ${resolvedPostHeight} post height; post.setCustomPostStyles is unavailable: postId=${post.id ?? "unknown"}`,
     );
     return;
   }
@@ -61,11 +67,11 @@ export async function applyGoalPostFrameStyle(
   try {
     await post.setCustomPostStyles({
       height: EntrypointHeight.HEIGHT_UNSPECIFIED,
-      heightPixels: shortSubGoalPostHeightPixels,
+      heightPixels,
     });
   } catch (error) {
     console.warn(
-      `[postHeight] failed to apply short post height: postId=${post.id ?? "unknown"} error=${String(error)}`,
+      `[postHeight] failed to apply ${resolvedPostHeight} post height: postId=${post.id ?? "unknown"} error=${String(error)}`,
     );
   }
 }

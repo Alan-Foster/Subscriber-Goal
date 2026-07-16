@@ -118,6 +118,37 @@ describe('SubGoalPage', () => {
     expect(html).toContain('Subscribe to r/ExampleSub');
   });
 
+  it('renders only the centered subscribe experience for unsubscribed tiny posts', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, postHeight: 'tiny' }}
+        {...commonProps}
+        notice="u/alice just subscribed!"
+      />
+    );
+
+    expect(html).toContain('View other subscriber goals in r/SubGoal');
+    expect(html).toContain('Subscribe to r/ExampleSub');
+    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).not.toContain('Welcome to r/ExampleSub');
+    expect(html).not.toContain('123 / 500');
+    expect(html).not.toContain('u/alice just subscribed!');
+    expect(html).not.toContain('Show my username when I subscribe');
+  });
+
+  it('renders a subscriber count message instead of a disabled button for subscribed tiny posts', () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, postHeight: 'tiny', subscribed: true }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).toContain('r/ExampleSub has 123 subscribers');
+    expect(html).not.toContain('Subscribed to r/ExampleSub');
+    expect(html).not.toContain('disabled=""');
+  });
+
   it('does not add attention glow after subscribing', () => {
     const html = renderToStaticMarkup(
       <SubGoalPage

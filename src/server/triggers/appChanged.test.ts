@@ -7,6 +7,7 @@ const hoisted = vi.hoisted(() => ({
   },
   getCurrentSubreddit: vi.fn(),
   ensureSavedSubredditDisplayName: vi.fn(),
+  clearLegacySubscriberErasureTombstones: vi.fn(),
   initializeRecentSubscriberIndexMigration: vi.fn(),
   initializeSubscriberStatsMigration: vi.fn(),
   getTrackedPosts: vi.fn(),
@@ -26,6 +27,8 @@ vi.mock('../data/subredditDisplayNameData', () => ({
 }));
 
 vi.mock('../data/subscriberStats', () => ({
+  clearLegacySubscriberErasureTombstones:
+    hoisted.clearLegacySubscriberErasureTombstones,
   initializeSubscriberStatsMigration: hoisted.initializeSubscriberStatsMigration,
 }));
 
@@ -47,11 +50,13 @@ describe('onAppChanged', () => {
     hoisted.context.subredditId = undefined;
     hoisted.getCurrentSubreddit.mockReset();
     hoisted.ensureSavedSubredditDisplayName.mockReset();
+    hoisted.clearLegacySubscriberErasureTombstones.mockReset();
     hoisted.initializeRecentSubscriberIndexMigration.mockReset();
     hoisted.initializeSubscriberStatsMigration.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
+    hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
     hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(undefined);
   });
@@ -61,6 +66,7 @@ describe('onAppChanged', () => {
 
     expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
+    expect(hoisted.clearLegacySubscriberErasureTombstones).not.toHaveBeenCalled();
     expect(hoisted.initializeSubscriberStatsMigration).not.toHaveBeenCalled();
     expect(hoisted.initializeRecentSubscriberIndexMigration).not.toHaveBeenCalled();
     expect(hoisted.queueUpdates).not.toHaveBeenCalled();
@@ -75,6 +81,9 @@ describe('onAppChanged', () => {
     expect(hoisted.ensureSavedSubredditDisplayName).toHaveBeenCalledWith(
       expect.anything(),
       'SubGoal'
+    );
+    expect(hoisted.clearLegacySubscriberErasureTombstones).toHaveBeenCalledWith(
+      expect.anything()
     );
     expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
       expect.anything()

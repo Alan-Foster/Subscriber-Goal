@@ -14,6 +14,6 @@ describe('subGoalPostHeight', () => {
 
   it('defaults invalid values to regular', () => {
     expect(resolveSubGoalPostHeight(undefined)).toBe(defaultSubGoalPostHeight);
-    expect(resolveSubGoalPostHeight('tiny')).toBe(defaultSubGoalPostHeight);
+    expect(resolveSubGoalPostHeight('compact')).toBe(defaultSubGoalPostHeight);
   });
 });

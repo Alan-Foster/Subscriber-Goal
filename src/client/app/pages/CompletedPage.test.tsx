@@ -119,4 +119,17 @@ describe('CompletedPage', () => {
     expect(html).toContain('text-lg font-semibold');
     expect(html).toContain('r/indianActressClass reached 10 subscribers!');
   });
+
+  it('hides the subreddit logo but keeps the promo link for tiny posts', () => {
+    const html = renderToStaticMarkup(
+      <CompletedPage
+        state={{ ...baseState, postHeight: 'tiny' }}
+        {...commonProps}
+      />
+    );
+
+    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).toContain('View other subscriber goals in r/SubGoal');
+    expect(html).toContain('r/indianActressClass reached 10 subscribers!');
+  });
 });

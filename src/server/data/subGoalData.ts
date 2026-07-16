@@ -349,6 +349,15 @@ export async function registerNewSubGoalPost(
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
+  if (postHeight === 'tiny') {
+    logCrosspostEvent({
+      event: 'crosspost_attempt_skipped',
+      sourcePostId: post.id,
+      targetSubreddit: appSettings.promoSubreddit,
+      reason: 'tiny_post_height',
+    });
+    return { status: 'skipped' };
+  }
   if (!crosspost) {
     logCrosspostEvent({
       event: 'crosspost_attempt_skipped',

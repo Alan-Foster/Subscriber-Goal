@@ -210,6 +210,30 @@ describe("createSubscriberGoal sticky handling", () => {
     );
   });
 
+  it("applies tiny post frame styles after creating the post", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    await createGoal({ postHeight: "tiny", crosspost: true });
+
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(post, "tiny");
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      post,
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      false,
+      "en",
+      undefined,
+      "tiny",
+    );
+  });
+
+
   it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {
     const refetchedBeforePropagation = createPost({
       isStickied: vi.fn(() => false),

@@ -1,44 +1,71 @@
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { SubGoalState } from '../../shared/types/api';
 
-const state: SubGoalState = {
-  goal: 1000,
-  recentSubscriber: null,
-  completedTime: null,
-  headerText: null,
-  colorTheme: 'red',
-  postHeight: 'regular',
-  language: 'en',
-  subscribed: false,
-  user: { id: 't2_user', username: 'alice' },
-  appSettings: {
-    promoSubreddit: 'SubGoal',
-  },
-  subreddit: {
-    id: 't5_test',
-    name: 'ExampleSub',
-    icon: '/icon.png',
-    subscribers: 123,
-    isNsfw: false,
-  },
-};
+const hoisted = vi.hoisted(() => ({
+  createState: () => ({
+    goal: 1000,
+    recentSubscriber: null,
+    completedTime: null,
+    headerText: null,
+    colorTheme: 'red',
+    postHeight: 'regular',
+    language: 'en',
+    subscribed: false,
+    user: { id: 't2_user', username: 'alice' },
+    appSettings: {
+      promoSubreddit: 'SubGoal',
+    },
+    subreddit: {
+      id: 't5_test',
+      name: 'ExampleSub',
+      icon: '/icon.png',
+      subscribers: 123,
+      isNsfw: false,
+    },
+  }),
+  state: undefined as unknown as SubGoalState,
+  subscribe: vi.fn(),
+  setError: vi.fn(),
+  showNotice: vi.fn(),
+  navigateTo: vi.fn(),
+  showToast: vi.fn(),
+}));
+
+hoisted.state = hoisted.createState() as SubGoalState;
+
+vi.mock('@devvit/web/client', () => ({
+  context: {},
+  navigateTo: hoisted.navigateTo,
+  showToast: hoisted.showToast,
+}));
 
 vi.mock('../hooks/useSubGoal', () => ({
   useSubGoal: () => ({
-    state,
+    state: hoisted.state,
     loading: false,
     submitting: false,
-    subscribe: vi.fn(async () => ({ state, error: null })),
-    setError: vi.fn(),
+    subscribe: hoisted.subscribe,
+    setError: hoisted.setError,
     notice: null,
-    showNotice: vi.fn(),
+    showNotice: hoisted.showNotice,
   }),
 }));
 
 import { App } from './App';
 
 describe('App', () => {
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+      true;
+    vi.resetAllMocks();
+    hoisted.state = hoisted.createState() as SubGoalState;
+    hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
+  });
+
   it('defaults username sharing to enabled on SFW subreddits', () => {
     const html = renderToStaticMarkup(<App />);
 
@@ -47,11 +74,47 @@ describe('App', () => {
   });
 
   it('uses the compact shell height for short posts', () => {
-    state.postHeight = 'short';
+    hoisted.state.postHeight = 'short';
     const html = renderToStaticMarkup(<App />);
-    state.postHeight = 'regular';
 
     expect(html).toContain('h-[234px]');
     expect(html).not.toContain('alt="Subreddit icon"');
+  });
+
+  it('uses the tiny shell height for tiny posts', () => {
+    hoisted.state.postHeight = 'tiny';
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('h-[120px]');
+    expect(html).not.toContain('alt="Subreddit icon"');
+  });
+
+  it('sends shareUsername false when subscribing from a tiny post', async () => {
+    hoisted.state.postHeight = 'tiny';
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    const subscribeButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Subscribe to r/ExampleSub',
+    );
+    expect(subscribeButton).toBeDefined();
+
+    await act(async () => {
+      subscribeButton?.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(hoisted.subscribe).toHaveBeenCalledWith({ shareUsername: false });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

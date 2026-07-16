@@ -5,6 +5,7 @@ import type {
   CreateGoalFormValues,
   DeleteGoalFormValues,
   EraseDataFormValues,
+  EraseMyDataFormValues,
 } from "../../shared/types/api";
 import {
   defaultSubGoalColorTheme,
@@ -92,6 +93,20 @@ export function registerInternalUiRoutes(router: Router): void {
                   required: true,
                 },
                 {
+                  name: "postHeight",
+                  label: "Post Height",
+                  type: "select",
+                  defaultValue: [defaultSubGoalPostHeight],
+                  options: [
+                    { label: "Regular", value: "regular" },
+                    { label: "Short (no logo)", value: "short" },
+                    { label: "Tiny (Subscribe button only)", value: "tiny" },
+                  ],
+                  helpText:
+                    "Tiny posts show only a subscribe button and cannot be crossposted.",
+                  required: true,
+                },
+                {
                   name: "subscriberGoal",
                   label: "Enter your Subscriber Goal",
                   type: "number",
@@ -131,19 +146,6 @@ export function registerInternalUiRoutes(router: Router): void {
                   ],
                   helpText:
                     "This controls the subscribe button, progress bar, and button glow color.",
-                  required: true,
-                },
-                {
-                  name: "postHeight",
-                  label: "Post Height",
-                  type: "select",
-                  defaultValue: [defaultSubGoalPostHeight],
-                  options: [
-                    { label: "Regular", value: "regular" },
-                    { label: "Short (no logo)", value: "short" },
-                  ],
-                  helpText:
-                    "Short posts reduce feed height and hide the subreddit logo.",
                   required: true,
                 },
                 {
@@ -227,6 +229,13 @@ export function registerInternalUiRoutes(router: Router): void {
           typeof requestedCrosspost === "boolean"
             ? requestedCrosspost
             : shouldCrosspostByDefault;
+        const shouldCreateTinyPost = postHeight === "tiny";
+        const effectiveCrosspost = shouldCreateTinyPost
+          ? false
+          : resolvedCrosspost;
+        const effectiveAutoCreateNextGoal = shouldCreateTinyPost
+          ? false
+          : autoCreateNextGoal;
 
         if (
           !subscriberGoal ||
@@ -275,10 +284,10 @@ export function registerInternalUiRoutes(router: Router): void {
               title: resolvedTitle,
               goal: subscriberGoal,
               subredditDisplayName: resolvedSubredditDisplayName,
-              crosspost: resolvedCrosspost,
+              crosspost: effectiveCrosspost,
               colorTheme,
               postHeight,
-              autoCreateNextGoal,
+              autoCreateNextGoal: effectiveAutoCreateNextGoal,
               language,
               cancelPendingAutoCreateGoals: true,
               submitAsUser: developerCommands.submitAsUser,
@@ -289,7 +298,7 @@ export function registerInternalUiRoutes(router: Router): void {
           });
 
         console.info(
-          `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${resolvedCrosspost}`,
+          `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${effectiveCrosspost}`,
         );
 
         if (stickyResult.status === "not_pinned") {
@@ -402,9 +411,9 @@ export function registerInternalUiRoutes(router: Router): void {
         showForm: {
           name: formNames.eraseData,
           form: {
-            title: "SubGoal - Erase a User's Data",
+            title: "Sub Goal - Erase Another User's Data",
             description:
-              "This will erase all data stored by Sub Goal associated with the specified user, such as when they subscribed and any other related data.",
+              "This moderator action will erase all data stored by Sub Goal for the specified user.",
             fields: [
               {
                 name: "username",
@@ -431,6 +440,33 @@ export function registerInternalUiRoutes(router: Router): void {
               },
             ],
             acceptLabel: "Erase",
+            cancelLabel: "Cancel",
+          },
+        },
+      });
+    },
+  );
+
+  router.post(
+    internalRoutes.menu.eraseMyData,
+    async (_req, res: Response<UiResponse>) => {
+      res.json({
+        showForm: {
+          name: formNames.eraseMyData,
+          form: {
+            title: "Sub Goal - Erase My User Data",
+            description:
+              "This will erase all data stored by Sub Goal for your Reddit account.",
+            fields: [
+              {
+                name: "confirm",
+                label: "Remove all of my Sub Goal user data",
+                type: "boolean",
+                defaultValue: false,
+                helpText: "This action is irreversible.",
+              },
+            ],
+            acceptLabel: "Erase My Data",
             cancelLabel: "Cancel",
           },
         },
@@ -510,6 +546,45 @@ export function registerInternalUiRoutes(router: Router): void {
       }
 
       res.json({ showToast: "User data has been erased successfully." });
+    },
+  );
+
+  router.post(
+    internalRoutes.forms.eraseMyData,
+    async (req, res: Response<UiResponse>) => {
+      const { confirm } = req.body as EraseMyDataFormValues;
+
+      if (!confirm) {
+        res.json({
+          showToast:
+            "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+        });
+        return;
+      }
+
+      const currentUserId = context.userId;
+      if (!currentUserId) {
+        res.json({
+          showToast: "Please log in to erase your Sub Goal user data.",
+        });
+        return;
+      }
+
+      let currentUsername: string | undefined;
+      try {
+        currentUsername = await reddit.getCurrentUsername();
+      } catch (error) {
+        console.warn(
+          `Could not resolve current username for self-erasure: ${String(error)}`,
+        );
+      }
+
+      await untrackSubscriberById(redis, currentUserId, currentUsername);
+      if (currentUsername) {
+        await eraseFromRecentSubscribers(redis, currentUsername);
+      }
+
+      res.json({ showToast: "Your Sub Goal user data has been erased." });
     },
   );
 }

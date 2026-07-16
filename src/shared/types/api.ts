@@ -87,3 +87,7 @@ export type EraseDataFormValues = {
   userId?: string;
   confirm?: boolean;
 };
+
+export type EraseMyDataFormValues = {
+  confirm?: boolean;
+};

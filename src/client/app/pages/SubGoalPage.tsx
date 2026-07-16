@@ -1,4 +1,5 @@
 import type { SubGoalState } from '../../../shared/types/api';
+import { formatSubscriberCount } from '../../../shared/numberFormat';
 import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
 import { ProgressBar } from '../components/ProgressBar';
 import { SubredditIcon } from '../components/SubredditIcon';
@@ -31,8 +32,41 @@ export const SubGoalPage = ({
   const showNotice = Boolean(notice);
   const messages = getSubGoalPostMessages(state.language);
   const isShort = state.postHeight === 'short';
+  const isTiny = state.postHeight === 'tiny';
   const welcomeText =
     state.headerText ?? messages.welcome({ subredditName: state.subreddit.name });
+
+  if (isTiny) {
+    return (
+      <div
+        className="relative flex h-full w-full flex-col items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
+        data-sg-theme={state.colorTheme}
+      >
+        <TopButtons
+          onVisitPromoSubPressed={onVisitPromoSub}
+          promoSubreddit={state.appSettings.promoSubreddit}
+          language={state.language}
+        />
+        {state.subscribed ? (
+          <div className="text-base font-bold text-[color:var(--sg-text-primary)]">
+            r/{state.subreddit.name} has{' '}
+            {formatSubscriberCount(state.subreddit.subscribers)} subscribers
+          </div>
+        ) : (
+          <button
+            className={`relative cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              shouldShowSubscribeAttention ? 'sg-subscribe-attention' : ''
+            }`}
+            disabled={isDisabled}
+            onClick={onSubscribe}
+          >
+            {messages.subscribeButton({ subredditName: state.subreddit.name })}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"

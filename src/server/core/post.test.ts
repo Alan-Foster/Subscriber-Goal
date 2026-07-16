@@ -91,6 +91,20 @@ describe("createGoalPost", () => {
     });
   });
 
+  it("applies heightPixels through post-creation styles for tiny posts", async () => {
+    const post = {
+      id: "t3_newpost",
+      setCustomPostStyles: vi.fn(),
+    };
+
+    await applyGoalPostFrameStyle(post, "tiny");
+
+    expect(post.setCustomPostStyles).toHaveBeenCalledWith({
+      height: EntrypointHeight.HEIGHT_UNSPECIFIED,
+      heightPixels: 120,
+    });
+  });
+
   it("does not apply post-creation styles for regular posts", async () => {
     const post = {
       id: "t3_newpost",

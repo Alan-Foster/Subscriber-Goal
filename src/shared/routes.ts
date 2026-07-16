@@ -17,11 +17,13 @@ export const internalRoutes = {
     createGoal: '/internal/menu/create-goal',
     deleteGoal: '/internal/menu/delete-goal',
     eraseData: '/internal/menu/erase-data',
+    eraseMyData: '/internal/menu/erase-my-data',
   },
   forms: {
     createGoal: '/internal/form/create-goal',
     deleteGoal: '/internal/form/delete-goal',
     eraseData: '/internal/form/erase-data',
+    eraseMyData: '/internal/form/erase-my-data',
   },
 } as const;
 
@@ -29,4 +31,5 @@ export const formNames = {
   createGoal: 'createGoalForm',
   deleteGoal: 'deleteGoalForm',
   eraseData: 'eraseDataForm',
+  eraseMyData: 'eraseMyDataForm',
 } as const;
