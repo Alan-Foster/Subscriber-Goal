@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ServerAppSettings } from '../settings';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ServerAppSettings } from "../settings";
 
 const emptyCrosspostSummary = {
-  status: 'success' as const,
+  status: "success" as const,
   revisionsFetched: 0,
   newPostsSeen: 0,
   crosspostsCreated: 0,
@@ -20,8 +20,8 @@ const emptyCrosspostSummary = {
 };
 
 const baseSettings: ServerAppSettings = {
-  promoSubreddit: 'SubGoal',
-  crosspostAuthoritySubreddit: 'SubGoal',
+  promoSubreddit: "SubGoal",
+  crosspostAuthoritySubreddit: "SubGoal",
   crosspostMaxSourcePostAgeMinutes: 10,
   crosspostIngestionEnabled: true,
   crosspostMaxRevisionAgeMinutes: 10,
@@ -45,6 +45,7 @@ const hoisted = vi.hoisted(() => ({
   processCrosspostDispatchQueue: vi.fn(),
   countPendingCrossposts: vi.fn(),
   processSubscriberStatsMigrationBatch: vi.fn(),
+  processPostKindMigrationBatch: vi.fn(),
   processRecentSubscriberIndexMigrationBatch: vi.fn(),
   processDueAutoCreateNextGoals: vi.fn(),
   getQueuedUpdates: vi.fn(),
@@ -58,39 +59,43 @@ const hoisted = vi.hoisted(() => ({
   applyGoalPostFrameStyle: vi.fn(),
 }));
 
-vi.mock('@devvit/web/server', () => ({
+vi.mock("@devvit/web/server", () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
   redis: {},
 }));
 
-vi.mock('../settings', () => ({
+vi.mock("../settings", () => ({
   getAppSettings: hoisted.getAppSettings,
 }));
 
-vi.mock('./modAction', () => ({
+vi.mock("./modAction", () => ({
   isCrosspostAuthorityInstall: (
     appSettings: ServerAppSettings,
-    subredditName: string
+    subredditName: string,
   ): boolean =>
-    subredditName.trim().replace(/^r\//i, '').toLowerCase() ===
+    subredditName.trim().replace(/^r\//i, "").toLowerCase() ===
     (appSettings.crosspostAuthoritySubreddit || appSettings.promoSubreddit)
       .trim()
-      .replace(/^r\//i, '')
+      .replace(/^r\//i, "")
       .toLowerCase(),
   processCrosspostDispatchQueue: hoisted.processCrosspostDispatchQueue,
 }));
 
-vi.mock('../data/crosspostData', () => ({
+vi.mock("../data/crosspostData", () => ({
   countPendingCrossposts: hoisted.countPendingCrossposts,
 }));
 
-vi.mock('../data/subscriberStats', () => ({
+vi.mock("../data/subscriberStats", () => ({
   processSubscriberStatsMigrationBatch:
     hoisted.processSubscriberStatsMigrationBatch,
 }));
 
-vi.mock('../data/subGoalData', () => ({
+vi.mock("../data/postKindMigration", () => ({
+  processPostKindMigrationBatch: hoisted.processPostKindMigrationBatch,
+}));
+
+vi.mock("../data/subGoalData", () => ({
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   checkCompletionStatus: hoisted.checkCompletionStatus,
   getSubGoalData: hoisted.getSubGoalData,
@@ -98,28 +103,28 @@ vi.mock('../data/subGoalData', () => ({
     hoisted.processRecentSubscriberIndexMigrationBatch,
 }));
 
-vi.mock('../data/updaterData', () => ({
+vi.mock("../data/updaterData", () => ({
   cancelUpdates: hoisted.cancelUpdates,
   getQueuedUpdates: hoisted.getQueuedUpdates,
   queueUpdate: hoisted.queueUpdate,
   untrackPost: hoisted.untrackPost,
 }));
 
-vi.mock('../utils/textFallback', () => ({
+vi.mock("../utils/textFallback", () => ({
   applyTextFallback: hoisted.applyTextFallback,
 }));
 
-vi.mock('../core/autoCreateNextGoal', () => ({
+vi.mock("../core/autoCreateNextGoal", () => ({
   processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
 }));
 
-vi.mock('../core/post', () => ({
+vi.mock("../core/post", () => ({
   applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
 }));
 
-import { onPostsUpdaterJob } from './scheduler';
+import { onPostsUpdaterJob } from "./scheduler";
 
-describe('onPostsUpdaterJob crosspost scheduling', () => {
+describe("onPostsUpdaterJob crosspost scheduling", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     hoisted.context.subredditName = undefined;
@@ -129,6 +134,7 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.processCrosspostDispatchQueue.mockReset();
     hoisted.countPendingCrossposts.mockReset();
     hoisted.processSubscriberStatsMigrationBatch.mockReset();
+    hoisted.processPostKindMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.processDueAutoCreateNextGoals.mockReset();
     hoisted.getQueuedUpdates.mockReset();
@@ -141,10 +147,15 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.applyTextFallback.mockReset();
     hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
-    hoisted.processCrosspostDispatchQueue.mockResolvedValue(emptyCrosspostSummary);
+    hoisted.processCrosspostDispatchQueue.mockResolvedValue(
+      emptyCrosspostSummary,
+    );
+    hoisted.processPostKindMigrationBatch.mockResolvedValue({});
     hoisted.countPendingCrossposts.mockResolvedValue(0);
     hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);
-    hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(undefined);
+    hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(
+      undefined,
+    );
     hoisted.processDueAutoCreateNextGoals.mockResolvedValue({
       due: 0,
       created: 0,
@@ -154,192 +165,200 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.getSubGoalData.mockResolvedValue({
       goal: 12,
-      recentSubscriber: '',
+      recentSubscriber: "",
       completedTime: 0,
-      subredditDisplayName: 'CorporateGifts',
-      colorTheme: 'red',
-      postHeight: 'regular',
+      subredditDisplayName: "CorporateGifts",
+      colorTheme: "red",
+      postHeight: "regular",
       autoCreateNextGoal: true,
-      language: 'en',
+      language: "en",
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      name: 'CorporateGifts',
+      name: "CorporateGifts",
       numberOfSubscribers: 10,
     });
   });
 
-  it('skips crosspost ingestion and pending-depth lookup outside authority installs', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
+  it("skips crosspost ingestion and pending-depth lookup outside authority installs", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
 
     await onPostsUpdaterJob();
 
     expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
     expect(hoisted.countPendingCrossposts).not.toHaveBeenCalled();
     expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
-    expect(hoisted.processRecentSubscriberIndexMigrationBatch).toHaveBeenCalled();
+    expect(
+      hoisted.processRecentSubscriberIndexMigrationBatch,
+    ).toHaveBeenCalled();
   });
 
-  it('runs crosspost ingestion from the authority install', async () => {
-    hoisted.context.subredditName = 'SubGoal';
+  it("runs crosspost ingestion from the authority install", async () => {
+    hoisted.context.subredditName = "SubGoal";
 
     await onPostsUpdaterJob();
 
     expect(hoisted.processCrosspostDispatchQueue).toHaveBeenCalledWith(
       baseSettings,
-      'scheduler_posts_updater'
+      "scheduler_posts_updater",
     );
     expect(hoisted.countPendingCrossposts).toHaveBeenCalledWith(
       expect.anything(),
-      'SubGoal'
+      "SubGoal",
     );
   });
 
-  it('cleans up moderator-removed posts without updating or requeueing', async () => {
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_removed']);
+  it("cleans up moderator-removed posts without updating or requeueing", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_removed"]);
     hoisted.reddit.getPostById.mockResolvedValue({
-      id: 't3_removed',
-      removedByCategory: 'moderator',
+      id: "t3_removed",
+      removedByCategory: "moderator",
     });
 
     await onPostsUpdaterJob();
 
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
-      't3_removed'
+      "t3_removed",
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
-      't3_removed'
+      "t3_removed",
     );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       expect.anything(),
-      't3_removed'
+      "t3_removed",
     );
     expect(hoisted.applyTextFallback).not.toHaveBeenCalled();
     expect(hoisted.queueUpdate).not.toHaveBeenCalled();
     expect(infoSpy).toHaveBeenCalledWith(
-      '[updater] cleaned up inactive post: postId=t3_removed reason=removedByCategory:moderator'
+      "[updater] cleaned up inactive post: postId=t3_removed reason=removedByCategory:moderator",
     );
   });
 
-  it('cleans up deleted posts without updating or requeueing', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_deleted']);
+  it("cleans up deleted posts without updating or requeueing", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_deleted"]);
     hoisted.reddit.getPostById.mockResolvedValue({
-      id: 't3_deleted',
-      removedByCategory: 'deleted',
+      id: "t3_deleted",
+      removedByCategory: "deleted",
     });
 
     await onPostsUpdaterJob();
 
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
-      't3_deleted'
+      "t3_deleted",
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
-      't3_deleted'
+      "t3_deleted",
     );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       expect.anything(),
-      't3_deleted'
+      "t3_deleted",
     );
     expect(hoisted.applyTextFallback).not.toHaveBeenCalled();
     expect(hoisted.queueUpdate).not.toHaveBeenCalled();
   });
 
-  it('updates and requeues active posts with no removedByCategory', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_active']);
+  it("updates and requeues active posts with no removedByCategory", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_active"]);
     hoisted.reddit.getPostById.mockResolvedValue({
-      id: 't3_active',
+      id: "t3_active",
       removedByCategory: undefined,
     });
 
     await onPostsUpdaterJob();
 
     expect(hoisted.applyTextFallback).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 't3_active' }),
+      expect.objectContaining({ id: "t3_active" }),
       expect.objectContaining({
         goal: 12,
         subscribers: 10,
-        subredditName: 'CorporateGifts',
-      })
+        subredditName: "CorporateGifts",
+      }),
     );
     expect(hoisted.queueUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      't3_active',
-      expect.any(Date)
+      "t3_active",
+      expect.any(Date),
     );
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 't3_active' }),
-      'regular'
+      expect.objectContaining({ id: "t3_active" }),
+      "regular",
     );
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.untrackPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
-  it('repairs short post frame styles for active queued posts', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_short']);
+  it("repairs short post frame styles for active queued posts", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_short"]);
     hoisted.getSubGoalData.mockResolvedValue({
       goal: 12,
-      recentSubscriber: '',
+      recentSubscriber: "",
       completedTime: 0,
-      subredditDisplayName: 'CorporateGifts',
-      colorTheme: 'red',
-      postHeight: 'short',
+      subredditDisplayName: "CorporateGifts",
+      colorTheme: "red",
+      postHeight: "short",
       autoCreateNextGoal: true,
-      language: 'en',
+      language: "en",
     });
     hoisted.reddit.getPostById.mockResolvedValue({
-      id: 't3_short',
+      id: "t3_short",
       removedByCategory: undefined,
     });
 
     await onPostsUpdaterJob();
 
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 't3_short' }),
-      'short'
+      expect.objectContaining({ id: "t3_short" }),
+      "short",
     );
     expect(hoisted.queueUpdate).toHaveBeenCalledWith(
       expect.anything(),
-      't3_short',
-      expect.any(Date)
+      "t3_short",
+      expect.any(Date),
     );
   });
 
-  it('cleans up missing posts returned as deleted/not-found errors', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_missing']);
-    hoisted.reddit.getPostById.mockRejectedValue(new Error('post not found'));
+  it("cleans up missing posts returned as deleted/not-found errors", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_missing"]);
+    hoisted.reddit.getPostById.mockRejectedValue(new Error("post not found"));
 
     await onPostsUpdaterJob();
 
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
-      't3_missing'
+      "t3_missing",
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
-      't3_missing'
+      "t3_missing",
     );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       expect.anything(),
-      't3_missing'
+      "t3_missing",
     );
     expect(hoisted.queueUpdate).not.toHaveBeenCalled();
   });
 
-  it('keeps transient post lookup errors queued for retry', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_retry']);
-    hoisted.reddit.getPostById.mockRejectedValue(new Error('503 Service Unavailable'));
+  it("keeps transient post lookup errors queued for retry", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_retry"]);
+    hoisted.reddit.getPostById.mockRejectedValue(
+      new Error("503 Service Unavailable"),
+    );
 
     await onPostsUpdaterJob();
 
@@ -347,52 +366,58 @@ describe('onPostsUpdaterJob crosspost scheduling', () => {
     expect(hoisted.untrackPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error updating post t3_retry: Error: 503 Service Unavailable'
+      "Error updating post t3_retry: Error: 503 Service Unavailable",
     );
   });
 
-  it('cleans up invalid post ids from queue and tracking', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['bad_id']);
+  it("cleans up invalid post ids from queue and tracking", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["bad_id"]);
 
     await onPostsUpdaterJob();
 
-    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(expect.anything(), 'bad_id');
-    expect(hoisted.untrackPost).toHaveBeenCalledWith(expect.anything(), 'bad_id');
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "bad_id",
+    );
+    expect(hoisted.untrackPost).toHaveBeenCalledWith(
+      expect.anything(),
+      "bad_id",
+    );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       expect.anything(),
-      'bad_id'
+      "bad_id",
     );
     expect(hoisted.reddit.getPostById).not.toHaveBeenCalled();
   });
 
-  it('cleans up posts with missing goal data', async () => {
-    hoisted.context.subredditName = 'CorporateGifts';
-    hoisted.getQueuedUpdates.mockResolvedValue(['t3_no_goal']);
+  it("cleans up posts with missing goal data", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_no_goal"]);
     hoisted.getSubGoalData.mockResolvedValue({
       goal: 0,
-      recentSubscriber: '',
+      recentSubscriber: "",
       completedTime: 0,
-      subredditDisplayName: 'CorporateGifts',
-      colorTheme: 'red',
-      postHeight: 'regular',
+      subredditDisplayName: "CorporateGifts",
+      colorTheme: "red",
+      postHeight: "regular",
       autoCreateNextGoal: true,
-      language: 'en',
+      language: "en",
     });
 
     await onPostsUpdaterJob();
 
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
-      't3_no_goal'
+      "t3_no_goal",
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
-      't3_no_goal'
+      "t3_no_goal",
     );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       expect.anything(),
-      't3_no_goal'
+      "t3_no_goal",
     );
     expect(hoisted.reddit.getPostById).not.toHaveBeenCalled();
   });

@@ -1,8 +1,8 @@
-import type { SubGoalState } from '../../../shared/types/api';
-import { formatSubscriberCount } from '../../../shared/numberFormat';
-import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
-import { SubredditIcon } from '../components/SubredditIcon';
-import { TopButtons } from '../components/TopButtons';
+import type { SubGoalState } from "../../../shared/types/api";
+import { formatSubscriberCount } from "../../../shared/numberFormat";
+import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
+import { SubredditIcon } from "../components/SubredditIcon";
+import { TopButtons } from "../components/TopButtons";
 
 type ThanksPageProps = {
   state: SubGoalState;
@@ -18,36 +18,33 @@ export const ThanksPage = ({
   onCelebrate,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
-  const isShort = state.postHeight === 'short';
-  const isTiny = state.postHeight === 'tiny';
+  const isShort = state.postHeight === "short";
+  if (state.postHeight === "tiny") {
+    return (
+      <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-base font-semibold text-[color:var(--sg-text-primary)]">
+        {messages.subscribedButton({ subredditName: state.subreddit.name })}
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`relative flex h-full w-full flex-col items-center justify-center text-center text-[color:var(--sg-text-primary)] ${
-        isTiny ? 'gap-2 px-4 py-3' : 'gap-4 px-4 py-6'
-      }`}
-    >
+    <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {isShort || isTiny ? null : (
+      {isShort ? null : (
         <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
       )}
-      {isTiny ? null : (
-        <div className="text-2xl font-bold">{messages.thanksTitle}</div>
-      )}
-      <div
-        className={`${isTiny ? 'text-base leading-5' : 'text-lg'} font-semibold text-[color:var(--sg-text-secondary)]`}
-      >
+      <div className="text-2xl font-bold">{messages.thanksTitle}</div>
+      <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         {messages.thanksBody({
           subscribersText: formatSubscriberCount(state.subreddit.subscribers),
         })}
       </div>
       <button
-        className={`cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] ${
-          isTiny ? 'px-3 py-1 text-xs' : 'px-4 py-2 text-sm'
-        }`}
+        className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
         onClick={onReturn}
       >
         {messages.thanksReturnButton}

@@ -1,5 +1,5 @@
-import { connectRealtime } from '@devvit/web/client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { connectRealtime } from "@devvit/web/client";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ErrorResponse,
   InitResponse,
@@ -8,9 +8,9 @@ import type {
   SubGoalState,
   SubscribeRequest,
   SubscribeResponse,
-} from '../../shared/types/api';
-import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
-import { requestJsonWithRetry } from '../utils/fetchWithRetry';
+} from "../../shared/types/api";
+import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import { requestJsonWithRetry } from "../utils/fetchWithRetry";
 
 type RequestResult<T> = {
   data: T | null;
@@ -33,20 +33,23 @@ const initRetryOptions = {
 const recoveryWindowMs = 30000;
 const recoveryIntervalMs = 5000;
 
-const requestJson = async <T>(input: RequestInfo, init?: RequestInit): Promise<RequestResult<T>> => {
+const requestJson = async <T>(
+  input: RequestInfo,
+  init?: RequestInit,
+): Promise<RequestResult<T>> => {
   try {
     const res = await fetch(input, init);
     const payload = (await res.json()) as T | ErrorResponse;
     if (!res.ok) {
       const message =
-        typeof (payload as ErrorResponse).message === 'string'
+        typeof (payload as ErrorResponse).message === "string"
           ? (payload as ErrorResponse).message
           : `HTTP ${res.status}`;
       return { data: null, error: message };
     }
     return { data: payload as T, error: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Request failed';
+    const message = error instanceof Error ? error.message : "Request failed";
     return { data: null, error: message };
   }
 };
@@ -60,6 +63,9 @@ export const useSubGoal = () => {
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
   const messages = getSubGoalPostMessages(state?.language);
+  const postHeight = state?.postHeight;
+  const recentSubscriber =
+    postHeight === "tiny" ? null : state?.recentSubscriber;
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -71,39 +77,47 @@ export const useSubGoal = () => {
     }, 2800);
   }, []);
 
-  const handleRealtimeMessage = useCallback((data: unknown) => {
-    const message = data as Partial<RealtimeMessage>;
-    if (!message || message.type !== 'sub' || typeof message.newSubscriberCount !== 'number') {
-      return;
-    }
-    const newSubscriberCount = message.newSubscriberCount;
-    const recentSubscriber =
-      typeof message.recentSubscriber === 'string' && message.recentSubscriber.length > 0
-        ? message.recentSubscriber
-        : null;
-    const noticeMessage = messages.subscriberNotice({
-      username: recentSubscriber,
-    });
-    showNotice(noticeMessage);
-    setState((prev) => {
-      if (!prev) {
-        return prev;
+  const handleRealtimeMessage = useCallback(
+    (data: unknown) => {
+      const message = data as Partial<RealtimeMessage>;
+      if (
+        !message ||
+        message.type !== "sub" ||
+        typeof message.newSubscriberCount !== "number"
+      ) {
+        return;
       }
-      const completedTime =
-        prev.goal && newSubscriberCount >= prev.goal
-          ? prev.completedTime ?? Date.now()
-          : prev.completedTime;
-      return {
-        ...prev,
-        completedTime,
-        recentSubscriber,
-        subreddit: {
-          ...prev.subreddit,
-          subscribers: newSubscriberCount,
-        },
-      };
-    });
-  }, [messages, showNotice]);
+      const newSubscriberCount = message.newSubscriberCount;
+      const recentSubscriber =
+        typeof message.recentSubscriber === "string" &&
+        message.recentSubscriber.length > 0
+          ? message.recentSubscriber
+          : null;
+      const noticeMessage = messages.subscriberNotice({
+        username: recentSubscriber,
+      });
+      showNotice(noticeMessage);
+      setState((prev) => {
+        if (!prev || prev.postHeight === "tiny") {
+          return prev;
+        }
+        const completedTime =
+          prev.goal && newSubscriberCount >= prev.goal
+            ? (prev.completedTime ?? Date.now())
+            : prev.completedTime;
+        return {
+          ...prev,
+          completedTime,
+          recentSubscriber,
+          subreddit: {
+            ...prev.subreddit,
+            subscribers: newSubscriberCount,
+          },
+        };
+      });
+    },
+    [messages, showNotice],
+  );
 
   useEffect(
     () => () => {
@@ -111,18 +125,22 @@ export const useSubGoal = () => {
         window.clearTimeout(noticeTimeoutRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
-    if (!state?.recentSubscriber) {
+    if (!recentSubscriber) {
       return;
     }
-    showNotice(messages.subscriberNotice({ username: state.recentSubscriber }));
-  }, [messages, state?.recentSubscriber, showNotice]);
+    showNotice(messages.subscriberNotice({ username: recentSubscriber }));
+  }, [messages, recentSubscriber, showNotice]);
 
   const refresh = useCallback(async () => {
-    const result = await requestJsonWithRetry<RefreshResponse>('/api/refresh', undefined, {});
+    const result = await requestJsonWithRetry<RefreshResponse>(
+      "/api/refresh",
+      undefined,
+      {},
+    );
     if (result.aborted) {
       return null;
     }
@@ -142,9 +160,9 @@ export const useSubGoal = () => {
 
     const runInit = async () => {
       const result = await requestJsonWithRetry<InitResponse>(
-        '/api/init',
+        "/api/init",
         { signal },
-        initRetryOptions
+        initRetryOptions,
       );
       if (cancelled || result.aborted) {
         return;
@@ -182,12 +200,12 @@ export const useSubGoal = () => {
       }
 
       const result = await requestJsonWithRetry<InitResponse>(
-        '/api/init',
+        "/api/init",
         undefined,
         {
           ...initRetryOptions,
           maxDurationMs: 3000,
-        }
+        },
       );
       if (cancelled || result.aborted) {
         return;
@@ -206,7 +224,7 @@ export const useSubGoal = () => {
 
       const nextState = result.data?.state ?? null;
       if (!nextState) {
-        setError('Initialization returned no state.');
+        setError("Initialization returned no state.");
         const elapsed = Date.now() - startedAt;
         if (elapsed >= recoveryWindowMs) {
           return;
@@ -234,7 +252,7 @@ export const useSubGoal = () => {
   }, [loading, state]);
 
   useEffect(() => {
-    if (realtimeConnectedRef.current) {
+    if (!postHeight || postHeight === "tiny" || realtimeConnectedRef.current) {
       return;
     }
     realtimeConnectedRef.current = true;
@@ -242,7 +260,7 @@ export const useSubGoal = () => {
     let connection: { disconnect: () => Promise<void> } | null = null;
     const connect = async () => {
       connection = await connectRealtime({
-        channel: 'subscriber_updates',
+        channel: "subscriber_updates",
         onMessage: handleRealtimeMessage,
       });
     };
@@ -254,39 +272,42 @@ export const useSubGoal = () => {
       }
       realtimeConnectedRef.current = false;
     };
-  }, [handleRealtimeMessage]);
+  }, [handleRealtimeMessage, postHeight]);
 
   useEffect(() => {
+    if (!postHeight || postHeight === "tiny") {
+      return;
+    }
     const interval = window.setInterval(() => {
       void refresh();
     }, 30000);
     return () => window.clearInterval(interval);
-  }, [refresh]);
+  }, [postHeight, refresh]);
 
   const subscribe = useCallback(
     async (payload?: SubscribeRequest): Promise<SubscribeResult> => {
-    if (submitting) {
-      return { state: null, error: null };
-    }
-    setSubmitting(true);
-    const result = await requestJson<SubscribeResponse>('/api/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      if (submitting) {
+        return { state: null, error: null };
+      }
+      setSubmitting(true);
+      const result = await requestJson<SubscribeResponse>("/api/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload ?? {}),
-    });
-    setSubmitting(false);
+      });
+      setSubmitting(false);
 
-    if (result.error) {
-      setError(result.error);
-      return { state: null, error: result.error };
-    }
+      if (result.error) {
+        setError(result.error);
+        return { state: null, error: result.error };
+      }
 
-    const nextState = result.data?.state ?? null;
-    setState(nextState);
-    setError(null);
-    return { state: nextState, error: null };
+      const nextState = result.data?.state ?? null;
+      setState(nextState);
+      setError(null);
+      return { state: nextState, error: null };
     },
-    [submitting]
+    [submitting],
   );
 
   return {

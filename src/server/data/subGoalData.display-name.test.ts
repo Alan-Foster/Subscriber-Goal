@@ -11,6 +11,7 @@ import {
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
   registerNewSubGoalPost,
+  registerNewSubscribeOnlyPost,
   scheduleAutoCreateNextGoal,
   setSubGoalData,
   setSubredditDisplayNameForPost,
@@ -18,9 +19,14 @@ import {
   postColorThemeSuffix,
   postHeaderTextSuffix,
   postHeightSuffix,
+  postKindSuffix,
   postSubredditDisplayNameSuffix,
 } from "./subGoalData";
-import { postsKey } from "./updaterData";
+import {
+  subscriberGoalPostKind,
+  subscribeOnlyPostKind,
+} from "../../shared/postKind";
+import { postsKey, updatesKey } from "./updaterData";
 
 type ZEntry = { member: string; score: number };
 
@@ -251,27 +257,72 @@ describe("subGoalData subreddit display name", () => {
     ).resolves.toMatchObject({ postHeight: "regular" });
   });
 
+  it("preserves a positive legacy goal when conflicting metadata says Tiny", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_legacy_goal: "250",
+      [`t3_legacy${postHeightSuffix}`]: "tiny",
+      [`t3_legacy${postKindSuffix}`]: subscribeOnlyPostKind,
+      t3_legacy_recent_subscriber: "ExistingUser",
+      t3_legacy_completed_time: "123",
+    });
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+
+    const data = await getSubGoalData(
+      redis as unknown as Parameters<typeof getSubGoalData>[0],
+      "t3_legacy",
+      { postKind: subscribeOnlyPostKind },
+    );
+
+    expect(data).toMatchObject({
+      postKind: subscriberGoalPostKind,
+      postHeight: "regular",
+      goal: 250,
+      recentSubscriber: "ExistingUser",
+      completedTime: 123,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("preserving subscriber goal"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("recognizes a markerless Tiny record only when no goal field exists", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      [`t3_tiny${postHeightSuffix}`]: "tiny",
+    });
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_tiny",
+      ),
+    ).resolves.toMatchObject({
+      postKind: subscribeOnlyPostKind,
+      postHeight: "tiny",
+      goal: 0,
+    });
+  });
+
   it("persists tiny post height and skips crossposting with a tiny reason", async () => {
     const redis = new InMemoryRedis();
-    const getCurrentSubreddit = vi.fn();
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
 
-    const result = await registerNewSubGoalPost(
-      { getCurrentSubreddit } as never,
-      redis as unknown as Parameters<typeof registerNewSubGoalPost>[1],
+    const result = await registerNewSubscribeOnlyPost(
+      redis as unknown as Parameters<typeof registerNewSubscribeOnlyPost>[0],
       { promoSubreddit: "SubGoal" } as never,
       {
         id: "t3_tiny",
         createdAt: new Date("2026-01-01T00:00:00.000Z"),
       } as never,
-      10,
-      true,
       "ExampleSub",
       "red",
-      true,
       "en",
-      undefined,
-      "tiny",
     );
 
     await expect(
@@ -280,11 +331,19 @@ describe("subGoalData subreddit display name", () => {
         "t3_tiny",
       ),
     ).resolves.toMatchObject({
+      postKind: subscribeOnlyPostKind,
       postHeight: "tiny",
-      autoCreateNextGoal: true,
+      goal: 0,
+      recentSubscriber: null,
+      completedTime: 0,
+      autoCreateNextGoal: false,
     });
     expect(result).toEqual({ status: "skipped" });
-    expect(getCurrentSubreddit).not.toHaveBeenCalled();
+    await expect(
+      redis.hGet(subscriberGoalsKey, `t3_tiny${postKindSuffix}`),
+    ).resolves.toBe(subscribeOnlyPostKind);
+    await expect(redis.zRange(postsKey, 0, -1)).resolves.toEqual([]);
+    await expect(redis.zRange(updatesKey, 0, -1)).resolves.toEqual([]);
     expect(infoSpy).toHaveBeenCalledWith(
       expect.stringContaining('"reason":"tiny_post_height"'),
     );

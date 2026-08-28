@@ -6,6 +6,12 @@ import { formNames, internalRoutes } from "../shared/routes";
 describe("devvit.json route alignment", () => {
   const configPath = join(process.cwd(), "devvit.json");
   const devvitConfig = JSON.parse(readFileSync(configPath, "utf-8")) as {
+    post: {
+      entrypoints: Record<
+        string,
+        { entry: string; height?: string; styles?: { height?: number } }
+      >;
+    };
     forms: Record<string, string>;
     triggers: Record<string, string>;
     scheduler: { tasks: { "posts-updater-job": { endpoint: string } } };
@@ -29,6 +35,17 @@ describe("devvit.json route alignment", () => {
     expect(devvitConfig.forms[formNames.eraseMyData]).toBe(
       internalRoutes.forms.eraseMyData,
     );
+  });
+
+  it("keeps Tiny posts on a dedicated 120px entrypoint", () => {
+    expect(devvitConfig.post.entrypoints.default).toMatchObject({
+      entry: "app.html",
+      height: "regular",
+    });
+    expect(devvitConfig.post.entrypoints["subscribe-only"]).toEqual({
+      entry: "subscribe-only.html",
+      styles: { height: 120 },
+    });
   });
 
   it("maps triggers to the same internal endpoints", () => {

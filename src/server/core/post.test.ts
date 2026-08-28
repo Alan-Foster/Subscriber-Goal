@@ -34,6 +34,7 @@ describe("createGoalPost", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       entry: "default",
+      postData: { postKind: "subscriber-goal-v1" },
       styles: { height: EntrypointHeight.REGULAR },
       textFallback: { text: "Fallback text" },
     });
@@ -51,6 +52,7 @@ describe("createGoalPost", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       entry: "default",
+      postData: { postKind: "subscriber-goal-v1" },
       styles: { height: EntrypointHeight.REGULAR },
       textFallback: { text: "Fallback text" },
       runAs: "USER",
@@ -72,9 +74,27 @@ describe("createGoalPost", () => {
       title: "Welcome!",
       subredditName: "ExampleSub",
       entry: "default",
+      postData: { postKind: "subscriber-goal-v1" },
       styles: { height: EntrypointHeight.REGULAR },
       textFallback: { text: "Fallback text" },
     });
+  });
+
+  it("submits Tiny posts through the dedicated subscribe-only entrypoint", async () => {
+    await createGoalPost({
+      title: "Subscribe",
+      subredditName: "ExampleSub",
+      textFallback: "Subscribe to r/ExampleSub",
+      postHeight: "tiny",
+    });
+
+    expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: "subscribe-only",
+        postData: { postKind: "subscribe-only-v1" },
+        styles: { height: 0, heightPixels: 120 },
+      }),
+    );
   });
 
   it("applies heightPixels through post-creation styles for short posts", async () => {
@@ -117,7 +137,9 @@ describe("createGoalPost", () => {
   });
 
   it("logs and continues when short post style application fails", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
     const post = {
       id: "t3_newpost",
       setCustomPostStyles: vi.fn(async () => {
@@ -125,7 +147,9 @@ describe("createGoalPost", () => {
       }),
     };
 
-    await expect(applyGoalPostFrameStyle(post, "short")).resolves.toBeUndefined();
+    await expect(
+      applyGoalPostFrameStyle(post, "short"),
+    ).resolves.toBeUndefined();
 
     expect(warnSpy).toHaveBeenCalledWith(
       "[postHeight] failed to apply short post height: postId=t3_newpost error=Error: style denied",

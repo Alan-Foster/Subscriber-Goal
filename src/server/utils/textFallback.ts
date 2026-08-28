@@ -1,6 +1,6 @@
-import { formatSubscriberCount } from '../../shared/numberFormat';
-import type { SubGoalLanguage } from '../../shared/subGoalPostI18n';
-import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
+import { formatSubscriberCount } from "../../shared/numberFormat";
+import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
+import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 
 export type TextFallbackProps = {
   goal: number;
@@ -9,6 +9,18 @@ export type TextFallbackProps = {
   completedTime: Date | null;
   language?: SubGoalLanguage;
 };
+
+export type SubscribeOnlyTextFallbackProps = {
+  subredditName: string;
+  language?: SubGoalLanguage;
+};
+
+export const subscribeOnlyTextFallbackMaker = (
+  props: SubscribeOnlyTextFallbackProps,
+): string =>
+  getSubGoalPostMessages(props.language).subscribeButton({
+    subredditName: props.subredditName,
+  });
 
 export const textFallbackMaker = (props: TextFallbackProps): string => {
   const messages = getSubGoalPostMessages(props.language);
@@ -30,18 +42,19 @@ type TextFallbackTarget = {
 };
 
 const supportsTextFallback = (post: unknown): post is TextFallbackTarget => {
-  if (!post || typeof post !== 'object') {
+  if (!post || typeof post !== "object") {
     return false;
   }
   return (
-    'setTextFallback' in post &&
-    typeof (post as { setTextFallback?: unknown }).setTextFallback === 'function'
+    "setTextFallback" in post &&
+    typeof (post as { setTextFallback?: unknown }).setTextFallback ===
+      "function"
   );
 };
 
 export const applyTextFallback = async (
   post: unknown,
-  props: TextFallbackProps
+  props: TextFallbackProps,
 ): Promise<void> => {
   if (!supportsTextFallback(post)) {
     return;

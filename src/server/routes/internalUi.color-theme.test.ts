@@ -24,6 +24,7 @@ const hoisted = vi.hoisted(() => ({
   setSavedSubredditDisplayName: vi.fn(),
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
+  registerNewSubscribeOnlyPost: vi.fn(),
   setSubredditDisplayNameForPost: vi.fn(),
   cancelAllAutoCreateNextGoals: vi.fn(),
   eraseFromRecentSubscribers: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   eraseFromRecentSubscribers: hoisted.eraseFromRecentSubscribers,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
+  registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
 }));
 
@@ -132,6 +134,9 @@ describe("internalUi color theme create goal routes", () => {
       isStickied: vi.fn(() => true),
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
+    hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
+      status: "skipped",
+    });
     hoisted.untrackSubscriberById.mockResolvedValue({
       status: "complete",
       userIds: ["t2_mod"],
@@ -276,6 +281,7 @@ describe("internalUi color theme create goal routes", () => {
             type: string;
             label?: string;
             helpText?: string;
+            required?: boolean;
             defaultValue?: unknown;
             options?: Array<{ label: string; value: string }>;
           }>;
@@ -305,8 +311,14 @@ describe("internalUi color theme create goal routes", () => {
       options: [
         { label: "Regular", value: "regular" },
         { label: "Short (no logo)", value: "short" },
-        { label: "Tiny (Subscribe button only)", value: "tiny" },
+        { label: "Tiny (Only Subscribe Button)", value: "tiny" },
       ],
+    });
+    expect(
+      fields.find((field) => field.name === "subscriberGoal"),
+    ).toMatchObject({
+      required: false,
+      helpText: expect.stringContaining("ignored for Tiny posts"),
     });
     expect(fields.find((field) => field.name === "language")).toMatchObject({
       type: "select",
@@ -402,14 +414,13 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("stores tiny post height while suppressing crosspost and auto-create settings", async () => {
+  it("creates tiny posts without requiring or registering a subscriber goal", async () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
     await routes.get(internalRoutes.forms.createGoal)?.(
       {
         body: {
-          subscriberGoal: 200,
           postTitle: "Welcome!",
           subredditDisplayName: "ExampleSub",
           crosspost: true,
@@ -427,20 +438,15 @@ describe("internalUi color theme create goal routes", () => {
         postHeight: "tiny",
       }),
     );
-    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
-      hoisted.reddit,
+    expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledWith(
       hoisted.redis,
       expect.anything(),
       expect.objectContaining({ id: "t3_newpost" }),
-      200,
-      false,
       "ExampleSub",
       "red",
-      false,
       "en",
-      undefined,
-      "tiny",
     );
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
 
   it("localizes the default post title when Spanish is selected", async () => {

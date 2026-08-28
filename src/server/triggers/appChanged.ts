@@ -1,16 +1,17 @@
-import { context, reddit, redis } from '@devvit/web/server';
-import { ensureSavedSubredditDisplayName } from '../data/subredditDisplayNameData';
-import { initializeRecentSubscriberIndexMigration } from '../data/subGoalData';
+import { context, reddit, redis } from "@devvit/web/server";
+import { ensureSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
+import { initializeRecentSubscriberIndexMigration } from "../data/subGoalData";
 import {
   clearLegacySubscriberErasureTombstones,
   initializeSubscriberStatsMigration,
-} from '../data/subscriberStats';
-import { getTrackedPosts, queueUpdates } from '../data/updaterData';
+} from "../data/subscriberStats";
+import { getTrackedPosts, queueUpdates } from "../data/updaterData";
+import { initializePostKindMigration } from "../data/postKindMigration";
 
 export async function onAppChanged(): Promise<void> {
   if (!context.subredditName && !context.subredditId) {
     console.info(
-      '[appChanged] skipping subreddit setup: no subreddit context on lifecycle trigger'
+      "[appChanged] skipping subreddit setup: no subreddit context on lifecycle trigger",
     );
     return;
   }
@@ -22,7 +23,7 @@ export async function onAppChanged(): Promise<void> {
       subredditName = subreddit.name;
     } catch (error) {
       console.warn(
-        `[appChanged] skipping subreddit setup: failed to resolve current subreddit (${String(error)})`
+        `[appChanged] skipping subreddit setup: failed to resolve current subreddit (${String(error)})`,
       );
       return;
     }
@@ -34,9 +35,10 @@ export async function onAppChanged(): Promise<void> {
   await initializeRecentSubscriberIndexMigration(redis);
 
   const trackedPosts = await getTrackedPosts(redis);
+  await initializePostKindMigration(redis, trackedPosts);
   if (!trackedPosts.length) {
     return;
   }
-  console.log(`Scheduling update queue for: ${trackedPosts.join(',')}`);
+  console.log(`Scheduling update queue for: ${trackedPosts.join(",")}`);
   await queueUpdates(redis, trackedPosts);
 }

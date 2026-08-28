@@ -1,37 +1,43 @@
-import { context, reddit, redis } from '@devvit/web/server';
+import { context, reddit, redis } from "@devvit/web/server";
 import {
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
-} from '../data/subGoalData';
+} from "../data/subGoalData";
 import {
   cancelUpdates,
   getQueuedUpdates,
   queueUpdate,
   untrackPost,
-} from '../data/updaterData';
-import { isLinkId } from '../types';
-import { applyTextFallback } from '../utils/textFallback';
-import { getAppSettings } from '../settings';
+} from "../data/updaterData";
+import { isLinkId } from "../types";
+import { applyTextFallback } from "../utils/textFallback";
+import { getAppSettings } from "../settings";
 import {
   isCrosspostAuthorityInstall,
   processCrosspostDispatchQueue,
-} from './modAction';
-import { countPendingCrossposts } from '../data/crosspostData';
-import { processSubscriberStatsMigrationBatch } from '../data/subscriberStats';
-import { processDueAutoCreateNextGoals } from '../core/autoCreateNextGoal';
-import { applyGoalPostFrameStyle } from '../core/post';
+} from "./modAction";
+import { countPendingCrossposts } from "../data/crosspostData";
+import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
+import { processPostKindMigrationBatch } from "../data/postKindMigration";
+import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
+import { applyGoalPostFrameStyle } from "../core/post";
 import {
   getTerminalRemovedByCategory,
   isMissingPostError,
-} from '../utils/postStatus';
+} from "../utils/postStatus";
 
-async function cleanupInactivePost(postId: string, reason: string): Promise<void> {
+async function cleanupInactivePost(
+  postId: string,
+  reason: string,
+): Promise<void> {
   await cancelUpdates(redis, postId);
   await untrackPost(redis, postId);
   await cancelAutoCreateNextGoal(redis, postId);
-  console.info(`[updater] cleaned up inactive post: postId=${postId} reason=${reason}`);
+  console.info(
+    `[updater] cleaned up inactive post: postId=${postId} reason=${reason}`,
+  );
 }
 
 export async function onPostsUpdaterJob(): Promise<void> {
@@ -43,11 +49,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
   if (isCrosspostAuthorityInstall(appSettings, currentSubredditName)) {
     const ingestionSummary = await processCrosspostDispatchQueue(
       appSettings,
-      'scheduler_posts_updater'
+      "scheduler_posts_updater",
     );
     const pendingDepth = await countPendingCrossposts(
       redis,
-      appSettings.promoSubreddit
+      appSettings.promoSubreddit,
     );
     const crosspostWorkOccurred =
       ingestionSummary.revisionsFetched > 0 ||
@@ -64,12 +70,17 @@ export async function onPostsUpdaterJob(): Promise<void> {
     if (
       crosspostWorkOccurred ||
       pendingDepth > 0 ||
-      ingestionSummary.status !== 'success'
+      ingestionSummary.status !== "success"
     ) {
       console.info(
-        `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} crosspostPersistenceFailedAfterCreate=${ingestionSummary.crosspostPersistenceFailedAfterCreate} crosspostsSkippedBySourceCooldown=${ingestionSummary.crosspostsSkippedBySourceCooldown} crosspostsSkippedByInFlight=${ingestionSummary.crosspostsSkippedByInFlight} crosspostsSkippedByExistingDetection=${ingestionSummary.crosspostsSkippedByExistingDetection} pendingDepth=${pendingDepth} error=${ingestionSummary.errorMessage ?? 'none'}`
+        `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} crosspostPersistenceFailedAfterCreate=${ingestionSummary.crosspostPersistenceFailedAfterCreate} crosspostsSkippedBySourceCooldown=${ingestionSummary.crosspostsSkippedBySourceCooldown} crosspostsSkippedByInFlight=${ingestionSummary.crosspostsSkippedByInFlight} crosspostsSkippedByExistingDetection=${ingestionSummary.crosspostsSkippedByExistingDetection} pendingDepth=${pendingDepth} error=${ingestionSummary.errorMessage ?? "none"}`,
       );
     }
+  }
+  try {
+    await processPostKindMigrationBatch(reddit, redis);
+  } catch (error) {
+    console.error(`postKindMigration error: ${String(error)}`);
   }
   try {
     await processSubscriberStatsMigrationBatch(redis);
@@ -94,7 +105,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       autoCreateSummary.failed > 0
     ) {
       console.info(
-        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed}`
+        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed}`,
       );
     }
   } catch (error) {
@@ -114,12 +125,19 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const subGoalData = await getSubGoalData(redis, postId);
       if (!subGoalData.goal) {
         console.error(`Missing subGoalData for post ${postId}`);
-        await cleanupInactivePost(postId, 'missing_goal_data');
+        await cleanupInactivePost(postId, "missing_goal_data");
         continue;
       }
 
-      if (subreddit.numberOfSubscribers >= subGoalData.goal && !subGoalData.completedTime) {
-        subGoalData.completedTime = await checkCompletionStatus(reddit, redis, postId);
+      if (
+        subreddit.numberOfSubscribers >= subGoalData.goal &&
+        !subGoalData.completedTime
+      ) {
+        subGoalData.completedTime = await checkCompletionStatus(
+          reddit,
+          redis,
+          postId,
+        );
       }
 
       const completedTime = subGoalData.completedTime
@@ -127,7 +145,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
         : null;
       if (!isLinkId(postId)) {
         console.error(`Skipping invalid post id in scheduler queue: ${postId}`);
-        await cleanupInactivePost(postId, 'invalid_post_id');
+        await cleanupInactivePost(postId, "invalid_post_id");
         continue;
       }
       const post = await reddit.getPostById(postId);
@@ -135,7 +153,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       if (removedByCategory) {
         await cleanupInactivePost(
           postId,
-          `removedByCategory:${removedByCategory}`
+          `removedByCategory:${removedByCategory}`,
         );
         continue;
       }
@@ -156,7 +174,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       await queueUpdate(redis, postId, new Date());
     } catch (e) {
       if (isLinkId(postId) && isMissingPostError(e)) {
-        await cleanupInactivePost(postId, 'missing_post');
+        await cleanupInactivePost(postId, "missing_post");
         continue;
       }
       console.error(`Error updating post ${postId}: ${String(e)}`);

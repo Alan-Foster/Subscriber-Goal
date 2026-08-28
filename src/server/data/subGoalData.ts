@@ -1,45 +1,53 @@
-import type { RedditClient, RedisClient } from '../types';
-import type { ServerAppSettings } from '../settings';
-import type { SubGoalColorTheme } from '../../shared/subGoalColorTheme';
+import type { RedditClient, RedisClient } from "../types";
+import type { ServerAppSettings } from "../settings";
+import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import {
   defaultSubGoalColorTheme,
   resolveSubGoalColorTheme,
-} from '../../shared/subGoalColorTheme';
-import type { SubGoalLanguage } from '../../shared/subGoalPostI18n';
+} from "../../shared/subGoalColorTheme";
+import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import {
   defaultSubGoalLanguage,
   resolveSubGoalLanguage,
-} from '../../shared/subGoalPostI18n';
-import type { SubGoalPostHeight } from '../../shared/subGoalPostHeight';
+} from "../../shared/subGoalPostI18n";
+import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
+import { resolveSubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import {
-  defaultSubGoalPostHeight,
-  resolveSubGoalPostHeight,
-} from '../../shared/subGoalPostHeight';
-import { dispatchNewPost } from './crosspostData';
-import { postsKey, queueUpdate, trackPost } from './updaterData';
-import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
+  resolvePostKind,
+  resolvePostKindFromPostData,
+  subscriberGoalPostKind,
+  subscribeOnlyPostKind,
+  type PostKind,
+} from "../../shared/postKind";
+import { dispatchNewPost } from "./crosspostData";
+import { postsKey, queueUpdate, trackPost } from "./updaterData";
+import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
 
-export const subscriberGoalsKey = 'subscriber_goals';
-export const postGoalSuffix = '_goal';
-export const postRecentSubscriberSuffix = '_recent_subscriber';
-export const postCompletedTimeSuffix = '_completed_time';
-export const postSubredditDisplayNameSuffix = '_subreddit_display_name';
-export const postHeaderTextSuffix = '_header_text';
-export const postColorThemeSuffix = '_color_theme';
-export const postAutoCreateNextGoalSuffix = '_auto_create_next_goal';
-export const postLanguageSuffix = '_language';
-export const postHeightSuffix = '_post_height';
-export const autoCreateNextGoalQueueKey = 'auto_create_next_goal_queue';
-export const recentSubscriberPostsByUsernameKey = 'recent_subscriber_posts_by_username';
+export const subscriberGoalsKey = "subscriber_goals";
+export const postGoalSuffix = "_goal";
+export const postRecentSubscriberSuffix = "_recent_subscriber";
+export const postCompletedTimeSuffix = "_completed_time";
+export const postSubredditDisplayNameSuffix = "_subreddit_display_name";
+export const postHeaderTextSuffix = "_header_text";
+export const postColorThemeSuffix = "_color_theme";
+export const postAutoCreateNextGoalSuffix = "_auto_create_next_goal";
+export const postLanguageSuffix = "_language";
+export const postHeightSuffix = "_post_height";
+export const postKindSuffix = "_post_kind";
+export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
+export const recentSubscriberPostsByUsernameKey =
+  "recent_subscriber_posts_by_username";
 export const recentSubscriberIndexMigrationStateKey =
-  'recent_subscriber_index_migration_state';
-export const recentSubscriberIndexMigrationVersion = 'recent_subscriber_index_v1';
+  "recent_subscriber_index_migration_state";
+export const recentSubscriberIndexMigrationVersion =
+  "recent_subscriber_index_v1";
 
 const recentSubscriberIndexBatchSize = 25;
 const recentSubscriberIndexCooldownMinMs = 5 * 60 * 1000;
 const recentSubscriberIndexCooldownMaxMs = 15 * 60 * 1000;
 
 export type SubGoalData = {
+  postKind: PostKind;
   goal: number;
   recentSubscriber: string | null;
   completedTime: number;
@@ -51,14 +59,14 @@ export type SubGoalData = {
   postHeight: SubGoalPostHeight;
 };
 
-type RedditPost = Awaited<ReturnType<RedditClient['submitCustomPost']>>;
+type RedditPost = Awaited<ReturnType<RedditClient["submitCustomPost"]>>;
 
 export type CrosspostDispatchResult = {
-  status: 'success' | 'skipped' | 'failed';
+  status: "success" | "skipped" | "failed";
   errorMessage?: string;
 };
 
-type RecentSubscriberIndexMigrationStatus = 'pending' | 'running' | 'complete';
+type RecentSubscriberIndexMigrationStatus = "pending" | "running" | "complete";
 
 type RecentSubscriberIndexMigrationState = {
   version: string;
@@ -70,7 +78,8 @@ type RecentSubscriberIndexMigrationState = {
   lastRunAt: number;
 };
 
-const normalizeUsername = (username: string): string => username.trim().toLowerCase();
+const normalizeUsername = (username: string): string =>
+  username.trim().toLowerCase();
 
 const parsePostIdList = (raw: string | undefined): string[] => {
   if (!raw) {
@@ -81,7 +90,7 @@ const parsePostIdList = (raw: string | undefined): string[] => {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter((value): value is string => typeof value === 'string');
+    return parsed.filter((value): value is string => typeof value === "string");
   } catch {
     return [];
   }
@@ -93,7 +102,7 @@ const stringifyPostIdList = (postIds: string[]): string =>
 const nextCooldown = (
   nowMs: number,
   cooldownMinMs: number,
-  cooldownMaxMs: number
+  cooldownMaxMs: number,
 ): number => {
   const min = Math.max(0, cooldownMinMs);
   const max = Math.max(min, cooldownMaxMs);
@@ -101,13 +110,15 @@ const nextCooldown = (
 };
 
 const parseRecentSubscriberIndexMigrationState = (
-  raw: Record<string, string>
+  raw: Record<string, string>,
 ): RecentSubscriberIndexMigrationState | undefined => {
   if (raw.version !== recentSubscriberIndexMigrationVersion) {
     return undefined;
   }
   const status =
-    raw.status === 'pending' || raw.status === 'running' || raw.status === 'complete'
+    raw.status === "pending" ||
+    raw.status === "running" ||
+    raw.status === "complete"
       ? raw.status
       : undefined;
   if (!status) {
@@ -116,16 +127,16 @@ const parseRecentSubscriberIndexMigrationState = (
   return {
     version: raw.version,
     status,
-    cursor: parseInt(raw.cursor ?? '0', 10) || 0,
-    nextRunAt: parseInt(raw.nextRunAt ?? '0', 10) || 0,
-    scannedTotal: parseInt(raw.scannedTotal ?? '0', 10) || 0,
-    indexedTotal: parseInt(raw.indexedTotal ?? '0', 10) || 0,
-    lastRunAt: parseInt(raw.lastRunAt ?? '0', 10) || 0,
+    cursor: parseInt(raw.cursor ?? "0", 10) || 0,
+    nextRunAt: parseInt(raw.nextRunAt ?? "0", 10) || 0,
+    scannedTotal: parseInt(raw.scannedTotal ?? "0", 10) || 0,
+    indexedTotal: parseInt(raw.indexedTotal ?? "0", 10) || 0,
+    lastRunAt: parseInt(raw.lastRunAt ?? "0", 10) || 0,
   };
 };
 
 const serializeRecentSubscriberIndexMigrationState = (
-  state: RecentSubscriberIndexMigrationState
+  state: RecentSubscriberIndexMigrationState,
 ): Record<string, string> => ({
   version: state.version,
   status: state.status,
@@ -139,14 +150,14 @@ const serializeRecentSubscriberIndexMigrationState = (
 export async function addRecentSubscriberPostIndex(
   redis: RedisClient,
   username: string,
-  postId: string
+  postId: string,
 ): Promise<void> {
   const normalized = normalizeUsername(username);
   if (!normalized) {
     return;
   }
   const existing = parsePostIdList(
-    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized)
+    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
   if (existing.includes(postId)) {
     return;
@@ -159,14 +170,14 @@ export async function addRecentSubscriberPostIndex(
 export async function removeRecentSubscriberPostIndex(
   redis: RedisClient,
   username: string,
-  postId: string
+  postId: string,
 ): Promise<void> {
   const normalized = normalizeUsername(username);
   if (!normalized) {
     return;
   }
   const existing = parsePostIdList(
-    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized)
+    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
   const next = existing.filter((existingPostId) => existingPostId !== postId);
   if (next.length === existing.length) {
@@ -183,7 +194,8 @@ export async function removeRecentSubscriberPostIndex(
 
 export async function getSubGoalData(
   redis: RedisClient,
-  postId: string
+  postId: string,
+  customPostData?: unknown,
 ): Promise<SubGoalData> {
   const [
     goal,
@@ -195,6 +207,7 @@ export async function getSubGoalData(
     autoCreateNextGoal,
     language,
     postHeight,
+    storedPostKind,
   ] = (await redis.hMGet(subscriberGoalsKey, [
     `${postId}${postGoalSuffix}`,
     `${postId}${postRecentSubscriberSuffix}`,
@@ -205,6 +218,7 @@ export async function getSubGoalData(
     `${postId}${postAutoCreateNextGoalSuffix}`,
     `${postId}${postLanguageSuffix}`,
     `${postId}${postHeightSuffix}`,
+    `${postId}${postKindSuffix}`,
   ])) as [
     string | null,
     string | null,
@@ -215,9 +229,43 @@ export async function getSubGoalData(
     string | null,
     string | null,
     string | null,
+    string | null,
   ];
+  const parsedGoal = goal ? parseInt(goal, 10) || 0 : 0;
+  const postDataKind = resolvePostKindFromPostData(customPostData);
+  const persistedKind = resolvePostKind(storedPostKind);
+  const rawHeight = resolveSubGoalPostHeight(postHeight);
+  const hasPositiveGoal = parsedGoal > 0;
+  const hasGoalField = goal !== null && goal !== undefined && goal !== "";
+  const conflictingTinyGoal =
+    hasPositiveGoal &&
+    (postDataKind === subscribeOnlyPostKind ||
+      persistedKind === subscribeOnlyPostKind ||
+      rawHeight === "tiny");
+  if (conflictingTinyGoal) {
+    console.warn(
+      `[postKind] preserving subscriber goal with conflicting Tiny metadata: postId=${postId}`,
+    );
+  }
+  const postKind: PostKind = hasPositiveGoal
+    ? subscriberGoalPostKind
+    : postDataKind === subscriberGoalPostKind ||
+        persistedKind === subscriberGoalPostKind
+      ? subscriberGoalPostKind
+      : postDataKind === subscribeOnlyPostKind ||
+          persistedKind === subscribeOnlyPostKind ||
+          (rawHeight === "tiny" && !hasGoalField)
+        ? subscribeOnlyPostKind
+        : subscriberGoalPostKind;
+  const resolvedHeight: SubGoalPostHeight =
+    postKind === subscribeOnlyPostKind
+      ? "tiny"
+      : rawHeight === "short"
+        ? "short"
+        : "regular";
   return {
-    goal: goal ? parseInt(goal) : 0,
+    postKind,
+    goal: parsedGoal,
     recentSubscriber: recentSubscriber ?? null,
     completedTime: completedTime ? parseInt(completedTime) : 0,
     subredditDisplayName:
@@ -226,36 +274,60 @@ export async function getSubGoalData(
         : null,
     headerText: headerText && headerText.length > 0 ? headerText : null,
     colorTheme: resolveSubGoalColorTheme(colorTheme),
-    autoCreateNextGoal: autoCreateNextGoal === 'true',
+    autoCreateNextGoal: autoCreateNextGoal === "true",
     language: resolveSubGoalLanguage(language),
-    postHeight: resolveSubGoalPostHeight(postHeight),
+    postHeight: resolvedHeight,
   };
 }
 
 export async function setSubGoalData(
   redis: RedisClient,
   postId: string,
-  data: SubGoalData
+  data: Omit<SubGoalData, "postKind"> & { postKind?: PostKind },
 ): Promise<void> {
   await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postKindSuffix}`]: subscriberGoalPostKind,
     [`${postId}${postGoalSuffix}`]: data.goal.toString(),
-    [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? '',
+    [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? "",
     [`${postId}${postCompletedTimeSuffix}`]: data.completedTime.toString(),
-    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName ?? '',
-    [`${postId}${postHeaderTextSuffix}`]: data.headerText ?? '',
-    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(data.colorTheme),
+    [`${postId}${postSubredditDisplayNameSuffix}`]:
+      data.subredditDisplayName ?? "",
+    [`${postId}${postHeaderTextSuffix}`]: data.headerText ?? "",
+    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
+      data.colorTheme,
+    ),
     [`${postId}${postAutoCreateNextGoalSuffix}`]: data.autoCreateNextGoal
-      ? 'true'
-      : 'false',
+      ? "true"
+      : "false",
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
     [`${postId}${postHeightSuffix}`]: resolveSubGoalPostHeight(data.postHeight),
+  });
+}
+
+export async function setSubscribeOnlyPostData(
+  redis: RedisClient,
+  postId: string,
+  data: {
+    subredditDisplayName: string;
+    colorTheme: SubGoalColorTheme;
+    language: SubGoalLanguage;
+  },
+): Promise<void> {
+  await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postKindSuffix}`]: subscribeOnlyPostKind,
+    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName,
+    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
+      data.colorTheme,
+    ),
+    [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
+    [`${postId}${postHeightSuffix}`]: "tiny",
   });
 }
 
 export async function scheduleAutoCreateNextGoal(
   redis: RedisClient,
   postId: string,
-  completedTime: number
+  completedTime: number,
 ): Promise<void> {
   await redis.zAdd(autoCreateNextGoalQueueKey, {
     member: postId,
@@ -265,13 +337,13 @@ export async function scheduleAutoCreateNextGoal(
 
 export async function cancelAutoCreateNextGoal(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<void> {
   await redis.zRem(autoCreateNextGoalQueueKey, [postId]);
 }
 
 export async function cancelAllAutoCreateNextGoals(
-  redis: RedisClient
+  redis: RedisClient,
 ): Promise<void> {
   const pending = await redis.zRange(autoCreateNextGoalQueueKey, 0, -1);
   const postIds = pending.map((entry) => entry.member);
@@ -282,7 +354,7 @@ export async function cancelAllAutoCreateNextGoals(
 
 export async function getDueAutoCreateNextGoalPostIds(
   redis: RedisClient,
-  nowMs: number
+  nowMs: number,
 ): Promise<string[]> {
   const pending = await redis.zRange(autoCreateNextGoalQueueKey, 0, -1);
   return pending
@@ -293,7 +365,7 @@ export async function getDueAutoCreateNextGoalPostIds(
 export async function setSubredditDisplayNameForPost(
   redis: RedisClient,
   postId: string,
-  subredditDisplayName: string
+  subredditDisplayName: string,
 ): Promise<void> {
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
@@ -303,19 +375,24 @@ export async function setSubredditDisplayNameForPost(
 export async function checkCompletionStatus(
   reddit: RedditClient,
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<number> {
   const subGoalData = await getSubGoalData(redis, postId);
   if (subGoalData.completedTime) {
     return subGoalData.completedTime;
   }
 
-  const currentSubscribers = (await reddit.getCurrentSubreddit()).numberOfSubscribers;
+  const currentSubscribers = (await reddit.getCurrentSubreddit())
+    .numberOfSubscribers;
   if (currentSubscribers >= subGoalData.goal) {
     subGoalData.completedTime = Date.now();
     await setSubGoalData(redis, postId, subGoalData);
     if (subGoalData.autoCreateNextGoal) {
-      await scheduleAutoCreateNextGoal(redis, postId, subGoalData.completedTime);
+      await scheduleAutoCreateNextGoal(
+        redis,
+        postId,
+        subGoalData.completedTime,
+      );
     }
     return subGoalData.completedTime;
   }
@@ -334,11 +411,11 @@ export async function registerNewSubGoalPost(
   autoCreateNextGoal = false,
   language: SubGoalLanguage = defaultSubGoalLanguage,
   headerText?: string,
-  postHeight: SubGoalPostHeight = defaultSubGoalPostHeight
+  postHeight: Exclude<SubGoalPostHeight, "tiny"> = "regular",
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
-    recentSubscriber: '',
+    recentSubscriber: "",
     completedTime: 0,
     subredditDisplayName,
     headerText: headerText ?? null,
@@ -349,23 +426,14 @@ export async function registerNewSubGoalPost(
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
-  if (postHeight === 'tiny') {
-    logCrosspostEvent({
-      event: 'crosspost_attempt_skipped',
-      sourcePostId: post.id,
-      targetSubreddit: appSettings.promoSubreddit,
-      reason: 'tiny_post_height',
-    });
-    return { status: 'skipped' };
-  }
   if (!crosspost) {
     logCrosspostEvent({
-      event: 'crosspost_attempt_skipped',
+      event: "crosspost_attempt_skipped",
       sourcePostId: post.id,
       targetSubreddit: appSettings.promoSubreddit,
-      reason: 'crosspost_disabled',
+      reason: "crosspost_disabled",
     });
-    return { status: 'skipped' };
+    return { status: "skipped" };
   }
 
   const sourceSubreddit = await reddit.getCurrentSubreddit();
@@ -373,44 +441,69 @@ export async function registerNewSubGoalPost(
     (sourceSubreddit as { isNsfw?: boolean }).isNsfw === true;
   if (sourceSubredditIsNsfw) {
     logCrosspostEvent({
-      event: 'crosspost_attempt_skipped',
+      event: "crosspost_attempt_skipped",
       sourcePostId: post.id,
       targetSubreddit: appSettings.promoSubreddit,
-      reason: 'source_subreddit_nsfw',
+      reason: "source_subreddit_nsfw",
     });
-    return { status: 'skipped' };
+    return { status: "skipped" };
   }
 
-  if (appSettings.promoSubreddit.toLowerCase() === post.subredditName.toLowerCase()) {
+  if (
+    appSettings.promoSubreddit.toLowerCase() ===
+    post.subredditName.toLowerCase()
+  ) {
     logCrosspostEvent({
-      event: 'crosspost_attempt_skipped',
+      event: "crosspost_attempt_skipped",
       sourcePostId: post.id,
       targetSubreddit: appSettings.promoSubreddit,
-      reason: 'source_is_promo_subreddit',
+      reason: "source_is_promo_subreddit",
     });
-    return { status: 'skipped' };
+    return { status: "skipped" };
   }
 
   try {
     await dispatchNewPost(reddit, appSettings, post.id, goal);
-    return { status: 'success' };
+    return { status: "success" };
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     logCrosspostEvent(
       {
-        event: 'crosspost_attempt_failed',
+        event: "crosspost_attempt_failed",
         sourcePostId: post.id,
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'dispatch_new_post_failed',
+        reason: "dispatch_new_post_failed",
         errorMessage,
       },
-      'error'
+      "error",
     );
     return {
-      status: 'failed',
+      status: "failed",
       errorMessage,
     };
   }
+}
+
+export async function registerNewSubscribeOnlyPost(
+  redis: RedisClient,
+  appSettings: ServerAppSettings,
+  post: RedditPost,
+  subredditDisplayName: string,
+  colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
+  language: SubGoalLanguage = defaultSubGoalLanguage,
+): Promise<CrosspostDispatchResult> {
+  await setSubscribeOnlyPostData(redis, post.id, {
+    subredditDisplayName,
+    colorTheme,
+    language,
+  });
+  logCrosspostEvent({
+    event: "crosspost_attempt_skipped",
+    sourcePostId: post.id,
+    targetSubreddit: appSettings.promoSubreddit,
+    reason: "tiny_post_height",
+  });
+  return { status: "skipped" };
 }
 
 export async function initializeRecentSubscriberIndexMigration(
@@ -419,10 +512,10 @@ export async function initializeRecentSubscriberIndexMigration(
     nowMs?: number;
     cooldownMinMs?: number;
     cooldownMaxMs?: number;
-  } = {}
+  } = {},
 ): Promise<void> {
   const existing = parseRecentSubscriberIndexMigrationState(
-    await redis.hGetAll(recentSubscriberIndexMigrationStateKey)
+    await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
   );
   if (existing) {
     return;
@@ -436,13 +529,13 @@ export async function initializeRecentSubscriberIndexMigration(
     recentSubscriberIndexMigrationStateKey,
     serializeRecentSubscriberIndexMigrationState({
       version: recentSubscriberIndexMigrationVersion,
-      status: 'pending',
+      status: "pending",
       cursor: 0,
       nextRunAt: nextCooldown(nowMs, cooldownMinMs, cooldownMaxMs),
       scannedTotal: 0,
       indexedTotal: 0,
       lastRunAt: 0,
-    })
+    }),
   );
 }
 
@@ -453,7 +546,7 @@ export async function processRecentSubscriberIndexMigrationBatch(
     batchSize?: number;
     cooldownMinMs?: number;
     cooldownMaxMs?: number;
-  } = {}
+  } = {},
 ): Promise<void> {
   const nowMs = options.nowMs ?? Date.now();
   const cooldownMinMs =
@@ -462,10 +555,10 @@ export async function processRecentSubscriberIndexMigrationBatch(
     options.cooldownMaxMs ?? recentSubscriberIndexCooldownMaxMs;
   const batchSize = Math.max(
     1,
-    Math.floor(options.batchSize ?? recentSubscriberIndexBatchSize)
+    Math.floor(options.batchSize ?? recentSubscriberIndexBatchSize),
   );
   let state = parseRecentSubscriberIndexMigrationState(
-    await redis.hGetAll(recentSubscriberIndexMigrationStateKey)
+    await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
   );
   if (!state) {
     await initializeRecentSubscriberIndexMigration(redis, {
@@ -474,19 +567,24 @@ export async function processRecentSubscriberIndexMigrationBatch(
       cooldownMaxMs,
     });
     state = parseRecentSubscriberIndexMigrationState(
-      await redis.hGetAll(recentSubscriberIndexMigrationStateKey)
+      await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
     );
   }
-  if (!state || state.status === 'complete' || nowMs < state.nextRunAt) {
+  if (!state || state.status === "complete" || nowMs < state.nextRunAt) {
     return;
   }
 
-  const result = await redis.zScan(postsKey, state.cursor, undefined, batchSize);
+  const result = await redis.zScan(
+    postsKey,
+    state.cursor,
+    undefined,
+    batchSize,
+  );
   let indexedThisRun = 0;
   for (const entry of result.members) {
     const recentSubscriber = await redis.hGet(
       subscriberGoalsKey,
-      `${entry.member}${postRecentSubscriberSuffix}`
+      `${entry.member}${postRecentSubscriberSuffix}`,
     );
     if (recentSubscriber && recentSubscriber.length > 0) {
       await addRecentSubscriberPostIndex(redis, recentSubscriber, entry.member);
@@ -496,7 +594,7 @@ export async function processRecentSubscriberIndexMigrationBatch(
 
   const nextState: RecentSubscriberIndexMigrationState = {
     version: recentSubscriberIndexMigrationVersion,
-    status: result.cursor === 0 ? 'complete' : 'running',
+    status: result.cursor === 0 ? "complete" : "running",
     cursor: result.cursor,
     nextRunAt:
       result.cursor === 0
@@ -508,19 +606,19 @@ export async function processRecentSubscriberIndexMigrationBatch(
   };
   await redis.hSet(
     recentSubscriberIndexMigrationStateKey,
-    serializeRecentSubscriberIndexMigrationState(nextState)
+    serializeRecentSubscriberIndexMigrationState(nextState),
   );
   console.info(
-    `[recentSubscriberIndexMigration] batch complete: scanned=${result.members.length} indexed=${indexedThisRun} scannedTotal=${nextState.scannedTotal} indexedTotal=${nextState.indexedTotal} cursor=${nextState.cursor} status=${nextState.status}`
+    `[recentSubscriberIndexMigration] batch complete: scanned=${result.members.length} indexed=${indexedThisRun} scannedTotal=${nextState.scannedTotal} indexedTotal=${nextState.indexedTotal} cursor=${nextState.cursor} status=${nextState.status}`,
   );
 }
 export async function eraseFromRecentSubscribers(
   redis: RedisClient,
-  username: string
+  username: string,
 ): Promise<void> {
   const normalized = username.toLowerCase();
   const indexedPostIds = parsePostIdList(
-    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized)
+    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
   const keysToUpdate: Record<string, string> = {};
 
@@ -528,7 +626,7 @@ export async function eraseFromRecentSubscribers(
     const key = `${postId}${postRecentSubscriberSuffix}`;
     const value = await redis.hGet(subscriberGoalsKey, key);
     if (value?.toLowerCase() === normalized) {
-      keysToUpdate[key] = '';
+      keysToUpdate[key] = "";
     }
   }
 

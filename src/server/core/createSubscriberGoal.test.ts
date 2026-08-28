@@ -9,6 +9,7 @@ const hoisted = vi.hoisted(() => ({
   redis: {},
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
+  registerNewSubscribeOnlyPost: vi.fn(),
   setSubredditDisplayNameForPost: vi.fn(),
   setSavedSubredditDisplayName: vi.fn(),
   cancelAllAutoCreateNextGoals: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("./post", () => ({
 vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
+  registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
 }));
 
@@ -104,6 +106,9 @@ describe("createSubscriberGoal sticky handling", () => {
       username: "subscriber-goal",
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
+    hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
+      status: "skipped",
+    });
     hoisted.applyGoalPostFrameStyle.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
@@ -190,10 +195,7 @@ describe("createSubscriberGoal sticky handling", () => {
 
     await createGoal({ postHeight: "short" });
 
-    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
-      post,
-      "short",
-    );
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(post, "short");
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -214,25 +216,24 @@ describe("createSubscriberGoal sticky handling", () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    await createGoal({ postHeight: "tiny", crosspost: true });
+    await createGoal({ postHeight: "tiny", goal: undefined, crosspost: true });
 
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(post, "tiny");
-    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        textFallback: "Subscribe to r/ExampleSub",
+      }),
+    );
+    expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       post,
-      200,
-      false,
       "ExampleSub",
       "red",
-      false,
       "en",
-      undefined,
-      "tiny",
     );
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
-
 
   it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {
     const refetchedBeforePropagation = createPost({

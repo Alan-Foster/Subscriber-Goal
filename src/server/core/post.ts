@@ -5,6 +5,10 @@ import {
   shortSubGoalPostHeightPixels,
   tinySubGoalPostHeightPixels,
 } from "../../shared/subGoalPostHeight";
+import {
+  subscriberGoalPostKind,
+  subscribeOnlyPostKind,
+} from "../../shared/postKind";
 
 type CreateGoalPostParams = {
   title: string;
@@ -18,13 +22,25 @@ export const createGoalPost = async ({
   title,
   subredditName,
   textFallback,
+  postHeight = "regular",
   submitAsUser = false,
 }: CreateGoalPostParams) => {
+  const isSubscribeOnly = postHeight === "tiny";
   return await reddit.submitCustomPost({
     title,
     subredditName,
-    entry: "default",
-    styles: { height: EntrypointHeight.REGULAR },
+    entry: isSubscribeOnly ? "subscribe-only" : "default",
+    postData: {
+      postKind: isSubscribeOnly
+        ? subscribeOnlyPostKind
+        : subscriberGoalPostKind,
+    },
+    styles: isSubscribeOnly
+      ? {
+          height: EntrypointHeight.HEIGHT_UNSPECIFIED,
+          heightPixels: tinySubGoalPostHeightPixels,
+        }
+      : { height: EntrypointHeight.REGULAR },
     textFallback: { text: textFallback },
     ...(submitAsUser
       ? {

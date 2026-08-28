@@ -1,21 +1,24 @@
-import type { RedisClient } from '../types';
-import type { BasicUserData } from './basicData';
+import type { RedisClient } from "../types";
+import type { BasicUserData } from "./basicData";
 import {
   addRecentSubscriberPostIndex,
   eraseFromRecentSubscribers,
   postRecentSubscriberSuffix,
   subscriberGoalsKey,
-} from './subGoalData';
+} from "./subGoalData";
 
-export const subscriberStatsKey = 'subscriber_stats';
-export const subscriberStatsByUserIdKey = 'subscriber_stats_by_user_id';
+export const subscriberStatsKey = "subscriber_stats";
+export const subscriberStatsByUserIdKey = "subscriber_stats_by_user_id";
+export const subscriberStatusByUserIdKey = "subscriber_status_by_user_id";
 export const subscriberStatsUsernameToUserIdKey =
-  'subscriber_stats_username_to_user_id';
+  "subscriber_stats_username_to_user_id";
 export const subscriberStatsLegacyMembersByUserIdKey =
-  'subscriber_stats_legacy_members_by_user_id';
-export const subscriberStatsErasedUserIdsKey = 'subscriber_stats_erased_user_ids';
-export const subscriberStatsMigrationStateKey = 'subscriber_stats_migration_state';
-export const subscriberStatsMigrationVersion = 'user_id_hash_v1';
+  "subscriber_stats_legacy_members_by_user_id";
+export const subscriberStatsErasedUserIdsKey =
+  "subscriber_stats_erased_user_ids";
+export const subscriberStatsMigrationStateKey =
+  "subscriber_stats_migration_state";
+export const subscriberStatsMigrationVersion = "user_id_hash_v1";
 
 const migrationBatchSize = 25;
 const migrationCooldownMinMs = 5 * 60 * 1000;
@@ -29,15 +32,15 @@ export type SubscriberStats = {
 };
 
 export function isSubscriberStats(object: unknown): object is SubscriberStats {
-  if (!object || typeof object !== 'object') {
+  if (!object || typeof object !== "object") {
     return false;
   }
   const subStats = object as SubscriberStats;
   return (
-    typeof subStats.id === 'string' &&
-    typeof subStats.username === 'string' &&
-    typeof subStats.timestamp === 'number' &&
-    typeof subStats.subscribers === 'number'
+    typeof subStats.id === "string" &&
+    typeof subStats.username === "string" &&
+    typeof subStats.timestamp === "number" &&
+    typeof subStats.subscribers === "number"
   );
 }
 
@@ -48,8 +51,10 @@ type ParsedSubscriberMember = {
   timestamp?: number;
 };
 
-const parseSubscriberMember = (member: string): ParsedSubscriberMember | undefined => {
-  const [id, username, subscribers, timestamp] = member.split(':');
+const parseSubscriberMember = (
+  member: string,
+): ParsedSubscriberMember | undefined => {
+  const [id, username, subscribers, timestamp] = member.split(":");
   if (!id || !username || !subscribers) {
     return undefined;
   }
@@ -73,7 +78,8 @@ const serializeSubscriberStats = (subStats: SubscriberStats): string =>
 const serializeLegacySubscriberMember = (subStats: SubscriberStats): string =>
   `${subStats.id}:${subStats.username}:${subStats.subscribers}`;
 
-const normalizeUsername = (username: string): string => username.trim().toLowerCase();
+const normalizeUsername = (username: string): string =>
+  username.trim().toLowerCase();
 
 const parseStringList = (raw: string | undefined): string[] => {
   if (!raw) {
@@ -84,7 +90,7 @@ const parseStringList = (raw: string | undefined): string[] => {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter((value): value is string => typeof value === 'string');
+    return parsed.filter((value): value is string => typeof value === "string");
   } catch {
     return [];
   }
@@ -96,10 +102,10 @@ const stringifyStringList = (values: string[]): string =>
 const addLegacySubscriberMemberIndex = async (
   redis: RedisClient,
   userId: string,
-  legacyMember: string
+  legacyMember: string,
 ): Promise<void> => {
   const existing = parseStringList(
-    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId)
+    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId),
   );
   if (existing.includes(legacyMember)) {
     return;
@@ -112,15 +118,16 @@ const addLegacySubscriberMemberIndex = async (
 const deleteSubscriberIndexes = async (
   redis: RedisClient,
   userId: string,
-  usernames: string[]
+  usernames: string[],
 ): Promise<void> => {
   await redis.hDel(subscriberStatsByUserIdKey, [userId]);
+  await redis.hDel(subscriberStatusByUserIdKey, [userId]);
   await redis.hDel(subscriberStatsLegacyMembersByUserIdKey, [userId]);
   const normalizedUsernames = [
     ...new Set(
       usernames
         .map((username) => normalizeUsername(username))
-        .filter((username) => username.length > 0)
+        .filter((username) => username.length > 0),
     ),
   ];
   if (normalizedUsernames.length > 0) {
@@ -131,13 +138,13 @@ const deleteSubscriberIndexes = async (
 };
 
 export type SubscriberErasureResult = {
-  status: 'complete' | 'partial';
+  status: "complete" | "partial";
   userIds: string[];
 };
 
 export async function getSubscriberStats(
   redis: RedisClient,
-  userId: string
+  userId: string,
 ): Promise<SubscriberStats | undefined> {
   const indexedMember = await redis.hGet(subscriberStatsByUserIdKey, userId);
   if (indexedMember) {
@@ -151,18 +158,31 @@ export async function getSubscriberStats(
       };
     }
     console.error(
-      'Found malformed indexed subscriber stats record: ',
-      JSON.stringify(indexedMember)
+      "Found malformed indexed subscriber stats record: ",
+      JSON.stringify(indexedMember),
     );
   }
 }
 
 export async function isTrackedSubscriber(
   redis: RedisClient,
-  userId: string
+  userId: string,
 ): Promise<boolean> {
+  const status = await redis.hGet(subscriberStatusByUserIdKey, userId);
+  if (status === "1") {
+    return true;
+  }
   const subscriberStats = await getSubscriberStats(redis, userId);
   return subscriberStats !== undefined;
+}
+
+export async function markSubscriber(
+  redis: RedisClient,
+  userId: string,
+): Promise<boolean> {
+  const existingStats = await getSubscriberStats(redis, userId);
+  const created = await redis.hSetNX(subscriberStatusByUserIdKey, userId, "1");
+  return created === 1 && existingStats === undefined;
 }
 
 export async function setNewSubscriber(
@@ -170,7 +190,7 @@ export async function setNewSubscriber(
   postId: string,
   currentSubscribers: number,
   user: BasicUserData,
-  shareUsername: boolean
+  shareUsername: boolean,
 ): Promise<boolean> {
   const alreadySubscribed = await isTrackedSubscriber(redis, user.id);
   if (alreadySubscribed) {
@@ -189,18 +209,21 @@ export async function setNewSubscriber(
   const indexed = await redis.hSetNX(
     subscriberStatsByUserIdKey,
     user.id,
-    indexedMember
+    indexedMember,
   );
   if (indexed === 0) {
     return false;
   }
+  await redis.hSetNX(subscriberStatusByUserIdKey, user.id, "1");
   await redis.hSet(subscriberStatsUsernameToUserIdKey, {
     [normalizeUsername(user.username)]: user.id,
   });
   await addLegacySubscriberMemberIndex(redis, user.id, legacyMember);
 
   await redis.hSet(subscriberGoalsKey, {
-    [`${postId}${postRecentSubscriberSuffix}`]: shareUsername ? user.username : '',
+    [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
+      ? user.username
+      : "",
   });
   if (shareUsername) {
     await addRecentSubscriberPostIndex(redis, user.username, postId);
@@ -213,7 +236,7 @@ export async function setNewSubscriber(
 }
 
 export async function clearLegacySubscriberErasureTombstones(
-  redis: RedisClient
+  redis: RedisClient,
 ): Promise<number> {
   const tombstones = await redis.hGetAll(subscriberStatsErasedUserIdsKey);
   const userIds = Object.keys(tombstones);
@@ -222,12 +245,12 @@ export async function clearLegacySubscriberErasureTombstones(
   }
   await redis.hDel(subscriberStatsErasedUserIdsKey, userIds);
   console.info(
-    `[subscriberStatsErasure] cleared legacy tombstones: count=${userIds.length}`
+    `[subscriberStatsErasure] cleared legacy tombstones: count=${userIds.length}`,
   );
   return userIds.length;
 }
 
-type SubscriberStatsMigrationStatus = 'pending' | 'running' | 'complete';
+type SubscriberStatsMigrationStatus = "pending" | "running" | "complete";
 
 type SubscriberStatsMigrationState = {
   version: string;
@@ -250,7 +273,7 @@ type SubscriberStatsMigrationOptions = {
 
 const parseMigrationNumber = (
   value: string | undefined,
-  fallback: number
+  fallback: number,
 ): number => {
   if (value === undefined) {
     return fallback;
@@ -260,17 +283,17 @@ const parseMigrationNumber = (
 };
 
 const parseMigrationState = (
-  raw: Record<string, string>
+  raw: Record<string, string>,
 ): SubscriberStatsMigrationState | undefined => {
   if (raw.version !== subscriberStatsMigrationVersion) {
     return;
   }
   const status =
-    raw.status === 'pending' ||
-    raw.status === 'running' ||
-    raw.status === 'complete'
+    raw.status === "pending" ||
+    raw.status === "running" ||
+    raw.status === "complete"
       ? raw.status
-      : 'pending';
+      : "pending";
   return {
     version: raw.version,
     status,
@@ -285,7 +308,7 @@ const parseMigrationState = (
 };
 
 const serializeMigrationState = (
-  state: SubscriberStatsMigrationState
+  state: SubscriberStatsMigrationState,
 ): Record<string, string> => ({
   version: state.version,
   status: state.status,
@@ -307,7 +330,7 @@ const getRandomDelay = (minMs: number, maxMs: number): number => {
 
 export async function initializeSubscriberStatsMigration(
   redis: RedisClient,
-  options: SubscriberStatsMigrationOptions = {}
+  options: SubscriberStatsMigrationOptions = {},
 ): Promise<void> {
   const raw = await redis.hGetAll(subscriberStatsMigrationStateKey);
   const existing = parseMigrationState(raw);
@@ -320,7 +343,7 @@ export async function initializeSubscriberStatsMigration(
   const cooldownMaxMs = options.cooldownMaxMs ?? migrationCooldownMaxMs;
   const state: SubscriberStatsMigrationState = {
     version: subscriberStatsMigrationVersion,
-    status: 'pending',
+    status: "pending",
     cursor: 0,
     nextRunAt: nowMs + getRandomDelay(cooldownMinMs, cooldownMaxMs),
     scannedTotal: 0,
@@ -332,16 +355,16 @@ export async function initializeSubscriberStatsMigration(
 
   await redis.hSet(
     subscriberStatsMigrationStateKey,
-    serializeMigrationState(state)
+    serializeMigrationState(state),
   );
   console.info(
-    `[subscriberStatsMigration] initialized: status=${state.status} nextRunAt=${state.nextRunAt} version=${state.version}`
+    `[subscriberStatsMigration] initialized: status=${state.status} nextRunAt=${state.nextRunAt} version=${state.version}`,
   );
 }
 
 export async function processSubscriberStatsMigrationBatch(
   redis: RedisClient,
-  options: SubscriberStatsMigrationOptions = {}
+  options: SubscriberStatsMigrationOptions = {},
 ): Promise<void> {
   const nowMs = options.nowMs ?? Date.now();
   const batchSize = Math.max(1, options.batchSize ?? migrationBatchSize);
@@ -357,24 +380,24 @@ export async function processSubscriberStatsMigrationBatch(
       cooldownMaxMs,
     });
     state = parseMigrationState(
-      await redis.hGetAll(subscriberStatsMigrationStateKey)
+      await redis.hGetAll(subscriberStatsMigrationStateKey),
     );
   }
-  if (!state || state.status === 'complete' || nowMs < state.nextRunAt) {
+  if (!state || state.status === "complete" || nowMs < state.nextRunAt) {
     return;
   }
 
   const oldTotal = await redis.zCard(subscriberStatsKey);
   const newTotalBefore = await redis.hLen(subscriberStatsByUserIdKey);
   console.info(
-    `[subscriberStatsMigration] starting batch: oldTotal=${oldTotal} newTotal=${newTotalBefore} cursor=${state.cursor} status=${state.status}`
+    `[subscriberStatsMigration] starting batch: oldTotal=${oldTotal} newTotal=${newTotalBefore} cursor=${state.cursor} status=${state.status}`,
   );
 
   const result = await redis.zScan(
     subscriberStatsKey,
     state.cursor,
     undefined,
-    batchSize
+    batchSize,
   );
   let migratedThisRun = 0;
   let skippedMalformed = 0;
@@ -400,7 +423,7 @@ export async function processSubscriberStatsMigrationBatch(
         username: parsed.username,
         subscribers: parsed.subscribers,
         timestamp: parsed.timestamp ?? record.score,
-      })
+      }),
     );
     if (stored === 1) {
       migratedThisRun += 1;
@@ -411,13 +434,13 @@ export async function processSubscriberStatsMigrationBatch(
 
   const scannedThisRun = result.members.length;
   const status: SubscriberStatsMigrationStatus =
-    result.cursor === 0 ? 'complete' : 'running';
+    result.cursor === 0 ? "complete" : "running";
   const nextState: SubscriberStatsMigrationState = {
     ...state,
     status,
     cursor: result.cursor,
     nextRunAt:
-      status === 'complete'
+      status === "complete"
         ? nowMs
         : nowMs + getRandomDelay(cooldownMinMs, cooldownMaxMs),
     scannedTotal: state.scannedTotal + scannedThisRun,
@@ -428,18 +451,18 @@ export async function processSubscriberStatsMigrationBatch(
   };
   await redis.hSet(
     subscriberStatsMigrationStateKey,
-    serializeMigrationState(nextState)
+    serializeMigrationState(nextState),
   );
 
   const newTotal = await redis.hLen(subscriberStatsByUserIdKey);
   const estimatedRemaining = Math.max(oldTotal - nextState.scannedTotal, 0);
   console.info(
-    `[subscriberStatsMigration] batch complete: scanned=${scannedThisRun} migrated=${migratedThisRun} skippedMalformed=${skippedMalformed} skippedExisting=${skippedExisting} scannedTotal=${nextState.scannedTotal} oldTotal=${oldTotal} newTotal=${newTotal} estimatedRemaining=${estimatedRemaining} cursor=${nextState.cursor} status=${nextState.status}`
+    `[subscriberStatsMigration] batch complete: scanned=${scannedThisRun} migrated=${migratedThisRun} skippedMalformed=${skippedMalformed} skippedExisting=${skippedExisting} scannedTotal=${nextState.scannedTotal} oldTotal=${oldTotal} newTotal=${newTotal} estimatedRemaining=${estimatedRemaining} cursor=${nextState.cursor} status=${nextState.status}`,
   );
 
-  if (nextState.status === 'complete') {
+  if (nextState.status === "complete") {
     console.info(
-      `[subscriberStatsMigration] complete: scanned=${nextState.scannedTotal} migrated=${nextState.migratedTotal} skippedMalformed=${nextState.skippedMalformedTotal} skippedExisting=${nextState.skippedExistingTotal} oldTotal=${oldTotal} newTotal=${newTotal}`
+      `[subscriberStatsMigration] complete: scanned=${nextState.scannedTotal} migrated=${nextState.migratedTotal} skippedMalformed=${nextState.skippedMalformedTotal} skippedExisting=${nextState.skippedExistingTotal} oldTotal=${oldTotal} newTotal=${newTotal}`,
     );
   }
 }
@@ -447,22 +470,29 @@ export async function processSubscriberStatsMigrationBatch(
 export async function untrackSubscriberById(
   redis: RedisClient,
   userId: string,
-  knownUsername?: string
+  knownUsername?: string,
 ): Promise<SubscriberErasureResult> {
   const indexedRecord = await redis.hGet(subscriberStatsByUserIdKey, userId);
-  const parsed = indexedRecord ? parseSubscriberMember(indexedRecord) : undefined;
+  const parsed = indexedRecord
+    ? parseSubscriberMember(indexedRecord)
+    : undefined;
 
   const legacyMembers = parseStringList(
-    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId)
+    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId),
   );
   let cursor = 0;
   do {
-    const result = await redis.zScan(subscriberStatsKey, cursor, undefined, 100);
+    const result = await redis.zScan(
+      subscriberStatsKey,
+      cursor,
+      undefined,
+      100,
+    );
     cursor = result.cursor;
     legacyMembers.push(
       ...result.members
         .filter((member) => parseSubscriberMember(member.member)?.id === userId)
-        .map((member) => member.member)
+        .map((member) => member.member),
     );
   } while (cursor !== 0);
 
@@ -473,7 +503,7 @@ export async function untrackSubscriberById(
         username: parsed.username,
         subscribers: parsed.subscribers,
         timestamp: parsed.timestamp ?? Date.now(),
-      })
+      }),
     );
   }
   const uniqueLegacyMembers = [...new Set(legacyMembers)];
@@ -492,17 +522,20 @@ export async function untrackSubscriberById(
   for (const username of usernamesToDelete) {
     await eraseFromRecentSubscribers(redis, username);
   }
-  return { status: 'complete', userIds: [userId] };
+  return { status: "complete", userIds: [userId] };
 }
 
 export async function untrackSubscriberByUsername(
   redis: RedisClient,
-  username: string
+  username: string,
 ): Promise<SubscriberErasureResult> {
   const normalized = normalizeUsername(username);
-  const userId = await redis.hGet(subscriberStatsUsernameToUserIdKey, normalized);
+  const userId = await redis.hGet(
+    subscriberStatsUsernameToUserIdKey,
+    normalized,
+  );
   if (!userId) {
-    return { status: 'partial', userIds: [] };
+    return { status: "partial", userIds: [] };
   }
   return await untrackSubscriberById(redis, userId, username);
 }

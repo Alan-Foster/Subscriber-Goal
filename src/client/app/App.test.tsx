@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderToStaticMarkup } from 'react-dom/server';
-import type { SubGoalState } from '../../shared/types/api';
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { SubGoalState, SubscribeOnlyState } from "../../shared/types/api";
 
 const hoisted = vi.hoisted(() => ({
   createState: () => ({
@@ -11,21 +11,29 @@ const hoisted = vi.hoisted(() => ({
     recentSubscriber: null,
     completedTime: null,
     headerText: null,
-    colorTheme: 'red',
-    postHeight: 'regular',
-    language: 'en',
+    colorTheme: "red",
+    postHeight: "regular",
+    language: "en",
     subscribed: false,
-    user: { id: 't2_user', username: 'alice' },
+    user: { id: "t2_user", username: "alice" },
     appSettings: {
-      promoSubreddit: 'SubGoal',
+      promoSubreddit: "SubGoal",
     },
     subreddit: {
-      id: 't5_test',
-      name: 'ExampleSub',
-      icon: '/icon.png',
+      id: "t5_test",
+      name: "ExampleSub",
+      icon: "/icon.png",
       subscribers: 123,
       isNsfw: false,
     },
+  }),
+  createTinyState: (subscribed = false): SubscribeOnlyState => ({
+    colorTheme: "red",
+    postHeight: "tiny",
+    language: "en",
+    subscribed,
+    authenticated: true,
+    subreddit: { name: "ExampleSub" },
   }),
   state: undefined as unknown as SubGoalState,
   subscribe: vi.fn(),
@@ -37,13 +45,13 @@ const hoisted = vi.hoisted(() => ({
 
 hoisted.state = hoisted.createState() as SubGoalState;
 
-vi.mock('@devvit/web/client', () => ({
+vi.mock("@devvit/web/client", () => ({
   context: {},
   navigateTo: hoisted.navigateTo,
   showToast: hoisted.showToast,
 }));
 
-vi.mock('../hooks/useSubGoal', () => ({
+vi.mock("../hooks/useSubGoal", () => ({
   useSubGoal: () => ({
     state: hoisted.state,
     loading: false,
@@ -55,43 +63,48 @@ vi.mock('../hooks/useSubGoal', () => ({
   }),
 }));
 
-import { App } from './App';
+import { App } from "./App";
 
-describe('App', () => {
+describe("App", () => {
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-      true;
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
     hoisted.state = hoisted.createState() as SubGoalState;
     hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
   });
 
-  it('defaults username sharing to enabled on SFW subreddits', () => {
+  it("defaults username sharing to enabled on SFW subreddits", () => {
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain('Show my username when I subscribe');
+    expect(html).toContain("Show my username when I subscribe");
     expect(html).toContain('checked=""');
   });
 
-  it('uses the compact shell height for short posts', () => {
-    hoisted.state.postHeight = 'short';
+  it("uses the compact shell height for short posts", () => {
+    hoisted.state.postHeight = "short";
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain('h-[234px]');
+    expect(html).toContain("h-[234px]");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 
-  it('uses the tiny shell height for tiny posts', () => {
-    hoisted.state.postHeight = 'tiny';
+  it("uses the tiny shell height for tiny posts", () => {
+    hoisted.state = hoisted.createTinyState();
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain('h-[120px]');
+    expect(html).toContain("h-[120px]");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 
-  it('sends shareUsername false when subscribing from a tiny post', async () => {
-    hoisted.state.postHeight = 'tiny';
-    const container = document.createElement('div');
+  it("subscribes without a username payload and renders only the tiny confirmation", async () => {
+    hoisted.state = hoisted.createTinyState();
+    hoisted.subscribe.mockResolvedValue({
+      state: hoisted.createTinyState(true),
+      error: null,
+    });
+    const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
 
@@ -99,18 +112,22 @@ describe('App', () => {
       root.render(<App />);
     });
 
-    const subscribeButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Subscribe to r/ExampleSub',
-    );
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
     expect(subscribeButton).toBeDefined();
 
     await act(async () => {
       subscribeButton?.dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
       );
     });
 
-    expect(hoisted.subscribe).toHaveBeenCalledWith({ shareUsername: false });
+    expect(hoisted.subscribe).toHaveBeenCalledWith(undefined);
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).not.toContain("Return to Previous Page");
+    expect(container.textContent).not.toContain("subscribers in the community");
+    expect(hoisted.showNotice).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();

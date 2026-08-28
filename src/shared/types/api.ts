@@ -19,19 +19,31 @@ export type PublicAppSettings = {
   promoSubreddit: string;
 };
 
-export type SubGoalState = {
+type SharedPostState = {
+  colorTheme: SubGoalColorTheme;
+  language: SubGoalLanguage;
+};
+
+export type SubscriberGoalState = SharedPostState & {
+  postHeight: Exclude<SubGoalPostHeight, "tiny">;
   goal: number | null;
   recentSubscriber: string | null;
   completedTime: number | null;
   headerText: string | null;
-  colorTheme: SubGoalColorTheme;
-  postHeight: SubGoalPostHeight;
-  language: SubGoalLanguage;
   subscribed: boolean;
   user: BasicUserData | null;
   appSettings: PublicAppSettings;
   subreddit: BasicSubredditData;
 };
+
+export type SubscribeOnlyState = SharedPostState & {
+  postHeight: "tiny";
+  subscribed: boolean;
+  authenticated: boolean;
+  subreddit: Pick<BasicSubredditData, "name">;
+};
+
+export type SubGoalState = SubscriberGoalState | SubscribeOnlyState;
 
 export type InitResponse = {
   type: "init";

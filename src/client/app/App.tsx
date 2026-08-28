@@ -1,15 +1,15 @@
-import { navigateTo, showToast } from '@devvit/web/client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSubGoalPostMessages } from '../../shared/subGoalPostI18n';
-import { useSubGoal } from '../hooks/useSubGoal';
-import { ConfettiBurst } from './components/ConfettiBurst';
-import { SkeletonPage } from './components/SkeletonPage';
-import { confettiPresets } from './confettiPresets';
-import { CompletedPage } from './pages/CompletedPage';
-import { SubGoalPage } from './pages/SubGoalPage';
-import { ThanksPage } from './pages/ThanksPage';
+import { navigateTo, showToast } from "@devvit/web/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import { useSubGoal } from "../hooks/useSubGoal";
+import { ConfettiBurst } from "./components/ConfettiBurst";
+import { SkeletonPage } from "./components/SkeletonPage";
+import { confettiPresets } from "./confettiPresets";
+import { CompletedPage } from "./pages/CompletedPage";
+import { SubGoalPage } from "./pages/SubGoalPage";
+import { ThanksPage } from "./pages/ThanksPage";
 
-type PageName = 'subGoal' | 'thanks' | 'completed';
+type PageName = "subGoal" | "thanks" | "completed";
 
 export const App = () => {
   const {
@@ -21,11 +21,11 @@ export const App = () => {
     notice,
     showNotice,
   } = useSubGoal();
-  const [page, setPage] = useState<PageName>('subGoal');
+  const [page, setPage] = useState<PageName>("subGoal");
   const [showConfetti, setShowConfetti] = useState(false);
   const [confettiKey, setConfettiKey] = useState(0);
   const [confettiPieces, setConfettiPieces] = useState<number>(
-    confettiPresets.default.pieceCount
+    confettiPresets.default.pieceCount,
   );
   const confettiTimeoutRef = useRef<number | null>(null);
   const completedConfettiShownRef = useRef(false);
@@ -34,16 +34,16 @@ export const App = () => {
   const messages = getSubGoalPostMessages(state?.language);
 
   useEffect(() => {
-    if (state?.subreddit.isNsfw) {
+    if (state && state.postHeight !== "tiny" && state.subreddit.isNsfw) {
       setShareUsername(false);
     }
-  }, [state?.subreddit.isNsfw]);
+  }, [state]);
 
   useEffect(() => {
-    if (state?.completedTime) {
-      setPage('completed');
+    if (state && state.postHeight !== "tiny" && state.completedTime) {
+      setPage("completed");
     }
-  }, [state?.completedTime]);
+  }, [state]);
 
   useEffect(
     () => () => {
@@ -54,10 +54,13 @@ export const App = () => {
         window.clearTimeout(returnNoticeTimeoutRef.current);
       }
     },
-    []
+    [],
   );
 
-  const promoSubreddit = state?.appSettings.promoSubreddit;
+  const promoSubreddit =
+    state?.postHeight !== "tiny"
+      ? state?.appSettings.promoSubreddit
+      : undefined;
   const handleVisitPromo = () => {
     if (!promoSubreddit) {
       return;
@@ -88,11 +91,11 @@ export const App = () => {
         setShowConfetti(false);
       }, durationMs);
     },
-    [showConfetti]
+    [showConfetti],
   );
 
   useEffect(() => {
-    if (page === 'completed') {
+    if (page === "completed") {
       if (!completedConfettiShownRef.current) {
         triggerConfetti(confettiPresets.completed);
         completedConfettiShownRef.current = true;
@@ -103,48 +106,60 @@ export const App = () => {
   }, [page, triggerConfetti]);
 
   const handleSubscribe = async () => {
-    if (!state?.user) {
+    if (!state) {
+      return;
+    }
+    const authenticated =
+      state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
+    if (!authenticated) {
       setError(messages.loginRequired);
       showToast(messages.loginRequired);
       return;
     }
-    const effectiveShareUsername = state.subreddit.isNsfw || state.postHeight === 'tiny'
-      ? false
-      : shareUsername;
-    const { state: updatedState, error: subscribeError } = await subscribe({
-      shareUsername: effectiveShareUsername,
-    });
+    const payload =
+      state.postHeight === "tiny"
+        ? undefined
+        : { shareUsername: state.subreddit.isNsfw ? false : shareUsername };
+    const { state: updatedState, error: subscribeError } =
+      await subscribe(payload);
     if (subscribeError) {
       showToast(
-        state.language === 'en' ? subscribeError : messages.subscribeErrorToast
+        state.language === "en" ? subscribeError : messages.subscribeErrorToast,
       );
       return;
     }
     if (!updatedState) {
       return;
     }
-    if (updatedState.completedTime) {
-      setPage('completed');
+    if (updatedState.postHeight !== "tiny" && updatedState.completedTime) {
+      setPage("completed");
     } else {
-      setPage('thanks');
+      setPage("thanks");
     }
     triggerConfetti(confettiPresets.subscribe);
-    const noticeMessage = messages.subscriberNotice({
-      username: updatedState.recentSubscriber,
-    });
-    showNotice(noticeMessage);
-    showToast({ text: messages.subscribeSuccessToast, appearance: 'success' });
+    if (updatedState.postHeight !== "tiny") {
+      const noticeMessage = messages.subscriberNotice({
+        username: updatedState.recentSubscriber,
+      });
+      showNotice(noticeMessage);
+    }
+    showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
   };
 
   const handleReturnToSubGoal = () => {
-    setPage('subGoal');
+    if (!state || state.postHeight === "tiny") {
+      return;
+    }
+    setPage("subGoal");
     if (returnNoticeTimeoutRef.current) {
       window.clearTimeout(returnNoticeTimeoutRef.current);
     }
-    const effectiveShareUsername = state?.subreddit.isNsfw || state?.postHeight === 'tiny'
+    const effectiveShareUsername = state.subreddit.isNsfw
       ? false
       : shareUsername;
-    const username = effectiveShareUsername ? state?.user?.username ?? null : null;
+    const username = effectiveShareUsername
+      ? (state.user?.username ?? null)
+      : null;
     const message = messages.subscriberNotice({ username });
     returnNoticeTimeoutRef.current = window.setTimeout(() => {
       showNotice(message);
@@ -157,7 +172,7 @@ export const App = () => {
 
   let content = null;
   if (state) {
-    if (page === 'thanks') {
+    if (page === "thanks") {
       content = (
         <ThanksPage
           state={state}
@@ -166,7 +181,7 @@ export const App = () => {
           onCelebrate={handleCelebrate}
         />
       );
-    } else if (page === 'completed') {
+    } else if (page === "completed" && state.postHeight !== "tiny") {
       content = (
         <CompletedPage
           state={state}
@@ -195,11 +210,11 @@ export const App = () => {
   }
 
   const appHeightClass =
-    state?.postHeight === 'tiny'
-      ? 'h-[120px]'
-      : state?.postHeight === 'short'
-        ? 'h-[234px]'
-        : 'h-[320px]';
+    state?.postHeight === "tiny"
+      ? "h-[120px]"
+      : state?.postHeight === "short"
+        ? "h-[234px]"
+        : "h-[320px]";
 
   return (
     <div

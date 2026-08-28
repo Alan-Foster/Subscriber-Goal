@@ -12,6 +12,12 @@
         "entry": "app.html",
         "height": "regular"
       },
+      "subscribe-only": {
+        "entry": "subscribe-only.html",
+        "styles": {
+          "height": 120
+        }
+      },
       "app": {
         "entry": "app.html",
         "height": "regular"

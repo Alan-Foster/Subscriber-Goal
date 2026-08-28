@@ -100,10 +100,10 @@ export function registerInternalUiRoutes(router: Router): void {
                   options: [
                     { label: "Regular", value: "regular" },
                     { label: "Short (no logo)", value: "short" },
-                    { label: "Tiny (Subscribe button only)", value: "tiny" },
+                    { label: "Tiny (Only Subscribe Button)", value: "tiny" },
                   ],
                   helpText:
-                    "Tiny posts show only a subscribe button and cannot be crossposted.",
+                    "Tiny posts show only a subscribe button. Subscriber goal, crosspost, and auto-create settings are ignored for Tiny posts.",
                   required: true,
                 },
                 {
@@ -112,8 +112,8 @@ export function registerInternalUiRoutes(router: Router): void {
                   type: "number",
                   defaultValue: defaultGoal,
                   helpText:
-                    "The default goal is a suggestion on your current subscriber count. Set it to any number greater than your current subscriber count.",
-                  required: true,
+                    "Required for Regular and Short posts and ignored for Tiny posts. The default is a suggestion based on your current subscriber count.",
+                  required: false,
                 },
                 {
                   name: "postTitle",
@@ -238,8 +238,8 @@ export function registerInternalUiRoutes(router: Router): void {
           : autoCreateNextGoal;
 
         if (
-          !subscriberGoal ||
-          subreddit.numberOfSubscribers >= subscriberGoal
+          !shouldCreateTinyPost &&
+          (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal)
         ) {
           res.json({ showToast: "Please select a valid subscriber goal!" });
           return;
@@ -282,7 +282,7 @@ export function registerInternalUiRoutes(router: Router): void {
             appSettings,
             options: {
               title: resolvedTitle,
-              goal: subscriberGoal,
+              ...(shouldCreateTinyPost ? {} : { goal: subscriberGoal }),
               subredditDisplayName: resolvedSubredditDisplayName,
               crosspost: effectiveCrosspost,
               colorTheme,

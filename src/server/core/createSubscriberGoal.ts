@@ -3,11 +3,11 @@ import type { RedditClient, RedisClient } from "../types";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
-import { defaultSubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 import {
   cancelAllAutoCreateNextGoals,
   registerNewSubGoalPost,
+  registerNewSubscribeOnlyPost,
   setSubredditDisplayNameForPost,
   type CrosspostDispatchResult,
 } from "../data/subGoalData";
@@ -19,12 +19,15 @@ import {
 } from "../data/updaterData";
 import { isLinkId } from "../types";
 import { clearUserStickies } from "../utils/redditUtils";
-import { textFallbackMaker } from "../utils/textFallback";
+import {
+  subscribeOnlyTextFallbackMaker,
+  textFallbackMaker,
+} from "../utils/textFallback";
 import { toErrorMessage } from "../utils/crosspostLogs";
 
 type CreateSubscriberGoalOptions = {
   title: string;
-  goal: number;
+  goal?: number;
   subredditDisplayName: string;
   crosspost: boolean;
   colorTheme: SubGoalColorTheme;
@@ -77,17 +80,28 @@ export async function createSubscriberGoal({
   const existingTrackedPosts = await getTrackedPosts(redis);
   const existingQueuedPosts = await getQueuedUpdates(redis);
   await clearUserStickies(reddit, appUser.username, {
-    knownPostIds: [...new Set([...existingTrackedPosts, ...existingQueuedPosts])],
+    knownPostIds: [
+      ...new Set([...existingTrackedPosts, ...existingQueuedPosts]),
+    ],
     subreddit,
   });
 
-  const textFallback = textFallbackMaker({
-    goal: options.goal,
-    subscribers: subreddit.numberOfSubscribers,
-    subredditName: options.subredditDisplayName,
-    completedTime: null,
-    language: options.language,
-  });
+  const isTinyPost = options.postHeight === "tiny";
+  if (!isTinyPost && options.goal === undefined) {
+    throw new Error("Subscriber goal is required for non-tiny posts.");
+  }
+  const textFallback = isTinyPost
+    ? subscribeOnlyTextFallbackMaker({
+        subredditName: options.subredditDisplayName,
+        language: options.language,
+      })
+    : textFallbackMaker({
+        goal: options.goal as number,
+        subscribers: subreddit.numberOfSubscribers,
+        subredditName: options.subredditDisplayName,
+        completedTime: null,
+        language: options.language,
+      });
 
   const post = await createGoalPost({
     title: options.title,
@@ -99,26 +113,29 @@ export async function createSubscriberGoal({
   await applyGoalPostFrameStyle(post, options.postHeight);
 
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
-  const isTinyPost = options.postHeight === "tiny";
-  const effectiveCrosspost = isTinyPost ? false : options.crosspost;
-  const effectiveAutoCreateNextGoal = isTinyPost
-    ? false
-    : options.autoCreateNextGoal;
-
-  const crosspostDispatchResult = await registerNewSubGoalPost(
-    reddit,
-    redis,
-    appSettings,
-    post,
-    options.goal,
-    effectiveCrosspost,
-    options.subredditDisplayName,
-    options.colorTheme,
-    effectiveAutoCreateNextGoal,
-    options.language,
-    options.headerText,
-    options.postHeight ?? defaultSubGoalPostHeight,
-  );
+  const crosspostDispatchResult = isTinyPost
+    ? await registerNewSubscribeOnlyPost(
+        redis,
+        appSettings,
+        post,
+        options.subredditDisplayName,
+        options.colorTheme,
+        options.language,
+      )
+    : await registerNewSubGoalPost(
+        reddit,
+        redis,
+        appSettings,
+        post,
+        options.goal as number,
+        options.crosspost,
+        options.subredditDisplayName,
+        options.colorTheme,
+        options.autoCreateNextGoal,
+        options.language,
+        options.headerText,
+        options.postHeight as Exclude<SubGoalPostHeight, "tiny">,
+      );
 
   const trackedPosts = await getTrackedPosts(redis);
   const queuedPosts = await getQueuedUpdates(redis);
@@ -150,11 +167,9 @@ export async function createSubscriberGoal({
   await post.approve();
   const stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
     maxWaitMs:
-      options.stickyVerification?.maxWaitMs ??
-      STICKY_VERIFICATION_MAX_WAIT_MS,
+      options.stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
     intervalMs:
-      options.stickyVerification?.intervalMs ??
-      STICKY_VERIFICATION_INTERVAL_MS,
+      options.stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
   });
 
   if (options.cancelPendingAutoCreateGoals) {

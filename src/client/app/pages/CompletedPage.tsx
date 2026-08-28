@@ -1,12 +1,12 @@
-import { context } from '@devvit/web/client';
-import type { SubGoalState } from '../../../shared/types/api';
-import { formatSubscriberCount } from '../../../shared/numberFormat';
-import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
-import { SubredditIcon } from '../components/SubredditIcon';
-import { TopButtons } from '../components/TopButtons';
+import { context } from "@devvit/web/client";
+import type { SubscriberGoalState } from "../../../shared/types/api";
+import { formatSubscriberCount } from "../../../shared/numberFormat";
+import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
+import { SubredditIcon } from "../components/SubredditIcon";
+import { TopButtons } from "../components/TopButtons";
 
 type CompletedPageProps = {
-  state: SubGoalState;
+  state: SubscriberGoalState;
   onVisitPromoSub: () => void;
   onCelebrate: () => void;
 };
@@ -21,22 +21,24 @@ export const CompletedPage = ({
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const messages = getSubGoalPostMessages(state.language);
-  const isShort = state.postHeight === 'short' || state.postHeight === 'tiny';
+  const isShort = state.postHeight === "short";
   const gregorianLocale = getGregorianLocale(messages.intlLocale);
-  const completedDate = state.completedTime ? new Date(state.completedTime) : null;
+  const completedDate = state.completedTime
+    ? new Date(state.completedTime)
+    : null;
   const timeText = completedDate
     ? new Intl.DateTimeFormat(gregorianLocale, {
-        timeZone: timezone ?? 'UTC',
-        hour: 'numeric',
-        minute: '2-digit',
+        timeZone: timezone ?? "UTC",
+        hour: "numeric",
+        minute: "2-digit",
       }).format(completedDate)
     : null;
   const dateText = completedDate
     ? new Intl.DateTimeFormat(gregorianLocale, {
-        timeZone: timezone ?? 'UTC',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
+        timeZone: timezone ?? "UTC",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
       }).format(completedDate)
     : null;
 
