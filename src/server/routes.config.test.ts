@@ -23,8 +23,14 @@ describe("devvit.json route alignment", () => {
   };
 
   it("maps forms to the same internal endpoints", () => {
-    expect(devvitConfig.forms[formNames.createGoal]).toBe(
-      internalRoutes.forms.createGoal,
+    expect(devvitConfig.forms[formNames.createGoalSetup]).toBe(
+      internalRoutes.forms.createGoalSetup,
+    );
+    expect(devvitConfig.forms[formNames.createSubscriberGoal]).toBe(
+      internalRoutes.forms.createSubscriberGoal,
+    );
+    expect(devvitConfig.forms[formNames.createSubscribeOnly]).toBe(
+      internalRoutes.forms.createSubscribeOnly,
     );
     expect(devvitConfig.forms[formNames.deleteGoal]).toBe(
       internalRoutes.forms.deleteGoal,

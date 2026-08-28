@@ -78,15 +78,25 @@ export type ErrorResponse = {
   message: string;
 };
 
-export type CreateGoalFormValues = {
+export type CreateGoalSetupFormValues = {
+  postHeight?: string[];
+  language?: string[];
+};
+
+export type CreateSubscriberGoalFormValues = {
   subscriberGoal?: number;
   postTitle?: string;
   crosspost?: boolean;
   subredditDisplayName?: string;
   colorTheme?: string[];
-  postHeight?: string[];
   autoCreateNextGoal?: boolean;
-  language?: string[];
+  customDeveloperField?: string;
+};
+
+export type CreateSubscribeOnlyFormValues = {
+  postTitle?: string;
+  subredditDisplayName?: string;
+  colorTheme?: string[];
   customDeveloperField?: string;
 };
 

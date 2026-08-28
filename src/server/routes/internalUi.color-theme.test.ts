@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formNames, internalRoutes } from "../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({
+  redisValues: new Map<string, string>(),
   context: {
     subredditName: "ExampleSub",
     userId: "t2_mod",
@@ -18,7 +19,11 @@ const hoisted = vi.hoisted(() => ({
     },
     sendPrivateMessage: vi.fn(),
   },
-  redis: {},
+  redis: {
+    set: vi.fn(),
+    get: vi.fn(),
+    del: vi.fn(),
+  },
   getAppSettings: vi.fn(),
   getSavedSubredditDisplayName: vi.fn(),
   setSavedSubredditDisplayName: vi.fn(),
@@ -87,6 +92,10 @@ import { registerInternalUiRoutes } from "./internalUi";
 type RouteHandler = (req: Request, res: Response) => void | Promise<void>;
 
 function createRouteHarness(): Map<string, RouteHandler> {
+  const userId = hoisted.context.userId;
+  if (userId && !hoisted.redisValues.has(`create_goal_draft:${userId}`)) {
+    seedCreateGoalDraft("regular", "en");
+  }
   const routes = new Map<string, RouteHandler>();
   const router = {
     post: (path: string, handler: RouteHandler) => {
@@ -97,9 +106,31 @@ function createRouteHarness(): Map<string, RouteHandler> {
   return routes;
 }
 
+function seedCreateGoalDraft(
+  postHeight: "regular" | "short" | "tiny",
+  language: string,
+): void {
+  hoisted.redisValues.set(
+    `create_goal_draft:${hoisted.context.userId}`,
+    JSON.stringify({ version: 1, postHeight, language }),
+  );
+}
+
 describe("internalUi color theme create goal routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    hoisted.redisValues.clear();
+    hoisted.redis.set.mockImplementation(async (key, value) => {
+      hoisted.redisValues.set(key, value);
+      return "OK";
+    });
+    hoisted.redis.get.mockImplementation(async (key) =>
+      hoisted.redisValues.get(key),
+    );
+    hoisted.redis.del.mockImplementation(async (key) => {
+      const existed = hoisted.redisValues.delete(key);
+      return existed ? 1 : 0;
+    });
     hoisted.context.subredditName = "ExampleSub";
     hoisted.context.userId = "t2_mod";
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -266,7 +297,7 @@ describe("internalUi color theme create goal routes", () => {
     });
   });
 
-  it("adds a red-default color theme select to the create goal form", async () => {
+  it("opens a setup form containing only language and post height", async () => {
     const routes = createRouteHarness();
     const json = vi.fn();
     const res = { json } as unknown as Response;
@@ -275,7 +306,10 @@ describe("internalUi color theme create goal routes", () => {
 
     const response = json.mock.calls[0]?.[0] as {
       showForm: {
+        name: string;
         form: {
+          title: string;
+          acceptLabel: string;
           fields: Array<{
             name: string;
             type: string;
@@ -289,22 +323,9 @@ describe("internalUi color theme create goal routes", () => {
       };
     };
     const fields = response.showForm.form.fields;
-    expect(fields.find((field) => field.name === "colorTheme")).toMatchObject({
-      type: "select",
-      defaultValue: ["red"],
-      options: [
-        { label: "Red", value: "red" },
-        { label: "Green", value: "green" },
-        { label: "Purple", value: "purple" },
-        { label: "Blue", value: "blue" },
-      ],
-    });
-    expect(
-      fields.find((field) => field.name === "autoCreateNextGoal"),
-    ).toMatchObject({
-      type: "boolean",
-      defaultValue: true,
-    });
+    expect(response.showForm.name).toBe(formNames.createGoalSetup);
+    expect(response.showForm.form.title).toBe("Sub Goal - Choose Post Type");
+    expect(response.showForm.form.acceptLabel).toBe("Next");
     expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
       type: "select",
       defaultValue: ["regular"],
@@ -313,12 +334,6 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Short (no logo)", value: "short" },
         { label: "Tiny (Only Subscribe Button)", value: "tiny" },
       ],
-    });
-    expect(
-      fields.find((field) => field.name === "subscriberGoal"),
-    ).toMatchObject({
-      required: false,
-      helpText: expect.stringContaining("ignored for Tiny posts"),
     });
     expect(fields.find((field) => field.name === "language")).toMatchObject({
       type: "select",
@@ -354,32 +369,220 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Yorùbá", value: "yo" },
       ],
     });
-    expect(
-      fields.find((field) => field.name === "customDeveloperField"),
-    ).toMatchObject({
-      type: "string",
-      label: "Custom Developer Field",
-      helpText:
-        "This field is for developers and testing only. Please leave this field empty",
-    });
     expect(fields.map((field) => field.name)).toEqual([
       "language",
       "postHeight",
-      "subscriberGoal",
+    ]);
+    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.redis.del).toHaveBeenCalledWith(
+      "create_goal_draft:t2_mod",
+    );
+  });
+
+  it("stores setup choices and opens the Regular/Short details form", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { language: ["es"], postHeight: ["short"] } } as Request,
+      res,
+    );
+
+    const response = json.mock.calls[0]?.[0] as {
+      showForm: {
+        name: string;
+        form: {
+          fields: Array<{
+            name: string;
+            defaultValue?: unknown;
+            disabled?: boolean;
+          }>;
+        };
+      };
+    };
+    expect(response.showForm.name).toBe(formNames.createSubscriberGoal);
+    expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
       "postTitle",
       "subredditDisplayName",
+      "subscriberGoal",
       "colorTheme",
       "crosspost",
       "autoCreateNextGoal",
       "customDeveloperField",
     ]);
+    expect(
+      response.showForm.form.fields.find((field) => field.name === "postTitle"),
+    ).toMatchObject({ defaultValue: "¡Bienvenido a r/ExampleSub!" });
+    expect(
+      response.showForm.form.fields.find(
+        (field) => field.name === "subscriberGoal",
+      ),
+    ).toMatchObject({ defaultValue: 200 });
+    expect(
+      response.showForm.form.fields.find((field) => field.name === "crosspost"),
+    ).toMatchObject({ defaultValue: true, disabled: false });
+    expect(hoisted.redis.set).toHaveBeenCalledWith(
+      "create_goal_draft:t2_mod",
+      JSON.stringify({ version: 1, language: "es", postHeight: "short" }),
+      { expiration: expect.any(Date) },
+    );
   });
 
-  it("passes the selected color theme when creating a goal post", async () => {
+  it("opens a Tiny details form without goal-only fields", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { language: ["en"], postHeight: ["tiny"] } } as Request,
+      res,
+    );
+
+    const response = json.mock.calls[0]?.[0] as {
+      showForm: {
+        name: string;
+        form: { fields: Array<{ name: string; helpText?: string }> };
+      };
+    };
+    expect(response.showForm.name).toBe(formNames.createSubscribeOnly);
+    expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
+      "postTitle",
+      "subredditDisplayName",
+      "colorTheme",
+      "customDeveloperField",
+    ]);
+    expect(
+      response.showForm.form.fields.find((field) => field.name === "colorTheme")
+        ?.helpText,
+    ).not.toContain("progress bar");
+  });
+
+  it("disables goal crossposting when the source subreddit is NSFW", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      isNsfw: true,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { language: ["en"], postHeight: ["regular"] } } as Request,
+      res,
+    );
+
+    const response = json.mock.calls[0]?.[0] as {
+      showForm: {
+        form: {
+          fields: Array<{
+            name: string;
+            defaultValue?: unknown;
+            disabled?: boolean;
+            helpText?: string;
+          }>;
+        };
+      };
+    };
+    expect(
+      response.showForm.form.fields.find((field) => field.name === "crosspost"),
+    ).toMatchObject({
+      defaultValue: false,
+      disabled: true,
+      helpText: "Crossposting is disabled for NSFW source subreddits.",
+    });
+  });
+
+  it("rejects invalid setup selections without storing a draft", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { language: ["invalid"], postHeight: ["giant"] } } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: "Please select a valid language and post height.",
+    });
+    expect(hoisted.redis.set).not.toHaveBeenCalled();
+  });
+
+  it("reopens setup when a details draft is missing", async () => {
+    const routes = createRouteHarness();
+    hoisted.redisValues.clear();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          subscriberGoal: 200,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          colorTheme: ["red"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showToast: expect.stringContaining("expired"),
+        showForm: expect.objectContaining({ name: formNames.createGoalSetup }),
+      }),
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Tiny draft submitted through the subscriber-goal form", async () => {
+    seedCreateGoalDraft("tiny", "en");
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      { body: {} } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showForm: expect.objectContaining({ name: formNames.createGoalSetup }),
+      }),
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("retains the draft when subscriber-goal validation fails", async () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          subscriberGoal: 100,
+          postTitle: "Welcome!",
+          subredditDisplayName: "ExampleSub",
+          colorTheme: ["red"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.redis.del).not.toHaveBeenCalled();
+    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(true);
+  });
+
+  it("passes the selected color theme when creating a goal post", async () => {
+    seedCreateGoalDraft("short", "es");
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -412,13 +615,16 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
     );
+    expect(hoisted.redis.del).toHaveBeenCalledWith("create_goal_draft:t2_mod");
+    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(false);
   });
 
   it("creates tiny posts without requiring or registering a subscriber goal", async () => {
+    seedCreateGoalDraft("tiny", "en");
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscribeOnly)?.(
       {
         body: {
           postTitle: "Welcome!",
@@ -450,14 +656,15 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it("localizes the default post title when Spanish is selected", async () => {
+    seedCreateGoalDraft("regular", "es");
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
-          postTitle: "Welcome to r/ExampleSub!",
+          postTitle: "¡Bienvenido a r/ExampleSub!",
           subredditDisplayName: "ExampleSub",
           crosspost: false,
           colorTheme: ["red"],
@@ -480,7 +687,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -509,7 +716,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -567,7 +774,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -597,7 +804,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -631,7 +838,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -675,7 +882,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -703,7 +910,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -731,7 +938,7 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoal)?.(
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
       {
         body: {
           subscriberGoal: 200,
@@ -785,7 +992,9 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    const responsePromise = routes.get(internalRoutes.forms.createGoal)?.(
+    const responsePromise = routes.get(
+      internalRoutes.forms.createSubscriberGoal,
+    )?.(
       {
         body: {
           subscriberGoal: 200,
@@ -846,7 +1055,9 @@ describe("internalUi color theme create goal routes", () => {
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
 
-    const responsePromise = routes.get(internalRoutes.forms.createGoal)?.(
+    const responsePromise = routes.get(
+      internalRoutes.forms.createSubscriberGoal,
+    )?.(
       {
         body: {
           subscriberGoal: 200,
