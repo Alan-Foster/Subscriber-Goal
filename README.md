@@ -51,7 +51,8 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1 5.1 - Release of Mini-Height Goals (goals without subreddit icons) 
+- 1.6.1 - Release of Micro-Height Goals (call to action Subscribe button only). Devvit 0.14.1
+- 1.5.1 - Release of Mini-Height Goals (goals without subreddit icons) 
 - 1.4.4 - Fixed a bug with sticky not replacing completed goals. Devvit 0.13.6. Updated Overrides.
 - 1.4.3 - Added more developer special code commands.
 - 1.4.1 - Subscriber Goal provides a warning via Modmail and DM when it cannot pin a post. Menu item developer special-code field. Devvit 0.13.2
@@ -59,13 +60,13 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - 1.2.3 - Subscriber Goal is now available in 28 total languages! Wow!
 - 1.2.1 - Subscriber Goal is now available in 7 other languages.
 - 1.1.1 - Added Auto-Launch New Goal toggle that can create a new goal 24 hours after success.
-- 1.0.1 - Official Launch - all previous installations force-updated to 1.0.0.
+- 1.0.1 - Official Launch - all previous installations force-updated to 1.0.1.
 - 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Fixed package drift. Devvit 0.12.22
 - 0.13.1 - Reduce scheduler work on non-authority installs, removed full Redis scans from admin erasure paths. Devvit 0.12.21
 - 0.13.0 - Final conversion from zrange to hget for data lookup. Custom button colors.
 - 0.12.5 - Add a subscribe button glow to drive higher button engagement. Share username is now opt-out.
 - 0.12.3 - Removal of decimals on any value below 9999 and 10k+ does not use hundreds decimals.
-- 0.12.2 - Adjusted subreddit icon scale to not be blurry. Devvit 0.12.20.
+- 0.12.2 - Adjusted subreddit icon scale to not be blurry. Devvit 0.12.20
 - 0.12.0 - Proper utilization of App Settings. Fixed stale-posts preventing crossposting. Devvit 0.12.19
 - 0.11.10 - Removed unused code, added app icon.
 - 0.11.9 - Experimental fixes for broken crossposting.
