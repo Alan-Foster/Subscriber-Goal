@@ -23,6 +23,7 @@ import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
+import { processDueOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
   getTerminalRemovedByCategory,
@@ -99,6 +100,20 @@ export async function onPostsUpdaterJob(): Promise<void> {
     await processRecentSubscriberIndexMigrationBatch(redis);
   } catch (error) {
     console.error(`recentSubscriberIndexMigration error: ${String(error)}`);
+  }
+  try {
+    const onboardingSummary = await processDueOnboardingSubscriberGoal({
+      reddit,
+      redis,
+      appSettings,
+    });
+    if (onboardingSummary.shouldLog) {
+      console.info(
+        `[onboardingSubscriberGoal] scheduler summary: subreddit=${currentSubredditName} status=${onboardingSummary.status} terminalStatus=${onboardingSummary.terminalStatus ?? "none"} source=${onboardingSummary.lifecycleSource ?? "unknown"} existingSource=${onboardingSummary.existingSource ?? "none"} trackedInspected=${onboardingSummary.trackedInspected} pinnedInspected=${onboardingSummary.pinnedInspected} recentInspected=${onboardingSummary.recentInspected} postId=${onboardingSummary.postId ?? "none"} error=${onboardingSummary.errorMessage ?? "none"}`,
+      );
+    }
+  } catch (error) {
+    console.error(`onboardingSubscriberGoal error: ${String(error)}`);
   }
   try {
     const autoCreateSummary = await processDueAutoCreateNextGoals({

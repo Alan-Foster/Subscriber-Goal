@@ -49,6 +49,7 @@ const hoisted = vi.hoisted(() => ({
   processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
   processRecentSubscriberIndexMigrationBatch: vi.fn(),
   processDueAutoCreateNextGoals: vi.fn(),
+  processDueOnboardingSubscriberGoal: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   cancelUpdates: vi.fn(),
@@ -124,6 +125,11 @@ vi.mock("../core/autoCreateNextGoal", () => ({
   processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
 }));
 
+vi.mock("../core/onboardingSubscriberGoal", () => ({
+  processDueOnboardingSubscriberGoal:
+    hoisted.processDueOnboardingSubscriberGoal,
+}));
+
 vi.mock("../core/post", () => ({
   applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
 }));
@@ -144,6 +150,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.processDueAutoCreateNextGoals.mockReset();
+    hoisted.processDueOnboardingSubscriberGoal.mockReset();
     hoisted.getQueuedUpdates.mockReset();
     hoisted.queueUpdate.mockReset();
     hoisted.cancelUpdates.mockReset();
@@ -171,6 +178,12 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       created: 0,
       skipped: 0,
       failed: 0,
+    });
+    hoisted.processDueOnboardingSubscriberGoal.mockResolvedValue({
+      status: "not_due",
+      trackedInspected: 0,
+      pinnedInspected: 0,
+      recentInspected: 0,
     });
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -203,6 +216,11 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(
       hoisted.processRecentSubscriberIndexMigrationBatch,
     ).toHaveBeenCalled();
+    expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledWith({
+      reddit: hoisted.reddit,
+      redis: expect.anything(),
+      appSettings: baseSettings,
+    });
   });
 
   it("runs crosspost ingestion from the authority install", async () => {
@@ -217,6 +235,35 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.countPendingCrossposts).toHaveBeenCalledWith(
       expect.anything(),
       "SubGoal",
+    );
+  });
+
+  it("logs an onboarding terminal result once when the processor requests it", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.processDueOnboardingSubscriberGoal.mockResolvedValue({
+      status: "existing",
+      terminalStatus: "existing",
+      lifecycleSource: "upgrade",
+      existingSource: "tracked",
+      shouldLog: true,
+      trackedInspected: 5,
+      pinnedInspected: 0,
+      recentInspected: 0,
+      postId: "t3_existing",
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[onboardingSubscriberGoal] scheduler summary: subreddit=CorporateGifts status=existing",
+      ),
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("existingSource=tracked"),
     );
   });
 
