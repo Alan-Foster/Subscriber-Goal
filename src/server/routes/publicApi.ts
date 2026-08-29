@@ -2,6 +2,7 @@ import type { Router } from "express";
 import { context, reddit, redis, realtime } from "@devvit/web/server";
 import type {
   ErrorResponse,
+  AfterSubscribeTargetResponse,
   InitResponse,
   RefreshResponse,
   RealtimeMessage,
@@ -58,6 +59,7 @@ const buildState = async (
     completedTime: subGoalData.completedTime ? subGoalData.completedTime : null,
     headerText: subGoalData.headerText ?? null,
     colorTheme: subGoalData.colorTheme,
+    afterSubscribeAction: subGoalData.afterSubscribeAction,
     postHeight: subGoalData.postHeight === "short" ? "short" : "regular",
     language: subGoalData.language,
     subscribed,
@@ -82,6 +84,7 @@ const buildSubscribeOnlyState = async (
     : false;
   return {
     colorTheme: subGoalData.colorTheme,
+    afterSubscribeAction: subGoalData.afterSubscribeAction,
     postHeight: "tiny",
     language: subGoalData.language,
     subscribed,
@@ -94,6 +97,99 @@ const buildSubscribeOnlyState = async (
 };
 
 export function registerPublicApiRoutes(router: Router): void {
+  router.get(
+    apiRoutes.afterSubscribeTarget,
+    async (_req, res): Promise<void> => {
+      const { postId, userId } = context;
+      if (!postId) {
+        res.status(400).json({
+          status: "error",
+          message: "postId is required",
+        } satisfies ErrorResponse);
+        return;
+      }
+      if (!userId) {
+        res.status(403).json({
+          status: "error",
+          message: "Subscription is required.",
+        } satisfies ErrorResponse);
+        return;
+      }
+      try {
+        if (!(await isTrackedSubscriber(redis, userId))) {
+          res.status(403).json({
+            status: "error",
+            message: "Subscription is required.",
+          } satisfies ErrorResponse);
+          return;
+        }
+        const subGoalData = await getSubGoalData(
+          redis,
+          postId,
+          context.postData,
+        );
+        const action = subGoalData.afterSubscribeAction;
+        if (action.type !== "top-post-day" && action.type !== "newest-post") {
+          res.status(400).json({
+            status: "error",
+            message: "This button does not use a dynamic post target.",
+          } satisfies ErrorResponse);
+          return;
+        }
+        const subreddit = await reddit.getCurrentSubreddit();
+        let targetPost: { url?: string; permalink?: string | null } | undefined;
+        if (action.type === "top-post-day") {
+          for (const timeframe of ["day", "week", "month", "all"] as const) {
+            const [candidate] = await reddit
+              .getTopPosts({
+                subredditName: subreddit.name,
+                timeframe,
+                limit: 1,
+                pageSize: 1,
+              })
+              .all();
+            if (hasUsableNavigationUrl(candidate?.url)) {
+              targetPost = candidate;
+              break;
+            }
+          }
+        } else {
+          [targetPost] = await reddit
+            .getNewPosts({
+              subredditName: subreddit.name,
+              limit: 1,
+              pageSize: 1,
+            })
+            .all();
+        }
+        if (!targetPost || !hasUsableNavigationUrl(targetPost.url)) {
+          res.status(404).json({
+            status: "error",
+            message: "No post is currently available.",
+          } satisfies ErrorResponse);
+          return;
+        }
+        res.json({
+          target: {
+            url: targetPost.url,
+            ...(targetPost.permalink
+              ? { permalink: targetPost.permalink }
+              : {}),
+          },
+        } satisfies AfterSubscribeTargetResponse);
+      } catch (error) {
+        console.error(
+          `After-subscribe target error for post ${postId}:`,
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: "The post target could not be loaded.",
+        } satisfies ErrorResponse);
+      }
+    },
+  );
+
   router.get(apiRoutes.init, async (_req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
@@ -280,4 +376,19 @@ export function registerPublicApiRoutes(router: Router): void {
       } satisfies ErrorResponse);
     }
   });
+}
+
+function hasUsableNavigationUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
 }

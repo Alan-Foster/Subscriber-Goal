@@ -1,15 +1,20 @@
 import { navigateTo, showToast } from "@devvit/web/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import type { NavigationTarget } from "../../shared/types/api";
 import { useSubGoal } from "../hooks/useSubGoal";
 import { ConfettiBurst } from "./components/ConfettiBurst";
 import { SkeletonPage } from "./components/SkeletonPage";
+import {
+  TinySubscriptionConfirmation,
+  tinySubscriptionConfirmationDurationMs,
+} from "./components/TinySubscriptionConfirmation";
 import { confettiPresets } from "./confettiPresets";
 import { CompletedPage } from "./pages/CompletedPage";
 import { SubGoalPage } from "./pages/SubGoalPage";
 import { ThanksPage } from "./pages/ThanksPage";
 
-type PageName = "subGoal" | "thanks" | "completed";
+type PageName = "subGoal" | "thanks" | "completed" | "tinyConfirmation";
 
 export const App = () => {
   const {
@@ -45,6 +50,16 @@ export const App = () => {
     }
   }, [state]);
 
+  useEffect(() => {
+    if (page !== "tinyConfirmation") {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setPage("subGoal");
+    }, tinySubscriptionConfirmationDurationMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [page]);
+
   useEffect(
     () => () => {
       if (confettiTimeoutRef.current) {
@@ -66,6 +81,9 @@ export const App = () => {
       return;
     }
     navigateTo(`https://www.reddit.com/r/${promoSubreddit}/`);
+  };
+  const handleAfterSubscribeNavigate = (target: string | NavigationTarget) => {
+    navigateTo(target);
   };
 
   const triggerConfetti = useCallback(
@@ -133,6 +151,8 @@ export const App = () => {
     }
     if (updatedState.postHeight !== "tiny" && updatedState.completedTime) {
       setPage("completed");
+    } else if (updatedState.postHeight === "tiny") {
+      setPage("tinyConfirmation");
     } else {
       setPage("thanks");
     }
@@ -172,13 +192,21 @@ export const App = () => {
 
   let content = null;
   if (state) {
-    if (page === "thanks") {
+    if (page === "tinyConfirmation" && state.postHeight === "tiny") {
+      content = (
+        <TinySubscriptionConfirmation
+          language={state.language}
+          subredditName={state.subreddit.name}
+        />
+      );
+    } else if (page === "thanks") {
       content = (
         <ThanksPage
           state={state}
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
           onCelebrate={handleCelebrate}
+          onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
         />
       );
     } else if (page === "completed" && state.postHeight !== "tiny") {
@@ -200,6 +228,7 @@ export const App = () => {
           shareUsername={shareUsername}
           onShareUsernameChange={setShareUsername}
           notice={notice}
+          onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
         />
       );
     }

@@ -17,6 +17,8 @@ const hoisted = vi.hoisted(() => ({
   reddit: {
     getCurrentSubreddit: vi.fn(),
     getCurrentUsername: vi.fn(),
+    getTopPosts: vi.fn(),
+    getNewPosts: vi.fn(),
     subscribeToCurrentSubreddit: vi.fn(),
   },
   redis: {},
@@ -89,6 +91,8 @@ describe("publicApi routes", () => {
       numberOfSubscribers: 100,
       isNsfw: false,
     });
+    hoisted.reddit.getTopPosts.mockReturnValue({ all: vi.fn() });
+    hoisted.reddit.getNewPosts.mockReturnValue({ all: vi.fn() });
     hoisted.getPublicAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
@@ -104,6 +108,12 @@ describe("publicApi routes", () => {
       postHeight: "short",
       autoCreateNextGoal: true,
       language: "en",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "pink",
+      },
     });
   });
 
@@ -117,6 +127,12 @@ describe("publicApi routes", () => {
     const response = json.mock.calls[0]?.[0] as InitResponse;
     expect(response.state.headerText).toBe("Custom Header");
     expect(response.state.postHeight).toBe("short");
+    expect(response.state.afterSubscribeAction).toEqual({
+      type: "link",
+      buttonText: "Join the Discord",
+      url: "https://discord.com/invite/example",
+      colorTheme: "pink",
+    });
   });
 
   it("initializes tiny posts from persistent anonymous subscriber status", async () => {
@@ -133,6 +149,12 @@ describe("publicApi routes", () => {
       postHeight: "tiny",
       autoCreateNextGoal: false,
       language: "es",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Visit Website",
+        url: "https://example.com/",
+        colorTheme: "pink",
+      },
     });
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -147,6 +169,12 @@ describe("publicApi routes", () => {
       colorTheme: "purple",
       postHeight: "tiny",
       language: "es",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Visit Website",
+        url: "https://example.com/",
+        colorTheme: "pink",
+      },
       subscribed: true,
       authenticated: true,
       subreddit: { name: "ExampleSub" },
@@ -321,5 +349,294 @@ describe("publicApi routes", () => {
       message: "Subscription failed: redis unavailable",
     });
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
+  });
+
+  it("returns the current top-day post as a minimal navigation target", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      goal: 200,
+      colorTheme: "red",
+      postHeight: "regular",
+      language: "en",
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "pink",
+      },
+    });
+    const all = vi.fn().mockResolvedValue([
+      {
+        id: "t3_top",
+        title: "Top post",
+        url: "https://www.reddit.com/r/ExampleSub/comments/top",
+        permalink: "/r/ExampleSub/comments/top",
+        authorName: "ignored",
+      },
+    ]);
+    hoisted.reddit.getTopPosts.mockReturnValue({ all });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
+      subredditName: "ExampleSub",
+      timeframe: "day",
+      limit: 1,
+      pageSize: 1,
+    });
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    expect(all).toHaveBeenCalledOnce();
+    expect(json).toHaveBeenCalledWith({
+      target: {
+        url: "https://www.reddit.com/r/ExampleSub/comments/top",
+        permalink: "/r/ExampleSub/comments/top",
+      },
+    });
+  });
+
+  it("falls back from day to week and month until it finds a valid top post", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getTopPosts
+      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([{ url: " " }]) })
+      .mockReturnValueOnce({
+        all: vi.fn().mockResolvedValue([{ url: "not a URL" }]),
+      })
+      .mockReturnValueOnce({
+        all: vi.fn().mockResolvedValue([
+          {
+            url: "https://www.reddit.com/r/ExampleSub/comments/monthly",
+            permalink: "/r/ExampleSub/comments/monthly",
+          },
+        ]),
+      });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(
+      hoisted.reddit.getTopPosts.mock.calls.map(
+        ([options]) => options.timeframe,
+      ),
+    ).toEqual(["day", "week", "month"]);
+    expect(json).toHaveBeenCalledWith({
+      target: {
+        url: "https://www.reddit.com/r/ExampleSub/comments/monthly",
+        permalink: "/r/ExampleSub/comments/monthly",
+      },
+    });
+  });
+
+  it("returns the most recent available post without trusting an action from the client", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      goal: 0,
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: {
+        type: "newest-post",
+        buttonText: "View the Most Recent Post Today",
+        colorTheme: "blue",
+      },
+    });
+    const all = vi
+      .fn()
+      .mockResolvedValue([
+        { url: "https://www.reddit.com/r/ExampleSub/comments/newest" },
+      ]);
+    hoisted.reddit.getNewPosts.mockReturnValue({ all });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledWith({
+      subredditName: "ExampleSub",
+      limit: 1,
+      pageSize: 1,
+    });
+    expect(json).toHaveBeenCalledWith({
+      target: {
+        url: "https://www.reddit.com/r/ExampleSub/comments/newest",
+      },
+    });
+  });
+
+  it("returns unavailable when the most recent post has no valid target", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "newest-post",
+        buttonText: "View the Most Recent Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([{ url: "not a URL" }]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(404);
+  });
+
+  it("rejects dynamic navigation for unsubscribed viewers", async () => {
+    hoisted.context.userId = "t2_user";
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(403);
+    expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+  });
+
+  it("does not query Reddit for a persisted link action", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+  });
+
+  it("returns unavailable when a dynamic listing is empty", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getTopPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(404);
+    expect(
+      hoisted.reddit.getTopPosts.mock.calls.map(
+        ([options]) => options.timeframe,
+      ),
+    ).toEqual(["day", "week", "month", "all"]);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "No post is currently available.",
+    });
+  });
+
+  it("does not hide a top-post API failure behind a broader fallback", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getTopPosts.mockImplementation(() => {
+      throw new Error("listing unavailable");
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(1);
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
+      subredditName: "ExampleSub",
+      timeframe: "day",
+      limit: 1,
+      pageSize: 1,
+    });
+  });
+
+  it("returns a service error when Reddit cannot resolve the target", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "newest-post",
+        buttonText: "View the Most Recent Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getNewPosts.mockImplementation(() => {
+      throw new Error("listing unavailable");
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "The post target could not be loaded.",
+    });
   });
 });

@@ -3,6 +3,7 @@ import type { ServerAppSettings } from "../settings";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import {
   defaultSubGoalColorTheme,
+  isSubGoalColorTheme,
   resolveSubGoalColorTheme,
 } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
@@ -22,6 +23,12 @@ import {
 import { dispatchNewPost } from "./crosspostData";
 import { postsKey, queueUpdate, trackPost } from "./updaterData";
 import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
+import {
+  createTopPostFallbackAction,
+  defaultAfterSubscribeAction,
+  resolveAfterSubscribeAction,
+  type AfterSubscribeAction,
+} from "../../shared/afterSubscribeAction";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -34,6 +41,12 @@ export const postAutoCreateNextGoalSuffix = "_auto_create_next_goal";
 export const postLanguageSuffix = "_language";
 export const postHeightSuffix = "_post_height";
 export const postKindSuffix = "_post_kind";
+export const postAfterSubscribeActionSuffix = "_after_subscribe_action";
+export const postAfterSubscribeButtonTextSuffix =
+  "_after_subscribe_button_text";
+export const postAfterSubscribeUrlSuffix = "_after_subscribe_url";
+export const postAfterSubscribeColorThemeSuffix =
+  "_after_subscribe_color_theme";
 export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
 export const recentSubscriberPostsByUsernameKey =
   "recent_subscriber_posts_by_username";
@@ -57,6 +70,7 @@ export type SubGoalData = {
   autoCreateNextGoal: boolean;
   language: SubGoalLanguage;
   postHeight: SubGoalPostHeight;
+  afterSubscribeAction: AfterSubscribeAction;
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient["submitCustomPost"]>>;
@@ -208,6 +222,10 @@ export async function getSubGoalData(
     language,
     postHeight,
     storedPostKind,
+    afterSubscribeActionType,
+    afterSubscribeButtonText,
+    afterSubscribeUrl,
+    afterSubscribeColorTheme,
   ] = (await redis.hMGet(subscriberGoalsKey, [
     `${postId}${postGoalSuffix}`,
     `${postId}${postRecentSubscriberSuffix}`,
@@ -219,7 +237,15 @@ export async function getSubGoalData(
     `${postId}${postLanguageSuffix}`,
     `${postId}${postHeightSuffix}`,
     `${postId}${postKindSuffix}`,
+    `${postId}${postAfterSubscribeActionSuffix}`,
+    `${postId}${postAfterSubscribeButtonTextSuffix}`,
+    `${postId}${postAfterSubscribeUrlSuffix}`,
+    `${postId}${postAfterSubscribeColorThemeSuffix}`,
   ])) as [
+    string | null,
+    string | null,
+    string | null,
+    string | null,
     string | null,
     string | null,
     string | null,
@@ -263,6 +289,35 @@ export async function getSubGoalData(
       : rawHeight === "short"
         ? "short"
         : "regular";
+  const resolvedColorTheme = resolveSubGoalColorTheme(colorTheme);
+  const resolvedLanguage = resolveSubGoalLanguage(language);
+  const hasActionMetadata =
+    typeof afterSubscribeActionType === "string" &&
+    afterSubscribeActionType.trim().length > 0;
+  const isActionlessLegacySubscriberGoal =
+    postKind === subscriberGoalPostKind && parsedGoal > 0 && !hasActionMetadata;
+  const hasMalformedRecoverableAction =
+    afterSubscribeActionType === "link" ||
+    afterSubscribeActionType === "top-post-day" ||
+    afterSubscribeActionType === "newest-post";
+  const legacyFallbackAction = createTopPostFallbackAction({
+    language: resolvedLanguage,
+    colorTheme: isSubGoalColorTheme(afterSubscribeColorTheme)
+      ? afterSubscribeColorTheme
+      : resolvedColorTheme,
+  });
+  const afterSubscribeAction = isActionlessLegacySubscriberGoal
+    ? legacyFallbackAction
+    : resolveAfterSubscribeAction({
+        type: afterSubscribeActionType,
+        buttonText: afterSubscribeButtonText,
+        url: afterSubscribeUrl,
+        colorTheme: afterSubscribeColorTheme,
+        fallbackColorTheme: resolvedColorTheme,
+        ...(hasMalformedRecoverableAction
+          ? { invalidConfigurationFallback: legacyFallbackAction }
+          : {}),
+      }).action;
   return {
     postKind,
     goal: parsedGoal,
@@ -273,18 +328,24 @@ export async function getSubGoalData(
         ? subredditDisplayName
         : null,
     headerText: headerText && headerText.length > 0 ? headerText : null,
-    colorTheme: resolveSubGoalColorTheme(colorTheme),
+    colorTheme: resolvedColorTheme,
     autoCreateNextGoal: autoCreateNextGoal === "true",
-    language: resolveSubGoalLanguage(language),
+    language: resolvedLanguage,
     postHeight: resolvedHeight,
+    afterSubscribeAction,
   };
 }
 
 export async function setSubGoalData(
   redis: RedisClient,
   postId: string,
-  data: Omit<SubGoalData, "postKind"> & { postKind?: PostKind },
+  data: Omit<SubGoalData, "postKind" | "afterSubscribeAction"> & {
+    postKind?: PostKind;
+    afterSubscribeAction?: AfterSubscribeAction;
+  },
 ): Promise<void> {
+  const afterSubscribeAction =
+    data.afterSubscribeAction ?? defaultAfterSubscribeAction;
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postKindSuffix}`]: subscriberGoalPostKind,
     [`${postId}${postGoalSuffix}`]: data.goal.toString(),
@@ -301,7 +362,60 @@ export async function setSubGoalData(
       : "false",
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
     [`${postId}${postHeightSuffix}`]: resolveSubGoalPostHeight(data.postHeight),
+    [`${postId}${postAfterSubscribeActionSuffix}`]: afterSubscribeAction.type,
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
+      afterSubscribeAction.type !== "disabled"
+        ? afterSubscribeAction.buttonText
+        : "",
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      afterSubscribeAction.type === "link" ? afterSubscribeAction.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
+      afterSubscribeAction.type !== "disabled"
+        ? afterSubscribeAction.colorTheme
+        : data.colorTheme,
   });
+}
+
+export async function setAfterSubscribeActionForPost(
+  redis: RedisClient,
+  postId: string,
+  action: AfterSubscribeAction,
+  fallbackColorTheme: SubGoalColorTheme,
+): Promise<void> {
+  await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postAfterSubscribeActionSuffix}`]: action.type,
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
+      action.type !== "disabled" ? action.buttonText : "",
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      action.type === "link" ? action.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
+      action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
+  });
+}
+
+export async function setAfterSubscribeActionForPostIfMissing(
+  redis: RedisClient,
+  postId: string,
+  action: AfterSubscribeAction,
+  fallbackColorTheme: SubGoalColorTheme,
+): Promise<boolean> {
+  const created = await redis.hSetNX(
+    subscriberGoalsKey,
+    `${postId}${postAfterSubscribeActionSuffix}`,
+    action.type,
+  );
+  if (!created) {
+    return false;
+  }
+  await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
+      action.type !== "disabled" ? action.buttonText : "",
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      action.type === "link" ? action.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
+      action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
+  });
+  return true;
 }
 
 export async function setSubscribeOnlyPostData(
@@ -311,8 +425,11 @@ export async function setSubscribeOnlyPostData(
     subredditDisplayName: string;
     colorTheme: SubGoalColorTheme;
     language: SubGoalLanguage;
+    afterSubscribeAction?: AfterSubscribeAction;
   },
 ): Promise<void> {
+  const afterSubscribeAction =
+    data.afterSubscribeAction ?? defaultAfterSubscribeAction;
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postKindSuffix}`]: subscribeOnlyPostKind,
     [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName,
@@ -321,6 +438,17 @@ export async function setSubscribeOnlyPostData(
     ),
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
     [`${postId}${postHeightSuffix}`]: "tiny",
+    [`${postId}${postAfterSubscribeActionSuffix}`]: afterSubscribeAction.type,
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
+      afterSubscribeAction.type !== "disabled"
+        ? afterSubscribeAction.buttonText
+        : "",
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      afterSubscribeAction.type === "link" ? afterSubscribeAction.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
+      afterSubscribeAction.type !== "disabled"
+        ? afterSubscribeAction.colorTheme
+        : data.colorTheme,
   });
 }
 
@@ -412,6 +540,7 @@ export async function registerNewSubGoalPost(
   language: SubGoalLanguage = defaultSubGoalLanguage,
   headerText?: string,
   postHeight: Exclude<SubGoalPostHeight, "tiny"> = "regular",
+  afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
@@ -423,6 +552,7 @@ export async function registerNewSubGoalPost(
     autoCreateNextGoal,
     language,
     postHeight,
+    afterSubscribeAction,
   });
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
@@ -491,11 +621,13 @@ export async function registerNewSubscribeOnlyPost(
   subredditDisplayName: string,
   colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
   language: SubGoalLanguage = defaultSubGoalLanguage,
+  afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
 ): Promise<CrosspostDispatchResult> {
   await setSubscribeOnlyPostData(redis, post.id, {
     subredditDisplayName,
     colorTheme,
     language,
+    afterSubscribeAction,
   });
   logCrosspostEvent({
     event: "crosspost_attempt_skipped",

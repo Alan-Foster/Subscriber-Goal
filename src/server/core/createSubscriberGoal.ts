@@ -24,6 +24,10 @@ import {
   textFallbackMaker,
 } from "../utils/textFallback";
 import { toErrorMessage } from "../utils/crosspostLogs";
+import {
+  defaultAfterSubscribeAction,
+  type AfterSubscribeAction,
+} from "../../shared/afterSubscribeAction";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -37,6 +41,7 @@ type CreateSubscriberGoalOptions = {
   cancelPendingAutoCreateGoals?: boolean;
   submitAsUser?: boolean;
   headerText?: string;
+  afterSubscribeAction?: AfterSubscribeAction;
   stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
@@ -121,6 +126,7 @@ export async function createSubscriberGoal({
         options.subredditDisplayName,
         options.colorTheme,
         options.language,
+        options.afterSubscribeAction ?? defaultAfterSubscribeAction,
       )
     : await registerNewSubGoalPost(
         reddit,
@@ -135,6 +141,7 @@ export async function createSubscriberGoal({
         options.language,
         options.headerText,
         options.postHeight as Exclude<SubGoalPostHeight, "tiny">,
+        options.afterSubscribeAction ?? defaultAfterSubscribeAction,
       );
 
   const trackedPosts = await getTrackedPosts(redis);

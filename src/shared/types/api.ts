@@ -1,6 +1,7 @@
 import type { SubGoalColorTheme } from "../subGoalColorTheme";
 import type { SubGoalPostHeight } from "../subGoalPostHeight";
 import type { SubGoalLanguage } from "../subGoalPostI18n";
+import type { AfterSubscribeAction } from "../afterSubscribeAction";
 
 export type BasicSubredditData = {
   id: string;
@@ -22,6 +23,7 @@ export type PublicAppSettings = {
 type SharedPostState = {
   colorTheme: SubGoalColorTheme;
   language: SubGoalLanguage;
+  afterSubscribeAction: AfterSubscribeAction;
 };
 
 export type SubscriberGoalState = SharedPostState & {
@@ -67,6 +69,12 @@ export type SubscribeRequest = {
   shareUsername?: boolean;
 };
 
+export type NavigationTarget = { url: string; permalink?: string };
+
+export type AfterSubscribeTargetResponse = {
+  target: NavigationTarget;
+};
+
 export type RealtimeMessage = {
   type: "sub";
   newSubscriberCount: number;
@@ -81,24 +89,35 @@ export type ErrorResponse = {
 export type CreateGoalSetupFormValues = {
   postHeight?: string[];
   language?: string[];
+  subredditDisplayName?: string;
 };
 
-export type CreateSubscriberGoalFormValues = {
+type CreateGoalDetailsFormValues = {
+  postTitle?: string;
+  colorTheme?: string[];
+  afterSubscribePreset?: string[];
+};
+
+export type CreateSubscriberGoalFormValues = CreateGoalDetailsFormValues & {
   subscriberGoal?: number;
-  postTitle?: string;
   crosspost?: boolean;
-  subredditDisplayName?: string;
-  colorTheme?: string[];
   autoCreateNextGoal?: boolean;
+};
+
+export type CreateSubscribeOnlyFormValues = CreateGoalDetailsFormValues;
+
+type CreateAfterSubscribeFormValues = {
+  afterSubscribeButtonText?: string;
+  afterSubscribeUrl?: string;
+  afterSubscribeColorTheme?: string[];
   customDeveloperField?: string;
 };
 
-export type CreateSubscribeOnlyFormValues = {
-  postTitle?: string;
-  subredditDisplayName?: string;
-  colorTheme?: string[];
-  customDeveloperField?: string;
-};
+export type CreateSubscriberGoalFollowUpFormValues =
+  CreateAfterSubscribeFormValues;
+
+export type CreateSubscribeOnlyFollowUpFormValues =
+  CreateAfterSubscribeFormValues;
 
 export type DeleteGoalFormValues = {
   confirm?: boolean;

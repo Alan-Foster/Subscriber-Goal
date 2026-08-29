@@ -79,6 +79,8 @@
     "createGoalSetupForm": "/internal/form/create-goal/setup",
     "createSubscriberGoalForm": "/internal/form/create-goal/subscriber-goal",
     "createSubscribeOnlyForm": "/internal/form/create-goal/subscribe-only",
+    "createSubscriberGoalFollowUpForm": "/internal/form/create-goal/subscriber-goal/follow-up",
+    "createSubscribeOnlyFollowUpForm": "/internal/form/create-goal/subscribe-only/follow-up",
     "deleteGoalForm": "/internal/form/delete-goal",
     "eraseDataForm": "/internal/form/erase-data",
     "eraseMyDataForm": "/internal/form/erase-my-data"

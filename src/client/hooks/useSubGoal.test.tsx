@@ -23,6 +23,7 @@ const tinyState: SubscribeOnlyState = {
   colorTheme: "red",
   postHeight: "tiny",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: false,
   authenticated: true,
   subreddit: { name: "ExampleSub" },

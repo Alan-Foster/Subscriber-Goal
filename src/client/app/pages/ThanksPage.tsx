@@ -3,12 +3,16 @@ import { formatSubscriberCount } from "../../../shared/numberFormat";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { SubredditIcon } from "../components/SubredditIcon";
 import { TopButtons } from "../components/TopButtons";
+import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
+import { SubscriptionButton } from "../components/SubscriptionButton";
+import type { NavigationTarget } from "../../../shared/types/api";
 
 type ThanksPageProps = {
   state: SubGoalState;
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onCelebrate: () => void;
+  onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
 };
 
 export const ThanksPage = ({
@@ -16,13 +20,30 @@ export const ThanksPage = ({
   onReturn,
   onVisitPromoSub,
   onCelebrate,
+  onAfterSubscribeNavigate,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
+    if (state.afterSubscribeAction.type !== "disabled") {
+      return (
+        <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
+          <AfterSubscribeButton
+            action={state.afterSubscribeAction}
+            language={state.language}
+            onNavigate={onAfterSubscribeNavigate}
+          />
+        </div>
+      );
+    }
     return (
-      <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-base font-semibold text-[color:var(--sg-text-primary)]">
-        {messages.subscribedButton({ subredditName: state.subreddit.name })}
+      <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
+        <SubscriptionButton
+          label={messages.subscribedButton({
+            subredditName: state.subreddit.name,
+          })}
+          mode="subscribed"
+        />
       </div>
     );
   }
@@ -43,12 +64,21 @@ export const ThanksPage = ({
           subscribersText: formatSubscriberCount(state.subreddit.subscribers),
         })}
       </div>
-      <button
-        className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
-        onClick={onReturn}
-      >
-        {messages.thanksReturnButton}
-      </button>
+      <div className="flex items-center justify-center gap-3">
+        {state.subscribed && state.afterSubscribeAction.type !== "disabled" ? (
+          <AfterSubscribeButton
+            action={state.afterSubscribeAction}
+            language={state.language}
+            onNavigate={onAfterSubscribeNavigate}
+          />
+        ) : null}
+        <button
+          className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
+          onClick={onReturn}
+        >
+          {messages.thanksReturnButton}
+        </button>
+      </div>
     </div>
   );
 };

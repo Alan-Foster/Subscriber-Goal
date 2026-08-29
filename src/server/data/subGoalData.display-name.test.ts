@@ -17,6 +17,10 @@ import {
   setSubredditDisplayNameForPost,
   subscriberGoalsKey,
   postColorThemeSuffix,
+  postAfterSubscribeActionSuffix,
+  postAfterSubscribeButtonTextSuffix,
+  postAfterSubscribeColorThemeSuffix,
+  postAfterSubscribeUrlSuffix,
   postHeaderTextSuffix,
   postHeightSuffix,
   postKindSuffix,
@@ -183,7 +187,13 @@ describe("subGoalData subreddit display name", () => {
 
   it("persists each supported color theme", async () => {
     const redis = new InMemoryRedis();
-    for (const colorTheme of ["red", "green", "purple", "blue"] as const) {
+    for (const colorTheme of [
+      "red",
+      "green",
+      "purple",
+      "blue",
+      "pink",
+    ] as const) {
       await setSubGoalData(
         redis as unknown as Parameters<typeof setSubGoalData>[0],
         `t3_${colorTheme}`,
@@ -211,6 +221,159 @@ describe("subGoalData subreddit display name", () => {
         ),
       ).toBe(colorTheme);
     }
+  });
+
+  it("persists and resolves a link action independently from the primary color", async () => {
+    const redis = new InMemoryRedis();
+    await setSubGoalData(
+      redis as unknown as Parameters<typeof setSubGoalData>[0],
+      "t3_cta",
+      {
+        goal: 100,
+        recentSubscriber: "",
+        completedTime: 0,
+        subredditDisplayName: "ExampleSub",
+        colorTheme: "red",
+        postHeight: "regular",
+        autoCreateNextGoal: false,
+        language: "en",
+        afterSubscribeAction: {
+          type: "link",
+          buttonText: "Join the Discord",
+          url: "https://discord.com/invite/example",
+          colorTheme: "pink",
+        },
+      },
+    );
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_cta",
+      ),
+    ).resolves.toMatchObject({
+      colorTheme: "red",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "pink",
+      },
+    });
+    await expect(
+      Promise.all([
+        redis.hGet(
+          subscriberGoalsKey,
+          `t3_cta${postAfterSubscribeActionSuffix}`,
+        ),
+        redis.hGet(
+          subscriberGoalsKey,
+          `t3_cta${postAfterSubscribeButtonTextSuffix}`,
+        ),
+        redis.hGet(subscriberGoalsKey, `t3_cta${postAfterSubscribeUrlSuffix}`),
+        redis.hGet(
+          subscriberGoalsKey,
+          `t3_cta${postAfterSubscribeColorThemeSuffix}`,
+        ),
+      ]),
+    ).resolves.toEqual([
+      "link",
+      "Join the Discord",
+      "https://discord.com/invite/example",
+      "pink",
+    ]);
+  });
+
+  it.each(["top-post-day", "newest-post"] as const)(
+    "persists and resolves the URL-free %s action",
+    async (type) => {
+      const redis = new InMemoryRedis();
+      await setSubGoalData(
+        redis as unknown as Parameters<typeof setSubGoalData>[0],
+        `t3_${type}`,
+        {
+          goal: 100,
+          recentSubscriber: "",
+          completedTime: 0,
+          subredditDisplayName: "ExampleSub",
+          colorTheme: "red",
+          postHeight: "regular",
+          autoCreateNextGoal: false,
+          language: "en",
+          afterSubscribeAction: {
+            type,
+            buttonText:
+              type === "top-post-day"
+                ? "View the Top Post Today"
+                : "View the Most Recent Post Today",
+            colorTheme: "pink",
+          },
+        },
+      );
+
+      await expect(
+        getSubGoalData(
+          redis as unknown as Parameters<typeof getSubGoalData>[0],
+          `t3_${type}`,
+        ),
+      ).resolves.toMatchObject({
+        afterSubscribeAction: {
+          type,
+          colorTheme: "pink",
+        },
+      });
+      await expect(
+        redis.hGet(
+          subscriberGoalsKey,
+          `t3_${type}${postAfterSubscribeUrlSuffix}`,
+        ),
+      ).resolves.toBe("");
+    },
+  );
+
+  it("activates actionless legacy goals but preserves explicit disabled actions", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_legacy_goal: "100",
+      t3_disabled_goal: "100",
+      [`t3_disabled${postAfterSubscribeActionSuffix}`]: "disabled",
+      t3_invalid_goal: "100",
+      [`t3_invalid${postAfterSubscribeActionSuffix}`]: "link",
+      [`t3_invalid${postAfterSubscribeButtonTextSuffix}`]: "No",
+      [`t3_invalid${postAfterSubscribeUrlSuffix}`]: "http://example.com",
+      [`t3_invalid${postAfterSubscribeColorThemeSuffix}`]: "orange",
+    });
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_legacy",
+      ),
+    ).resolves.toMatchObject({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_disabled",
+      ),
+    ).resolves.toMatchObject({ afterSubscribeAction: { type: "disabled" } });
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_invalid",
+      ),
+    ).resolves.toMatchObject({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
   });
 
   it("defaults missing or invalid color themes to red", async () => {

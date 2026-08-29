@@ -7,6 +7,7 @@ import {
 } from "../data/subscriberStats";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
 import { initializePostKindMigration } from "../data/postKindMigration";
+import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAfterSubscribeActionMigration";
 
 export async function onAppChanged(): Promise<void> {
   if (!context.subredditName && !context.subredditId) {
@@ -36,6 +37,7 @@ export async function onAppChanged(): Promise<void> {
 
   const trackedPosts = await getTrackedPosts(redis);
   await initializePostKindMigration(redis, trackedPosts);
+  await initializeLegacyAfterSubscribeActionMigration(redis, trackedPosts);
   if (!trackedPosts.length) {
     return;
   }

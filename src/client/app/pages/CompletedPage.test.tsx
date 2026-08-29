@@ -18,6 +18,7 @@ const baseState: SubscriberGoalState = {
   colorTheme: "red",
   postHeight: "regular",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
@@ -118,5 +119,32 @@ describe("CompletedPage", () => {
     expect(html).toContain("text-2xl font-bold");
     expect(html).toContain("text-lg font-semibold");
     expect(html).toContain("r/indianActressClass reached 10 subscribers!");
+  });
+
+  it.each([
+    {
+      type: "link" as const,
+      buttonText: "Visit Website",
+      url: "https://example.com/",
+      colorTheme: "pink" as const,
+    },
+    {
+      type: "top-post-day" as const,
+      buttonText: "View the Top Post Today",
+      colorTheme: "blue" as const,
+    },
+  ])("never renders a CTA on the completed page (%o)", (action) => {
+    const html = renderToStaticMarkup(
+      <CompletedPage
+        state={{
+          ...baseState,
+          afterSubscribeAction: action,
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).not.toContain(action.buttonText);
+    expect(html).not.toContain("sg-subscribe-attention");
   });
 });

@@ -1,8 +1,11 @@
 import type { SubGoalState } from "../../../shared/types/api";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { ProgressBar } from "../components/ProgressBar";
+import { SubscriptionButton } from "../components/SubscriptionButton";
 import { SubredditIcon } from "../components/SubredditIcon";
 import { TopButtons } from "../components/TopButtons";
+import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
+import type { NavigationTarget } from "../../../shared/types/api";
 
 type SubGoalPageProps = {
   state: SubGoalState;
@@ -13,6 +16,7 @@ type SubGoalPageProps = {
   shareUsername: boolean;
   onShareUsernameChange: (value: boolean) => void;
   notice: string | null;
+  onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
 };
 
 export const SubGoalPage = ({
@@ -24,12 +28,29 @@ export const SubGoalPage = ({
   shareUsername,
   onShareUsernameChange,
   notice,
+  onAfterSubscribeNavigate,
 }: SubGoalPageProps) => {
-  const isDisabled = state.subscribed || isSubmitting;
-  const shouldShowSubscribeAttention = !isDisabled;
+  const messages = getSubGoalPostMessages(state.language);
+  const afterSubscribeAction =
+    state.subscribed && state.afterSubscribeAction.type !== "disabled"
+      ? state.afterSubscribeAction
+      : null;
+  const buttonMode = isSubmitting
+    ? "submitting"
+    : afterSubscribeAction
+      ? "link"
+      : state.subscribed
+        ? "subscribed"
+        : "subscribe";
+  const isDisabled = buttonMode === "submitting" || buttonMode === "subscribed";
+  const buttonLabel = afterSubscribeAction
+    ? afterSubscribeAction.buttonText
+    : state.subscribed
+      ? messages.subscribedButton({ subredditName: state.subreddit.name })
+      : messages.subscribeButton({ subredditName: state.subreddit.name });
+  const handleButtonClick = onSubscribe;
   const iconAction = state.subscribed ? onCelebrate : onSubscribe;
   const showNotice = Boolean(notice);
-  const messages = getSubGoalPostMessages(state.language);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
     return (
@@ -37,15 +58,19 @@ export const SubGoalPage = ({
         className="relative flex h-full w-full flex-col items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
         data-sg-theme={state.colorTheme}
       >
-        <button
-          className={`relative cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
-            shouldShowSubscribeAttention ? "sg-subscribe-attention" : ""
-          }`}
-          disabled={isDisabled}
-          onClick={onSubscribe}
-        >
-          {messages.subscribeButton({ subredditName: state.subreddit.name })}
-        </button>
+        {afterSubscribeAction ? (
+          <AfterSubscribeButton
+            action={afterSubscribeAction}
+            language={state.language}
+            onNavigate={onAfterSubscribeNavigate}
+          />
+        ) : (
+          <SubscriptionButton
+            label={buttonLabel}
+            mode={buttonMode}
+            onClick={handleButtonClick}
+          />
+        )}
       </div>
     );
   }
@@ -108,17 +133,19 @@ export const SubGoalPage = ({
           width="70%"
         />
       )}
-      <button
-        className={`relative cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
-          shouldShowSubscribeAttention ? "sg-subscribe-attention" : ""
-        }`}
-        disabled={isDisabled}
-        onClick={onSubscribe}
-      >
-        {state.subscribed
-          ? messages.subscribedButton({ subredditName: state.subreddit.name })
-          : messages.subscribeButton({ subredditName: state.subreddit.name })}
-      </button>
+      {afterSubscribeAction ? (
+        <AfterSubscribeButton
+          action={afterSubscribeAction}
+          language={state.language}
+          onNavigate={onAfterSubscribeNavigate}
+        />
+      ) : (
+        <SubscriptionButton
+          label={buttonLabel}
+          mode={buttonMode}
+          onClick={handleButtonClick}
+        />
+      )}
       {state.subscribed || state.subreddit.isNsfw ? (
         <div className="h-5" />
       ) : (

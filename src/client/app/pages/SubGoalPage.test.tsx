@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
-  SubGoalState,
+  SubscriberGoalState,
   SubscribeOnlyState,
 } from "../../../shared/types/api";
 import { SubGoalPage } from "./SubGoalPage";
 
-const baseState: SubGoalState = {
+const baseState: SubscriberGoalState = {
   goal: 500,
   recentSubscriber: null,
   completedTime: null,
@@ -14,6 +14,7 @@ const baseState: SubGoalState = {
   colorTheme: "red",
   postHeight: "regular",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: false,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
@@ -32,6 +33,7 @@ const tinyState: SubscribeOnlyState = {
   colorTheme: "red",
   postHeight: "tiny",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: false,
   authenticated: true,
   subreddit: { name: "ExampleSub" },
@@ -46,6 +48,7 @@ describe("SubGoalPage", () => {
     shareUsername: false,
     onShareUsernameChange: vi.fn(),
     notice: null,
+    onAfterSubscribeNavigate: vi.fn(),
   };
 
   it("shows username share control on non-NSFW subreddits", () => {
@@ -142,6 +145,8 @@ describe("SubGoalPage", () => {
     expect(html).not.toContain("123 / 500");
     expect(html).not.toContain("u/alice just subscribed!");
     expect(html).not.toContain("Show my username when I subscribe");
+    expect(html).toContain("sg-subscribe-attention");
+    expect(html).toContain('data-subscription-button-mode="subscribe"');
   });
 
   it("keeps the tiny page free of subscriber data", () => {
@@ -152,7 +157,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("Subscribe to r/ExampleSub");
+    expect(html).toContain("Subscribed to r/ExampleSub");
     expect(html).not.toContain("subscribers");
     expect(html).toContain('disabled=""');
   });
@@ -166,6 +171,49 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).not.toContain("sg-subscribe-attention");
+  });
+
+  it("renders the configured subscribed CTA with its secondary theme and shared attention glow", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{
+          ...baseState,
+          subscribed: true,
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Join the Discord",
+            url: "https://discord.com/invite/example",
+            colorTheme: "pink",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Join the Discord");
+    expect(html).toContain('data-sg-theme="pink"');
+    expect(html).not.toContain('disabled=""');
+    expect(html).toContain("sg-subscribe-attention");
+  });
+
+  it("never shows the follow-up CTA to an unsubscribed viewer", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{
+          ...baseState,
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Join the Discord",
+            url: "https://discord.com/invite/example",
+            colorTheme: "pink",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Subscribe to r/ExampleSub");
+    expect(html).not.toContain("Join the Discord");
   });
 
   it("does not add attention glow while submitting", () => {

@@ -14,6 +14,7 @@ const hoisted = vi.hoisted(() => ({
     colorTheme: "red",
     postHeight: "regular",
     language: "en",
+    afterSubscribeAction: { type: "disabled" },
     subscribed: false,
     user: { id: "t2_user", username: "alice" },
     appSettings: {
@@ -31,6 +32,7 @@ const hoisted = vi.hoisted(() => ({
     colorTheme: "red",
     postHeight: "tiny",
     language: "en",
+    afterSubscribeAction: { type: "disabled" },
     subscribed,
     authenticated: true,
     subreddit: { name: "ExampleSub" },
@@ -132,6 +134,42 @@ describe("App", () => {
     await act(async () => {
       root.unmount();
     });
+    container.remove();
+  });
+
+  it("navigates to the persisted HTTPS CTA after subscription", async () => {
+    hoisted.state = {
+      ...hoisted.createState(),
+      subscribed: true,
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "pink",
+      },
+    } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+    });
+    const cta = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "Join the Discord",
+    );
+    expect(cta?.getAttribute("data-sg-theme")).toBe("pink");
+
+    await act(async () => {
+      cta?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(hoisted.navigateTo).toHaveBeenCalledWith(
+      "https://discord.com/invite/example",
+    );
+
+    await act(async () => root.unmount());
     container.remove();
   });
 });

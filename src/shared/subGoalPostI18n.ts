@@ -104,8 +104,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Berlangganan ke r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Sudah berlangganan ke r/${subredditName}`,
-      shareUsernameLabel:
-        "Tampilkan nama pengguna saya saat saya berlangganan",
+      shareUsernameLabel: "Tampilkan nama pengguna saya saat saya berlangganan",
       thanksTitle: "Terima kasih sudah berlangganan!",
       thanksBody: ({ subscribersText }) =>
         `Sekarang ada ${subscribersText} pelanggan di komunitas!`,
@@ -141,8 +140,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Pretplati se na r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Pretplaćeni ste na r/${subredditName}`,
-      shareUsernameLabel:
-        "Prikaži moje korisničko ime kada se pretplatim",
+      shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
       thanksTitle: "Hvala na pretplati!",
       thanksBody: ({ subscribersText }) =>
         `Zajednica sada ima ${subscribersText} pretplatnika!`,
@@ -176,10 +174,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       welcome: ({ subredditName }) => `Benvingut a r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
         `Subscriu-te a r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Subscrit a r/${subredditName}`,
-      shareUsernameLabel:
-        "Mostra el meu nom d'usuari quan em subscrigui",
+      subscribedButton: ({ subredditName }) => `Subscrit a r/${subredditName}`,
+      shareUsernameLabel: "Mostra el meu nom d'usuari quan em subscrigui",
       thanksTitle: "Gràcies per subscriure't!",
       thanksBody: ({ subscribersText }) =>
         `Ara hi ha ${subscribersText} subscriptors a la comunitat!`,
@@ -211,8 +207,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Velkommen til r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Abonner på r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Abonner på r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Abonnerer på r/${subredditName}`,
       shareUsernameLabel: "Vis mit brugernavn, når jeg abonnerer",
@@ -366,9 +361,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       promoAriaLabel: ({ promoSubreddit }) =>
         `Vaata teisi tellijate eesmärke r/${promoSubreddit}`,
       subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} tellis just!`
-          : "Uus liige tellis just!",
+        username ? `u/${username} tellis just!` : "Uus liige tellis just!",
       subscribeSuccessToast: "Täname tellimise eest!",
       subscribeErrorToast: "Tellimine ebaõnnestus.",
       loginRequired: "Tellimiseks logi sisse.",
@@ -422,8 +415,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Pretplati se na r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Pretplaćeni ste na r/${subredditName}`,
-      shareUsernameLabel:
-        "Prikaži moje korisničko ime kada se pretplatim",
+      shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
       thanksTitle: "Hvala na pretplati!",
       thanksBody: ({ subscribersText }) =>
         `Zajednica sada ima ${subscribersText} pretplatnika!`,
@@ -452,15 +444,13 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
     is: {
       languageLabel: "Íslenska",
       intlLocale: "is-IS",
-      defaultPostTitle: ({ subredditName }) =>
-        `Velkomin í r/${subredditName}!`,
+      defaultPostTitle: ({ subredditName }) => `Velkomin í r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkomin í r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
         `Gerast áskrifandi að r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Áskrifandi að r/${subredditName}`,
-      shareUsernameLabel:
-        "Sýna notandanafnið mitt þegar ég gerist áskrifandi",
+      shareUsernameLabel: "Sýna notandanafnið mitt þegar ég gerist áskrifandi",
       thanksTitle: "Takk fyrir áskriftina!",
       thanksBody: ({ subscribersText }) =>
         `Nú eru ${subscribersText} áskrifendur í samfélaginu!`,
@@ -526,10 +516,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Laipni lūdzam r/${subredditName}!`,
       welcome: ({ subredditName }) => `Laipni lūdzam r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Abonēt r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Abonēts r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Abonēt r/${subredditName}`,
+      subscribedButton: ({ subredditName }) => `Abonēts r/${subredditName}`,
       shareUsernameLabel: "Rādīt manu lietotājvārdu, kad abonēju",
       thanksTitle: "Paldies par abonēšanu!",
       thanksBody: ({ subscribersText }) =>
@@ -562,12 +550,10 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Sveiki atvykę į r/${subredditName}!`,
       welcome: ({ subredditName }) => `Sveiki atvykę į r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Prenumeruoti r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Prenumeruoti r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Prenumeruojate r/${subredditName}`,
-      shareUsernameLabel:
-        "Rodyti mano naudotojo vardą, kai prenumeruoju",
+      shareUsernameLabel: "Rodyti mano naudotojo vardą, kai prenumeruoju",
       thanksTitle: "Ačiū, kad prenumeruojate!",
       thanksBody: ({ subscribersText }) =>
         `Bendruomenėje dabar yra ${subscribersText} prenumeratorių!`,
@@ -604,8 +590,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Feliratkozás erre: r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Feliratkozva erre: r/${subredditName}`,
-      shareUsernameLabel:
-        "Mutassa a felhasználónevemet, amikor feliratkozom",
+      shareUsernameLabel: "Mutassa a felhasználónevemet, amikor feliratkozom",
       thanksTitle: "Köszönjük a feliratkozást!",
       thanksBody: ({ subscribersText }) =>
         `A közösségnek most ${subscribersText} feliratkozója van!`,
@@ -671,8 +656,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Velkommen til r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Abonner på r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Abonner på r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Abonnerer på r/${subredditName}`,
       shareUsernameLabel: "Vis brukernavnet mitt når jeg abonnerer",
@@ -704,15 +688,12 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
     pl: {
       languageLabel: "Polski",
       intlLocale: "pl-PL",
-      defaultPostTitle: ({ subredditName }) =>
-        `Witamy w r/${subredditName}!`,
+      defaultPostTitle: ({ subredditName }) => `Witamy w r/${subredditName}!`,
       welcome: ({ subredditName }) => `Witamy w r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Subskrybuj r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Subskrybuj r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Subskrybujesz r/${subredditName}`,
-      shareUsernameLabel:
-        "Pokaż moją nazwę użytkownika, gdy subskrybuję",
+      shareUsernameLabel: "Pokaż moją nazwę użytkownika, gdy subskrybuję",
       thanksTitle: "Dziękujemy za subskrypcję!",
       thanksBody: ({ subscribersText }) =>
         `Społeczność ma teraz ${subscribersText} subskrybentów!`,
@@ -814,12 +795,10 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Mirë se vini në r/${subredditName}!`,
       welcome: ({ subredditName }) => `Mirë se vini në r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Abonohu te r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Abonohu te r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `I abonuar te r/${subredditName}`,
-      shareUsernameLabel:
-        "Shfaq emrin tim të përdoruesit kur abonohem",
+      shareUsernameLabel: "Shfaq emrin tim të përdoruesit kur abonohem",
       thanksTitle: "Faleminderit që u abonove!",
       thanksBody: ({ subscribersText }) =>
         `Tani ka ${subscribersText} abonentë në komunitet!`,
@@ -848,8 +827,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
     sk: {
       languageLabel: "Slovenčina",
       intlLocale: "sk-SK",
-      defaultPostTitle: ({ subredditName }) =>
-        `Vitajte v r/${subredditName}!`,
+      defaultPostTitle: ({ subredditName }) => `Vitajte v r/${subredditName}!`,
       welcome: ({ subredditName }) => `Vitajte v r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
         `Prihlásiť sa na odber r/${subredditName}`,
@@ -888,12 +866,9 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Dobrodošli v r/${subredditName}!`,
       welcome: ({ subredditName }) => `Dobrodošli v r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Naroči se na r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Naročen na r/${subredditName}`,
-      shareUsernameLabel:
-        "Prikaži moje uporabniško ime, ko se naročim",
+      subscribeButton: ({ subredditName }) => `Naroči se na r/${subredditName}`,
+      subscribedButton: ({ subredditName }) => `Naročen na r/${subredditName}`,
+      shareUsernameLabel: "Prikaži moje uporabniško ime, ko se naročim",
       thanksTitle: "Hvala za naročnino!",
       thanksBody: ({ subscribersText }) =>
         `Skupnost ima zdaj ${subscribersText} naročnikov!`,
@@ -922,13 +897,10 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
     fi: {
       languageLabel: "Suomi",
       intlLocale: "fi-FI",
-      defaultPostTitle: ({ subredditName }) =>
-        `Tervetuloa r/${subredditName}!`,
+      defaultPostTitle: ({ subredditName }) => `Tervetuloa r/${subredditName}!`,
       welcome: ({ subredditName }) => `Tervetuloa r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Tilaa r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Tilattu r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Tilaa r/${subredditName}`,
+      subscribedButton: ({ subredditName }) => `Tilattu r/${subredditName}`,
       shareUsernameLabel: "Näytä käyttäjänimeni, kun tilaan",
       thanksTitle: "Kiitos tilauksesta!",
       thanksBody: ({ subscribersText }) =>
@@ -943,9 +915,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       promoAriaLabel: ({ promoSubreddit }) =>
         `Katso muita tilaajatavoitteita r/${promoSubreddit}`,
       subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} tilasi juuri!`
-          : "Uusi jäsen tilasi juuri!",
+        username ? `u/${username} tilasi juuri!` : "Uusi jäsen tilasi juuri!",
       subscribeSuccessToast: "Kiitos tilauksesta!",
       subscribeErrorToast: "Tilaus epäonnistui.",
       loginRequired: "Kirjaudu sisään tilataksesi.",
@@ -965,8 +935,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Prenumerera på r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Prenumererar på r/${subredditName}`,
-      shareUsernameLabel:
-        "Visa mitt användarnamn när jag prenumererar",
+      shareUsernameLabel: "Visa mitt användarnamn när jag prenumererar",
       thanksTitle: "Tack för att du prenumererar!",
       thanksBody: ({ subscribersText }) =>
         `Det finns nu ${subscribersText} prenumeranter i communityn!`,
@@ -1003,8 +972,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Mag-subscribe sa r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Naka-subscribe sa r/${subredditName}`,
-      shareUsernameLabel:
-        "Ipakita ang username ko kapag nag-subscribe ako",
+      shareUsernameLabel: "Ipakita ang username ko kapag nag-subscribe ako",
       thanksTitle: "Salamat sa pag-subscribe!",
       thanksBody: ({ subscribersText }) =>
         `Mayroon na ngayong ${subscribersText} subscriber sa komunidad!`,
@@ -1041,8 +1009,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `r/${subredditName} topluluğuna abone ol`,
       subscribedButton: ({ subredditName }) =>
         `r/${subredditName} topluluğuna abone oldun`,
-      shareUsernameLabel:
-        "Abone olduğumda kullanıcı adımı göster",
+      shareUsernameLabel: "Abone olduğumda kullanıcı adımı göster",
       thanksTitle: "Abone olduğunuz için teşekkürler!",
       thanksBody: ({ subscribersText }) =>
         `Toplulukta artık ${subscribersText} abone var!`,
@@ -1071,15 +1038,13 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
     yo: {
       languageLabel: "Yorùbá",
       intlLocale: "yo-NG",
-      defaultPostTitle: ({ subredditName }) =>
-        `Ẹ káàbọ̀ sí r/${subredditName}!`,
+      defaultPostTitle: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}!`,
       welcome: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
         `Ṣe alabapin sí r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `O ti ṣe alabapin sí r/${subredditName}`,
-      shareUsernameLabel:
-        "Fi orúkọ olumulo mi hàn nígbà tí mo bá ṣe alabapin",
+      shareUsernameLabel: "Fi orúkọ olumulo mi hàn nígbà tí mo bá ṣe alabapin",
       thanksTitle: "Ẹ ṣé fún alabapin!",
       thanksBody: ({ subscribersText }) =>
         `Àwọn alabapin ${subscribersText} wà ní àwùjọ báyìí!`,
@@ -1116,4 +1081,308 @@ export function resolveSubGoalLanguage(value: unknown): SubGoalLanguage {
 
 export function getSubGoalPostMessages(language: unknown): SubGoalPostMessages {
   return subGoalPostMessages[resolveSubGoalLanguage(language)];
+}
+
+export type AfterSubscribePresetMessages = {
+  joinDiscord: string;
+  viewTopPostToday: string;
+  readWiki: string;
+  createNewPost: string;
+  sharePicture: string;
+  viewMostRecentPostToday: string;
+  dynamicPostUnavailable: string;
+  dynamicPostError: string;
+};
+
+export const afterSubscribePresetMessages: Record<
+  SubGoalLanguage,
+  AfterSubscribePresetMessages
+> = {
+  id: {
+    joinDiscord: "Gabung Discord",
+    viewTopPostToday: "Lihat Postingan Teratas Hari Ini",
+    readWiki: "Baca Wiki",
+    createNewPost: "Buat Postingan Baru",
+    sharePicture: "Bagikan Gambar",
+    viewMostRecentPostToday: "Lihat Postingan Terbaru Hari Ini",
+    dynamicPostUnavailable: "Tidak ada postingan yang tersedia.",
+    dynamicPostError: "Tidak dapat membuka postingan sekarang.",
+  },
+  bs: {
+    joinDiscord: "Pridruži se Discordu",
+    viewTopPostToday: "Pogledaj najbolju objavu danas",
+    readWiki: "Pročitaj Wiki",
+    createNewPost: "Kreiraj novu objavu",
+    sharePicture: "Podijeli sliku",
+    viewMostRecentPostToday: "Pogledaj najnoviju objavu danas",
+    dynamicPostUnavailable: "Nema dostupnih objava.",
+    dynamicPostError: "Objavu trenutno nije moguće otvoriti.",
+  },
+  ca: {
+    joinDiscord: "Uneix-te al Discord",
+    viewTopPostToday: "Mira la publicació destacada d'avui",
+    readWiki: "Llegeix la Wiki",
+    createNewPost: "Crea una publicació",
+    sharePicture: "Comparteix una imatge",
+    viewMostRecentPostToday: "Mira la publicació més recent d'avui",
+    dynamicPostUnavailable: "No hi ha cap publicació disponible.",
+    dynamicPostError: "Ara no es pot obrir la publicació.",
+  },
+  da: {
+    joinDiscord: "Deltag på Discord",
+    viewTopPostToday: "Se dagens bedste opslag",
+    readWiki: "Læs wikien",
+    createNewPost: "Opret et nyt opslag",
+    sharePicture: "Del et billede",
+    viewMostRecentPostToday: "Se dagens nyeste opslag",
+    dynamicPostUnavailable: "Der er ingen tilgængelige opslag.",
+    dynamicPostError: "Opslaget kan ikke åbnes lige nu.",
+  },
+  de: {
+    joinDiscord: "Discord beitreten",
+    viewTopPostToday: "Heutigen Top-Beitrag ansehen",
+    readWiki: "Wiki lesen",
+    createNewPost: "Neuen Beitrag erstellen",
+    sharePicture: "Bild teilen",
+    viewMostRecentPostToday: "Heutigen neuesten Beitrag ansehen",
+    dynamicPostUnavailable: "Kein Beitrag ist verfügbar.",
+    dynamicPostError: "Der Beitrag kann gerade nicht geöffnet werden.",
+  },
+  en: {
+    joinDiscord: "Join the Discord",
+    viewTopPostToday: "View the Top Post Today",
+    readWiki: "Read the Wiki",
+    createNewPost: "Create a New Post",
+    sharePicture: "Share an Image",
+    viewMostRecentPostToday: "View the Most Recent Post Today",
+    dynamicPostUnavailable: "No post is currently available.",
+    dynamicPostError: "The post could not be opened right now.",
+  },
+  es: {
+    joinDiscord: "Únete al Discord",
+    viewTopPostToday: "Ver la publicación destacada de hoy",
+    readWiki: "Leer la Wiki",
+    createNewPost: "Crear una publicación",
+    sharePicture: "Compartir una imagen",
+    viewMostRecentPostToday: "Ver la publicación más reciente de hoy",
+    dynamicPostUnavailable: "No hay ninguna publicación disponible.",
+    dynamicPostError: "No se pudo abrir la publicación ahora.",
+  },
+  et: {
+    joinDiscord: "Liitu Discordiga",
+    viewTopPostToday: "Vaata tänast populaarseimat postitust",
+    readWiki: "Loe vikit",
+    createNewPost: "Loo uus postitus",
+    sharePicture: "Jaga pilti",
+    viewMostRecentPostToday: "Vaata tänast uusimat postitust",
+    dynamicPostUnavailable: "Ühtegi postitust pole saadaval.",
+    dynamicPostError: "Postitust ei saa praegu avada.",
+  },
+  fr: {
+    joinDiscord: "Rejoindre le Discord",
+    viewTopPostToday: "Voir la meilleure publication du jour",
+    readWiki: "Lire le Wiki",
+    createNewPost: "Créer une publication",
+    sharePicture: "Partager une image",
+    viewMostRecentPostToday:
+      "Voir la publication la plus récente d’aujourd’hui",
+    dynamicPostUnavailable: "Aucune publication n'est disponible.",
+    dynamicPostError: "Impossible d'ouvrir la publication maintenant.",
+  },
+  hr: {
+    joinDiscord: "Pridruži se Discordu",
+    viewTopPostToday: "Pogledaj najbolju objavu danas",
+    readWiki: "Pročitaj Wiki",
+    createNewPost: "Izradi novu objavu",
+    sharePicture: "Podijeli sliku",
+    viewMostRecentPostToday: "Pogledaj najnoviju objavu danas",
+    dynamicPostUnavailable: "Nema dostupnih objava.",
+    dynamicPostError: "Objavu trenutačno nije moguće otvoriti.",
+  },
+  is: {
+    joinDiscord: "Vertu með á Discord",
+    viewTopPostToday: "Skoða vinsælasta innlegg dagsins",
+    readWiki: "Lesa Wiki",
+    createNewPost: "Búa til nýtt innlegg",
+    sharePicture: "Deila mynd",
+    viewMostRecentPostToday: "Skoða nýjasta innlegg dagsins",
+    dynamicPostUnavailable: "Ekkert innlegg er tiltækt.",
+    dynamicPostError: "Ekki var hægt að opna innleggið núna.",
+  },
+  it: {
+    joinDiscord: "Unisciti al Discord",
+    viewTopPostToday: "Vedi il post migliore di oggi",
+    readWiki: "Leggi la Wiki",
+    createNewPost: "Crea un nuovo post",
+    sharePicture: "Condividi una foto",
+    viewMostRecentPostToday: "Vedi il post più recente di oggi",
+    dynamicPostUnavailable: "Nessun post è disponibile.",
+    dynamicPostError: "Impossibile aprire il post in questo momento.",
+  },
+  lv: {
+    joinDiscord: "Pievienojies Discord",
+    viewTopPostToday: "Skatīt šodienas labāko ierakstu",
+    readWiki: "Lasīt Wiki",
+    createNewPost: "Izveidot jaunu ierakstu",
+    sharePicture: "Kopīgot attēlu",
+    viewMostRecentPostToday: "Skatīt šodienas jaunāko ierakstu",
+    dynamicPostUnavailable: "Nav pieejamu ierakstu.",
+    dynamicPostError: "Ierakstu pašlaik nevar atvērt.",
+  },
+  lt: {
+    joinDiscord: "Prisijungti prie Discord",
+    viewTopPostToday: "Žiūrėti geriausią dienos įrašą",
+    readWiki: "Skaityti Wiki",
+    createNewPost: "Sukurti naują įrašą",
+    sharePicture: "Bendrinti paveikslėlį",
+    viewMostRecentPostToday: "Žiūrėti naujausią šios dienos įrašą",
+    dynamicPostUnavailable: "Nėra pasiekiamų įrašų.",
+    dynamicPostError: "Dabar įrašo atidaryti nepavyko.",
+  },
+  hu: {
+    joinDiscord: "Csatlakozás a Discordhoz",
+    viewTopPostToday: "A nap legjobb bejegyzésének megtekintése",
+    readWiki: "Wiki olvasása",
+    createNewPost: "Új bejegyzés létrehozása",
+    sharePicture: "Kép megosztása",
+    viewMostRecentPostToday: "A mai legfrissebb bejegyzés megtekintése",
+    dynamicPostUnavailable: "Nincs elérhető bejegyzés.",
+    dynamicPostError: "A bejegyzés most nem nyitható meg.",
+  },
+  nl: {
+    joinDiscord: "Word lid van Discord",
+    viewTopPostToday: "Bekijk het topbericht van vandaag",
+    readWiki: "Lees de Wiki",
+    createNewPost: "Maak een nieuw bericht",
+    sharePicture: "Deel een afbeelding",
+    viewMostRecentPostToday: "Bekijk het nieuwste bericht van vandaag",
+    dynamicPostUnavailable: "Er is geen bericht beschikbaar.",
+    dynamicPostError: "Het bericht kan nu niet worden geopend.",
+  },
+  nb: {
+    joinDiscord: "Bli med på Discord",
+    viewTopPostToday: "Se dagens beste innlegg",
+    readWiki: "Les wikien",
+    createNewPost: "Opprett et nytt innlegg",
+    sharePicture: "Del et bilde",
+    viewMostRecentPostToday: "Se dagens nyeste innlegg",
+    dynamicPostUnavailable: "Ingen innlegg er tilgjengelige.",
+    dynamicPostError: "Innlegget kan ikke åpnes akkurat nå.",
+  },
+  pl: {
+    joinDiscord: "Dołącz do Discorda",
+    viewTopPostToday: "Zobacz najlepszy post dnia",
+    readWiki: "Przeczytaj Wiki",
+    createNewPost: "Utwórz nowy post",
+    sharePicture: "Udostępnij zdjęcie",
+    viewMostRecentPostToday: "Zobacz najnowszy post z dzisiaj",
+    dynamicPostUnavailable: "Brak dostępnych postów.",
+    dynamicPostError: "Nie można teraz otworzyć postu.",
+  },
+  pt: {
+    joinDiscord: "Entrar no Discord",
+    viewTopPostToday: "Ver a melhor publicação de hoje",
+    readWiki: "Ler a Wiki",
+    createNewPost: "Criar uma publicação",
+    sharePicture: "Compartilhar uma imagem",
+    viewMostRecentPostToday: "Ver a publicação mais recente de hoje",
+    dynamicPostUnavailable: "Nenhuma publicação está disponível.",
+    dynamicPostError: "Não foi possível abrir a publicação agora.",
+  },
+  ro: {
+    joinDiscord: "Intră pe Discord",
+    viewTopPostToday: "Vezi cea mai bună postare de azi",
+    readWiki: "Citește Wiki",
+    createNewPost: "Creează o postare nouă",
+    sharePicture: "Distribuie o imagine",
+    viewMostRecentPostToday: "Vezi cea mai nouă postare de azi",
+    dynamicPostUnavailable: "Nu există nicio postare disponibilă.",
+    dynamicPostError: "Postarea nu poate fi deschisă acum.",
+  },
+  sq: {
+    joinDiscord: "Bashkohu në Discord",
+    viewTopPostToday: "Shiko postimin më të mirë sot",
+    readWiki: "Lexo Wiki-n",
+    createNewPost: "Krijo një postim të ri",
+    sharePicture: "Ndaj një fotografi",
+    viewMostRecentPostToday: "Shiko postimin më të ri sot",
+    dynamicPostUnavailable: "Nuk ka postime të disponueshme.",
+    dynamicPostError: "Postimi nuk mund të hapet tani.",
+  },
+  sk: {
+    joinDiscord: "Pripojiť sa na Discord",
+    viewTopPostToday: "Zobraziť najlepší príspevok dňa",
+    readWiki: "Prečítať Wiki",
+    createNewPost: "Vytvoriť nový príspevok",
+    sharePicture: "Zdieľať obrázok",
+    viewMostRecentPostToday: "Zobraziť najnovší dnešný príspevok",
+    dynamicPostUnavailable: "Nie je dostupný žiadny príspevok.",
+    dynamicPostError: "Príspevok sa teraz nedá otvoriť.",
+  },
+  sl: {
+    joinDiscord: "Pridruži se Discordu",
+    viewTopPostToday: "Oglej si najboljšo objavo danes",
+    readWiki: "Preberi Wiki",
+    createNewPost: "Ustvari novo objavo",
+    sharePicture: "Deli sliko",
+    viewMostRecentPostToday: "Oglej si najnovejšo današnjo objavo",
+    dynamicPostUnavailable: "Na voljo ni nobene objave.",
+    dynamicPostError: "Objave trenutno ni mogoče odpreti.",
+  },
+  fi: {
+    joinDiscord: "Liity Discordiin",
+    viewTopPostToday: "Katso päivän suosituin julkaisu",
+    readWiki: "Lue Wiki",
+    createNewPost: "Luo uusi julkaisu",
+    sharePicture: "Jaa kuva",
+    viewMostRecentPostToday: "Katso päivän uusin julkaisu",
+    dynamicPostUnavailable: "Julkaisuja ei ole saatavilla.",
+    dynamicPostError: "Julkaisua ei voi avata juuri nyt.",
+  },
+  sv: {
+    joinDiscord: "Gå med i Discord",
+    viewTopPostToday: "Visa dagens populäraste inlägg",
+    readWiki: "Läs wikin",
+    createNewPost: "Skapa ett nytt inlägg",
+    sharePicture: "Dela en bild",
+    viewMostRecentPostToday: "Visa dagens senaste inlägg",
+    dynamicPostUnavailable: "Det finns inga tillgängliga inlägg.",
+    dynamicPostError: "Inlägget kan inte öppnas just nu.",
+  },
+  tl: {
+    joinDiscord: "Sumali sa Discord",
+    viewTopPostToday: "Tingnan ang Nangungunang Post Ngayon",
+    readWiki: "Basahin ang Wiki",
+    createNewPost: "Gumawa ng Bagong Post",
+    sharePicture: "Magbahagi ng Larawan",
+    viewMostRecentPostToday: "Tingnan ang Pinakabagong Post Ngayon",
+    dynamicPostUnavailable: "Walang post na available.",
+    dynamicPostError: "Hindi mabuksan ang post ngayon.",
+  },
+  tr: {
+    joinDiscord: "Discord'a Katıl",
+    viewTopPostToday: "Bugünün En İyi Gönderisini Gör",
+    readWiki: "Wiki'yi Oku",
+    createNewPost: "Yeni Gönderi Oluştur",
+    sharePicture: "Resim Paylaş",
+    viewMostRecentPostToday: "Bugünün En Yeni Gönderisini Gör",
+    dynamicPostUnavailable: "Kullanılabilir gönderi yok.",
+    dynamicPostError: "Gönderi şu anda açılamıyor.",
+  },
+  yo: {
+    joinDiscord: "Darapọ̀ mọ́ Discord",
+    viewTopPostToday: "Wo ìfìwéránṣẹ́ tó ga jù lónìí",
+    readWiki: "Ka Wiki",
+    createNewPost: "Ṣẹ̀dá ìfìwéránṣẹ́ tuntun",
+    sharePicture: "Pín àwòrán",
+    viewMostRecentPostToday: "Wo ìfìwéránṣẹ́ tuntun jù lónìí",
+    dynamicPostUnavailable: "Kò sí ìfìwéránṣẹ́ tó wà.",
+    dynamicPostError: "A kò lè ṣí ìfìwéránṣẹ́ báyìí.",
+  },
+};
+
+export function getAfterSubscribePresetMessages(
+  language: unknown,
+): AfterSubscribePresetMessages {
+  return afterSubscribePresetMessages[resolveSubGoalLanguage(language)];
 }

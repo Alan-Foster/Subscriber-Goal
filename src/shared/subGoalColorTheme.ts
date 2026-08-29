@@ -1,12 +1,16 @@
-export const subGoalColorThemes = ['red', 'green', 'purple', 'blue'] as const;
+export const subGoalColorThemes = ['red', 'green', 'purple', 'blue', 'pink'] as const;
 
 export type SubGoalColorTheme = (typeof subGoalColorThemes)[number];
 
 export const defaultSubGoalColorTheme: SubGoalColorTheme = 'red';
 
-export function resolveSubGoalColorTheme(value: unknown): SubGoalColorTheme {
-  return typeof value === 'string' &&
+export function isSubGoalColorTheme(value: unknown): value is SubGoalColorTheme {
+  return (
+    typeof value === 'string' &&
     subGoalColorThemes.includes(value as SubGoalColorTheme)
-    ? (value as SubGoalColorTheme)
-    : defaultSubGoalColorTheme;
+  );
+}
+
+export function resolveSubGoalColorTheme(value: unknown): SubGoalColorTheme {
+  return isSubGoalColorTheme(value) ? value : defaultSubGoalColorTheme;
 }

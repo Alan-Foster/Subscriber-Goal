@@ -13,6 +13,7 @@ const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
   initializePostKindMigration: vi.fn(),
+  initializeLegacyAfterSubscribeActionMigration: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -48,6 +49,11 @@ vi.mock("../data/postKindMigration", () => ({
   initializePostKindMigration: hoisted.initializePostKindMigration,
 }));
 
+vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
+  initializeLegacyAfterSubscribeActionMigration:
+    hoisted.initializeLegacyAfterSubscribeActionMigration,
+}));
+
 import { onAppChanged } from "./appChanged";
 
 describe("onAppChanged", () => {
@@ -62,6 +68,7 @@ describe("onAppChanged", () => {
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.initializePostKindMigration.mockReset();
+    hoisted.initializeLegacyAfterSubscribeActionMigration.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -69,6 +76,9 @@ describe("onAppChanged", () => {
       undefined,
     );
     hoisted.initializePostKindMigration.mockResolvedValue(undefined);
+    hoisted.initializeLegacyAfterSubscribeActionMigration.mockResolvedValue(
+      undefined,
+    );
   });
 
   it("skips gracefully when lifecycle trigger has no subreddit context", async () => {
@@ -109,6 +119,9 @@ describe("onAppChanged", () => {
       expect.anything(),
       [],
     );
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenCalledWith(expect.anything(), []);
   });
 
   it("falls back safely when subreddit fetch fails", async () => {

@@ -209,6 +209,7 @@ describe("createSubscriberGoal sticky handling", () => {
       "en",
       undefined,
       "short",
+      { type: "disabled" },
     );
   });
 
@@ -231,6 +232,7 @@ describe("createSubscriberGoal sticky handling", () => {
       "ExampleSub",
       "red",
       "en",
+      { type: "disabled" },
     );
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });

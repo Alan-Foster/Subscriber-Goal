@@ -106,6 +106,7 @@ export async function processDueAutoCreateNextGoals({
           postHeight: sourceGoalData.postHeight,
           autoCreateNextGoal: true,
           language: sourceGoalData.language,
+          afterSubscribeAction: sourceGoalData.afterSubscribeAction,
           cancelPendingAutoCreateGoals: true
         }
       });

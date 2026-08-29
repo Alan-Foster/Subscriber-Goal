@@ -66,6 +66,10 @@ body {
   --sg-accent: #60a5fa;
 }
 
+[data-sg-theme='pink'] {
+  --sg-accent: #f472b6;
+}
+
 @media (prefers-color-scheme: dark) {
   [data-sg-theme='red'] {
     --sg-accent: #ff4500;
@@ -82,6 +86,10 @@ body {
   [data-sg-theme='blue'] {
     --sg-accent: #60a5fa;
   }
+
+  [data-sg-theme='pink'] {
+    --sg-accent: #f472b6;
+  }
 }
 
 .sg-fade-in {
@@ -90,14 +98,8 @@ body {
 }
 
 .sg-subscribe-attention {
-  isolation: isolate;
-}
-
-.sg-subscribe-attention::after {
-  content: '';
-  position: absolute;
   inset: -4px;
-  z-index: -1;
+  z-index: 0;
   border-radius: 9999px;
   background: radial-gradient(
     ellipse at center,
@@ -113,6 +115,7 @@ body {
   opacity: 0.95;
   pointer-events: none;
   animation: sg-subscribe-glow 1.8s ease-out infinite;
+  will-change: opacity, transform;
 }
 
 .confetti {
@@ -169,7 +172,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sg-subscribe-attention::after {
+  .sg-subscribe-attention {
     animation: none;
     opacity: 0.48;
     transform: none;

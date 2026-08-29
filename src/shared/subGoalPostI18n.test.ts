@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  afterSubscribePresetMessages,
   defaultSubGoalLanguage,
+  getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
   subGoalLanguages,
@@ -16,6 +18,45 @@ describe("subGoalPostI18n", () => {
         englishKeys,
       );
     }
+  });
+
+  it("keeps every after-subscription preset localized and within button limits", () => {
+    const englishKeys = Object.keys(afterSubscribePresetMessages.en).sort();
+    const buttonMessageKeys = [
+      "joinDiscord",
+      "viewTopPostToday",
+      "readWiki",
+      "createNewPost",
+      "sharePicture",
+      "viewMostRecentPostToday",
+    ] as const;
+
+    for (const language of subGoalLanguages) {
+      const messages = afterSubscribePresetMessages[language];
+      expect(Object.keys(messages).sort()).toEqual(englishKeys);
+      for (const key of buttonMessageKeys) {
+        const length = Array.from(messages[key]).length;
+        expect(length, `${language}.${key}`).toBeGreaterThanOrEqual(5);
+        expect(length, `${language}.${key}`).toBeLessThanOrEqual(50);
+      }
+      expect(messages.dynamicPostUnavailable.length).toBeGreaterThan(0);
+      expect(messages.dynamicPostError.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns localized preset defaults and navigation errors", () => {
+    expect(getAfterSubscribePresetMessages("es")).toMatchObject({
+      joinDiscord: "Únete al Discord",
+      viewTopPostToday: "Ver la publicación destacada de hoy",
+      readWiki: "Leer la Wiki",
+      createNewPost: "Crear una publicación",
+      sharePicture: "Compartir una imagen",
+      viewMostRecentPostToday: "Ver la publicación más reciente de hoy",
+      dynamicPostUnavailable: "No hay ninguna publicación disponible.",
+    });
+    expect(getAfterSubscribePresetMessages("unsupported")).toBe(
+      afterSubscribePresetMessages.en,
+    );
   });
 
   it("lists supported languages in dropdown order and keeps English as the default", () => {
@@ -142,17 +183,9 @@ describe("subGoalPostI18n", () => {
       "r/Beispiel hat 15k Abonnenten erreicht!",
     ],
     ["fr", "Bienvenue sur r/Exemple !", "r/Exemple a atteint 15k abonnés !"],
-    [
-      "is",
-      "Velkomin í r/Dæmi!",
-      "r/Dæmi náði 15k áskrifendum!",
-    ],
+    ["is", "Velkomin í r/Dæmi!", "r/Dæmi náði 15k áskrifendum!"],
     ["it", "Benvenuto in r/Esempio!", "r/Esempio ha raggiunto 15k iscritti!"],
-    [
-      "lv",
-      "Laipni lūdzam r/Piemērs!",
-      "r/Piemērs sasniedza 15k abonentus!",
-    ],
+    ["lv", "Laipni lūdzam r/Piemērs!", "r/Piemērs sasniedza 15k abonentus!"],
     [
       "lt",
       "Sveiki atvykę į r/Pavyzdys!",
@@ -163,33 +196,13 @@ describe("subGoalPostI18n", () => {
       "Welkom bij r/Voorbeeld!",
       "r/Voorbeeld heeft 15k abonnees bereikt!",
     ],
-    [
-      "nb",
-      "Velkommen til r/Eksempel!",
-      "r/Eksempel nådde 15k abonnenter!",
-    ],
+    ["nb", "Velkommen til r/Eksempel!", "r/Eksempel nådde 15k abonnenter!"],
     ["pt", "Bem-vindo ao r/Exemplo!", "r/Exemplo alcançou 15k inscritos!"],
     ["ro", "Bun venit pe r/Exemplu!", "r/Exemplu a atins 15k abonați!"],
-    [
-      "sk",
-      "Vitajte v r/Príklad!",
-      "r/Príklad dosiahol 15k odberateľov!",
-    ],
-    [
-      "sl",
-      "Dobrodošli v r/Primer!",
-      "r/Primer je dosegel 15k naročnikov!",
-    ],
-    [
-      "tr",
-      "r/Örnek topluluğuna hoş geldiniz!",
-      "r/Örnek 15k aboneye ulaştı!",
-    ],
-    [
-      "yo",
-      "Ẹ káàbọ̀ sí r/Àpẹẹrẹ!",
-      "r/Àpẹẹrẹ ti dé 15k alabapin!",
-    ],
+    ["sk", "Vitajte v r/Príklad!", "r/Príklad dosiahol 15k odberateľov!"],
+    ["sl", "Dobrodošli v r/Primer!", "r/Primer je dosegel 15k naročnikov!"],
+    ["tr", "r/Örnek topluluğuna hoş geldiniz!", "r/Örnek 15k aboneye ulaştı!"],
+    ["yo", "Ẹ káàbọ̀ sí r/Àpẹẹrẹ!", "r/Àpẹẹrẹ ti dé 15k alabapin!"],
   ] as const)(
     "renders representative %s dynamic post messages",
     (language, expectedTitle, expectedCompletedTitle) => {

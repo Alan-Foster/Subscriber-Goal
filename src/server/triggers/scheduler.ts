@@ -21,6 +21,7 @@ import {
 import { countPendingCrossposts } from "../data/crosspostData";
 import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
+import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
@@ -81,6 +82,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
     await processPostKindMigrationBatch(reddit, redis);
   } catch (error) {
     console.error(`postKindMigration error: ${String(error)}`);
+  }
+  try {
+    await processLegacyAfterSubscribeActionMigrationBatch(redis);
+  } catch (error) {
+    console.error(
+      `legacyAfterSubscribeActionMigration error: ${String(error)}`,
+    );
   }
   try {
     await processSubscriberStatsMigrationBatch(redis);

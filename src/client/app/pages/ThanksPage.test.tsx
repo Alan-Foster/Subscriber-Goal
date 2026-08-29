@@ -1,12 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type {
-  SubGoalState,
+  SubscriberGoalState,
   SubscribeOnlyState,
 } from "../../../shared/types/api";
 import { ThanksPage } from "./ThanksPage";
 
-const baseState: SubGoalState = {
+const baseState: SubscriberGoalState = {
   goal: 10,
   recentSubscriber: null,
   completedTime: null,
@@ -14,6 +14,7 @@ const baseState: SubGoalState = {
   colorTheme: "red",
   postHeight: "regular",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
@@ -32,6 +33,7 @@ const tinyState: SubscribeOnlyState = {
   colorTheme: "red",
   postHeight: "tiny",
   language: "en",
+  afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
   subreddit: { name: "ExampleSub" },
@@ -42,6 +44,7 @@ describe("ThanksPage", () => {
     onReturn: vi.fn(),
     onVisitPromoSub: vi.fn(),
     onCelebrate: vi.fn(),
+    onAfterSubscribeNavigate: vi.fn(),
   };
 
   it("renders Spanish thanks text", () => {
@@ -82,5 +85,49 @@ describe("ThanksPage", () => {
     expect(html).not.toContain("subscribers in the community");
     expect(html).not.toContain("Return to Previous Page");
     expect(html).toContain("px-4 py-3");
+  });
+
+  it("shows a valid CTA beside the full-size Return button", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{
+          ...baseState,
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Join the Discord",
+            url: "https://discord.com/invite/example",
+            colorTheme: "pink",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Join the Discord");
+    expect(html).toContain("Return to Previous Page");
+    expect(html).toContain('data-sg-theme="pink"');
+    expect(html).toContain("sg-subscribe-attention");
+  });
+
+  it("replaces the Tiny confirmation with its valid CTA", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{
+          ...tinyState,
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Visit Website",
+            url: "https://example.com/",
+            colorTheme: "blue",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Visit Website");
+    expect(html).toContain("sg-subscribe-attention");
+    expect(html).not.toContain("Subscribed to r/ExampleSub");
+    expect(html).not.toContain("Return to Previous Page");
   });
 });

@@ -46,6 +46,7 @@ const hoisted = vi.hoisted(() => ({
   countPendingCrossposts: vi.fn(),
   processSubscriberStatsMigrationBatch: vi.fn(),
   processPostKindMigrationBatch: vi.fn(),
+  processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
   processRecentSubscriberIndexMigrationBatch: vi.fn(),
   processDueAutoCreateNextGoals: vi.fn(),
   getQueuedUpdates: vi.fn(),
@@ -95,6 +96,11 @@ vi.mock("../data/postKindMigration", () => ({
   processPostKindMigrationBatch: hoisted.processPostKindMigrationBatch,
 }));
 
+vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
+  processLegacyAfterSubscribeActionMigrationBatch:
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch,
+}));
+
 vi.mock("../data/subGoalData", () => ({
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   checkCompletionStatus: hoisted.checkCompletionStatus,
@@ -135,6 +141,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.countPendingCrossposts.mockReset();
     hoisted.processSubscriberStatsMigrationBatch.mockReset();
     hoisted.processPostKindMigrationBatch.mockReset();
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.processDueAutoCreateNextGoals.mockReset();
     hoisted.getQueuedUpdates.mockReset();
@@ -151,6 +158,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       emptyCrosspostSummary,
     );
     hoisted.processPostKindMigrationBatch.mockResolvedValue({});
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockResolvedValue(
+      {},
+    );
     hoisted.countPendingCrossposts.mockResolvedValue(0);
     hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);
     hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(
@@ -187,6 +197,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
     expect(hoisted.countPendingCrossposts).not.toHaveBeenCalled();
     expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(
+      hoisted.processLegacyAfterSubscribeActionMigrationBatch,
+    ).toHaveBeenCalledWith(expect.anything());
     expect(
       hoisted.processRecentSubscriberIndexMigrationBatch,
     ).toHaveBeenCalled();

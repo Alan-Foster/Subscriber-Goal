@@ -58,7 +58,13 @@ describe('processDueAutoCreateNextGoals', () => {
       colorTheme: 'purple',
       postHeight: 'short',
       autoCreateNextGoal: true,
-      language: 'en'
+      language: 'en',
+      afterSubscribeAction: {
+        type: 'link',
+        buttonText: 'Join the Discord',
+        url: 'https://discord.com/invite/example',
+        colorTheme: 'pink'
+      }
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: 't5_example',
@@ -119,6 +125,12 @@ describe('processDueAutoCreateNextGoals', () => {
         postHeight: 'short',
         autoCreateNextGoal: true,
         language: 'en',
+        afterSubscribeAction: {
+          type: 'link',
+          buttonText: 'Join the Discord',
+          url: 'https://discord.com/invite/example',
+          colorTheme: 'pink'
+        },
         cancelPendingAutoCreateGoals: true
       }
     });
