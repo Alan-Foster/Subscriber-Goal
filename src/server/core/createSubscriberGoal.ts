@@ -200,17 +200,17 @@ async function stickyAndVerifyPost(
   let lastVerifiedStickied: boolean | undefined;
 
   console.info(
-    `[sticky] attempting to sticky new Subscriber Goal: subreddit=${subredditName} postId=${post.id}`,
+    `[sticky] append attempt: mode=append operation=write subreddit=${subredditName} postId=${post.id}`,
   );
   try {
-    await post.sticky(1);
+    await post.sticky();
     console.info(
-      `[sticky] sticky call completed: subreddit=${subredditName} postId=${post.id}`,
+      `[sticky] append completed: mode=append operation=write subreddit=${subredditName} postId=${post.id}`,
     );
   } catch (error) {
     stickyErrorMessage = toErrorMessage(error);
     console.warn(
-      `[sticky] sticky call failed: subreddit=${subredditName} postId=${post.id} error=${stickyErrorMessage}`,
+      `[sticky] append failed: mode=append operation=write subreddit=${subredditName} postId=${post.id} error=${stickyErrorMessage}`,
     );
   }
 
@@ -235,7 +235,7 @@ async function stickyAndVerifyPost(
       const refetchErrorMessage = toErrorMessage(error);
       lastVerificationErrorMessage = refetchErrorMessage;
       console.warn(
-        `[sticky] sticky verification refetch failed: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} error=${refetchErrorMessage}`,
+        `[sticky] verification refetch failed: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} error=${refetchErrorMessage}`,
       );
     }
 
@@ -246,7 +246,7 @@ async function stickyAndVerifyPost(
       lastVerificationErrorMessage =
         "Unable to verify sticky status because post.isStickied is unavailable.";
       console.warn(
-        `[sticky] sticky verification unavailable: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
+        `[sticky] verification unavailable: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
       );
     } else {
       try {
@@ -255,7 +255,7 @@ async function stickyAndVerifyPost(
         );
         lastVerifiedStickied = verifiedStickied;
         console.info(
-          `[sticky] sticky verification result: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} verifiedStickied=${verifiedStickied}`,
+          `[sticky] verification result: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} verifiedStickied=${verifiedStickied}`,
         );
         if (verifiedStickied) {
           return { status: "pinned", verifiedStickied };
@@ -263,7 +263,7 @@ async function stickyAndVerifyPost(
       } catch (error) {
         lastVerificationErrorMessage = toErrorMessage(error);
         console.warn(
-          `[sticky] sticky verification failed: subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
+          `[sticky] verification failed: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
         );
       }
     }

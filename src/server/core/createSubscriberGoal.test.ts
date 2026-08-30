@@ -132,7 +132,8 @@ describe("createSubscriberGoal sticky handling", () => {
       post,
       "regular",
     );
-    expect(post.sticky).toHaveBeenCalledWith(1);
+    expect(post.sticky).toHaveBeenCalledTimes(1);
+    expect(post.sticky).toHaveBeenCalledWith();
     expect(post.isStickied).toHaveBeenCalledWith();
     expect(result.post).toBe(post);
     expect(result.stickyResult).toEqual({
@@ -254,6 +255,9 @@ describe("createSubscriberGoal sticky handling", () => {
       stickyVerification: { maxWaitMs: 5, intervalMs: 1 },
     });
 
+    expect(post.sticky).toHaveBeenCalledTimes(1);
+    expect(post.sticky).toHaveBeenCalledWith();
+    expect(hoisted.reddit.getPostById).toHaveBeenCalledTimes(2);
     expect(refetchedBeforePropagation.isStickied).toHaveBeenCalled();
     expect(refetchedAfterPropagation.isStickied).toHaveBeenCalled();
     expect(result.post).toBe(post);
@@ -302,6 +306,8 @@ describe("createSubscriberGoal sticky handling", () => {
 
     const result = await createGoal(noRetryStickyVerification);
 
+    expect(post.sticky).toHaveBeenCalledTimes(1);
+    expect(post.sticky).toHaveBeenCalledWith();
     expect(post.isStickied).toHaveBeenCalled();
     expect(result.post).toBe(post);
     expect(result.stickyResult).toEqual({
