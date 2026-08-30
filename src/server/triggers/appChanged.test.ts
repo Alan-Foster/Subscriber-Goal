@@ -10,6 +10,8 @@ const hoisted = vi.hoisted(() => ({
   clearLegacySubscriberErasureTombstones: vi.fn(),
   initializeRecentSubscriberIndexMigration: vi.fn(),
   initializeSubscriberStatsMigration: vi.fn(),
+  initializeOnboardingSubscriberGoal: vi.fn(),
+  scheduleOnboardingReminder: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
   initializePostKindMigration: vi.fn(),
@@ -40,6 +42,15 @@ vi.mock("../data/subGoalData", () => ({
     hoisted.initializeRecentSubscriberIndexMigration,
 }));
 
+vi.mock("../core/onboardingSubscriberGoal", () => ({
+  initializeOnboardingSubscriberGoal:
+    hoisted.initializeOnboardingSubscriberGoal,
+}));
+
+vi.mock("../core/onboardingReminder", () => ({
+  scheduleOnboardingReminder: hoisted.scheduleOnboardingReminder,
+}));
+
 vi.mock("../data/updaterData", () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdates: hoisted.queueUpdates,
@@ -65,6 +76,8 @@ describe("onAppChanged", () => {
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
     hoisted.initializeRecentSubscriberIndexMigration.mockReset();
     hoisted.initializeSubscriberStatsMigration.mockReset();
+    hoisted.initializeOnboardingSubscriberGoal.mockReset();
+    hoisted.scheduleOnboardingReminder.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.initializePostKindMigration.mockReset();
@@ -72,6 +85,8 @@ describe("onAppChanged", () => {
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
+    hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
+    hoisted.scheduleOnboardingReminder.mockResolvedValue(undefined);
     hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(
       undefined,
     );
@@ -90,6 +105,8 @@ describe("onAppChanged", () => {
       hoisted.clearLegacySubscriberErasureTombstones,
     ).not.toHaveBeenCalled();
     expect(hoisted.initializeSubscriberStatsMigration).not.toHaveBeenCalled();
+    expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
     expect(
       hoisted.initializeRecentSubscriberIndexMigration,
     ).not.toHaveBeenCalled();
@@ -112,6 +129,14 @@ describe("onAppChanged", () => {
     expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
       expect.anything(),
     );
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "unknown" },
+    );
+    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "unknown" },
+    );
     expect(
       hoisted.initializeRecentSubscriberIndexMigration,
     ).toHaveBeenCalledWith(expect.anything());
@@ -122,6 +147,21 @@ describe("onAppChanged", () => {
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,
     ).toHaveBeenCalledWith(expect.anything(), []);
+  });
+
+  it("passes the install or upgrade lifecycle source to onboarding initialization", async () => {
+    hoisted.context.subredditName = "SubGoal";
+
+    await onAppChanged({ lifecycleSource: "upgrade" });
+
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "upgrade" },
+    );
+    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "upgrade" },
+    );
   });
 
   it("falls back safely when subreddit fetch fails", async () => {

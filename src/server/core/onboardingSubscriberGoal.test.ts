@@ -33,25 +33,18 @@ import {
 } from "./onboardingSubscriberGoal";
 
 class InMemoryRedis {
-  values = new Map<string, string>();
+  hashes = new Map<string, Map<string, string>>();
 
-  async get(key: string): Promise<string | undefined> {
-    return this.values.get(key);
+  async hGetAll(key: string): Promise<Record<string, string>> {
+    return Object.fromEntries(this.hashes.get(key) ?? []);
   }
 
-  async set(
-    key: string,
-    value: string,
-    options?: { nx?: boolean },
-  ): Promise<void> {
-    if (options?.nx && this.values.has(key)) {
-      return;
+  async hSet(key: string, values: Record<string, string>): Promise<void> {
+    const hash = this.hashes.get(key) ?? new Map<string, string>();
+    for (const [field, value] of Object.entries(values)) {
+      hash.set(field, value);
     }
-    this.values.set(key, value);
-  }
-
-  async del(key: string): Promise<void> {
-    this.values.delete(key);
+    this.hashes.set(key, hash);
   }
 }
 
@@ -109,25 +102,21 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("arms once for one hour and remains not due before then", async () => {
+  it("arms once for the configured delay and remains not due before then", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 100,
+    });
     await expect(
-      initializeOnboardingSubscriberGoal(redis as never, {
-        lifecycleSource: "install",
-        nowMs,
-      }),
-    ).resolves.toMatchObject({ outcome: "armed" });
-    await expect(
-      initializeOnboardingSubscriberGoal(redis as never, {
-        lifecycleSource: "upgrade",
-        nowMs: nowMs + 100,
-      }),
-    ).resolves.toMatchObject({ outcome: "existing" });
-    expect(
-      JSON.parse((await redis.get(onboardingSubscriberGoalStateKey))!),
-    ).toMatchObject({
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
       status: "pending",
       lifecycleSource: "install",
-      dueAt: nowMs + onboardingSubscriberGoalDelayMs,
+      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
     });
 
     await expect(
@@ -160,7 +149,6 @@ describe("onboarding subscriber goal", () => {
       postId: "t3_existing",
       existingSource: "tracked",
       lifecycleSource: "upgrade",
-      shouldLog: true,
     });
     expect(reddit.getHotPosts).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
@@ -258,7 +246,6 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "created",
       postId: "t3_created",
-      shouldLog: true,
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -284,9 +271,8 @@ describe("onboarding subscriber goal", () => {
         nowMs: nowMs + onboardingSubscriberGoalDelayMs + 60_000,
       }),
     ).resolves.toMatchObject({
-      status: "already_terminal",
-      terminalStatus: "created",
-      shouldLog: false,
+      status: "complete",
+      postId: "t3_created",
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
   });
@@ -317,14 +303,19 @@ describe("onboarding subscriber goal", () => {
         nowMs: nowMs + onboardingSubscriberGoalDelayMs + 60_000,
       }),
     ).resolves.toMatchObject({
-      status: "already_terminal",
-      terminalStatus: "failed",
-      shouldLog: false,
+      status: "complete",
+      errorMessage: "Error: redis unavailable",
     });
   });
 
-  it("turns malformed state into one terminal diagnostic failure", async () => {
-    await redis.set(onboardingSubscriberGoalStateKey, "not-json");
+  it("self-initializes absent or malformed state using the migration pattern", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+    await redis.hSet(onboardingSubscriberGoalStateKey, {
+      version: "invalid",
+      status: "pending",
+    });
 
     await expect(
       processDueOnboardingSubscriberGoal({
@@ -333,18 +324,43 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs,
       }),
-    ).resolves.toMatchObject({ status: "failed", shouldLog: true });
+    ).resolves.toMatchObject({ status: "not_due" });
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[onboardingSubscriberGoal] initialized: status=pending",
+      ),
+    );
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      version: "onboarding_subscriber_goal_v2",
+      status: "pending",
+    });
+  });
+
+  it("self-initializes an absent state before waiting for its one-time check", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+
     await expect(
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + 60_000,
+        nowMs,
       }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "already_terminal",
-      terminalStatus: "failed",
-      shouldLog: false,
+      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
+      lifecycleSource: "unknown",
     });
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[onboardingSubscriberGoal] initialized: status=pending",
+      ),
+    );
   });
 });

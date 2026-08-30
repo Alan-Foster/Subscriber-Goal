@@ -8,8 +8,14 @@ import {
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
 import { initializePostKindMigration } from "../data/postKindMigration";
 import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAfterSubscribeActionMigration";
+import { initializeOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
+import { scheduleOnboardingReminder } from "../core/onboardingReminder";
 
-export async function onAppChanged(): Promise<void> {
+export async function onAppChanged({
+  lifecycleSource = "unknown",
+}: {
+  lifecycleSource?: "install" | "upgrade" | "unknown";
+} = {}): Promise<void> {
   if (!context.subredditName && !context.subredditId) {
     console.info(
       "[appChanged] skipping subreddit setup: no subreddit context on lifecycle trigger",
@@ -33,6 +39,8 @@ export async function onAppChanged(): Promise<void> {
   await ensureSavedSubredditDisplayName(redis, subredditName);
   await clearLegacySubscriberErasureTombstones(redis);
   await initializeSubscriberStatsMigration(redis);
+  await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
+  await scheduleOnboardingReminder(redis, { lifecycleSource });
   await initializeRecentSubscriberIndexMigration(redis);
 
   const trackedPosts = await getTrackedPosts(redis);

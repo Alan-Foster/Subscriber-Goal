@@ -1,29 +1,15 @@
-import { context, redis } from "@devvit/web/server";
 import type { Router } from "express";
 import { internalRoutes } from "../../shared/routes";
-import { initializeOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
 import { onAppChanged } from "../triggers/appChanged";
 import { onModAction, type ModActionEvent } from "../triggers/modAction";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
-
-async function initializeOnboardingGoalForLifecycle(
-  lifecycleSource: "install" | "upgrade",
-): Promise<void> {
-  const result = await initializeOnboardingSubscriberGoal(redis, {
-    lifecycleSource,
-  });
-  console.info(
-    `[onboardingSubscriberGoal] lifecycle: subreddit=${context.subredditName ?? context.subredditId ?? "unknown"} source=${lifecycleSource} outcome=${result.outcome} state=${result.state.status} stateSource=${result.state.lifecycleSource} armedAt=${new Date(result.state.armedAt).toISOString()} dueAt=${new Date(result.state.dueAt).toISOString()} completedAt=${result.state.completedAt ? new Date(result.state.completedAt).toISOString() : "none"} postId=${result.state.postId ?? "none"} error=${result.state.errorMessage ?? "none"}`,
-  );
-}
 
 export function registerInternalSystemRoutes(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppInstall,
     async (_req, res): Promise<void> => {
       try {
-        await initializeOnboardingGoalForLifecycle("install");
-        await onAppChanged();
+        await onAppChanged({ lifecycleSource: "install" });
         res.json({ status: "ok" });
       } catch (error) {
         console.error(`on-app-install error: ${String(error)}`);
@@ -41,8 +27,7 @@ export function registerInternalSystemRoutes(router: Router): void {
     internalRoutes.triggers.onAppUpgrade,
     async (_req, res): Promise<void> => {
       try {
-        await initializeOnboardingGoalForLifecycle("upgrade");
-        await onAppChanged();
+        await onAppChanged({ lifecycleSource: "upgrade" });
         res.json({ status: "ok" });
       } catch (error) {
         console.error(`on-app-upgrade error: ${String(error)}`);

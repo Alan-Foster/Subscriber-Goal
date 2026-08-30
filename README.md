@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Devvit 0.14.1
+- 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Automatic 24h goal creation fallback. Devvit 0.14.1
 - 1.5.1 - Release of Small-Height Goals (goals without subreddit icons). Users can erase their own data. Devvit 0.13.8
 - 1.4.4 - Fixed a bug with sticky not replacing completed goals. Devvit 0.13.6. Updated Overrides.
 - 1.4.3 - Added more developer special code commands.

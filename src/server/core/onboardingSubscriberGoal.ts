@@ -14,49 +14,43 @@ import {
 import { getQueuedUpdates, getTrackedPosts } from "../data/updaterData";
 import { createSubscriberGoal } from "./createSubscriberGoal";
 
-export const onboardingSubscriberGoalStateKey = "onboarding_subscriber_goal_v1";
-export const onboardingSubscriberGoalLockKey =
-  "onboarding_subscriber_goal_v1_lock";
-export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v1";
-export const onboardingSubscriberGoalDelayMs = 60 * 60 * 1000;
+export const onboardingSubscriberGoalStateKey =
+  "onboarding_subscriber_goal_v2_state";
+export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
+export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingRecentPostWindowMs = 2 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
 
-type OnboardingStatus =
-  | "pending"
-  | "processing"
-  | "created"
-  | "existing"
-  | "failed";
+type OnboardingStatus = "pending" | "processing" | "complete";
+
+type OnboardingResultStatus = "created" | "existing" | "failed";
 
 export type OnboardingLifecycleSource = "install" | "upgrade" | "unknown";
 
 export type OnboardingSubscriberGoalState = {
   version: typeof onboardingSubscriberGoalVersion;
   status: OnboardingStatus;
-  dueAt: number;
+  nextRunAt: number;
   armedAt: number;
-  armToken: string;
   lifecycleSource: OnboardingLifecycleSource;
   startedAt?: number;
   completedAt?: number;
-  diagnosticLoggedAt?: number;
   postId?: string;
+  existingSource?: "tracked" | "queued" | "pinned" | "recent";
+  resultStatus?: OnboardingResultStatus;
   errorMessage?: string;
 };
 
 export type OnboardingSubscriberGoalSummary = {
-  status: "not_due" | "created" | "existing" | "failed" | "already_terminal";
+  status: "not_due" | "created" | "existing" | "failed" | "complete";
   trackedInspected: number;
   pinnedInspected: number;
   recentInspected: number;
   postId?: string;
   existingSource?: "tracked" | "queued" | "pinned" | "recent";
   lifecycleSource?: OnboardingLifecycleSource;
-  terminalStatus?: OnboardingStatus;
-  shouldLog?: boolean;
   errorMessage?: string;
 };
 
@@ -81,48 +75,31 @@ const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
 export async function initializeOnboardingSubscriberGoal(
   redis: RedisClient,
   {
-    lifecycleSource,
+    lifecycleSource = "unknown",
     nowMs = Date.now(),
   }: {
-    lifecycleSource: Exclude<OnboardingLifecycleSource, "unknown">;
+    lifecycleSource?: OnboardingLifecycleSource;
     nowMs?: number;
   },
-): Promise<{
-  outcome: "armed" | "existing" | "failed";
-  state: OnboardingSubscriberGoalState;
-}> {
+): Promise<void> {
+  const raw = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+  if (parseOnboardingState(raw)) {
+    return;
+  }
   const state: OnboardingSubscriberGoalState = {
     version: onboardingSubscriberGoalVersion,
     status: "pending",
     armedAt: nowMs,
-    dueAt: nowMs + onboardingSubscriberGoalDelayMs,
-    armToken: `${nowMs}:${Math.random().toString(36).slice(2)}`,
+    nextRunAt: nowMs + onboardingSubscriberGoalDelayMs,
     lifecycleSource,
   };
-  await redis.set(onboardingSubscriberGoalStateKey, JSON.stringify(state), {
-    nx: true,
-  });
-  const armed =
-    (await redis.get(onboardingSubscriberGoalStateKey)) ===
-    JSON.stringify(state);
-  if (armed) {
-    return { outcome: "armed", state };
-  }
-
-  const existing = await getOnboardingState(redis);
-  if (existing) {
-    return { outcome: "existing", state: existing };
-  }
-
-  const failedState: OnboardingSubscriberGoalState = {
-    ...state,
-    status: "failed",
-    completedAt: nowMs,
-    diagnosticLoggedAt: nowMs,
-    errorMessage: "Malformed existing onboarding state; it was not rearmed.",
-  };
-  await saveOnboardingState(redis, failedState);
-  return { outcome: "failed", state: failedState };
+  await redis.hSet(
+    onboardingSubscriberGoalStateKey,
+    serializeOnboardingState(state),
+  );
+  console.info(
+    `[onboardingSubscriberGoal] initialized: status=${state.status} nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} version=${state.version}`,
+  );
 }
 
 export async function processDueOnboardingSubscriberGoal({
@@ -138,60 +115,39 @@ export async function processDueOnboardingSubscriberGoal({
 }): Promise<OnboardingSubscriberGoalSummary> {
   const base = emptySummary();
   let inspected = base;
-  const rawState = await redis.get(onboardingSubscriberGoalStateKey);
-  if (!rawState) {
-    return { status: "not_due", ...base };
-  }
-  const state = parseOnboardingState(rawState);
+  let state = parseOnboardingState(
+    await redis.hGetAll(onboardingSubscriberGoalStateKey),
+  );
   if (!state) {
-    const failedState = createMalformedState(nowMs);
-    await saveOnboardingState(redis, failedState);
-    return {
-      status: "failed",
-      ...base,
-      lifecycleSource: failedState.lifecycleSource,
-      shouldLog: true,
-      errorMessage:
-        "Malformed onboarding state; automatic creation was skipped.",
-    };
+    await initializeOnboardingSubscriberGoal(redis, { nowMs });
+    state = parseOnboardingState(
+      await redis.hGetAll(onboardingSubscriberGoalStateKey),
+    );
   }
-  if (state.status === "pending" && nowMs < state.dueAt) {
-    return { status: "not_due", ...base };
+  if (!state) {
+    console.error("[onboardingSubscriberGoal] failed to initialize state");
+    return { status: "failed", ...base, errorMessage: "state_unavailable" };
   }
-  if (state.status !== "pending") {
-    const shouldLog = state.diagnosticLoggedAt === undefined;
-    if (shouldLog) {
-      await saveOnboardingState(redis, {
-        ...state,
-        diagnosticLoggedAt: nowMs,
-      });
-    }
+  if (state.status === "complete") {
     return {
-      status: "already_terminal",
+      status: "complete",
       ...base,
       ...(state.postId ? { postId: state.postId } : {}),
       lifecycleSource: state.lifecycleSource,
-      terminalStatus: state.status,
-      shouldLog,
+      ...(state.existingSource ? { existingSource: state.existingSource } : {}),
+      ...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
     };
   }
-
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(onboardingSubscriberGoalLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + 5 * 60 * 1000),
-  });
-  if ((await redis.get(onboardingSubscriberGoalLockKey)) !== lockToken) {
-    return { status: "already_terminal", ...base };
+  if (nowMs < state.nextRunAt) {
+    return { status: "not_due", ...base };
   }
 
   try {
-    const reloadedState = await getOnboardingState(redis);
-    if (!reloadedState || reloadedState.status !== "pending") {
-      return { status: "already_terminal", ...base };
-    }
+    console.info(
+      `[onboardingSubscriberGoal] starting check: source=${state.lifecycleSource} nextRunAt=${state.nextRunAt} status=${state.status}`,
+    );
     await saveOnboardingState(redis, {
-      ...reloadedState,
+      ...state,
       status: "processing",
       startedAt: nowMs,
     });
@@ -204,18 +160,21 @@ export async function processDueOnboardingSubscriberGoal({
     };
     if (existing.postId) {
       await saveOnboardingState(redis, {
-        ...reloadedState,
-        status: "existing",
+        ...state,
+        status: "complete",
         completedAt: nowMs,
-        diagnosticLoggedAt: nowMs,
         postId: existing.postId,
+        existingSource: existing.source!,
+        resultStatus: "existing",
       });
+      console.info(
+        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+      );
       return {
         status: "existing",
         postId: existing.postId,
         existingSource: existing.source!,
-        lifecycleSource: reloadedState.lifecycleSource,
-        shouldLog: true,
+        lifecycleSource: state.lifecycleSource,
         ...inspected,
       };
     }
@@ -261,58 +220,49 @@ export async function processDueOnboardingSubscriberGoal({
       }
     }
     await saveOnboardingState(redis, {
-      ...reloadedState,
-      status: "created",
+      ...state,
+      status: "complete",
       completedAt: nowMs,
-      diagnosticLoggedAt: nowMs,
       postId: post.id,
+      resultStatus: "created",
     });
+    console.info(
+      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+    );
     return {
       status: "created",
       postId: post.id,
-      lifecycleSource: reloadedState.lifecycleSource,
-      shouldLog: true,
+      lifecycleSource: state.lifecycleSource,
       ...inspected,
     };
   } catch (error) {
     const errorMessage = String(error);
     try {
-      const current = await getOnboardingState(redis);
-      if (current) {
-        await saveOnboardingState(redis, {
-          ...current,
-          status: "failed",
-          completedAt: nowMs,
-          diagnosticLoggedAt: nowMs,
-          errorMessage,
-        });
-      }
+      await saveOnboardingState(redis, {
+        ...state,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "failed",
+        errorMessage,
+      });
     } catch (stateError) {
       console.error(
         `[onboardingSubscriberGoal] failed to persist terminal failure: ${String(stateError)}`,
       );
     }
+    console.error(
+      `[onboardingSubscriberGoal] complete: status=failed error=${errorMessage} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+    );
     return {
       status: "failed",
       errorMessage,
       lifecycleSource: state.lifecycleSource,
-      shouldLog: true,
       ...inspected,
     };
-  } finally {
-    try {
-      if ((await redis.get(onboardingSubscriberGoalLockKey)) === lockToken) {
-        await redis.del(onboardingSubscriberGoalLockKey);
-      }
-    } catch (lockError) {
-      console.warn(
-        `[onboardingSubscriberGoal] failed to release execution lock: ${String(lockError)}`,
-      );
-    }
   }
 }
 
-async function findExistingSubscriberGoal(
+export async function findExistingSubscriberGoal(
   reddit: RedditClient,
   redis: RedisClient,
   nowMs: number,
@@ -448,54 +398,77 @@ function getCreatedAtMs(value: CandidatePost["createdAt"]): number | undefined {
   return undefined;
 }
 
-async function getOnboardingState(
-  redis: RedisClient,
-): Promise<OnboardingSubscriberGoalState | undefined> {
-  const raw = await redis.get(onboardingSubscriberGoalStateKey);
-  return raw ? parseOnboardingState(raw) : undefined;
-}
-
 function parseOnboardingState(
-  raw: string,
+  raw: Record<string, string>,
 ): OnboardingSubscriberGoalState | undefined {
-  try {
-    const state = JSON.parse(raw) as Partial<OnboardingSubscriberGoalState>;
-    if (
-      state.version !== onboardingSubscriberGoalVersion ||
-      !["pending", "processing", "created", "existing", "failed"].includes(
-        state.status ?? "",
-      ) ||
-      !Number.isFinite(state.dueAt) ||
-      !Number.isFinite(state.armedAt) ||
-      typeof state.armToken !== "string" ||
-      state.armToken.length === 0
-    ) {
-      return undefined;
-    }
-    return {
-      ...state,
-      lifecycleSource:
-        state.lifecycleSource === "upgrade" ||
-        state.lifecycleSource === "install"
-          ? state.lifecycleSource
-          : "unknown",
-    } as OnboardingSubscriberGoalState;
-  } catch {
+  const status = raw.status;
+  const lifecycleSource = raw.lifecycleSource;
+  const nextRunAt = parseStateNumber(raw.nextRunAt);
+  const armedAt = parseStateNumber(raw.armedAt);
+  if (
+    raw.version !== onboardingSubscriberGoalVersion ||
+    (status !== "pending" &&
+      status !== "processing" &&
+      status !== "complete") ||
+    nextRunAt === undefined ||
+    armedAt === undefined
+  ) {
     return undefined;
   }
+  const state: OnboardingSubscriberGoalState = {
+    version: onboardingSubscriberGoalVersion,
+    status,
+    nextRunAt,
+    armedAt,
+    lifecycleSource:
+      lifecycleSource === "install" || lifecycleSource === "upgrade"
+        ? lifecycleSource
+        : "unknown",
+  };
+  const startedAt = parseStateNumber(raw.startedAt);
+  const completedAt = parseStateNumber(raw.completedAt);
+  if (startedAt !== undefined) state.startedAt = startedAt;
+  if (completedAt !== undefined) state.completedAt = completedAt;
+  if (raw.postId) state.postId = raw.postId;
+  if (raw.errorMessage) state.errorMessage = raw.errorMessage;
+  if (
+    raw.resultStatus === "created" ||
+    raw.resultStatus === "existing" ||
+    raw.resultStatus === "failed"
+  ) {
+    state.resultStatus = raw.resultStatus;
+  }
+  if (
+    raw.existingSource === "tracked" ||
+    raw.existingSource === "queued" ||
+    raw.existingSource === "pinned" ||
+    raw.existingSource === "recent"
+  ) {
+    state.existingSource = raw.existingSource;
+  }
+  return state;
 }
 
-function createMalformedState(nowMs: number): OnboardingSubscriberGoalState {
+function parseStateNumber(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function serializeOnboardingState(
+  state: OnboardingSubscriberGoalState,
+): Record<string, string> {
   return {
-    version: onboardingSubscriberGoalVersion,
-    status: "failed",
-    armedAt: nowMs,
-    dueAt: nowMs,
-    armToken: `malformed:${nowMs}:${Math.random().toString(36).slice(2)}`,
-    lifecycleSource: "unknown",
-    completedAt: nowMs,
-    diagnosticLoggedAt: nowMs,
-    errorMessage: "Malformed onboarding state; automatic creation was skipped.",
+    version: state.version,
+    status: state.status,
+    nextRunAt: String(state.nextRunAt),
+    armedAt: String(state.armedAt),
+    lifecycleSource: state.lifecycleSource,
+    startedAt: String(state.startedAt ?? 0),
+    completedAt: String(state.completedAt ?? 0),
+    postId: state.postId ?? "",
+    existingSource: state.existingSource ?? "",
+    resultStatus: state.resultStatus ?? "",
+    errorMessage: state.errorMessage ?? "",
   };
 }
 
@@ -503,5 +476,8 @@ async function saveOnboardingState(
   redis: RedisClient,
   state: OnboardingSubscriberGoalState,
 ): Promise<void> {
-  await redis.set(onboardingSubscriberGoalStateKey, JSON.stringify(state));
+  await redis.hSet(
+    onboardingSubscriberGoalStateKey,
+    serializeOnboardingState(state),
+  );
 }
