@@ -5,20 +5,40 @@ import {
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
 import type { ServerAppSettings } from "../settings";
-import type { RedditClient, RedisClient } from "../types";
+import { isLinkId, type RedditClient, type RedisClient } from "../types";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
   getPostUrl,
   notifyStickyFailure,
 } from "../utils/stickyFailureNotifications";
-import { getQueuedUpdates, getTrackedPosts } from "../data/updaterData";
+import {
+  cancelUpdates,
+  getQueuedUpdates,
+  getTrackedPosts,
+  untrackPost,
+} from "../data/updaterData";
+import {
+  postGoalSuffix,
+  postHeightSuffix,
+  postKindSuffix,
+  subscriberGoalsKey,
+} from "../data/subGoalData";
+import {
+  getRegisteredSubscriberGoalPosts,
+  registerSubscriberGoalPost,
+  removeSubscriberGoalPost,
+} from "../data/subscriberGoalPostRegistry";
+import {
+  getTerminalRemovedByCategory,
+  isMissingPostError,
+} from "../utils/postStatus";
 import { createSubscriberGoal } from "./createSubscriberGoal";
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v2_state";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
 export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
-export const onboardingRecentPostWindowMs = 2 * 60 * 60 * 1000;
+export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
@@ -28,6 +48,25 @@ type OnboardingStatus = "pending" | "processing" | "complete";
 type OnboardingResultStatus = "created" | "existing" | "failed";
 
 export type OnboardingLifecycleSource = "install" | "upgrade" | "unknown";
+export type OnboardingExistingSource =
+  | "registered"
+  | "tracked"
+  | "queued"
+  | "persisted"
+  | "pinned"
+  | "recent";
+
+export type OnboardingDetectionDiagnostics = {
+  registeredInspected: number;
+  trackedInspected: number;
+  queuedInspected: number;
+  persistedInspected: number;
+  pinnedInspected: number;
+  recentInspected: number;
+  validated: number;
+  stalePruned: number;
+  failed: number;
+};
 
 export type OnboardingSubscriberGoalState = {
   version: typeof onboardingSubscriberGoalVersion;
@@ -38,18 +77,24 @@ export type OnboardingSubscriberGoalState = {
   startedAt?: number;
   completedAt?: number;
   postId?: string;
-  existingSource?: "tracked" | "queued" | "pinned" | "recent";
+  existingSource?: OnboardingExistingSource;
   resultStatus?: OnboardingResultStatus;
   errorMessage?: string;
 };
 
 export type OnboardingSubscriberGoalSummary = {
   status: "not_due" | "created" | "existing" | "failed" | "complete";
+  registeredInspected: number;
   trackedInspected: number;
+  queuedInspected: number;
+  persistedInspected: number;
   pinnedInspected: number;
   recentInspected: number;
+  validated: number;
+  stalePruned: number;
+  failed: number;
   postId?: string;
-  existingSource?: "tracked" | "queued" | "pinned" | "recent";
+  existingSource?: OnboardingExistingSource;
   lifecycleSource?: OnboardingLifecycleSource;
   errorMessage?: string;
 };
@@ -63,13 +108,20 @@ type CandidatePost = {
   createdAt?: Date | string | number;
   postData?: unknown;
   customPostData?: unknown;
+  removedByCategory?: string;
   isStickied?: () => boolean | Promise<boolean>;
 };
 
 const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
+  registeredInspected: 0,
   trackedInspected: 0,
+  queuedInspected: 0,
+  persistedInspected: 0,
   pinnedInspected: 0,
   recentInspected: 0,
+  validated: 0,
+  stalePruned: 0,
+  failed: 0,
 });
 
 export async function initializeOnboardingSubscriberGoal(
@@ -154,9 +206,15 @@ export async function processDueOnboardingSubscriberGoal({
 
     const existing = await findExistingSubscriberGoal(reddit, redis, nowMs);
     inspected = {
+      registeredInspected: existing.registeredInspected,
       trackedInspected: existing.trackedInspected,
+      queuedInspected: existing.queuedInspected,
+      persistedInspected: existing.persistedInspected,
       pinnedInspected: existing.pinnedInspected,
       recentInspected: existing.recentInspected,
+      validated: existing.validated,
+      stalePruned: existing.stalePruned,
+      failed: existing.failed,
     };
     if (existing.postId) {
       await saveOnboardingState(redis, {
@@ -168,7 +226,7 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus: "existing",
       });
       console.info(
-        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} ${formatDetectionDiagnostics(inspected)}`,
       );
       return {
         status: "existing",
@@ -227,7 +285,7 @@ export async function processDueOnboardingSubscriberGoal({
       resultStatus: "created",
     });
     console.info(
-      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} ${formatDetectionDiagnostics(inspected)}`,
     );
     return {
       status: "created",
@@ -236,6 +294,7 @@ export async function processDueOnboardingSubscriberGoal({
       ...inspected,
     };
   } catch (error) {
+    inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
     try {
       await saveOnboardingState(redis, {
@@ -251,7 +310,7 @@ export async function processDueOnboardingSubscriberGoal({
       );
     }
     console.error(
-      `[onboardingSubscriberGoal] complete: status=failed error=${errorMessage} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+      `[onboardingSubscriberGoal] complete: status=failed error=${errorMessage} ${formatDetectionDiagnostics(inspected)}`,
     );
     return {
       status: "failed",
@@ -266,29 +325,29 @@ export async function findExistingSubscriberGoal(
   reddit: RedditClient,
   redis: RedisClient,
   nowMs: number,
-): Promise<{
-  postId?: string;
-  source?: "tracked" | "queued" | "pinned" | "recent";
-  trackedInspected: number;
-  pinnedInspected: number;
-  recentInspected: number;
-}> {
-  const [tracked, queued] = await Promise.all([
+): Promise<
+  OnboardingDetectionDiagnostics & {
+    postId?: string;
+    source?: OnboardingExistingSource;
+  }
+> {
+  const diagnostics: OnboardingDetectionDiagnostics = {
+    registeredInspected: 0,
+    trackedInspected: 0,
+    queuedInspected: 0,
+    persistedInspected: 0,
+    pinnedInspected: 0,
+    recentInspected: 0,
+    validated: 0,
+    stalePruned: 0,
+    failed: 0,
+  };
+  const [registered, tracked, queued, persisted] = await Promise.all([
+    getRegisteredSubscriberGoalPosts(redis),
     getTrackedPosts(redis),
     getQueuedUpdates(redis),
+    getPersistedSubscriberGoalCandidates(redis),
   ]);
-  if (tracked.length > 0 || queued.length > 0) {
-    const source = tracked.length > 0 ? "tracked" : "queued";
-    const postId = (tracked.length > 0 ? tracked : queued)[0]!;
-    return {
-      postId,
-      source,
-      trackedInspected: tracked.length + queued.length,
-      pinnedInspected: 0,
-      recentInspected: 0,
-    };
-  }
-
   const [subreddit, appUser] = await Promise.all([
     reddit.getCurrentSubreddit(),
     reddit.getAppUser(),
@@ -298,23 +357,82 @@ export async function findExistingSubscriberGoal(
       "Could not resolve app user while checking onboarding posts.",
     );
   }
+
+  const candidateSources: [OnboardingExistingSource, string[]][] = [
+    ["registered", registered],
+    ["tracked", tracked],
+    ["queued", queued],
+    ["persisted", persisted],
+  ];
+  const seen = new Set<string>();
+  for (const [source, postIds] of candidateSources) {
+    for (const postId of postIds) {
+      if (seen.has(postId) || !isLinkId(postId)) {
+        continue;
+      }
+      seen.add(postId);
+      incrementInspected(diagnostics, source);
+      let post: CandidatePost | undefined;
+      try {
+        post = (await reddit.getPostById(postId)) as CandidatePost;
+      } catch (error) {
+        if (!isMissingPostError(error)) {
+          diagnostics.failed += 1;
+          attachDetectionDiagnostics(error, diagnostics);
+          throw error;
+        }
+        await pruneStaleCandidate(redis, postId);
+        diagnostics.stalePruned += 1;
+        continue;
+      }
+      if (
+        !post ||
+        !(await isSubscriberGoalCandidate(
+          redis,
+          post,
+          subreddit,
+          appUser.username,
+        ))
+      ) {
+        await pruneStaleCandidate(redis, postId);
+        diagnostics.stalePruned += 1;
+        continue;
+      }
+      diagnostics.validated += 1;
+      await registerSubscriberGoalPost(
+        redis,
+        postId,
+        getCreatedAtMs(post.createdAt) ?? nowMs,
+      );
+      return { postId, source, ...diagnostics };
+    }
+  }
+
   const hotPosts = (await reddit
     .getHotPosts({
       subredditName: subreddit.name,
       limit: onboardingPinnedPostScanLimit,
     })
     .get(onboardingPinnedPostScanLimit)) as CandidatePost[];
+  diagnostics.pinnedInspected = hotPosts.length;
   for (const post of hotPosts) {
     if (!(await isStickied(post))) {
       continue;
     }
-    if (isSubscriberGoalCandidate(post, subreddit, appUser.username)) {
+    if (
+      await isSubscriberGoalCandidate(redis, post, subreddit, appUser.username)
+    ) {
+      diagnostics.validated += 1;
+      const postId = post.id!;
+      await registerSubscriberGoalPost(
+        redis,
+        postId,
+        getCreatedAtMs(post.createdAt) ?? nowMs,
+      );
       return {
-        postId: post.id,
+        postId,
         source: "pinned",
-        trackedInspected: 0,
-        pinnedInspected: hotPosts.length,
-        recentInspected: 0,
+        ...diagnostics,
       };
     }
   }
@@ -326,35 +444,40 @@ export async function findExistingSubscriberGoal(
       pageSize: onboardingRecentPostPageSize,
     })
     .all()) as CandidatePost[];
+  diagnostics.recentInspected = recentPosts.length;
   const cutoff = nowMs - onboardingRecentPostWindowMs;
   for (const post of recentPosts) {
     const createdAt = getCreatedAtMs(post.createdAt);
     if (createdAt === undefined || createdAt < cutoff) {
       continue;
     }
-    if (isSubscriberGoalCandidate(post, subreddit, appUser.username)) {
+    if (
+      await isSubscriberGoalCandidate(redis, post, subreddit, appUser.username)
+    ) {
+      diagnostics.validated += 1;
+      const postId = post.id!;
+      await registerSubscriberGoalPost(redis, postId, createdAt ?? nowMs);
       return {
-        postId: post.id,
+        postId,
         source: "recent",
-        trackedInspected: 0,
-        pinnedInspected: hotPosts.length,
-        recentInspected: recentPosts.length,
+        ...diagnostics,
       };
     }
   }
-  return {
-    trackedInspected: 0,
-    pinnedInspected: hotPosts.length,
-    recentInspected: recentPosts.length,
-  };
+  return diagnostics;
 }
 
-function isSubscriberGoalCandidate(
+async function isSubscriberGoalCandidate(
+  redis: RedisClient,
   post: CandidatePost,
   subreddit: { id: string; name: string },
   appUsername: string,
-): post is CandidatePost & { id: string } {
-  if (!post.id || post.authorName !== appUsername) {
+): Promise<boolean> {
+  if (
+    !post.id ||
+    post.authorName !== appUsername ||
+    getTerminalRemovedByCategory(post) !== undefined
+  ) {
     return false;
   }
   if (
@@ -368,11 +491,106 @@ function isSubscriberGoalCandidate(
     data && typeof data === "object"
       ? (data as { postKind?: unknown }).postKind
       : undefined;
+  if (
+    postKind === subscriberGoalPostKind ||
+    postKind === subscribeOnlyPostKind
+  ) {
+    return true;
+  }
+  return await hasCompatiblePersistedPostData(redis, post.id);
+}
+
+async function getPersistedSubscriberGoalCandidates(
+  redis: RedisClient,
+): Promise<string[]> {
+  const postIds = new Set<string>();
+  let cursor = 0;
+  do {
+    const page = await redis.hScan(subscriberGoalsKey, cursor, undefined, 500);
+    cursor = page.cursor;
+    for (const { field, value } of page.fieldValues) {
+      if (
+        field.endsWith(postKindSuffix) &&
+        (value === subscriberGoalPostKind || value === subscribeOnlyPostKind)
+      ) {
+        postIds.add(field.slice(0, -postKindSuffix.length));
+      } else if (
+        field.endsWith(postGoalSuffix) &&
+        Number.isFinite(Number(value)) &&
+        Number(value) > 0
+      ) {
+        postIds.add(field.slice(0, -postGoalSuffix.length));
+      } else if (field.endsWith(postHeightSuffix) && value === "tiny") {
+        postIds.add(field.slice(0, -postHeightSuffix.length));
+      }
+    }
+  } while (cursor !== 0);
+  return [...postIds];
+}
+
+async function hasCompatiblePersistedPostData(
+  redis: RedisClient,
+  postId: string,
+): Promise<boolean> {
+  const [postKind, goal, height] = await redis.hMGet(subscriberGoalsKey, [
+    `${postId}${postKindSuffix}`,
+    `${postId}${postGoalSuffix}`,
+    `${postId}${postHeightSuffix}`,
+  ]);
   return (
     postKind === subscriberGoalPostKind ||
     postKind === subscribeOnlyPostKind ||
-    postKind === undefined
+    (Number.isFinite(Number(goal)) && Number(goal) > 0) ||
+    height === "tiny"
   );
+}
+
+function incrementInspected(
+  diagnostics: OnboardingDetectionDiagnostics,
+  source: OnboardingExistingSource,
+): void {
+  if (source === "registered") diagnostics.registeredInspected += 1;
+  else if (source === "tracked") diagnostics.trackedInspected += 1;
+  else if (source === "queued") diagnostics.queuedInspected += 1;
+  else if (source === "persisted") diagnostics.persistedInspected += 1;
+}
+
+function formatDetectionDiagnostics(
+  diagnostics: OnboardingDetectionDiagnostics,
+): string {
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
+}
+
+function attachDetectionDiagnostics(
+  error: unknown,
+  diagnostics: OnboardingDetectionDiagnostics,
+): void {
+  if (error && typeof error === "object") {
+    Object.assign(error, {
+      onboardingDetectionDiagnostics: { ...diagnostics },
+    });
+  }
+}
+
+export function getDetectionDiagnosticsFromError(
+  error: unknown,
+): OnboardingDetectionDiagnostics | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+  return (error as { onboardingDetectionDiagnostics?: unknown })
+    .onboardingDetectionDiagnostics as OnboardingDetectionDiagnostics;
+}
+
+async function pruneStaleCandidate(
+  redis: RedisClient,
+  postId: string,
+): Promise<void> {
+  await Promise.all([
+    removeSubscriberGoalPost(redis, postId),
+    cancelUpdates(redis, postId),
+    untrackPost(redis, postId),
+  ]);
 }
 
 async function isStickied(post: CandidatePost): Promise<boolean> {
@@ -439,8 +657,10 @@ function parseOnboardingState(
     state.resultStatus = raw.resultStatus;
   }
   if (
+    raw.existingSource === "registered" ||
     raw.existingSource === "tracked" ||
     raw.existingSource === "queued" ||
+    raw.existingSource === "persisted" ||
     raw.existingSource === "pinned" ||
     raw.existingSource === "recent"
   ) {

@@ -40,6 +40,7 @@ const hoisted = vi.hoisted(() => ({
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
+  removeSubscriberGoalPost: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -81,6 +82,10 @@ vi.mock("../data/updaterData", () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdate: hoisted.queueUpdate,
   untrackPost: vi.fn(),
+}));
+
+vi.mock("../data/subscriberGoalPostRegistry", () => ({
+  removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
 }));
 
 vi.mock("../utils/redditUtils", () => ({

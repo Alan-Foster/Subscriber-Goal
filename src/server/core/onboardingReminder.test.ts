@@ -6,6 +6,7 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("./onboardingSubscriberGoal", () => ({
   findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
+  getDetectionDiagnosticsFromError: () => undefined,
 }));
 
 import {
@@ -118,7 +119,14 @@ describe("onboarding reminder", () => {
     expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["tracked", "queued", "pinned", "recent"] as const)(
+  it.each([
+    "registered",
+    "tracked",
+    "queued",
+    "persisted",
+    "pinned",
+    "recent",
+  ] as const)(
     "suppresses modmail when the detector finds an existing %s goal",
     async (source) => {
       await scheduleOnboardingReminder(redis as never, {

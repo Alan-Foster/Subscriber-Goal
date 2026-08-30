@@ -1,6 +1,9 @@
 import type { RedditClient, RedisClient } from "../types";
 import {
   findExistingSubscriberGoal,
+  getDetectionDiagnosticsFromError,
+  type OnboardingDetectionDiagnostics,
+  type OnboardingExistingSource,
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
 
@@ -11,7 +14,6 @@ export const onboardingReminderDelayMs = 60 * 1000;
 
 type OnboardingReminderStatus = "pending" | "processing" | "complete";
 type OnboardingReminderResult = "sent" | "existing" | "failed";
-type ExistingSource = "tracked" | "queued" | "pinned" | "recent";
 
 export type OnboardingReminderState = {
   version: typeof onboardingReminderVersion;
@@ -22,18 +24,15 @@ export type OnboardingReminderState = {
   startedAt?: number;
   completedAt?: number;
   postId?: string;
-  existingSource?: ExistingSource;
+  existingSource?: OnboardingExistingSource;
   result?: OnboardingReminderResult;
   errorMessage?: string;
 };
 
-export type OnboardingReminderSummary = {
+export type OnboardingReminderSummary = OnboardingDetectionDiagnostics & {
   status: "not_due" | "sent" | "existing" | "failed" | "complete";
-  trackedInspected: number;
-  pinnedInspected: number;
-  recentInspected: number;
   postId?: string;
-  existingSource?: ExistingSource;
+  existingSource?: OnboardingExistingSource;
   errorMessage?: string;
 };
 
@@ -43,9 +42,15 @@ export type OnboardingReminderMessage = {
 };
 
 const emptySummary = (): Omit<OnboardingReminderSummary, "status"> => ({
+  registeredInspected: 0,
   trackedInspected: 0,
+  queuedInspected: 0,
+  persistedInspected: 0,
   pinnedInspected: 0,
   recentInspected: 0,
+  validated: 0,
+  stalePruned: 0,
+  failed: 0,
 });
 
 export function buildOnboardingReminderMessage(
@@ -141,9 +146,15 @@ export async function processDueOnboardingReminder({
 
     const existing = await findExistingSubscriberGoal(reddit, redis, nowMs);
     inspected = {
-      trackedInspected: existing.trackedInspected,
-      pinnedInspected: existing.pinnedInspected,
-      recentInspected: existing.recentInspected,
+      registeredInspected: existing.registeredInspected ?? 0,
+      trackedInspected: existing.trackedInspected ?? 0,
+      queuedInspected: existing.queuedInspected ?? 0,
+      persistedInspected: existing.persistedInspected ?? 0,
+      pinnedInspected: existing.pinnedInspected ?? 0,
+      recentInspected: existing.recentInspected ?? 0,
+      validated: existing.validated ?? 0,
+      stalePruned: existing.stalePruned ?? 0,
+      failed: existing.failed ?? 0,
     };
     if (existing.postId) {
       const existingSource = existing.source ?? "tracked";
@@ -156,7 +167,7 @@ export async function processDueOnboardingReminder({
         existingSource,
       });
       console.info(
-        `[onboardingReminder] complete: status=existing existingSource=${existingSource} postId=${existing.postId} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+        `[onboardingReminder] complete: status=existing existingSource=${existingSource} postId=${existing.postId} ${formatReminderDiagnostics(inspected)}`,
       );
       return {
         status: "existing",
@@ -180,10 +191,11 @@ export async function processDueOnboardingReminder({
       result: "sent",
     });
     console.info(
-      `[onboardingReminder] complete: status=sent trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+      `[onboardingReminder] complete: status=sent ${formatReminderDiagnostics(inspected)}`,
     );
     return { status: "sent", ...inspected };
   } catch (error) {
+    inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
     try {
       await saveOnboardingReminderState(redis, {
@@ -199,7 +211,7 @@ export async function processDueOnboardingReminder({
       );
     }
     console.error(
-      `[onboardingReminder] complete: status=failed error=${errorMessage} trackedInspected=${inspected.trackedInspected} pinnedInspected=${inspected.pinnedInspected} recentInspected=${inspected.recentInspected}`,
+      `[onboardingReminder] complete: status=failed error=${errorMessage} ${formatReminderDiagnostics(inspected)}`,
     );
     return { status: "failed", errorMessage, ...inspected };
   } finally {
@@ -207,6 +219,12 @@ export async function processDueOnboardingReminder({
       await redis.del(onboardingReminderLockKey);
     }
   }
+}
+
+function formatReminderDiagnostics(
+  diagnostics: OnboardingDetectionDiagnostics,
+): string {
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
 function parseOnboardingReminderState(
@@ -246,10 +264,14 @@ function parseOnboardingReminderState(
   };
 }
 
-function isExistingSource(value: string | undefined): value is ExistingSource {
+function isExistingSource(
+  value: string | undefined,
+): value is OnboardingExistingSource {
   return (
+    value === "registered" ||
     value === "tracked" ||
     value === "queued" ||
+    value === "persisted" ||
     value === "pinned" ||
     value === "recent"
   );

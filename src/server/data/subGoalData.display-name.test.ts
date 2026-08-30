@@ -31,6 +31,7 @@ import {
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
 import { postsKey, updatesKey } from "./updaterData";
+import { subscriberGoalPostRegistryKey } from "./subscriberGoalPostRegistry";
 
 type ZEntry = { member: string; score: number };
 
@@ -507,10 +508,44 @@ describe("subGoalData subreddit display name", () => {
     ).resolves.toBe(subscribeOnlyPostKind);
     await expect(redis.zRange(postsKey, 0, -1)).resolves.toEqual([]);
     await expect(redis.zRange(updatesKey, 0, -1)).resolves.toEqual([]);
+    await expect(
+      redis.zRange(subscriberGoalPostRegistryKey, 0, -1),
+    ).resolves.toEqual([
+      {
+        member: "t3_tiny",
+        score: Date.parse("2026-01-01T00:00:00.000Z"),
+      },
+    ]);
     expect(infoSpy).toHaveBeenCalledWith(
       expect.stringContaining('"reason":"tiny_post_height"'),
     );
     infoSpy.mockRestore();
+  });
+
+  it("registers regular goals in both the durable registry and updater indexes", async () => {
+    const redis = new InMemoryRedis();
+    const createdAt = new Date("2026-02-01T00:00:00.000Z");
+
+    await registerNewSubGoalPost(
+      {} as never,
+      redis as unknown as Parameters<typeof registerNewSubGoalPost>[1],
+      { promoSubreddit: "SubGoal" } as never,
+      {
+        id: "t3_regular",
+        createdAt,
+        subredditName: "ExampleSub",
+      } as never,
+      100,
+      false,
+      "ExampleSub",
+    );
+
+    const expected = [{ member: "t3_regular", score: createdAt.getTime() }];
+    await expect(
+      redis.zRange(subscriberGoalPostRegistryKey, 0, -1),
+    ).resolves.toEqual(expected);
+    await expect(redis.zRange(postsKey, 0, -1)).resolves.toEqual(expected);
+    await expect(redis.zRange(updatesKey, 0, -1)).resolves.toEqual(expected);
   });
 
   it("defaults missing auto-create settings to disabled", async () => {

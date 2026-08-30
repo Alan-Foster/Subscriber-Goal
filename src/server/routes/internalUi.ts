@@ -45,6 +45,7 @@ import {
   untrackSubscriberByUsername,
 } from "../data/subscriberStats";
 import { cancelUpdates, untrackPost } from "../data/updaterData";
+import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
@@ -244,6 +245,7 @@ export function registerInternalUiRoutes(router: Router): void {
         await post.delete();
         await cancelUpdates(redis, postId);
         await untrackPost(redis, postId);
+        await removeSubscriberGoalPost(redis, postId);
         res.json({ showToast: "Post deleted successfully!" });
       } catch (error) {
         console.error("Error deleting post:", error);

@@ -29,6 +29,7 @@ import {
   resolveAfterSubscribeAction,
   type AfterSubscribeAction,
 } from "../../shared/afterSubscribeAction";
+import { registerSubscriberGoalPost } from "./subscriberGoalPostRegistry";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -554,6 +555,7 @@ export async function registerNewSubGoalPost(
     postHeight,
     afterSubscribeAction,
   });
+  await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   await trackPost(redis, post.id, post.createdAt);
   await queueUpdate(redis, post.id, post.createdAt);
   if (!crosspost) {
@@ -629,6 +631,7 @@ export async function registerNewSubscribeOnlyPost(
     language,
     afterSubscribeAction,
   });
+  await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   logCrosspostEvent({
     event: "crosspost_attempt_skipped",
     sourcePostId: post.id,

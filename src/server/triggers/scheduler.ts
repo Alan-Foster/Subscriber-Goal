@@ -30,6 +30,7 @@ import {
   getTerminalRemovedByCategory,
   isMissingPostError,
 } from "../utils/postStatus";
+import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 
 async function cleanupInactivePost(
   postId: string,
@@ -38,6 +39,7 @@ async function cleanupInactivePost(
   await cancelUpdates(redis, postId);
   await untrackPost(redis, postId);
   await cancelAutoCreateNextGoal(redis, postId);
+  await removeSubscriberGoalPost(redis, postId);
   console.info(
     `[updater] cleaned up inactive post: postId=${postId} reason=${reason}`,
   );

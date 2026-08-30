@@ -1,5 +1,6 @@
-import { isLinkId, isSubredditId, type RedditClient } from '../types';
-import { logCrosspostEvent, toErrorMessage } from './crosspostLogs';
+import { cache, type CacheHelper } from "@devvit/web/server";
+import { isLinkId, isSubredditId, type RedditClient } from "../types";
+import { logCrosspostEvent, toErrorMessage } from "./crosspostLogs";
 
 export type WikiPageRevision = {
   id: string;
@@ -25,7 +26,7 @@ function normalizeTimestampMs(value: number): number {
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  timeoutMessage: string
+  timeoutMessage: string,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -49,7 +50,8 @@ export async function getSubredditIcon(
   subredditSettings?: { communityIcon?: string },
   // Keep fallback app-owned to avoid external dependency for missing subreddit icons.
   // This replaces the prior remote redditforbusiness-derived fallback URL.
-  defaultIconUrl: string = '/reddit_temp_logo.jpg'
+  defaultIconUrl: string = "/reddit_temp_logo.jpg",
+  cacheHelper: CacheHelper = cache,
 ): Promise<string> {
   if (!isSubredditId(subredditId)) {
     return defaultIconUrl;
@@ -57,10 +59,15 @@ export async function getSubredditIcon(
   if (subredditSettings?.communityIcon) {
     return subredditSettings.communityIcon;
   }
-  const subredditStyles = await reddit.getSubredditStyles(subredditId);
-  return (
-    subredditStyles.icon ??
-    defaultIconUrl
+  return await cacheHelper(
+    async () => {
+      const subredditStyles = await reddit.getSubredditStyles(subredditId);
+      return subredditStyles.icon ?? defaultIconUrl;
+    },
+    {
+      key: `subgoal:subreddit-icon:v1:${subredditId}`,
+      ttl: 60 * 60,
+    },
   );
 }
 
@@ -70,15 +77,15 @@ export async function clearUserStickies(
   options: {
     knownPostIds?: string[];
     subreddit?: { id: string; name: string };
-  } = {}
+  } = {},
 ): Promise<void> {
   const subreddit = options.subreddit ?? (await reddit.getCurrentSubreddit());
   const seenPostIds = new Set<string>();
   let unstickiedCount = 0;
 
   const unstickyIfAppOwned = async (
-    post: Awaited<ReturnType<RedditClient['getPostById']>>,
-    source: 'known_post' | 'hot_post'
+    post: Awaited<ReturnType<RedditClient["getPostById"]>>,
+    source: "known_post" | "hot_post",
   ): Promise<void> => {
     if (seenPostIds.has(post.id)) {
       return;
@@ -92,14 +99,14 @@ export async function clearUserStickies(
     let isStickied = post.stickied;
     const verifier = (post as { isStickied?: () => boolean | Promise<boolean> })
       .isStickied;
-    if (!isStickied && typeof verifier === 'function') {
+    if (!isStickied && typeof verifier === "function") {
       try {
         isStickied = await Promise.resolve(verifier.call(post));
       } catch (error) {
         console.warn(
           `[sticky] failed to verify existing app-owned sticky: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
-            error
-          )}`
+            error,
+          )}`,
         );
       }
     }
@@ -112,13 +119,13 @@ export async function clearUserStickies(
       await post.unsticky();
       unstickiedCount += 1;
       console.info(
-        `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source}`
+        `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source}`,
       );
     } catch (error) {
       console.warn(
         `[sticky] failed to unsticky app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
-          error
-        )}`
+          error,
+        )}`,
       );
     }
   };
@@ -128,12 +135,12 @@ export async function clearUserStickies(
       continue;
     }
     try {
-      await unstickyIfAppOwned(await reddit.getPostById(postId), 'known_post');
+      await unstickyIfAppOwned(await reddit.getPostById(postId), "known_post");
     } catch (error) {
       console.warn(
         `[sticky] failed to fetch known app-owned sticky candidate: subreddit=${subreddit.name} postId=${postId} error=${toErrorMessage(
-          error
-        )}`
+          error,
+        )}`,
       );
     }
   }
@@ -143,12 +150,12 @@ export async function clearUserStickies(
     .get(100);
 
   for (const post of hotPosts) {
-    await unstickyIfAppOwned(post, 'hot_post');
+    await unstickyIfAppOwned(post, "hot_post");
   }
 
   if (unstickiedCount === 0) {
     console.info(
-      `[sticky] no existing app-owned stickies found: subreddit=${subreddit.name}`
+      `[sticky] no existing app-owned stickies found: subreddit=${subreddit.name}`,
     );
   }
 }
@@ -156,7 +163,7 @@ export async function clearUserStickies(
 export async function safeGetWikiPageRevisions(
   reddit: RedditClient,
   subredditName: string,
-  page: string
+  page: string,
 ): Promise<WikiRevisionsFetchResult> {
   const startedAt = Date.now();
 
@@ -169,18 +176,17 @@ export async function safeGetWikiPageRevisions(
     const revisions = await withTimeout(
       listing.get(WIKI_REVISION_FETCH_LIMIT),
       WIKI_FETCH_TIMEOUT_MS,
-      `Timed out fetching wiki revisions for ${subredditName}/${page}`
+      `Timed out fetching wiki revisions for ${subredditName}/${page}`,
     );
     const mapped = revisions.map((revision) => {
       const maybeDate =
-        revision.date ??
-        (revision as { revisionDate?: unknown }).revisionDate;
+        revision.date ?? (revision as { revisionDate?: unknown }).revisionDate;
       let dateMs: number | undefined;
       if (maybeDate instanceof Date) {
         dateMs = maybeDate.getTime();
-      } else if (typeof maybeDate === 'number') {
+      } else if (typeof maybeDate === "number") {
         dateMs = normalizeTimestampMs(maybeDate);
-      } else if (typeof maybeDate === 'string') {
+      } else if (typeof maybeDate === "string") {
         const parsed = Date.parse(maybeDate);
         if (!Number.isNaN(parsed)) {
           dateMs = parsed;
@@ -189,8 +195,8 @@ export async function safeGetWikiPageRevisions(
 
       return {
         id: revision.id,
-        reason: revision.reason ?? '',
-        ...(typeof dateMs === 'number' ? { dateMs } : {}),
+        reason: revision.reason ?? "",
+        ...(typeof dateMs === "number" ? { dateMs } : {}),
       };
     });
     const durationMs = Date.now() - startedAt;
@@ -204,14 +210,14 @@ export async function safeGetWikiPageRevisions(
     const durationMs = Date.now() - startedAt;
     logCrosspostEvent(
       {
-        event: 'wiki_fetch_failed',
+        event: "wiki_fetch_failed",
         targetSubreddit: subredditName,
         page,
-        reason: 'fetch_wiki_revisions',
+        reason: "fetch_wiki_revisions",
         errorMessage,
         durationMs,
       },
-      'error'
+      "error",
     );
     return {
       ok: false,

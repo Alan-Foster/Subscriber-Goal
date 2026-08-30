@@ -60,6 +60,7 @@ const hoisted = vi.hoisted(() => ({
   checkCompletionStatus: vi.fn(),
   applyTextFallback: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
+  removeSubscriberGoalPost: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -118,6 +119,10 @@ vi.mock("../data/updaterData", () => ({
   untrackPost: hoisted.untrackPost,
 }));
 
+vi.mock("../data/subscriberGoalPostRegistry", () => ({
+  removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
+}));
+
 vi.mock("../utils/textFallback", () => ({
   applyTextFallback: hoisted.applyTextFallback,
 }));
@@ -166,6 +171,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.checkCompletionStatus.mockReset();
     hoisted.applyTextFallback.mockReset();
     hoisted.applyGoalPostFrameStyle.mockReset();
+    hoisted.removeSubscriberGoalPost.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(
       emptyCrosspostSummary,
@@ -276,6 +282,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       "t3_removed",
     );
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_removed",
+    );
+    expect(hoisted.removeSubscriberGoalPost).toHaveBeenCalledWith(
       expect.anything(),
       "t3_removed",
     );

@@ -4,6 +4,8 @@ import type { ServerAppSettings } from "../settings";
 const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
+  cancelUpdates: vi.fn(),
+  untrackPost: vi.fn(),
   createSubscriberGoal: vi.fn(),
   notifyStickyFailure: vi.fn(),
   getPostUrl: vi.fn(),
@@ -12,6 +14,8 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("../data/updaterData", () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   getQueuedUpdates: hoisted.getQueuedUpdates,
+  cancelUpdates: hoisted.cancelUpdates,
+  untrackPost: hoisted.untrackPost,
 }));
 
 vi.mock("./createSubscriberGoal", () => ({
@@ -24,6 +28,7 @@ vi.mock("../utils/stickyFailureNotifications", () => ({
 }));
 
 import {
+  findExistingSubscriberGoal,
   initializeOnboardingSubscriberGoal,
   onboardingSubscriberGoalDelayMs,
   onboardingRecentPostPageSize,
@@ -31,9 +36,11 @@ import {
   onboardingSubscriberGoalStateKey,
   processDueOnboardingSubscriberGoal,
 } from "./onboardingSubscriberGoal";
+import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
+  sortedSets = new Map<string, Map<string, number>>();
 
   async hGetAll(key: string): Promise<Record<string, string>> {
     return Object.fromEntries(this.hashes.get(key) ?? []);
@@ -45,6 +52,43 @@ class InMemoryRedis {
       hash.set(field, value);
     }
     this.hashes.set(key, hash);
+  }
+
+  async hMGet(key: string, fields: string[]): Promise<(string | undefined)[]> {
+    const hash = this.hashes.get(key);
+    return fields.map((field) => hash?.get(field));
+  }
+
+  async hScan(key: string): Promise<{
+    cursor: number;
+    fieldValues: { field: string; value: string }[];
+  }> {
+    return {
+      cursor: 0,
+      fieldValues: [...(this.hashes.get(key)?.entries() ?? [])].map(
+        ([field, value]) => ({ field, value }),
+      ),
+    };
+  }
+
+  async zAdd(
+    key: string,
+    ...entries: { member: string; score: number }[]
+  ): Promise<void> {
+    const set = this.sortedSets.get(key) ?? new Map<string, number>();
+    for (const entry of entries) set.set(entry.member, entry.score);
+    this.sortedSets.set(key, set);
+  }
+
+  async zRange(key: string): Promise<{ member: string; score: number }[]> {
+    return [...(this.sortedSets.get(key)?.entries() ?? [])].map(
+      ([member, score]) => ({ member, score }),
+    );
+  }
+
+  async zRem(key: string, members: string[]): Promise<void> {
+    const set = this.sortedSets.get(key);
+    for (const member of members) set?.delete(member);
   }
 }
 
@@ -73,6 +117,7 @@ function createReddit() {
       isNsfw: false,
     }),
     getAppUser: vi.fn().mockResolvedValue({ username: "subscriber-goal" }),
+    getPostById: vi.fn(),
     getHotPosts: vi
       .fn()
       .mockReturnValue({ get: vi.fn().mockResolvedValue([]) }),
@@ -91,6 +136,8 @@ describe("onboarding subscriber goal", () => {
     reddit = createReddit();
     hoisted.getTrackedPosts.mockReset();
     hoisted.getQueuedUpdates.mockReset();
+    hoisted.cancelUpdates.mockReset();
+    hoisted.untrackPost.mockReset();
     hoisted.createSubscriberGoal.mockReset();
     hoisted.notifyStickyFailure.mockReset();
     hoisted.getPostUrl.mockReset();
@@ -130,12 +177,19 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("records an existing tracked post without scanning or creating", async () => {
+  it("validates an existing tracked post before suppressing creation", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs,
     });
     hoisted.getTrackedPosts.mockResolvedValue(["t3_existing"]);
+    reddit.getPostById.mockResolvedValue({
+      id: "t3_existing",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      postData: { postKind: "subscriber-goal-v1" },
+      createdAt: new Date(nowMs),
+    });
 
     await expect(
       processDueOnboardingSubscriberGoal({
@@ -150,6 +204,7 @@ describe("onboarding subscriber goal", () => {
       existingSource: "tracked",
       lifecycleSource: "upgrade",
     });
+    expect(reddit.getPostById).toHaveBeenCalledWith("t3_existing");
     expect(reddit.getHotPosts).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
@@ -189,6 +244,7 @@ describe("onboarding subscriber goal", () => {
       nowMs,
     });
     reddit = createReddit();
+    await redis.hSet("subscriber_goals", { t3_legacy_goal: "100" });
     reddit.getNewPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
         {
@@ -218,6 +274,124 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
+  it("prunes a missing tracked post and continues to a valid pinned post", async () => {
+    hoisted.getTrackedPosts.mockResolvedValue(["t3_stale"]);
+    reddit.getPostById.mockRejectedValue(new Error("post not found"));
+    reddit.getHotPosts.mockReturnValue({
+      get: vi.fn().mockResolvedValue([
+        {
+          id: "t3_pinned",
+          authorName: "subscriber-goal",
+          subredditId: "t5_example",
+          stickied: true,
+          postData: { postKind: "subscriber-goal-v1" },
+        },
+      ]),
+    });
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).resolves.toMatchObject({
+      postId: "t3_pinned",
+      source: "pinned",
+      trackedInspected: 1,
+      stalePruned: 1,
+      validated: 1,
+    });
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_stale",
+    );
+    expect(hoisted.untrackPost).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_stale",
+    );
+  });
+
+  it("discovers and validates a persisted Tiny post created 24 hours earlier", async () => {
+    await redis.hSet("subscriber_goals", {
+      t3_tiny_post_kind: "subscribe-only-v1",
+      t3_tiny_post_height: "tiny",
+    });
+    reddit.getPostById.mockResolvedValue({
+      id: "t3_tiny",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      createdAt: new Date(nowMs - 24 * 60 * 60 * 1000),
+      postData: { postKind: "subscribe-only-v1" },
+    });
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).resolves.toMatchObject({
+      postId: "t3_tiny",
+      source: "persisted",
+      persistedInspected: 1,
+      validated: 1,
+    });
+    expect(await redis.zRange(subscriberGoalPostRegistryKey)).toContainEqual(
+      expect.objectContaining({ member: "t3_tiny" }),
+    );
+  });
+
+  it("validates a registered Tiny post without relying on updater tracking", async () => {
+    await redis.zAdd(subscriberGoalPostRegistryKey, {
+      member: "t3_registered_tiny",
+      score: nowMs,
+    });
+    reddit.getPostById.mockResolvedValue({
+      id: "t3_registered_tiny",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      postData: { postKind: "subscribe-only-v1" },
+      createdAt: new Date(nowMs),
+    });
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).resolves.toMatchObject({
+      postId: "t3_registered_tiny",
+      source: "registered",
+      registeredInspected: 1,
+      validated: 1,
+    });
+    expect(hoisted.getTrackedPosts).toHaveBeenCalled();
+    expect(reddit.getHotPosts).not.toHaveBeenCalled();
+  });
+
+  it("does not classify an ordinary markerless app-authored post as a goal", async () => {
+    reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_ordinary",
+          authorName: "subscriber-goal",
+          subredditId: "t5_example",
+          createdAt: new Date(nowMs),
+        },
+      ]),
+    });
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).resolves.not.toHaveProperty("postId");
+  });
+
+  it("fails closed on a transient candidate lookup error", async () => {
+    await redis.zAdd(subscriberGoalPostRegistryKey, {
+      member: "t3_candidate",
+      score: nowMs,
+    });
+    reddit.getPostById.mockRejectedValue(new Error("reddit unavailable"));
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).rejects.toThrow("reddit unavailable");
+    expect(reddit.getHotPosts).not.toHaveBeenCalled();
+    expect(await redis.zRange(subscriberGoalPostRegistryKey)).toContainEqual(
+      expect.objectContaining({ member: "t3_candidate" }),
+    );
+  });
+
   it("creates the requested English Red regular goal and then becomes terminal", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -230,7 +404,7 @@ describe("onboarding subscriber goal", () => {
           authorName: "subscriber-goal",
           subredditId: "t5_example",
           createdAt: new Date(
-            nowMs + onboardingSubscriberGoalDelayMs - 2 * 60 * 60 * 1000 - 1,
+            nowMs + onboardingSubscriberGoalDelayMs - 25 * 60 * 60 * 1000 - 1,
           ),
         },
       ]),
