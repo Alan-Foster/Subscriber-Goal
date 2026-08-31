@@ -6,6 +6,7 @@ import { SubredditIcon } from "../components/SubredditIcon";
 import { TopButtons } from "../components/TopButtons";
 import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
 import type { NavigationTarget } from "../../../shared/types/api";
+import { TinyActionLayout } from "../components/TinyActionLayout";
 
 type SubGoalPageProps = {
   state: SubGoalState;
@@ -53,24 +54,26 @@ export const SubGoalPage = ({
   const showNotice = Boolean(notice);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
+    const actionButton = afterSubscribeAction ? (
+      <AfterSubscribeButton
+        action={afterSubscribeAction}
+        language={state.language}
+        onNavigate={onAfterSubscribeNavigate}
+      />
+    ) : (
+      <SubscriptionButton
+        label={buttonLabel}
+        mode={buttonMode}
+        onClick={handleButtonClick}
+      />
+    );
+
     return (
       <div
-        className="relative flex h-full w-full flex-col items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
+        className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
         data-sg-theme={state.colorTheme}
       >
-        {afterSubscribeAction ? (
-          <AfterSubscribeButton
-            action={afterSubscribeAction}
-            language={state.language}
-            onNavigate={onAfterSubscribeNavigate}
-          />
-        ) : (
-          <SubscriptionButton
-            label={buttonLabel}
-            mode={buttonMode}
-            onClick={handleButtonClick}
-          />
-        )}
+        <TinyActionLayout state={state}>{actionButton}</TinyActionLayout>
       </div>
     );
   }

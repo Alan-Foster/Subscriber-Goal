@@ -80,10 +80,14 @@ const buildState = async (
 
 const buildSubscribeOnlyState = async (
   subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
+  options?: { subscribersOverride?: number },
 ): Promise<SubscribeOnlyState> => {
   const subscribed = context.userId
     ? await isTrackedSubscriber(redis, context.userId)
     : false;
+  const subscribers =
+    options?.subscribersOverride ??
+    (await reddit.getCurrentSubreddit()).numberOfSubscribers;
   return {
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
@@ -94,6 +98,7 @@ const buildSubscribeOnlyState = async (
     subreddit: {
       name:
         subGoalData.subredditDisplayName ?? context.subredditName ?? "unknown",
+      subscribers,
     },
   };
 };
@@ -309,11 +314,14 @@ export function registerPublicApiRoutes(router: Router): void {
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
       if (subGoalData.postKind === subscribeOnlyPostKind) {
         await reddit.subscribeToCurrentSubreddit();
+        const subreddit = await reddit.getCurrentSubreddit();
         await markSubscriber(redis, userId);
         res.json({
           type: "subscribe",
           postId,
-          state: await buildSubscribeOnlyState(subGoalData),
+          state: await buildSubscribeOnlyState(subGoalData, {
+            subscribersOverride: subreddit.numberOfSubscribers + 1,
+          }),
         } satisfies SubscribeResponse);
         return;
       }

@@ -48,6 +48,42 @@ type SubscribersParams = {
   subscribersText: string;
 };
 
+const subscriberLabels: Record<SubGoalLanguage, string> = {
+  id: "pelanggan",
+  bs: "pretplatnika",
+  ca: "subscriptors",
+  da: "abonnenter",
+  de: "Abonnenten",
+  en: "subscribers",
+  es: "suscriptores",
+  et: "tellijat",
+  fr: "abonnés",
+  hr: "pretplatnika",
+  is: "áskrifendur",
+  it: "iscritti",
+  lv: "abonenti",
+  lt: "prenumeratorių",
+  hu: "feliratkozó",
+  nl: "abonnees",
+  nb: "abonnenter",
+  pl: "subskrybentów",
+  pt: "inscritos",
+  ro: "abonați",
+  sq: "abonentë",
+  sk: "odberateľov",
+  sl: "naročnikov",
+  fi: "tilaajaa",
+  sv: "prenumeranter",
+  tl: "subscriber",
+  tr: "abone",
+  yo: "alabapin",
+};
+
+export const formatLocalizedSubscriberCount = (
+  language: SubGoalLanguage,
+  subscribersText: string,
+): string => `${subscribersText} ${subscriberLabels[language]}`;
+
 type CompletedTitleParams = SubredditNameParams & {
   goalText: string;
 };

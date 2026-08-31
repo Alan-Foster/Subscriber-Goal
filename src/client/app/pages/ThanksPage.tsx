@@ -6,6 +6,7 @@ import { TopButtons } from "../components/TopButtons";
 import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
 import { SubscriptionButton } from "../components/SubscriptionButton";
 import type { NavigationTarget } from "../../../shared/types/api";
+import { TinyActionLayout } from "../components/TinyActionLayout";
 
 type ThanksPageProps = {
   state: SubGoalState;
@@ -28,22 +29,26 @@ export const ThanksPage = ({
     if (state.afterSubscribeAction.type !== "disabled") {
       return (
         <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
-          <AfterSubscribeButton
-            action={state.afterSubscribeAction}
-            language={state.language}
-            onNavigate={onAfterSubscribeNavigate}
-          />
+          <TinyActionLayout state={state}>
+            <AfterSubscribeButton
+              action={state.afterSubscribeAction}
+              language={state.language}
+              onNavigate={onAfterSubscribeNavigate}
+            />
+          </TinyActionLayout>
         </div>
       );
     }
     return (
       <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
-        <SubscriptionButton
-          label={messages.subscribedButton({
-            subredditName: state.subreddit.name,
-          })}
-          mode="subscribed"
-        />
+        <TinyActionLayout state={state}>
+          <SubscriptionButton
+            label={messages.subscribedButton({
+              subredditName: state.subreddit.name,
+            })}
+            mode="subscribed"
+          />
+        </TinyActionLayout>
       </div>
     );
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterSubscribePresetMessages,
   defaultSubGoalLanguage,
+  formatLocalizedSubscriberCount,
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
@@ -10,6 +11,20 @@ import {
 } from "./subGoalPostI18n";
 
 describe("subGoalPostI18n", () => {
+  it("formats the desktop subscriber count in every supported language", () => {
+    expect(formatLocalizedSubscriberCount("en", "15.1k")).toBe(
+      "15.1k subscribers",
+    );
+    expect(formatLocalizedSubscriberCount("es", "15.1k")).toBe(
+      "15.1k suscriptores",
+    );
+    for (const language of subGoalLanguages) {
+      expect(formatLocalizedSubscriberCount(language, "15.1k")).toMatch(
+        /^15\.1k .+/,
+      );
+    }
+  });
+
   it("keeps every language on the same catalog shape", () => {
     const englishKeys = Object.keys(subGoalPostMessages.en).sort();
 

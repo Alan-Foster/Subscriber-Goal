@@ -41,7 +41,7 @@ const createTinyState = (
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
-  subreddit: { name: "ExampleSub" },
+  subreddit: { name: "ExampleSub", subscribers: 123 },
   ...overrides,
 });
 
@@ -74,6 +74,7 @@ describe("SubscribeOnlyApp", () => {
       state: createTinyState(),
       error: null,
     });
+    Reflect.deleteProperty(window, "matchMedia");
   });
 
   it("renders the prohibited message instead of a skeleton", () => {
@@ -92,6 +93,7 @@ describe("SubscribeOnlyApp", () => {
       container.remove();
     }
     vi.useRealTimers();
+    Reflect.deleteProperty(window, "matchMedia");
   });
 
   it("renders the persisted disabled subscribed button immediately", () => {
@@ -124,8 +126,16 @@ describe("SubscribeOnlyApp", () => {
 
   it("shows confirmation for two seconds before the disabled subscribed button", async () => {
     vi.useFakeTimers();
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      media: "(min-width: 640px)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList);
     hoisted.state = createTinyState({ subscribed: false });
     const container = await renderApp();
+
+    expect(container.textContent).toContain("123 subscribers");
 
     await act(async () => {
       container
@@ -145,11 +155,18 @@ describe("SubscribeOnlyApp", () => {
       vi.advanceTimersByTime(1);
     });
     expect(container.querySelector("button")?.disabled).toBe(true);
-    expect(container.textContent).toBe("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("123 subscribers");
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
   });
 
   it("shows a localized confirmation before the configured CTA", async () => {
     vi.useFakeTimers();
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      media: "(min-width: 640px)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList);
     hoisted.state = createTinyState({
       subscribed: false,
       language: "es",
@@ -169,12 +186,14 @@ describe("SubscribeOnlyApp", () => {
     });
     expect(container.textContent).toBe("Suscrito a r/ExampleSub");
     expect(container.textContent).not.toContain("Visitar sitio");
+    expect(container.textContent).not.toContain("123 suscriptores");
 
     await act(async () => {
       vi.advanceTimersByTime(tinySubscriptionConfirmationDurationMs);
     });
     const cta = container.querySelector("button");
     expect(cta?.textContent).toBe("Visitar sitio");
+    expect(container.textContent).toContain("123 suscriptores");
     expect(
       container.querySelector('[data-subscription-button-mode="link"]'),
     ).not.toBeNull();

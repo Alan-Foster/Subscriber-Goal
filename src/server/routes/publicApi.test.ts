@@ -207,9 +207,9 @@ describe("publicApi routes", () => {
       },
       subscribed: true,
       authenticated: true,
-      subreddit: { name: "ExampleSub" },
+      subreddit: { name: "ExampleSub", subscribers: 100 },
     });
-    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
     expect(hoisted.isTrackedSubscriber).toHaveBeenCalledWith(
       hoisted.redis,
@@ -245,6 +245,7 @@ describe("publicApi routes", () => {
     expect(response.state).toMatchObject({
       postHeight: "tiny",
       subscribed: true,
+      subreddit: { name: "ExampleSub", subscribers: 100 },
     });
   });
 
@@ -274,6 +275,7 @@ describe("publicApi routes", () => {
       postHeight: "tiny",
       authenticated: false,
       subscribed: false,
+      subreddit: { name: "ExampleSub", subscribers: 100 },
     });
     expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
   });
@@ -326,7 +328,7 @@ describe("publicApi routes", () => {
       postHeight: "tiny",
       subscribed: true,
       authenticated: true,
-      subreddit: { name: "ExampleSub" },
+      subreddit: { name: "ExampleSub", subscribers: 101 },
     });
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.markSubscriber).toHaveBeenCalledWith(
@@ -337,7 +339,7 @@ describe("publicApi routes", () => {
       hoisted.reddit.subscribeToCurrentSubreddit.mock.invocationCallOrder[0],
     ).toBeLessThan(hoisted.markSubscriber.mock.invocationCallOrder[0]);
     expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
-    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.isTrackedSubscriber).toHaveBeenCalledWith(
       hoisted.redis,
       "t2_user",

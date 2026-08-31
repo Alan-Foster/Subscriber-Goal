@@ -27,7 +27,7 @@ const tinyState: SubscribeOnlyState = {
   afterSubscribeAction: { type: "disabled" },
   subscribed: false,
   authenticated: true,
-  subreddit: { name: "ExampleSub" },
+  subreddit: { name: "ExampleSub", subscribers: 123 },
 };
 
 const Harness = () => {

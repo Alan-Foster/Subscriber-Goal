@@ -36,7 +36,7 @@ const tinyState: SubscribeOnlyState = {
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
-  subreddit: { name: "ExampleSub" },
+  subreddit: { name: "ExampleSub", subscribers: 10 },
 };
 
 describe("ThanksPage", () => {

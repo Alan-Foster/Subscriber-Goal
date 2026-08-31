@@ -35,7 +35,7 @@ const hoisted = vi.hoisted(() => ({
     afterSubscribeAction: { type: "disabled" },
     subscribed,
     authenticated: true,
-    subreddit: { name: "ExampleSub" },
+    subreddit: { name: "ExampleSub", subscribers: 123 },
   }),
   state: undefined as unknown as SubGoalState,
   subscribe: vi.fn(),

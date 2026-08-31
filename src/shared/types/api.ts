@@ -42,7 +42,7 @@ export type SubscribeOnlyState = SharedPostState & {
   postHeight: "tiny";
   subscribed: boolean;
   authenticated: boolean;
-  subreddit: Pick<BasicSubredditData, "name">;
+  subreddit: Pick<BasicSubredditData, "name" | "subscribers">;
 };
 
 export type SubGoalState = SubscriberGoalState | SubscribeOnlyState;
