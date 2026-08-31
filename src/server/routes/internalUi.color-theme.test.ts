@@ -41,6 +41,7 @@ const hoisted = vi.hoisted(() => ({
   clearUserStickies: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
+  isSubredditBlacklisted: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -90,6 +91,11 @@ vi.mock("../data/subscriberGoalPostRegistry", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
+}));
+
+vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/subredditBlacklist")>()),
+  isSubredditBlacklisted: hoisted.isSubredditBlacklisted,
 }));
 
 import { registerInternalUiRoutes } from "./internalUi";
@@ -190,6 +196,7 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
     });
+    hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
     hoisted.reddit.submitPost.mockResolvedValue({
       id: "t3_selfpost",
@@ -839,6 +846,24 @@ describe("internalUi color theme create goal routes", () => {
         showForm: expect.objectContaining({ name: formNames.createGoalSetup }),
       }),
     );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("shows the prohibited message when the subreddit is blacklisted", async () => {
+    seedCreateGoalDraft("regular", "en");
+    hoisted.isSubredditBlacklisted.mockResolvedValue(true);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: "This content is prohibited",
+    });
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 

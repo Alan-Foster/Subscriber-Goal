@@ -32,6 +32,7 @@ const hoisted = vi.hoisted(() => ({
   markSubscriber: vi.fn(),
   setNewSubscriber: vi.fn(),
   checkCompletionStatus: vi.fn(),
+  isSubredditBlacklisted: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -58,6 +59,10 @@ vi.mock("../data/subscriberStats", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   getSubredditIcon: hoisted.getSubredditIcon,
+}));
+
+vi.mock("../utils/subredditBlacklist", () => ({
+  isSubredditBlacklisted: hoisted.isSubredditBlacklisted,
 }));
 
 import { registerPublicApiRoutes } from "./publicApi";
@@ -97,6 +102,7 @@ describe("publicApi routes", () => {
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
     hoisted.markSubscriber.mockResolvedValue(true);
+    hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscriber-goal-v1",
       goal: 200,
@@ -115,6 +121,30 @@ describe("publicApi routes", () => {
         colorTheme: "pink",
       },
     });
+  });
+
+  it("rejects initialization for a blacklisted subreddit", async () => {
+    hoisted.isSubredditBlacklisted.mockResolvedValue(true);
+    const routes = createRouteHarness();
+    const status = vi.fn();
+    const json = vi.fn();
+    status.mockReturnValue({ json });
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { status, json } as unknown as Response,
+    );
+
+    expect(hoisted.isSubredditBlacklisted).toHaveBeenCalledWith(
+      hoisted.reddit,
+      "ExampleSub",
+    );
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "This content is prohibited",
+    });
+    expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
   });
 
   it("returns custom header text through init state", async () => {

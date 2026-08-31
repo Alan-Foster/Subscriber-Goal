@@ -11,6 +11,7 @@ const hoisted = vi.hoisted(() => ({
   setError: vi.fn(),
   navigateTo: vi.fn(),
   showToast: vi.fn(),
+  prohibited: false,
 }));
 
 vi.mock("@devvit/web/client", () => ({
@@ -24,6 +25,7 @@ vi.mock("../hooks/useSubGoal", () => ({
     submitting: false,
     setError: hoisted.setError,
     subscribe: hoisted.subscribe,
+    prohibited: hoisted.prohibited,
   }),
 }));
 
@@ -67,10 +69,21 @@ describe("SubscribeOnlyApp", () => {
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
     hoisted.state = createTinyState();
+    hoisted.prohibited = false;
     hoisted.subscribe.mockResolvedValue({
       state: createTinyState(),
       error: null,
     });
+  });
+
+  it("renders the prohibited message instead of a skeleton", () => {
+    hoisted.state = null;
+    hoisted.prohibited = true;
+
+    const html = renderToStaticMarkup(<SubscribeOnlyApp />);
+
+    expect(html).toContain("This content is prohibited");
+    expect(html).not.toContain("skeleton");
   });
 
   afterEach(async () => {

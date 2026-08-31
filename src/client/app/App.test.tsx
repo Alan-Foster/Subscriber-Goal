@@ -43,6 +43,7 @@ const hoisted = vi.hoisted(() => ({
   showNotice: vi.fn(),
   navigateTo: vi.fn(),
   showToast: vi.fn(),
+  prohibited: false,
 }));
 
 hoisted.state = hoisted.createState() as SubGoalState;
@@ -62,6 +63,7 @@ vi.mock("../hooks/useSubGoal", () => ({
     setError: hoisted.setError,
     notice: null,
     showNotice: hoisted.showNotice,
+    prohibited: hoisted.prohibited,
   }),
 }));
 
@@ -74,7 +76,18 @@ describe("App", () => {
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
     hoisted.state = hoisted.createState() as SubGoalState;
+    hoisted.prohibited = false;
     hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
+  });
+
+  it("renders the prohibited message instead of post content", () => {
+    hoisted.state = null as unknown as SubGoalState;
+    hoisted.prohibited = true;
+
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain("This content is prohibited");
+    expect(html).not.toContain("Unable to load Subscriber Goal data.");
   });
 
   it("defaults username sharing to enabled on SFW subreddits", () => {

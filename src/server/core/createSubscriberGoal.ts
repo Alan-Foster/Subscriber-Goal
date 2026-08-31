@@ -28,6 +28,10 @@ import {
   defaultAfterSubscribeAction,
   type AfterSubscribeAction,
 } from "../../shared/afterSubscribeAction";
+import {
+  isSubredditBlacklisted,
+  ProhibitedSubredditError,
+} from "../utils/subredditBlacklist";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -77,6 +81,9 @@ export async function createSubscriberGoal({
   options: CreateSubscriberGoalOptions;
 }): Promise<CreateSubscriberGoalResult> {
   const subreddit = await reddit.getCurrentSubreddit();
+  if (await isSubredditBlacklisted(reddit, subreddit.name)) {
+    throw new ProhibitedSubredditError();
+  }
   const appUser = await reddit.getAppUser();
   if (!appUser?.username) {
     throw new Error("Could not resolve app user.");

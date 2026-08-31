@@ -10,11 +10,13 @@ import {
 import { SubGoalPage } from "../app/pages/SubGoalPage";
 import { ThanksPage } from "../app/pages/ThanksPage";
 import { useSubGoal } from "../hooks/useSubGoal";
+import { prohibitedContentMessage } from "../../shared/contentPolicy";
 
 type TinySubscribeViewPhase = "subscribe" | "confirmation" | "subscribed";
 
 export const SubscribeOnlyApp = () => {
-  const { state, loading, submitting, setError, subscribe } = useSubGoal();
+  const { state, loading, submitting, setError, subscribe, prohibited } =
+    useSubGoal();
   const [viewPhase, setViewPhase] =
     useState<TinySubscribeViewPhase>("subscribe");
   const interactionStartedRef = useRef(false);
@@ -29,6 +31,14 @@ export const SubscribeOnlyApp = () => {
     }, tinySubscriptionConfirmationDurationMs);
     return () => window.clearTimeout(timeoutId);
   }, [viewPhase]);
+
+  if (prohibited) {
+    return (
+      <div className="flex h-[120px] w-full items-center justify-center text-center text-sm">
+        {prohibitedContentMessage}
+      </div>
+    );
+  }
 
   if (loading || !state) {
     return <SkeletonPage postHeight="tiny" />;

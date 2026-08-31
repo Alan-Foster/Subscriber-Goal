@@ -11,6 +11,7 @@ import type {
 } from "../../shared/types/api";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import { requestJsonWithRetry } from "../utils/fetchWithRetry";
+import { prohibitedContentMessage } from "../../shared/contentPolicy";
 
 type RequestResult<T> = {
   data: T | null;
@@ -60,6 +61,7 @@ export const useSubGoal = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const prohibited = error === prohibitedContentMessage;
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
   const messages = getSubGoalPostMessages(state?.language);
@@ -186,7 +188,7 @@ export const useSubGoal = () => {
   }, []);
 
   useEffect(() => {
-    if (loading || state !== null) {
+    if (loading || state !== null || prohibited) {
       return;
     }
 
@@ -249,7 +251,7 @@ export const useSubGoal = () => {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [loading, state]);
+  }, [loading, prohibited, state]);
 
   useEffect(() => {
     if (!postHeight || postHeight === "tiny" || realtimeConnectedRef.current) {
@@ -320,5 +322,6 @@ export const useSubGoal = () => {
     setError,
     notice,
     showNotice,
+    prohibited,
   } as const;
 };

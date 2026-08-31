@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import type { SubscribeOnlyState } from "../../shared/types/api";
 
 const hoisted = vi.hoisted(() => ({
@@ -30,8 +31,10 @@ const tinyState: SubscribeOnlyState = {
 };
 
 const Harness = () => {
-  const { state } = useSubGoal();
-  return <div>{state?.postHeight ?? "loading"}</div>;
+  const { prohibited, state } = useSubGoal();
+  return (
+    <div>{prohibited ? "prohibited" : (state?.postHeight ?? "loading")}</div>
+  );
 };
 
 describe("useSubGoal tiny behavior", () => {
@@ -72,5 +75,30 @@ describe("useSubGoal tiny behavior", () => {
 
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  it("marks a prohibited initialization as terminal without scheduling recovery", async () => {
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    hoisted.requestJsonWithRetry.mockResolvedValue({
+      data: null,
+      error: prohibitedContentMessage,
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("prohibited");
+    expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 5000);
+
+    await act(async () => root.unmount());
+    container.remove();
+    setTimeoutSpy.mockRestore();
   });
 });

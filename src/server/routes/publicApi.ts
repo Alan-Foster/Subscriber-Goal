@@ -22,6 +22,8 @@ import {
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { subscribeOnlyPostKind } from "../../shared/postKind";
+import { prohibitedContentMessage } from "../../shared/contentPolicy";
+import { isSubredditBlacklisted } from "../utils/subredditBlacklist";
 
 const buildState = async (
   postId: string,
@@ -202,6 +204,15 @@ export function registerPublicApiRoutes(router: Router): void {
     }
 
     try {
+      const subredditName =
+        context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
+      if (await isSubredditBlacklisted(reddit, subredditName)) {
+        res.status(403).json({
+          status: "error",
+          message: prohibitedContentMessage,
+        } satisfies ErrorResponse);
+        return;
+      }
       const state = await buildState(postId);
       res.json({
         type: "init",

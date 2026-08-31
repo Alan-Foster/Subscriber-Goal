@@ -18,6 +18,7 @@ const hoisted = vi.hoisted(() => ({
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
+  isSubredditBlacklisted: vi.fn(),
 }));
 
 vi.mock("./post", () => ({
@@ -44,6 +45,11 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
+}));
+
+vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/subredditBlacklist")>()),
+  isSubredditBlacklisted: hoisted.isSubredditBlacklisted,
 }));
 
 import { createSubscriberGoal } from "./createSubscriberGoal";
@@ -102,6 +108,7 @@ describe("createSubscriberGoal sticky handling", () => {
       numberOfSubscribers: 100,
       isNsfw: false,
     });
+    hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
     });
@@ -114,6 +121,29 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.reddit.getPostById.mockResolvedValue(undefined);
   });
+
+  it.each(["regular", "tiny"] as const)(
+    "blocks blacklisted %s posts before creation side effects",
+    async (postHeight) => {
+      hoisted.isSubredditBlacklisted.mockResolvedValue(true);
+
+      await expect(
+        createGoal({
+          postHeight,
+          ...(postHeight === "tiny" ? { goal: undefined } : {}),
+        }),
+      ).rejects.toMatchObject({
+        name: "ProhibitedSubredditError",
+        message: "This content is prohibited",
+      });
+
+      expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
+      expect(hoisted.clearUserStickies).not.toHaveBeenCalled();
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
+    },
+  );
 
   it("returns pinned when sticky succeeds and verification confirms the post is stickied", async () => {
     const post = createPost();

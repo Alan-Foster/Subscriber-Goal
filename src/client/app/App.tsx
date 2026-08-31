@@ -10,6 +10,7 @@ import {
   tinySubscriptionConfirmationDurationMs,
 } from "./components/TinySubscriptionConfirmation";
 import { confettiPresets } from "./confettiPresets";
+import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { CompletedPage } from "./pages/CompletedPage";
 import { SubGoalPage } from "./pages/SubGoalPage";
 import { ThanksPage } from "./pages/ThanksPage";
@@ -25,6 +26,7 @@ export const App = () => {
     setError,
     notice,
     showNotice,
+    prohibited,
   } = useSubGoal();
   const [page, setPage] = useState<PageName>("subGoal");
   const [showConfetti, setShowConfetti] = useState(false);
@@ -251,7 +253,7 @@ export const App = () => {
     >
       {content ?? (
         <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
-          {messages.loadError}
+          {prohibited ? prohibitedContentMessage : messages.loadError}
         </div>
       )}
       {showConfetti ? (
