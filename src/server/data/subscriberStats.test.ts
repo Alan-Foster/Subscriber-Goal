@@ -89,9 +89,19 @@ class InMemoryRedis {
     return added;
   }
 
-  async zRange(key: string, start: number, end: number): Promise<ZEntry[]> {
+  async zRange(
+    key: string,
+    start: number,
+    end: number,
+    options?: { by: "score" | "lex" | "rank" },
+  ): Promise<ZEntry[]> {
     this.zRangeCalls += 1;
     const sorted = this.sortedEntries(key);
+    if (options?.by === "score") {
+      return sorted.filter(
+        (entry) => entry.score >= start && entry.score <= end,
+      );
+    }
     const normalizedEnd = end < 0 ? sorted.length - 1 : end;
     return sorted.slice(start, normalizedEnd + 1);
   }

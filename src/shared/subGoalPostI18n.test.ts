@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterSubscribePresetMessages,
   defaultSubGoalLanguage,
+  formatLocalizedNewTodayCount,
   formatLocalizedSubscriberCount,
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
@@ -22,6 +23,14 @@ describe("subGoalPostI18n", () => {
       expect(formatLocalizedSubscriberCount(language, "15.1k")).toMatch(
         /^15\.1k .+/,
       );
+    }
+  });
+
+  it("formats the UTC daily count in every supported language", () => {
+    expect(formatLocalizedNewTodayCount("en", "3")).toBe("3 new today");
+    expect(formatLocalizedNewTodayCount("es", "3")).toBe("3 nuevos hoy");
+    for (const language of subGoalLanguages) {
+      expect(formatLocalizedNewTodayCount(language, "3")).toMatch(/^3 .+/);
     }
   });
 

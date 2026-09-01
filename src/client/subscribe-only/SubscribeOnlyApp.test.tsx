@@ -30,18 +30,25 @@ vi.mock("../hooks/useSubGoal", () => ({
 }));
 
 import { tinySubscriptionConfirmationDurationMs } from "../app/components/TinySubscriptionConfirmation";
+import { tinySubscriptionConfirmationPhaseDurationMs } from "../app/components/TinySubscriptionConfirmation";
+import { tinyViewTransitionDurationMs } from "../app/components/TinyViewTransition";
 import { SubscribeOnlyApp } from "./SubscribeOnlyApp";
 
 const createTinyState = (
   overrides: Partial<SubscribeOnlyState> = {},
 ): SubscribeOnlyState => ({
   postHeight: "tiny",
+  promoSubreddit: "SubGoal",
   colorTheme: "purple",
   language: "en",
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
-  subreddit: { name: "ExampleSub", subscribers: 123 },
+  subreddit: {
+    name: "ExampleSub",
+    subscribers: 123,
+    newSubscribersToday: 4,
+  },
   ...overrides,
 });
 
@@ -62,6 +69,28 @@ describe("SubscribeOnlyApp", () => {
     });
     return container;
   };
+
+  const useWideViewportWithoutReducedMotion = () => {
+    window.matchMedia = vi.fn(
+      (query: string) =>
+        ({
+          matches: query === "(min-width: 640px)",
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+  };
+
+  const getActionButton = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>(
+      "[data-subscription-button-mode] button",
+    );
+
+  const getPromoButton = (container: HTMLElement) =>
+    container.querySelector<HTMLButtonElement>(
+      'button[aria-label*="r/SubGoal"]',
+    );
 
   beforeEach(() => {
     (
@@ -104,9 +133,11 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain('data-subscription-button-mode="subscribed"');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain("progress");
+    expect(html).not.toContain("r/SubGoal");
   });
 
   it("renders the persisted Tiny CTA immediately on initial load", () => {
+    useWideViewportWithoutReducedMotion();
     hoisted.state = createTinyState({
       afterSubscribeAction: {
         type: "link",
@@ -122,51 +153,70 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain('data-sg-theme="pink"');
     expect(html).not.toContain("Subscribed to r/ExampleSub");
     expect(html).not.toContain("Return to Previous Page");
+    expect(html).toContain("r/SubGoal");
   });
 
   it("shows confirmation for two seconds before the disabled subscribed button", async () => {
     vi.useFakeTimers();
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: true,
-      media: "(min-width: 640px)",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    } as unknown as MediaQueryList);
+    useWideViewportWithoutReducedMotion();
     hoisted.state = createTinyState({ subscribed: false });
     const container = await renderApp();
 
     expect(container.textContent).toContain("123 subscribers");
 
     await act(async () => {
-      container
-        .querySelector("button")
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      getActionButton(container)?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
 
-    expect(container.textContent).toBe("Subscribed to r/ExampleSub");
-    expect(container.querySelector("button")).toBeNull();
-
-    await act(async () => {
-      vi.advanceTimersByTime(tinySubscriptionConfirmationDurationMs - 1);
-    });
-    expect(container.querySelector("button")).toBeNull();
-
-    await act(async () => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(container.querySelector("button")?.disabled).toBe(true);
-    expect(container.textContent).toContain("123 subscribers");
+    expect(container.textContent).toContain("Subscribe to r/ExampleSub");
     expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(
+      container.querySelector('[data-tiny-transition-outgoing="true"]'),
+    ).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(tinyViewTransitionDurationMs);
+    });
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("r/SubGoal");
+    expect(getActionButton(container)).toBeNull();
+    expect(getPromoButton(container)).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(
+        tinySubscriptionConfirmationPhaseDurationMs -
+          tinyViewTransitionDurationMs,
+      );
+    });
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[data-subscription-button-mode="subscribed"] button',
+      )?.disabled,
+    ).toBe(true);
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(getPromoButton(container)).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(tinyViewTransitionDurationMs);
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(
+      container.querySelector('[data-tiny-transition-outgoing="true"]'),
+    ).toBeNull();
+    expect(container.textContent).toContain("123 subscribers");
+    expect(container.textContent).toContain("4 new today");
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(
+      tinySubscriptionConfirmationPhaseDurationMs +
+        tinyViewTransitionDurationMs,
+    ).toBe(tinySubscriptionConfirmationDurationMs);
   });
 
   it("shows a localized confirmation before the configured CTA", async () => {
     vi.useFakeTimers();
-    window.matchMedia = vi.fn().mockReturnValue({
-      matches: true,
-      media: "(min-width: 640px)",
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    } as unknown as MediaQueryList);
+    useWideViewportWithoutReducedMotion();
     hoisted.state = createTinyState({
       subscribed: false,
       language: "es",
@@ -180,18 +230,26 @@ describe("SubscribeOnlyApp", () => {
     const container = await renderApp();
 
     await act(async () => {
-      container
-        .querySelector("button")
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      getActionButton(container)?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
-    expect(container.textContent).toBe("Suscrito a r/ExampleSub");
+    expect(container.textContent).toContain("Suscrito a r/ExampleSub");
     expect(container.textContent).not.toContain("Visitar sitio");
+
+    await act(async () => {
+      vi.advanceTimersByTime(tinyViewTransitionDurationMs);
+    });
+    expect(container.textContent).toContain("Suscrito a r/ExampleSub");
+    expect(container.textContent).toContain("r/SubGoal");
     expect(container.textContent).not.toContain("123 suscriptores");
 
     await act(async () => {
-      vi.advanceTimersByTime(tinySubscriptionConfirmationDurationMs);
+      vi.advanceTimersByTime(
+        tinySubscriptionConfirmationDurationMs - tinyViewTransitionDurationMs,
+      );
     });
-    const cta = container.querySelector("button");
+    const cta = getActionButton(container);
     expect(cta?.textContent).toBe("Visitar sitio");
     expect(container.textContent).toContain("123 suscriptores");
     expect(
@@ -215,9 +273,9 @@ describe("SubscribeOnlyApp", () => {
     const container = await renderApp();
 
     await act(async () => {
-      container
-        .querySelector("button")
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      getActionButton(container)?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
 
     expect(container.textContent).toBe("Subscribe to r/ExampleSub");
@@ -231,11 +289,11 @@ describe("SubscribeOnlyApp", () => {
     const container = await renderApp();
 
     await act(async () => {
-      container
-        .querySelector("button")
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      getActionButton(container)?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
     });
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
 
     const mounted = mountedRoots.pop();
     await act(async () => mounted?.root.unmount());

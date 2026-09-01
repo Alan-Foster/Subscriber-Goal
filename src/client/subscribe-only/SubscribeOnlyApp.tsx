@@ -5,8 +5,10 @@ import type { NavigationTarget } from "../../shared/types/api";
 import { SkeletonPage } from "../app/components/SkeletonPage";
 import {
   TinySubscriptionConfirmation,
-  tinySubscriptionConfirmationDurationMs,
+  tinySubscriptionConfirmationPhaseDurationMs,
 } from "../app/components/TinySubscriptionConfirmation";
+import { TinyViewTransition } from "../app/components/TinyViewTransition";
+import { TinyPromoLink } from "../app/components/TinyPromoLink";
 import { SubGoalPage } from "../app/pages/SubGoalPage";
 import { ThanksPage } from "../app/pages/ThanksPage";
 import { useSubGoal } from "../hooks/useSubGoal";
@@ -28,7 +30,7 @@ export const SubscribeOnlyApp = () => {
     }
     const timeoutId = window.setTimeout(() => {
       setViewPhase("subscribed");
-    }, tinySubscriptionConfirmationDurationMs);
+    }, tinySubscriptionConfirmationPhaseDurationMs);
     return () => window.clearTimeout(timeoutId);
   }, [viewPhase]);
 
@@ -80,39 +82,45 @@ export const SubscribeOnlyApp = () => {
 
   return (
     <div
-      className="h-[120px] w-full overflow-hidden"
+      className="relative h-[120px] w-full overflow-hidden"
       data-sg-theme={state.colorTheme}
     >
-      {effectiveViewPhase === "confirmation" ? (
-        <TinySubscriptionConfirmation
-          language={state.language}
-          subredditName={state.subreddit.name}
-        />
-      ) : effectiveViewPhase === "subscribed" ? (
-        <ThanksPage
-          state={state}
-          onReturn={() => undefined}
-          onVisitPromoSub={() => undefined}
-          onCelebrate={() => undefined}
-          onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-            navigateTo(target)
-          }
-        />
-      ) : (
-        <SubGoalPage
-          state={state}
-          onCelebrate={() => undefined}
-          onVisitPromoSub={() => undefined}
-          shareUsername={false}
-          onShareUsernameChange={() => undefined}
-          onSubscribe={() => void handleSubscribe()}
-          isSubmitting={submitting}
-          notice={null}
-          onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-            navigateTo(target)
-          }
-        />
-      )}
+      <TinyViewTransition transitionKey={effectiveViewPhase}>
+        {effectiveViewPhase === "confirmation" ? (
+          <TinySubscriptionConfirmation
+            language={state.language}
+            subredditName={state.subreddit.name}
+          />
+        ) : effectiveViewPhase === "subscribed" ? (
+          <ThanksPage
+            state={state}
+            onReturn={() => undefined}
+            onVisitPromoSub={() => undefined}
+            onCelebrate={() => undefined}
+            onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+              navigateTo(target)
+            }
+          />
+        ) : (
+          <SubGoalPage
+            state={state}
+            onCelebrate={() => undefined}
+            onVisitPromoSub={() => undefined}
+            shareUsername={false}
+            onShareUsernameChange={() => undefined}
+            onSubscribe={() => void handleSubscribe()}
+            isSubmitting={submitting}
+            notice={null}
+            onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+              navigateTo(target)
+            }
+          />
+        )}
+      </TinyViewTransition>
+      <TinyPromoLink
+        promoSubreddit={state.promoSubreddit}
+        language={state.language}
+      />
     </div>
   );
 };

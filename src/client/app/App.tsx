@@ -7,8 +7,10 @@ import { ConfettiBurst } from "./components/ConfettiBurst";
 import { SkeletonPage } from "./components/SkeletonPage";
 import {
   TinySubscriptionConfirmation,
-  tinySubscriptionConfirmationDurationMs,
+  tinySubscriptionConfirmationPhaseDurationMs,
 } from "./components/TinySubscriptionConfirmation";
+import { TinyViewTransition } from "./components/TinyViewTransition";
+import { TinyPromoLink } from "./components/TinyPromoLink";
 import { confettiPresets } from "./confettiPresets";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { CompletedPage } from "./pages/CompletedPage";
@@ -58,7 +60,7 @@ export const App = () => {
     }
     const timeoutId = window.setTimeout(() => {
       setPage("subGoal");
-    }, tinySubscriptionConfirmationDurationMs);
+    }, tinySubscriptionConfirmationPhaseDurationMs);
     return () => window.clearTimeout(timeoutId);
   }, [page]);
 
@@ -251,11 +253,21 @@ export const App = () => {
     <div
       className={`relative flex ${appHeightClass} w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
     >
-      {content ?? (
+      {state?.postHeight === "tiny" && content ? (
+        <TinyViewTransition transitionKey={page}>{content}</TinyViewTransition>
+      ) : content ? (
+        content
+      ) : (
         <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
           {prohibited ? prohibitedContentMessage : messages.loadError}
         </div>
       )}
+      {state?.postHeight === "tiny" ? (
+        <TinyPromoLink
+          promoSubreddit={state.promoSubreddit}
+          language={state.language}
+        />
+      ) : null}
       {showConfetti ? (
         <ConfettiBurst key={confettiKey} pieceCount={confettiPieces} />
       ) : null}

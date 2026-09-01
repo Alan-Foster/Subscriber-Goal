@@ -61,6 +61,7 @@ const hoisted = vi.hoisted(() => ({
   applyTextFallback: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
+  observeDailySubscriberCount: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -93,6 +94,10 @@ vi.mock("../data/crosspostData", () => ({
 vi.mock("../data/subscriberStats", () => ({
   processSubscriberStatsMigrationBatch:
     hoisted.processSubscriberStatsMigrationBatch,
+}));
+
+vi.mock("../data/subscriberDailyStats", () => ({
+  observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
 }));
 
 vi.mock("../data/postKindMigration", () => ({
@@ -172,6 +177,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.applyTextFallback.mockReset();
     hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.removeSubscriberGoalPost.mockReset();
+    hoisted.observeDailySubscriberCount.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(
       emptyCrosspostSummary,
@@ -218,6 +224,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       name: "CorporateGifts",
       numberOfSubscribers: 10,
     });
+    hoisted.observeDailySubscriberCount.mockResolvedValue({
+      newSubscribersToday: 0,
+    });
   });
 
   it("skips crosspost ingestion and pending-depth lookup outside authority installs", async () => {
@@ -228,6 +237,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
     expect(hoisted.countPendingCrossposts).not.toHaveBeenCalled();
     expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
+      expect.anything(),
+      10,
+    );
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).toHaveBeenCalledWith(expect.anything());
@@ -243,6 +256,53 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       reddit: hoisted.reddit,
       redis: expect.anything(),
     });
+  });
+
+  it("records the aggregate total even with no queued posts", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
+      expect.anything(),
+      10,
+    );
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("isolates aggregate observation failures from the remaining scheduler", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.observeDailySubscriberCount.mockRejectedValue(
+      new Error("redis unavailable"),
+    );
+
+    await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
+
+    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "subscriberDailyStats error: Error: redis unavailable",
+    );
+  });
+
+  it("isolates the aggregate Reddit lookup when no posts need updating", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.reddit.getCurrentSubreddit.mockRejectedValue(
+      new Error("reddit unavailable"),
+    );
+
+    await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
+
+    expect(hoisted.observeDailySubscriberCount).not.toHaveBeenCalled();
+    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "subscriberDailyStats error: Error: reddit unavailable",
+    );
   });
 
   it("runs crosspost ingestion from the authority install", async () => {

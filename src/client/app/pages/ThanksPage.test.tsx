@@ -32,11 +32,16 @@ const baseState: SubscriberGoalState = {
 const tinyState: SubscribeOnlyState = {
   colorTheme: "red",
   postHeight: "tiny",
+  promoSubreddit: "SubGoal",
   language: "en",
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
-  subreddit: { name: "ExampleSub", subscribers: 10 },
+  subreddit: {
+    name: "ExampleSub",
+    subscribers: 10,
+    newSubscribersToday: 4,
+  },
 };
 
 describe("ThanksPage", () => {

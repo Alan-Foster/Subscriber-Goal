@@ -28,8 +28,8 @@ const hoisted = vi.hoisted(() => ({
   getPublicAppSettings: vi.fn(),
   getSubGoalData: vi.fn(),
   getSubredditIcon: vi.fn(),
+  observeDailySubscriberCount: vi.fn(),
   isTrackedSubscriber: vi.fn(),
-  markSubscriber: vi.fn(),
   setNewSubscriber: vi.fn(),
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
@@ -53,8 +53,11 @@ vi.mock("../data/subGoalData", () => ({
 
 vi.mock("../data/subscriberStats", () => ({
   isTrackedSubscriber: hoisted.isTrackedSubscriber,
-  markSubscriber: hoisted.markSubscriber,
   setNewSubscriber: hoisted.setNewSubscriber,
+}));
+
+vi.mock("../data/subscriberDailyStats", () => ({
+  observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
 }));
 
 vi.mock("../utils/redditUtils", () => ({
@@ -100,8 +103,12 @@ describe("publicApi routes", () => {
     hoisted.reddit.getNewPosts.mockReturnValue({ all: vi.fn() });
     hoisted.getPublicAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
+    hoisted.observeDailySubscriberCount.mockResolvedValue({
+      newSubscribersToday: 5,
+    });
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
-    hoisted.markSubscriber.mockResolvedValue(true);
+    hoisted.setNewSubscriber.mockResolvedValue(true);
+    hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscriber-goal-v1",
@@ -198,6 +205,7 @@ describe("publicApi routes", () => {
     expect(response.state).toEqual({
       colorTheme: "purple",
       postHeight: "tiny",
+      promoSubreddit: "SubGoal",
       language: "es",
       afterSubscribeAction: {
         type: "link",
@@ -207,7 +215,11 @@ describe("publicApi routes", () => {
       },
       subscribed: true,
       authenticated: true,
-      subreddit: { name: "ExampleSub", subscribers: 100 },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 100,
+        newSubscribersToday: 5,
+      },
     });
     expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
@@ -216,6 +228,12 @@ describe("publicApi routes", () => {
       "t2_user",
     );
     expect(hoisted.getSubredditIcon).not.toHaveBeenCalled();
+    expect(response.state).not.toHaveProperty("appSettings");
+    expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
+      hoisted.redis,
+      100,
+      { displayedSubscribers: 100 },
+    );
   });
 
   it("keeps Tiny subscribed state during refresh", async () => {
@@ -244,8 +262,13 @@ describe("publicApi routes", () => {
     const response = json.mock.calls[0]?.[0] as RefreshResponse;
     expect(response.state).toMatchObject({
       postHeight: "tiny",
+      promoSubreddit: "SubGoal",
       subscribed: true,
-      subreddit: { name: "ExampleSub", subscribers: 100 },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 100,
+        newSubscribersToday: 5,
+      },
     });
   });
 
@@ -273,9 +296,14 @@ describe("publicApi routes", () => {
     const response = json.mock.calls[0]?.[0] as InitResponse;
     expect(response.state).toMatchObject({
       postHeight: "tiny",
+      promoSubreddit: "SubGoal",
       authenticated: false,
       subscribed: false,
-      subreddit: { name: "ExampleSub", subscribers: 100 },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 100,
+        newSubscribersToday: 5,
+      },
     });
     expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
   });
@@ -300,7 +328,7 @@ describe("publicApi routes", () => {
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
   });
 
-  it("subscribes tiny posts without recording or broadcasting subscriber data", async () => {
+  it("records and broadcasts Tiny subscriptions through the normal subscriber path", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -326,32 +354,45 @@ describe("publicApi routes", () => {
     const response = json.mock.calls[0]?.[0] as SubscribeResponse;
     expect(response.state).toMatchObject({
       postHeight: "tiny",
+      promoSubreddit: "SubGoal",
       subscribed: true,
       authenticated: true,
-      subreddit: { name: "ExampleSub", subscribers: 101 },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 101,
+        newSubscribersToday: 5,
+      },
     });
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
-    expect(hoisted.markSubscriber).toHaveBeenCalledWith(
+    expect(hoisted.reddit.getCurrentUsername).toHaveBeenCalledOnce();
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
       hoisted.redis,
-      "t2_user",
+      "t3_post",
+      101,
+      { id: "t2_user", username: "TinyUser" },
+      true,
     );
-    expect(
-      hoisted.reddit.subscribeToCurrentSubreddit.mock.invocationCallOrder[0],
-    ).toBeLessThan(hoisted.markSubscriber.mock.invocationCallOrder[0]);
-    expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
     expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
+      hoisted.redis,
+      100,
+      { displayedSubscribers: 101 },
+    );
     expect(hoisted.isTrackedSubscriber).toHaveBeenCalledWith(
       hoisted.redis,
       "t2_user",
     );
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
     expect(hoisted.checkCompletionStatus).not.toHaveBeenCalled();
-    expect(hoisted.realtime.send).not.toHaveBeenCalled();
+    expect(hoisted.realtime.send).toHaveBeenCalledWith("subscriber_updates", {
+      type: "sub",
+      newSubscriberCount: 101,
+      recentSubscriber: "TinyUser",
+    });
   });
 
-  it("does not report Tiny success when the anonymous Redis write fails", async () => {
+  it("does not report Tiny success when subscriber history persistence fails", async () => {
     hoisted.context.userId = "t2_user";
-    hoisted.markSubscriber.mockRejectedValue(new Error("redis unavailable"));
+    hoisted.setNewSubscriber.mockRejectedValue(new Error("redis unavailable"));
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscribe-only-v1",
       goal: 0,
@@ -374,12 +415,79 @@ describe("publicApi routes", () => {
     );
 
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
-    expect(hoisted.markSubscriber).toHaveBeenCalledOnce();
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledWith(400);
     expect(json).toHaveBeenCalledWith({
       status: "error",
       message: "Subscription failed: redis unavailable",
     });
+    expect(hoisted.realtime.send).not.toHaveBeenCalled();
+  });
+
+  it("records NSFW Tiny subscriptions without publicly sharing the username", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      isNsfw: true,
+    });
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_post",
+      101,
+      { id: "t2_user", username: "TinyUser" },
+      false,
+    );
+    expect(hoisted.realtime.send).toHaveBeenCalledWith("subscriber_updates", {
+      type: "sub",
+      newSubscriberCount: 101,
+    });
+  });
+
+  it("does not subscribe a Tiny viewer when their username cannot be resolved", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentUsername.mockResolvedValue(null);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "Unable to resolve username.",
+    });
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
 

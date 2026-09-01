@@ -33,6 +33,8 @@ const initRetryOptions = {
 
 const recoveryWindowMs = 30000;
 const recoveryIntervalMs = 5000;
+const regularRefreshIntervalMs = 30000;
+const tinyRefreshIntervalMs = 60000;
 
 const requestJson = async <T>(
   input: RequestInfo,
@@ -277,12 +279,15 @@ export const useSubGoal = () => {
   }, [handleRealtimeMessage, postHeight]);
 
   useEffect(() => {
-    if (!postHeight || postHeight === "tiny") {
+    if (!postHeight) {
       return;
     }
-    const interval = window.setInterval(() => {
-      void refresh();
-    }, 30000);
+    const interval = window.setInterval(
+      () => {
+        void refresh();
+      },
+      postHeight === "tiny" ? tinyRefreshIntervalMs : regularRefreshIntervalMs,
+    );
     return () => window.clearInterval(interval);
   }, [postHeight, refresh]);
 

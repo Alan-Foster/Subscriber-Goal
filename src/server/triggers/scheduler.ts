@@ -31,6 +31,7 @@ import {
   isMissingPostError,
 } from "../utils/postStatus";
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
+import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 
 async function cleanupInactivePost(
   postId: string,
@@ -49,9 +50,19 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
   const appSettings = getAppSettings();
-  const currentSubredditName =
-    context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-  if (isCrosspostAuthorityInstall(appSettings, currentSubredditName)) {
+  let subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | null =
+    null;
+  try {
+    subreddit = await reddit.getCurrentSubreddit();
+    await observeDailySubscriberCount(redis, subreddit.numberOfSubscribers);
+  } catch (error) {
+    console.error(`subscriberDailyStats error: ${String(error)}`);
+  }
+  const currentSubredditName = context.subredditName ?? subreddit?.name;
+  if (
+    currentSubredditName &&
+    isCrosspostAuthorityInstall(appSettings, currentSubredditName)
+  ) {
     const ingestionSummary = await processCrosspostDispatchQueue(
       appSettings,
       "scheduler_posts_updater",
@@ -138,11 +149,17 @@ export async function onPostsUpdaterJob(): Promise<void> {
     console.error(`autoCreateNextGoal error: ${String(error)}`);
   }
 
-  const subreddit = await reddit.getCurrentSubreddit();
-
   const postIds = await getQueuedUpdates(redis);
   if (!postIds.length) {
     return;
+  }
+  if (!subreddit) {
+    try {
+      subreddit = await reddit.getCurrentSubreddit();
+    } catch (error) {
+      console.error(`updater subreddit lookup error: ${String(error)}`);
+      return;
+    }
   }
   console.log(`Updating ${postIds.length} posts`);
 

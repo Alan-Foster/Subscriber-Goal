@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import { formatSubscriberCount } from "../../../shared/numberFormat";
-import { formatLocalizedSubscriberCount } from "../../../shared/subGoalPostI18n";
+import {
+  formatLocalizedNewTodayCount,
+  formatLocalizedSubscriberCount,
+} from "../../../shared/subGoalPostI18n";
 import type { SubscribeOnlyState } from "../../../shared/types/api";
 import { useWideViewport } from "../../hooks/useWideViewport";
 
@@ -33,7 +36,14 @@ export const TinyActionLayout = ({
         </span>
       </div>
       <div>{children}</div>
-      <div aria-hidden="true" />
+      <div className="min-w-0 px-4 text-center text-base font-semibold text-[color:var(--sg-text-secondary)]">
+        <span className="block truncate" data-new-subscribers-today="true">
+          {formatLocalizedNewTodayCount(
+            state.language,
+            formatSubscriberCount(state.subreddit.newSubscribersToday),
+          )}
+        </span>
+      </div>
     </div>
   );
 };

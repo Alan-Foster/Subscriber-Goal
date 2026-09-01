@@ -31,6 +31,7 @@ import {
   findExistingSubscriberGoal,
   initializeOnboardingSubscriberGoal,
   onboardingSubscriberGoalDelayMs,
+  onboardingTinySubscriberThreshold,
   onboardingRecentPostPageSize,
   onboardingRecentPostScanLimit,
   onboardingSubscriberGoalStateKey,
@@ -449,6 +450,77 @@ describe("onboarding subscriber goal", () => {
       postId: "t3_created",
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([999_999, onboardingTinySubscriberThreshold])(
+    "keeps the regular onboarding goal at %i subscribers",
+    async (numberOfSubscribers) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers,
+        isNsfw: false,
+      });
+
+      await processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      });
+
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            goal: numberOfSubscribers < 1_000_000 ? 1_000_000 : 1_500_000,
+            postHeight: "regular",
+            autoCreateNextGoal: true,
+          }),
+        }),
+      );
+    },
+  );
+
+  it("creates a Tiny onboarding post above one million subscribers", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: onboardingTinySubscriberThreshold + 1,
+      isNsfw: false,
+    });
+
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          colorTheme: "red",
+          language: "en",
+          postHeight: "tiny",
+          autoCreateNextGoal: false,
+          crosspost: true,
+          afterSubscribeAction: expect.objectContaining({
+            type: "top-post-day",
+            colorTheme: "red",
+          }),
+        }),
+      }),
+    );
+    const options = hoisted.createSubscriberGoal.mock.calls[0]?.[0]?.options;
+    expect(options).not.toHaveProperty("goal");
   });
 
   it("records a terminal failure without retrying", async () => {

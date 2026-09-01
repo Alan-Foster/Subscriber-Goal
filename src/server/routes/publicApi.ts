@@ -14,11 +14,8 @@ import type {
 import { apiRoutes } from "../../shared/routes";
 import { getPublicAppSettings } from "../settings";
 import { checkCompletionStatus, getSubGoalData } from "../data/subGoalData";
-import {
-  isTrackedSubscriber,
-  markSubscriber,
-  setNewSubscriber,
-} from "../data/subscriberStats";
+import { isTrackedSubscriber, setNewSubscriber } from "../data/subscriberStats";
+import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { subscribeOnlyPostKind } from "../../shared/postKind";
@@ -80,18 +77,28 @@ const buildState = async (
 
 const buildSubscribeOnlyState = async (
   subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
-  options?: { subscribersOverride?: number },
+  options?: {
+    subscribersOverride?: number;
+    observedSubscribers?: number;
+  },
 ): Promise<SubscribeOnlyState> => {
   const subscribed = context.userId
     ? await isTrackedSubscriber(redis, context.userId)
     : false;
-  const subscribers =
-    options?.subscribersOverride ??
+  const currentSubscribers =
+    options?.observedSubscribers ??
     (await reddit.getCurrentSubreddit()).numberOfSubscribers;
+  const subscribers = options?.subscribersOverride ?? currentSubscribers;
+  const { newSubscribersToday } = await observeDailySubscriberCount(
+    redis,
+    currentSubscribers,
+    { displayedSubscribers: subscribers },
+  );
   return {
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
     postHeight: "tiny",
+    promoSubreddit: getPublicAppSettings().promoSubreddit,
     language: subGoalData.language,
     subscribed,
     authenticated: Boolean(context.userId),
@@ -99,6 +106,7 @@ const buildSubscribeOnlyState = async (
       name:
         subGoalData.subredditDisplayName ?? context.subredditName ?? "unknown",
       subscribers,
+      newSubscribersToday,
     },
   };
 };
@@ -313,14 +321,43 @@ export function registerPublicApiRoutes(router: Router): void {
     try {
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
       if (subGoalData.postKind === subscribeOnlyPostKind) {
+        const username = await reddit.getCurrentUsername();
+        if (!username) {
+          res.status(400).json({
+            status: "error",
+            message: "Unable to resolve username.",
+          } satisfies ErrorResponse);
+          return;
+        }
+
         await reddit.subscribeToCurrentSubreddit();
         const subreddit = await reddit.getCurrentSubreddit();
-        await markSubscriber(redis, userId);
+        const sourceSubredditIsNsfw =
+          (subreddit as { isNsfw?: boolean }).isNsfw === true;
+        const newSubscriberCount = subreddit.numberOfSubscribers + 1;
+        const shareUsername = !sourceSubredditIsNsfw;
+
+        await setNewSubscriber(
+          redis,
+          postId,
+          newSubscriberCount,
+          { id: userId, username },
+          shareUsername,
+        );
+
+        const realtimeMessage: RealtimeMessage = {
+          type: "sub",
+          newSubscriberCount,
+          ...(shareUsername ? { recentSubscriber: username } : {}),
+        };
+        await realtime.send("subscriber_updates", realtimeMessage);
+
         res.json({
           type: "subscribe",
           postId,
           state: await buildSubscribeOnlyState(subGoalData, {
-            subscribersOverride: subreddit.numberOfSubscribers + 1,
+            subscribersOverride: newSubscriberCount,
+            observedSubscribers: subreddit.numberOfSubscribers,
           }),
         } satisfies SubscribeResponse);
         return;

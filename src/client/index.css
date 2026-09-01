@@ -97,6 +97,14 @@ body {
   animation-fill-mode: backwards;
 }
 
+.sg-tiny-view-enter {
+  animation: sg-tiny-view-fade-in 250ms ease-out both;
+}
+
+.sg-tiny-view-exit {
+  animation: sg-tiny-view-fade-out 250ms ease-in both;
+}
+
 .sg-subscribe-attention {
   inset: -4px;
   z-index: 0;
@@ -156,6 +164,24 @@ body {
   }
 }
 
+@keyframes sg-tiny-view-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sg-tiny-view-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes sg-subscribe-glow {
   0% {
     opacity: 0.99;
@@ -172,6 +198,11 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sg-tiny-view-enter,
+  .sg-tiny-view-exit {
+    animation: none;
+  }
+
   .sg-subscribe-attention {
     animation: none;
     opacity: 0.48;

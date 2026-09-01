@@ -79,10 +79,46 @@ const subscriberLabels: Record<SubGoalLanguage, string> = {
   yo: "alabapin",
 };
 
+const newTodayLabels: Record<SubGoalLanguage, string> = {
+  id: "baru hari ini",
+  bs: "novih danas",
+  ca: "nous avui",
+  da: "nye i dag",
+  de: "heute neu",
+  en: "new today",
+  es: "nuevos hoy",
+  et: "uut täna",
+  fr: "nouveaux aujourd’hui",
+  hr: "novih danas",
+  is: "nýir í dag",
+  it: "nuovi oggi",
+  lv: "jauni šodien",
+  lt: "naujų šiandien",
+  hu: "új ma",
+  nl: "nieuw vandaag",
+  nb: "nye i dag",
+  pl: "nowych dzisiaj",
+  pt: "novos hoje",
+  ro: "noi astăzi",
+  sq: "të rinj sot",
+  sk: "nových dnes",
+  sl: "novih danes",
+  fi: "uutta tänään",
+  sv: "nya idag",
+  tl: "bago ngayon",
+  tr: "bugün yeni",
+  yo: "tuntun lónìí",
+};
+
 export const formatLocalizedSubscriberCount = (
   language: SubGoalLanguage,
   subscribersText: string,
 ): string => `${subscribersText} ${subscriberLabels[language]}`;
+
+export const formatLocalizedNewTodayCount = (
+  language: SubGoalLanguage,
+  subscribersText: string,
+): string => `${subscribersText} ${newTodayLabels[language]}`;
 
 type CompletedTitleParams = SubredditNameParams & {
   goalText: string;

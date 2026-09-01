@@ -18,11 +18,16 @@ const createState = (
 ): SubscribeOnlyState => ({
   colorTheme: "purple",
   postHeight: "tiny",
+  promoSubreddit: "SubGoal",
   language: "en",
   afterSubscribeAction: { type: "disabled" },
   subscribed: false,
   authenticated: true,
-  subreddit: { name: "ExampleSub", subscribers: 15_100 },
+  subreddit: {
+    name: "ExampleSub",
+    subscribers: 15_100,
+    newSubscribersToday: 3,
+  },
   ...overrides,
 });
 
@@ -46,7 +51,9 @@ describe("SubGoalPage responsive tiny layout", () => {
     );
 
     expect(html).not.toContain("15.1k subscribers");
+    expect(html).not.toContain("3 new today");
     expect(html).not.toContain("data-subscriber-count");
+    expect(html).not.toContain("data-new-subscribers-today");
     expect(html).not.toContain("data-tiny-wide-layout");
   });
 
@@ -58,11 +65,31 @@ describe("SubGoalPage responsive tiny layout", () => {
     );
 
     expect(html).toContain("15.1k subscribers");
+    expect(html).toContain("3 new today");
     expect(html).toContain('data-tiny-wide-layout="true"');
     expect(html).toContain("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
     expect(html).toContain("text-[color:var(--sg-text-secondary)]");
     expect(html).toContain("block truncate");
     expect(html).toContain('data-sg-theme="purple"');
+  });
+
+  it("keeps the daily metric visible when its value is zero", () => {
+    hoisted.isWide = true;
+
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={createState({
+          subreddit: {
+            name: "ExampleSub",
+            subscribers: 15_100,
+            newSubscribersToday: 0,
+          },
+        })}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("0 new today");
   });
 
   it("retains the count beside subscribed and follow-up actions", () => {

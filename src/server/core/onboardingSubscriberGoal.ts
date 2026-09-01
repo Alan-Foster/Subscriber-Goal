@@ -38,6 +38,7 @@ export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v2_state";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
 export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
+export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
@@ -241,6 +242,8 @@ export async function processDueOnboardingSubscriberGoal({
     const crosspost =
       (subreddit as { isNsfw?: boolean }).isNsfw !== true &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
+    const useTinyPost =
+      subreddit.numberOfSubscribers > onboardingTinySubscriberThreshold;
     const messages = getSubGoalPostMessages("en");
     const { post, stickyResult } = await createSubscriberGoal({
       reddit,
@@ -248,12 +251,14 @@ export async function processDueOnboardingSubscriberGoal({
       appSettings,
       options: {
         title: messages.defaultPostTitle({ subredditName: subreddit.name }),
-        goal: getDefaultSubscriberGoal(subreddit.numberOfSubscribers),
+        ...(useTinyPost
+          ? {}
+          : { goal: getDefaultSubscriberGoal(subreddit.numberOfSubscribers) }),
         subredditDisplayName: subreddit.name,
         crosspost,
         colorTheme: "red",
-        postHeight: "regular",
-        autoCreateNextGoal: true,
+        postHeight: useTinyPost ? "tiny" : "regular",
+        autoCreateNextGoal: !useTinyPost,
         language: "en",
         afterSubscribeAction: createTopPostFallbackAction({
           language: "en",

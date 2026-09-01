@@ -2,6 +2,7 @@ import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 
 export const tinySubscriptionConfirmationDurationMs = 2000;
+export const tinySubscriptionConfirmationPhaseDurationMs = 1750;
 
 type TinySubscriptionConfirmationProps = {
   language: SubGoalLanguage;

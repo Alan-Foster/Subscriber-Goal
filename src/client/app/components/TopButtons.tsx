@@ -1,11 +1,12 @@
-import { useEffect } from 'react';
-import type { SubGoalLanguage } from '../../../shared/subGoalPostI18n';
-import { getSubGoalPostMessages } from '../../../shared/subGoalPostI18n';
+import { useEffect } from "react";
+import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
+import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 
 type TopButtonsProps = {
   onVisitPromoSubPressed: () => void;
   promoSubreddit: string;
   language: SubGoalLanguage;
+  revealTextOnInteraction?: boolean;
 };
 
 let hasAnimatedOnce = false;
@@ -14,6 +15,7 @@ export const TopButtons = ({
   onVisitPromoSubPressed,
   promoSubreddit,
   language,
+  revealTextOnInteraction = false,
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
   const messages = getSubGoalPostMessages(language);
@@ -23,16 +25,24 @@ export const TopButtons = ({
   }, []);
 
   return (
-    <div className="absolute right-4 top-4">
+    <div className="absolute right-4 top-4 z-20">
       <button
         type="button"
         aria-label={messages.promoAriaLabel({ promoSubreddit })}
         className={`${
-          shouldAnimate ? 'sg-fade-in' : ''
-        } inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
+          shouldAnimate ? "sg-fade-in" : ""
+        } ${revealTextOnInteraction ? "group relative" : "gap-1.5"} inline-flex cursor-pointer items-center whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
         onClick={onVisitPromoSubPressed}
       >
-        <span>r/{promoSubreddit}</span>
+        <span
+          className={
+            revealTextOnInteraction
+              ? "pointer-events-none absolute right-full mr-1.5 opacity-0 transition-opacity duration-[250ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 motion-reduce:transition-none"
+              : undefined
+          }
+        >
+          r/{promoSubreddit}
+        </span>
         <svg
           width="20"
           height="20"

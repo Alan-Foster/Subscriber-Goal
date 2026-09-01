@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SubGoalState, SubscribeOnlyState } from "../../shared/types/api";
 
@@ -31,11 +31,16 @@ const hoisted = vi.hoisted(() => ({
   createTinyState: (subscribed = false): SubscribeOnlyState => ({
     colorTheme: "red",
     postHeight: "tiny",
+    promoSubreddit: "SubGoal",
     language: "en",
     afterSubscribeAction: { type: "disabled" },
     subscribed,
     authenticated: true,
-    subreddit: { name: "ExampleSub", subscribers: 123 },
+    subreddit: {
+      name: "ExampleSub",
+      subscribers: 123,
+      newSubscribersToday: 4,
+    },
   }),
   state: undefined as unknown as SubGoalState,
   subscribe: vi.fn(),
@@ -70,6 +75,18 @@ vi.mock("../hooks/useSubGoal", () => ({
 import { App } from "./App";
 
 describe("App", () => {
+  const useWideViewportWithoutReducedMotion = () => {
+    window.matchMedia = vi.fn(
+      (query: string) =>
+        ({
+          matches: query === "(min-width: 640px)",
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+  };
+
   beforeEach(() => {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -78,6 +95,11 @@ describe("App", () => {
     hoisted.state = hoisted.createState() as SubGoalState;
     hoisted.prohibited = false;
     hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
   });
 
   it("renders the prohibited message instead of post content", () => {
@@ -114,6 +136,7 @@ describe("App", () => {
   });
 
   it("subscribes without a username payload and renders only the tiny confirmation", async () => {
+    useWideViewportWithoutReducedMotion();
     hoisted.state = hoisted.createTinyState();
     hoisted.subscribe.mockResolvedValue({
       state: hoisted.createTinyState(true),
@@ -126,6 +149,8 @@ describe("App", () => {
     await act(async () => {
       root.render(<App />);
     });
+
+    expect(container.textContent).toContain("r/SubGoal");
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
@@ -140,6 +165,10 @@ describe("App", () => {
 
     expect(hoisted.subscribe).toHaveBeenCalledWith(undefined);
     expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("r/SubGoal");
+    expect(
+      container.querySelector('button[aria-label*="r/SubGoal"]'),
+    ).not.toBeNull();
     expect(container.textContent).not.toContain("Return to Previous Page");
     expect(container.textContent).not.toContain("subscribers in the community");
     expect(hoisted.showNotice).not.toHaveBeenCalled();
