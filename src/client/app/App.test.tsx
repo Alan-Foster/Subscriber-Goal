@@ -39,7 +39,7 @@ const hoisted = vi.hoisted(() => ({
     subreddit: {
       name: "ExampleSub",
       subscribers: 123,
-      newSubscribersToday: 4,
+      growth: { count: 4, period: "today" },
     },
   }),
   state: undefined as unknown as SubGoalState,

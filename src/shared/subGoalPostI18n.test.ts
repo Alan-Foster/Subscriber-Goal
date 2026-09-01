@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterSubscribePresetMessages,
   defaultSubGoalLanguage,
-  formatLocalizedNewTodayCount,
+  formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
@@ -13,24 +13,75 @@ import {
 
 describe("subGoalPostI18n", () => {
   it("formats the desktop subscriber count in every supported language", () => {
-    expect(formatLocalizedSubscriberCount("en", "15.1k")).toBe(
+    expect(formatLocalizedSubscriberCount("en", 15_100, "15.1k")).toBe(
       "15.1k subscribers",
     );
-    expect(formatLocalizedSubscriberCount("es", "15.1k")).toBe(
+    expect(formatLocalizedSubscriberCount("es", 15_100, "15.1k")).toBe(
       "15.1k suscriptores",
     );
+    expect(formatLocalizedSubscriberCount("en", 1)).toBe("1 subscriber");
+    expect(formatLocalizedSubscriberCount("es", 1)).toBe("1 suscriptor");
     for (const language of subGoalLanguages) {
-      expect(formatLocalizedSubscriberCount(language, "15.1k")).toMatch(
+      expect(formatLocalizedSubscriberCount(language, 15_100, "15.1k")).toMatch(
         /^15\.1k .+/,
       );
     }
   });
 
-  it("formats the UTC daily count in every supported language", () => {
-    expect(formatLocalizedNewTodayCount("en", "3")).toBe("3 new today");
-    expect(formatLocalizedNewTodayCount("es", "3")).toBe("3 nuevos hoy");
+  it("formats daily and weekly growth with locale plural rules", () => {
+    expect(
+      formatLocalizedSubscriberGrowth("en", { count: 1, period: "today" }),
+    ).toBe("1 new today");
+    expect(
+      formatLocalizedSubscriberGrowth("en", { count: 2, period: "today" }),
+    ).toBe("2 new today");
+    expect(
+      formatLocalizedSubscriberGrowth("es", { count: 1, period: "today" }),
+    ).toBe("1 nuevo hoy");
+    expect(
+      formatLocalizedSubscriberGrowth("es", { count: 2, period: "today" }),
+    ).toBe("2 nuevos hoy");
+    expect(
+      formatLocalizedSubscriberGrowth("en", { count: 1, period: "week" }),
+    ).toBe("1 new this week");
+    expect(
+      formatLocalizedSubscriberGrowth("es", { count: 2, period: "week" }),
+    ).toBe("2 nuevos esta semana");
     for (const language of subGoalLanguages) {
-      expect(formatLocalizedNewTodayCount(language, "3")).toMatch(/^3 .+/);
+      const locale = subGoalPostMessages[language].intlLocale;
+      const pluralRules = new Intl.PluralRules(locale);
+      const candidates = [
+        ...Array.from({ length: 201 }, (_, count) => count),
+        0.1,
+        1.1,
+        2.1,
+        10.1,
+        1000,
+        1_000_000,
+      ];
+      for (const category of pluralRules.resolvedOptions().pluralCategories) {
+        const count = candidates.find(
+          (candidate) => pluralRules.select(candidate) === category,
+        );
+        expect(count, `${language}.${category}`).toBeDefined();
+        if (count === undefined) continue;
+        for (const period of ["today", "week"] as const) {
+          const countText = `#${category}#`;
+          const output = formatLocalizedSubscriberGrowth(
+            language,
+            { count, period },
+            countText,
+          );
+          expect(
+            output.length,
+            `${language}.${period}.${category}`,
+          ).toBeGreaterThan(0);
+          expect(
+            output.split(countText).length - 1,
+            `${language}.${period}.${category}`,
+          ).toBe(1);
+        }
+      }
     }
   });
 
@@ -164,15 +215,82 @@ describe("subGoalPostI18n", () => {
     expect(messages.defaultPostTitle({ subredditName: "Ejemplo" })).toBe(
       "¡Bienvenido a r/Ejemplo!",
     );
-    expect(messages.thanksBody({ subscribersText: "15k" })).toBe(
-      "¡Ahora hay 15k suscriptores en la comunidad!",
-    );
     expect(
-      messages.completedTitle({ subredditName: "Ejemplo", goalText: "15k" }),
+      messages.thanksBody({ subscribersCount: 15_000, subscribersText: "15k" }),
+    ).toBe("¡Ahora hay 15k suscriptores en la comunidad!");
+    expect(
+      messages.completedTitle({
+        subredditName: "Ejemplo",
+        goalCount: 15_000,
+        goalText: "15k",
+      }),
     ).toBe("¡r/Ejemplo alcanzó 15k suscriptores!");
     expect(messages.subscriberNotice({ username: "ana" })).toBe(
       "¡u/ana se acaba de suscribir!",
     );
+  });
+
+  it("uses plural-aware subscriber phrases inside full messages", () => {
+    const english = getSubGoalPostMessages("en");
+    const spanish = getSubGoalPostMessages("es");
+
+    expect(
+      english.thanksBody({ subscribersCount: 1, subscribersText: "1" }),
+    ).toBe("The community now has 1 subscriber!");
+    expect(
+      spanish.completedTitle({
+        subredditName: "Ejemplo",
+        goalCount: 1,
+        goalText: "1",
+      }),
+    ).toBe("¡r/Ejemplo alcanzó 1 suscriptor!");
+    expect(
+      english.fallbackActive({
+        subredditName: "Example",
+        subscribersCount: 1,
+        subscribersText: "1",
+        goalCount: 2,
+        goalText: "2",
+      }),
+    ).toContain("1 subscriber / 2 subscribers.");
+  });
+
+  it("keeps count and name placeholders intact in every localized full message", () => {
+    for (const language of subGoalLanguages) {
+      const messages = getSubGoalPostMessages(language);
+      for (const count of [1, 2, 5]) {
+        const countText = `#${count}#`;
+        const thanks = messages.thanksBody({
+          subscribersCount: count,
+          subscribersText: countText,
+        });
+        const completed = messages.completedTitle({
+          subredditName: "ExampleSub",
+          goalCount: count,
+          goalText: countText,
+        });
+        expect(
+          thanks.split(countText).length - 1,
+          `${language}.thanks.${count}`,
+        ).toBe(1);
+        expect(
+          completed.split(countText).length - 1,
+          `${language}.completed.${count}`,
+        ).toBe(1);
+        expect(completed).toContain("r/ExampleSub");
+      }
+
+      const fallback = messages.fallbackActive({
+        subredditName: "ExampleSub",
+        subscribersCount: 1,
+        subscribersText: "#CURRENT#",
+        goalCount: 2,
+        goalText: "#GOAL#",
+      });
+      expect(fallback).toContain("r/ExampleSub");
+      expect(fallback.split("#CURRENT#").length - 1).toBe(1);
+      expect(fallback.split("#GOAL#").length - 1).toBe(1);
+    }
   });
 
   it("keeps the Indonesian subscribed state distinct from the subscribe action", () => {

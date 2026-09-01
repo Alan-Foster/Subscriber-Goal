@@ -26,7 +26,7 @@ const createState = (
   subreddit: {
     name: "ExampleSub",
     subscribers: 15_100,
-    newSubscribersToday: 3,
+    growth: { count: 3, period: "today" },
   },
   ...overrides,
 });
@@ -53,7 +53,7 @@ describe("SubGoalPage responsive tiny layout", () => {
     expect(html).not.toContain("15.1k subscribers");
     expect(html).not.toContain("3 new today");
     expect(html).not.toContain("data-subscriber-count");
-    expect(html).not.toContain("data-new-subscribers-today");
+    expect(html).not.toContain("data-subscriber-growth");
     expect(html).not.toContain("data-tiny-wide-layout");
   });
 
@@ -73,7 +73,7 @@ describe("SubGoalPage responsive tiny layout", () => {
     expect(html).toContain('data-sg-theme="purple"');
   });
 
-  it("keeps the daily metric visible when its value is zero", () => {
+  it("shows the minimum weekly fallback instead of zero", () => {
     hoisted.isWide = true;
 
     const html = renderToStaticMarkup(
@@ -82,14 +82,14 @@ describe("SubGoalPage responsive tiny layout", () => {
           subreddit: {
             name: "ExampleSub",
             subscribers: 15_100,
-            newSubscribersToday: 0,
+            growth: { count: 1, period: "week" },
           },
         })}
         {...commonProps}
       />,
     );
 
-    expect(html).toContain("0 new today");
+    expect(html).toContain("1 new this week");
   });
 
   it("retains the count beside subscribed and follow-up actions", () => {

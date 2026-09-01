@@ -13,7 +13,7 @@ describe("textFallbackMaker", () => {
         subredditName: "PakStartups",
         completedTime: null,
       }),
-    ).toContain("12632 / 15k subscribers.");
+    ).toContain("12632 subscribers / 15k subscribers.");
   });
 
   it("formats completed goal counts with shared display rules", () => {
@@ -36,7 +36,7 @@ describe("textFallbackMaker", () => {
         completedTime: null,
         language: "es",
       }),
-    ).toContain("12632 / 15k suscriptores.");
+    ).toContain("12632 suscriptores / 15k suscriptores.");
   });
 
   it("renders a localized subscribe-only fallback without subscriber data", () => {

@@ -47,7 +47,7 @@ const createTinyState = (
   subreddit: {
     name: "ExampleSub",
     subscribers: 123,
-    newSubscribersToday: 4,
+    growth: { count: 4, period: "today" },
   },
   ...overrides,
 });

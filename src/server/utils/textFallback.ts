@@ -27,12 +27,15 @@ export const textFallbackMaker = (props: TextFallbackProps): string => {
   return props.completedTime
     ? messages.fallbackCompleted({
         subredditName: props.subredditName,
+        goalCount: props.goal,
         goalText: formatSubscriberCount(props.goal),
         completedIso: props.completedTime.toISOString(),
       })
     : messages.fallbackActive({
         subredditName: props.subredditName,
+        subscribersCount: props.subscribers,
         subscribersText: formatSubscriberCount(props.subscribers),
+        goalCount: props.goal,
         goalText: formatSubscriberCount(props.goal),
       });
 };

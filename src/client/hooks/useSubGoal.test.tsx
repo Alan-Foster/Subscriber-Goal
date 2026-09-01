@@ -31,7 +31,7 @@ const tinyState: SubscribeOnlyState = {
   subreddit: {
     name: "ExampleSub",
     subscribers: 123,
-    newSubscribersToday: 4,
+    growth: { count: 4, period: "today" },
   },
 };
 
@@ -94,7 +94,7 @@ describe("useSubGoal tiny behavior", () => {
           subreddit: {
             ...tinyState.subreddit,
             subscribers: 130,
-            newSubscribersToday: 11,
+            growth: { count: 11, period: "today" },
           },
         },
       },

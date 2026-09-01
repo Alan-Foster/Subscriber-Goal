@@ -44,7 +44,10 @@ export type SubscribeOnlyState = SharedPostState & {
   subscribed: boolean;
   authenticated: boolean;
   subreddit: Pick<BasicSubredditData, "name" | "subscribers"> & {
-    newSubscribersToday: number;
+    growth: {
+      count: number;
+      period: "today" | "week";
+    };
   };
 };
 

@@ -24,6 +24,7 @@
     "clsx": "2.1.1",
     "devvit": "0.14.2",
     "express": "5.1.0",
+    "intl-messageformat": "10.7.18",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "3.4.0"

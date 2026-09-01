@@ -225,7 +225,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       numberOfSubscribers: 10,
     });
     hoisted.observeDailySubscriberCount.mockResolvedValue({
-      newSubscribersToday: 0,
+      growth: { count: 1, period: "week" },
     });
   });
 

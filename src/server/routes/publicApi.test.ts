@@ -104,7 +104,7 @@ describe("publicApi routes", () => {
     hoisted.getPublicAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
     hoisted.observeDailySubscriberCount.mockResolvedValue({
-      newSubscribersToday: 5,
+      growth: { count: 5, period: "today" },
     });
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
     hoisted.setNewSubscriber.mockResolvedValue(true);
@@ -218,7 +218,7 @@ describe("publicApi routes", () => {
       subreddit: {
         name: "ExampleSub",
         subscribers: 100,
-        newSubscribersToday: 5,
+        growth: { count: 5, period: "today" },
       },
     });
     expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
@@ -267,7 +267,7 @@ describe("publicApi routes", () => {
       subreddit: {
         name: "ExampleSub",
         subscribers: 100,
-        newSubscribersToday: 5,
+        growth: { count: 5, period: "today" },
       },
     });
   });
@@ -302,7 +302,7 @@ describe("publicApi routes", () => {
       subreddit: {
         name: "ExampleSub",
         subscribers: 100,
-        newSubscribersToday: 5,
+        growth: { count: 5, period: "today" },
       },
     });
     expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
@@ -360,7 +360,7 @@ describe("publicApi routes", () => {
       subreddit: {
         name: "ExampleSub",
         subscribers: 101,
-        newSubscribersToday: 5,
+        growth: { count: 5, period: "today" },
       },
     });
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();

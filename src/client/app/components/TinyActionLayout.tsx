@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { formatSubscriberCount } from "../../../shared/numberFormat";
 import {
-  formatLocalizedNewTodayCount,
+  formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
 } from "../../../shared/subGoalPostI18n";
 import type { SubscribeOnlyState } from "../../../shared/types/api";
@@ -31,16 +31,18 @@ export const TinyActionLayout = ({
         <span className="block truncate" data-subscriber-count="true">
           {formatLocalizedSubscriberCount(
             state.language,
+            state.subreddit.subscribers,
             formatSubscriberCount(state.subreddit.subscribers),
           )}
         </span>
       </div>
       <div>{children}</div>
       <div className="min-w-0 px-4 text-center text-base font-semibold text-[color:var(--sg-text-secondary)]">
-        <span className="block truncate" data-new-subscribers-today="true">
-          {formatLocalizedNewTodayCount(
+        <span className="block truncate" data-subscriber-growth="true">
+          {formatLocalizedSubscriberGrowth(
             state.language,
-            formatSubscriberCount(state.subreddit.newSubscribersToday),
+            state.subreddit.growth,
+            formatSubscriberCount(state.subreddit.growth.count),
           )}
         </span>
       </div>

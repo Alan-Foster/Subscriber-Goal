@@ -1222,7 +1222,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "¡Bienvenido a r/ExampleSub!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 suscriptores."),
+      textFallback: expect.stringContaining(
+        "100 suscriptores / 200 suscriptores.",
+      ),
       postHeight: "regular",
     });
   });
@@ -1253,7 +1255,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
       submitAsUser: true,
     });
@@ -1418,7 +1422,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
       submitAsUser: true,
     });
@@ -1467,7 +1473,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
     });
   });
@@ -1498,7 +1506,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
     });
   });
@@ -1529,7 +1539,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(

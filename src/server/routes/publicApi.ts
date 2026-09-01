@@ -89,7 +89,7 @@ const buildSubscribeOnlyState = async (
     options?.observedSubscribers ??
     (await reddit.getCurrentSubreddit()).numberOfSubscribers;
   const subscribers = options?.subscribersOverride ?? currentSubscribers;
-  const { newSubscribersToday } = await observeDailySubscriberCount(
+  const { growth } = await observeDailySubscriberCount(
     redis,
     currentSubscribers,
     { displayedSubscribers: subscribers },
@@ -106,7 +106,7 @@ const buildSubscribeOnlyState = async (
       name:
         subGoalData.subredditDisplayName ?? context.subredditName ?? "unknown",
       subscribers,
-      newSubscribersToday,
+      growth,
     },
   };
 };

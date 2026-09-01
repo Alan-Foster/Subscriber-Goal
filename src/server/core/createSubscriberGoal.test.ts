@@ -154,7 +154,9 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
     });
     expect(post.approve).toHaveBeenCalled();
@@ -212,7 +214,9 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledWith({
       title: "Welcome!",
       subredditName: "ExampleSub",
-      textFallback: expect.stringContaining("100 / 200 subscribers."),
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
       postHeight: "regular",
       submitAsUser: true,
     });

@@ -40,7 +40,7 @@ const tinyState: SubscribeOnlyState = {
   subreddit: {
     name: "ExampleSub",
     subscribers: 10,
-    newSubscribersToday: 4,
+    growth: { count: 4, period: "today" },
   },
 };
 

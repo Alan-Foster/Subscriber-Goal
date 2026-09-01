@@ -1,3 +1,6 @@
+import { IntlMessageFormat } from "intl-messageformat";
+import { formatSubscriberCount } from "./numberFormat";
+
 export const subGoalLanguages = [
   "id",
   "bs",
@@ -45,82 +48,270 @@ type UsernameParams = {
 };
 
 type SubscribersParams = {
+  subscribersCount: number;
   subscribersText: string;
 };
 
-const subscriberLabels: Record<SubGoalLanguage, string> = {
-  id: "pelanggan",
-  bs: "pretplatnika",
-  ca: "subscriptors",
-  da: "abonnenter",
-  de: "Abonnenten",
-  en: "subscribers",
-  es: "suscriptores",
-  et: "tellijat",
-  fr: "abonnés",
-  hr: "pretplatnika",
-  is: "áskrifendur",
-  it: "iscritti",
-  lv: "abonenti",
-  lt: "prenumeratorių",
-  hu: "feliratkozó",
-  nl: "abonnees",
-  nb: "abonnenter",
-  pl: "subskrybentów",
-  pt: "inscritos",
-  ro: "abonați",
-  sq: "abonentë",
-  sk: "odberateľov",
-  sl: "naročnikov",
-  fi: "tilaajaa",
-  sv: "prenumeranter",
-  tl: "subscriber",
-  tr: "abone",
-  yo: "alabapin",
+type LocalizedCountMessages = {
+  subscribers: string;
+  newToday: string;
+  newThisWeek: string;
 };
 
-const newTodayLabels: Record<SubGoalLanguage, string> = {
-  id: "baru hari ini",
-  bs: "novih danas",
-  ca: "nous avui",
-  da: "nye i dag",
-  de: "heute neu",
-  en: "new today",
-  es: "nuevos hoy",
-  et: "uut täna",
-  fr: "nouveaux aujourd’hui",
-  hr: "novih danas",
-  is: "nýir í dag",
-  it: "nuovi oggi",
-  lv: "jauni šodien",
-  lt: "naujų šiandien",
-  hu: "új ma",
-  nl: "nieuw vandaag",
-  nb: "nye i dag",
-  pl: "nowych dzisiaj",
-  pt: "novos hoje",
-  ro: "noi astăzi",
-  sq: "të rinj sot",
-  sk: "nových dnes",
-  sl: "novih danes",
-  fi: "uutta tänään",
-  sv: "nya idag",
-  tl: "bago ngayon",
-  tr: "bugün yeni",
-  yo: "tuntun lónìí",
-};
+const localizedCountMessages: Record<SubGoalLanguage, LocalizedCountMessages> =
+  {
+    id: {
+      subscribers: "{count, plural, other {{countText} pelanggan}}",
+      newToday: "{count, plural, other {{countText} baru hari ini}}",
+      newThisWeek: "{count, plural, other {{countText} baru minggu ini}}",
+    },
+    bs: {
+      subscribers:
+        "{count, plural, one {{countText} pretplatnik} few {{countText} pretplatnika} other {{countText} pretplatnika}}",
+      newToday:
+        "{count, plural, one {{countText} novi danas} few {{countText} nova danas} other {{countText} novih danas}}",
+      newThisWeek:
+        "{count, plural, one {{countText} novi ove sedmice} few {{countText} nova ove sedmice} other {{countText} novih ove sedmice}}",
+    },
+    ca: {
+      subscribers:
+        "{count, plural, one {{countText} subscriptor} other {{countText} subscriptors}}",
+      newToday:
+        "{count, plural, one {{countText} nou avui} other {{countText} nous avui}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nou aquesta setmana} other {{countText} nous aquesta setmana}}",
+    },
+    da: {
+      subscribers:
+        "{count, plural, one {{countText} abonnent} other {{countText} abonnenter}}",
+      newToday:
+        "{count, plural, one {{countText} ny i dag} other {{countText} nye i dag}}",
+      newThisWeek:
+        "{count, plural, one {{countText} ny i denne uge} other {{countText} nye i denne uge}}",
+    },
+    de: {
+      subscribers:
+        "{count, plural, one {{countText} Abonnent} other {{countText} Abonnenten}}",
+      newToday:
+        "{count, plural, one {{countText} neuer Abonnent heute} other {{countText} neue Abonnenten heute}}",
+      newThisWeek:
+        "{count, plural, one {{countText} neuer Abonnent diese Woche} other {{countText} neue Abonnenten diese Woche}}",
+    },
+    en: {
+      subscribers:
+        "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",
+      newToday:
+        "{count, plural, one {{countText} new today} other {{countText} new today}}",
+      newThisWeek:
+        "{count, plural, one {{countText} new this week} other {{countText} new this week}}",
+    },
+    es: {
+      subscribers:
+        "{count, plural, one {{countText} suscriptor} other {{countText} suscriptores}}",
+      newToday:
+        "{count, plural, one {{countText} nuevo hoy} other {{countText} nuevos hoy}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nuevo esta semana} other {{countText} nuevos esta semana}}",
+    },
+    et: {
+      subscribers:
+        "{count, plural, one {{countText} tellija} other {{countText} tellijat}}",
+      newToday:
+        "{count, plural, one {{countText} uus täna} other {{countText} uut täna}}",
+      newThisWeek:
+        "{count, plural, one {{countText} uus sel nädalal} other {{countText} uut sel nädalal}}",
+    },
+    fr: {
+      subscribers:
+        "{count, plural, one {{countText} abonné} other {{countText} abonnés}}",
+      newToday:
+        "{count, plural, one {{countText} nouveau aujourd’hui} other {{countText} nouveaux aujourd’hui}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nouveau cette semaine} other {{countText} nouveaux cette semaine}}",
+    },
+    hr: {
+      subscribers:
+        "{count, plural, one {{countText} pretplatnik} few {{countText} pretplatnika} other {{countText} pretplatnika}}",
+      newToday:
+        "{count, plural, one {{countText} novi danas} few {{countText} nova danas} other {{countText} novih danas}}",
+      newThisWeek:
+        "{count, plural, one {{countText} novi ovaj tjedan} few {{countText} nova ovaj tjedan} other {{countText} novih ovaj tjedan}}",
+    },
+    is: {
+      subscribers:
+        "{count, plural, one {{countText} áskrifandi} other {{countText} áskrifendur}}",
+      newToday:
+        "{count, plural, one {{countText} nýr í dag} other {{countText} nýir í dag}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nýr í þessari viku} other {{countText} nýir í þessari viku}}",
+    },
+    it: {
+      subscribers:
+        "{count, plural, one {{countText} iscritto} other {{countText} iscritti}}",
+      newToday:
+        "{count, plural, one {{countText} nuovo oggi} other {{countText} nuovi oggi}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nuovo questa settimana} other {{countText} nuovi questa settimana}}",
+    },
+    lv: {
+      subscribers:
+        "{count, plural, zero {{countText} abonentu} one {{countText} abonents} other {{countText} abonenti}}",
+      newToday:
+        "{count, plural, zero {{countText} jaunu šodien} one {{countText} jauns šodien} other {{countText} jauni šodien}}",
+      newThisWeek:
+        "{count, plural, zero {{countText} jaunu šonedēļ} one {{countText} jauns šonedēļ} other {{countText} jauni šonedēļ}}",
+    },
+    lt: {
+      subscribers:
+        "{count, plural, one {{countText} prenumeratorius} few {{countText} prenumeratoriai} many {{countText} prenumeratorių} other {{countText} prenumeratorių}}",
+      newToday:
+        "{count, plural, one {{countText} naujas šiandien} few {{countText} nauji šiandien} many {{countText} naujų šiandien} other {{countText} naujų šiandien}}",
+      newThisWeek:
+        "{count, plural, one {{countText} naujas šią savaitę} few {{countText} nauji šią savaitę} many {{countText} naujų šią savaitę} other {{countText} naujų šią savaitę}}",
+    },
+    hu: {
+      subscribers: "{count, plural, other {{countText} feliratkozó}}",
+      newToday: "{count, plural, other {{countText} új ma}}",
+      newThisWeek: "{count, plural, other {{countText} új ezen a héten}}",
+    },
+    nl: {
+      subscribers:
+        "{count, plural, one {{countText} abonnee} other {{countText} abonnees}}",
+      newToday:
+        "{count, plural, one {{countText} nieuwe abonnee vandaag} other {{countText} nieuwe abonnees vandaag}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nieuwe abonnee deze week} other {{countText} nieuwe abonnees deze week}}",
+    },
+    nb: {
+      subscribers:
+        "{count, plural, one {{countText} abonnent} other {{countText} abonnenter}}",
+      newToday:
+        "{count, plural, one {{countText} ny i dag} other {{countText} nye i dag}}",
+      newThisWeek:
+        "{count, plural, one {{countText} ny denne uken} other {{countText} nye denne uken}}",
+    },
+    pl: {
+      subscribers:
+        "{count, plural, one {{countText} subskrybent} few {{countText} subskrybentów} many {{countText} subskrybentów} other {{countText} subskrybenta}}",
+      newToday:
+        "{count, plural, one {{countText} nowy dzisiaj} few {{countText} nowych dzisiaj} many {{countText} nowych dzisiaj} other {{countText} nowego dzisiaj}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nowy w tym tygodniu} few {{countText} nowych w tym tygodniu} many {{countText} nowych w tym tygodniu} other {{countText} nowego w tym tygodniu}}",
+    },
+    pt: {
+      subscribers:
+        "{count, plural, one {{countText} inscrito} other {{countText} inscritos}}",
+      newToday:
+        "{count, plural, one {{countText} novo hoje} other {{countText} novos hoje}}",
+      newThisWeek:
+        "{count, plural, one {{countText} novo esta semana} other {{countText} novos esta semana}}",
+    },
+    ro: {
+      subscribers:
+        "{count, plural, one {{countText} abonat} few {{countText} abonați} other {{countText} abonați}}",
+      newToday:
+        "{count, plural, one {{countText} nou astăzi} few {{countText} noi astăzi} other {{countText} noi astăzi}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nou săptămâna aceasta} few {{countText} noi săptămâna aceasta} other {{countText} noi săptămâna aceasta}}",
+    },
+    sq: {
+      subscribers:
+        "{count, plural, one {{countText} abonent} other {{countText} abonentë}}",
+      newToday:
+        "{count, plural, one {{countText} i ri sot} other {{countText} të rinj sot}}",
+      newThisWeek:
+        "{count, plural, one {{countText} i ri këtë javë} other {{countText} të rinj këtë javë}}",
+    },
+    sk: {
+      subscribers:
+        "{count, plural, one {{countText} odberateľ} few {{countText} odberatelia} many {{countText} odberateľa} other {{countText} odberateľov}}",
+      newToday:
+        "{count, plural, one {{countText} nový dnes} few {{countText} noví dnes} many {{countText} nového dnes} other {{countText} nových dnes}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nový tento týždeň} few {{countText} noví tento týždeň} many {{countText} nového tento týždeň} other {{countText} nových tento týždeň}}",
+    },
+    sl: {
+      subscribers:
+        "{count, plural, one {{countText} naročnik} two {{countText} naročnika} few {{countText} naročniki} other {{countText} naročnikov}}",
+      newToday:
+        "{count, plural, one {{countText} nov danes} two {{countText} nova danes} few {{countText} novi danes} other {{countText} novih danes}}",
+      newThisWeek:
+        "{count, plural, one {{countText} nov ta teden} two {{countText} nova ta teden} few {{countText} novi ta teden} other {{countText} novih ta teden}}",
+    },
+    fi: {
+      subscribers:
+        "{count, plural, one {{countText} tilaaja} other {{countText} tilaajaa}}",
+      newToday:
+        "{count, plural, one {{countText} uusi tänään} other {{countText} uutta tänään}}",
+      newThisWeek:
+        "{count, plural, one {{countText} uusi tällä viikolla} other {{countText} uutta tällä viikolla}}",
+    },
+    sv: {
+      subscribers:
+        "{count, plural, one {{countText} prenumerant} other {{countText} prenumeranter}}",
+      newToday:
+        "{count, plural, one {{countText} ny idag} other {{countText} nya idag}}",
+      newThisWeek:
+        "{count, plural, one {{countText} ny den här veckan} other {{countText} nya den här veckan}}",
+    },
+    tl: {
+      subscribers: "{count, plural, other {{countText} subscriber}}",
+      newToday: "{count, plural, other {{countText} bago ngayon}}",
+      newThisWeek: "{count, plural, other {{countText} bago ngayong linggo}}",
+    },
+    tr: {
+      subscribers: "{count, plural, other {{countText} abone}}",
+      newToday: "{count, plural, other {{countText} bugün yeni}}",
+      newThisWeek: "{count, plural, other {{countText} bu hafta yeni}}",
+    },
+    yo: {
+      subscribers: "{count, plural, other {{countText} alabapin}}",
+      newToday: "{count, plural, other {{countText} tuntun lónìí}}",
+      newThisWeek: "{count, plural, other {{countText} tuntun lọ́sẹ̀ yìí}}",
+    },
+  };
+
+const formatLocalizedCountMessage = (
+  language: SubGoalLanguage,
+  message: string,
+  count: number,
+  countText = formatSubscriberCount(count),
+): string =>
+  String(
+    new IntlMessageFormat(
+      message,
+      subGoalPostMessages[language].intlLocale,
+    ).format({ count, countText }),
+  );
 
 export const formatLocalizedSubscriberCount = (
   language: SubGoalLanguage,
-  subscribersText: string,
-): string => `${subscribersText} ${subscriberLabels[language]}`;
+  count: number,
+  countText?: string,
+): string =>
+  formatLocalizedCountMessage(
+    language,
+    localizedCountMessages[language].subscribers,
+    count,
+    countText,
+  );
 
-export const formatLocalizedNewTodayCount = (
+export const formatLocalizedSubscriberGrowth = (
   language: SubGoalLanguage,
-  subscribersText: string,
-): string => `${subscribersText} ${newTodayLabels[language]}`;
+  growth: { count: number; period: "today" | "week" },
+  countText?: string,
+): string =>
+  formatLocalizedCountMessage(
+    language,
+    growth.period === "today"
+      ? localizedCountMessages[language].newToday
+      : localizedCountMessages[language].newThisWeek,
+    growth.count,
+    countText,
+  );
 
 type CompletedTitleParams = SubredditNameParams & {
+  goalCount?: number;
   goalText: string;
 };
 
@@ -130,11 +321,14 @@ type CompletedDateParams = {
 };
 
 type TextFallbackActiveParams = SubredditNameParams & {
+  subscribersCount: number;
   subscribersText: string;
+  goalCount: number;
   goalText: string;
 };
 
 type TextFallbackCompletedParams = SubredditNameParams & {
+  goalCount: number;
   goalText: string;
   completedIso: string;
 };
@@ -353,7 +547,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       shareUsernameLabel: "Show my username when I subscribe",
       thanksTitle: "Thanks for Subscribing!",
       thanksBody: ({ subscribersText }) =>
-        `There are now ${subscribersText} subscribers in the community!`,
+        `The community now has ${subscribersText} subscribers!`,
       thanksReturnButton: "Return to Previous Page",
       completedTitle: ({ subredditName, goalText }) =>
         `r/${subredditName} reached ${goalText} subscribers!`,
@@ -525,7 +719,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       shareUsernameLabel: "Sýna notandanafnið mitt þegar ég gerist áskrifandi",
       thanksTitle: "Takk fyrir áskriftina!",
       thanksBody: ({ subscribersText }) =>
-        `Nú eru ${subscribersText} áskrifendur í samfélaginu!`,
+        `Samfélagið er nú með ${subscribersText} áskrifendur!`,
       thanksReturnButton: "Fara aftur á fyrri síðu",
       completedTitle: ({ subredditName, goalText }) =>
         `r/${subredditName} náði ${goalText} áskrifendum!`,
@@ -559,7 +753,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       shareUsernameLabel: "Mostra il mio nome utente quando mi iscrivo",
       thanksTitle: "Grazie per esserti iscritto!",
       thanksBody: ({ subscribersText }) =>
-        `Ora ci sono ${subscribersText} iscritti nella community!`,
+        `La community ora ha ${subscribersText} iscritti!`,
       thanksReturnButton: "Torna alla pagina precedente",
       completedTitle: ({ subredditName, goalText }) =>
         `r/${subredditName} ha raggiunto ${goalText} iscritti!`,
@@ -699,7 +893,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       shareUsernameLabel: "Mijn gebruikersnaam tonen wanneer ik me abonneer",
       thanksTitle: "Bedankt voor je abonnement!",
       thanksBody: ({ subscribersText }) =>
-        `Er zijn nu ${subscribersText} abonnees in de community!`,
+        `De community heeft nu ${subscribersText} abonnees!`,
       thanksReturnButton: "Terug naar vorige pagina",
       completedTitle: ({ subredditName, goalText }) =>
         `r/${subredditName} heeft ${goalText} abonnees bereikt!`,
@@ -838,7 +1032,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       shareUsernameLabel: "Afișează-mi numele de utilizator când mă abonez",
       thanksTitle: "Mulțumim pentru abonare!",
       thanksBody: ({ subscribersText }) =>
-        `Acum sunt ${subscribersText} abonați în comunitate!`,
+        `Comunitatea are acum ${subscribersText} abonați!`,
       thanksReturnButton: "Înapoi la pagina anterioară",
       completedTitle: ({ subredditName, goalText }) =>
         `r/${subredditName} a atins ${goalText} abonați!`,
@@ -1151,8 +1345,110 @@ export function resolveSubGoalLanguage(value: unknown): SubGoalLanguage {
     : defaultSubGoalLanguage;
 }
 
+const escapeForRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const replaceCountAndFollowingNoun = (
+  text: string,
+  countText: string,
+  localizedCount: string,
+): string =>
+  text.replace(
+    new RegExp(
+      `${escapeForRegex(countText)}\\s+[\\p{L}\\p{M}][\\p{L}\\p{M}’'-]*`,
+      "u",
+    ),
+    localizedCount,
+  );
+
+const localizedPostMessageCache = new Map<
+  SubGoalLanguage,
+  SubGoalPostMessages
+>();
+const subscribersCountSentinel = "__SG_SUBSCRIBERS_COUNT__";
+const goalCountSentinel = "__SG_GOAL_COUNT__";
+
 export function getSubGoalPostMessages(language: unknown): SubGoalPostMessages {
-  return subGoalPostMessages[resolveSubGoalLanguage(language)];
+  const resolvedLanguage = resolveSubGoalLanguage(language);
+  const cached = localizedPostMessageCache.get(resolvedLanguage);
+  if (cached) return cached;
+
+  const messages = subGoalPostMessages[resolvedLanguage];
+  const localizedMessages: SubGoalPostMessages = {
+    ...messages,
+    thanksBody: (params) => {
+      const localizedCount = formatLocalizedSubscriberCount(
+        resolvedLanguage,
+        params.subscribersCount,
+        params.subscribersText,
+      );
+      const original = messages.thanksBody({
+        ...params,
+        subscribersText: subscribersCountSentinel,
+      });
+      if (resolvedLanguage === "yo") {
+        return original.replace(
+          `Àwọn alabapin ${subscribersCountSentinel}`,
+          localizedCount,
+        );
+      }
+      return replaceCountAndFollowingNoun(
+        original,
+        subscribersCountSentinel,
+        localizedCount,
+      );
+    },
+    completedTitle: (params) => {
+      if (params.goalCount === undefined)
+        return messages.completedTitle(params);
+      return replaceCountAndFollowingNoun(
+        messages.completedTitle({ ...params, goalText: goalCountSentinel }),
+        goalCountSentinel,
+        formatLocalizedSubscriberCount(
+          resolvedLanguage,
+          params.goalCount,
+          params.goalText,
+        ),
+      );
+    },
+    fallbackActive: (params) => {
+      const withSubscriberCount = messages
+        .fallbackActive({
+          ...params,
+          subscribersText: subscribersCountSentinel,
+          goalText: goalCountSentinel,
+        })
+        .replace(
+          subscribersCountSentinel,
+          formatLocalizedSubscriberCount(
+            resolvedLanguage,
+            params.subscribersCount,
+            params.subscribersText,
+          ),
+        );
+      return replaceCountAndFollowingNoun(
+        withSubscriberCount,
+        goalCountSentinel,
+        formatLocalizedSubscriberCount(
+          resolvedLanguage,
+          params.goalCount,
+          params.goalText,
+        ),
+      );
+    },
+    fallbackCompleted: (params) =>
+      replaceCountAndFollowingNoun(
+        messages.fallbackCompleted({ ...params, goalText: goalCountSentinel }),
+        goalCountSentinel,
+        formatLocalizedSubscriberCount(
+          resolvedLanguage,
+          params.goalCount,
+          params.goalText,
+        ),
+      ),
+  };
+  localizedPostMessageCache.set(resolvedLanguage, localizedMessages);
+  return localizedMessages;
 }
 
 export type AfterSubscribePresetMessages = {

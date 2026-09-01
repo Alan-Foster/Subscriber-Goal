@@ -66,6 +66,7 @@ export const ThanksPage = ({
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         {messages.thanksBody({
+          subscribersCount: state.subreddit.subscribers,
           subscribersText: formatSubscriberCount(state.subreddit.subscribers),
         })}
       </div>

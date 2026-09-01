@@ -57,6 +57,8 @@ describe("subscriberDailyStats", () => {
       baselineSubscribers: 1_000,
       latestSubscribers: 1_000,
       newSubscribersToday: 0,
+      newSubscribersThisWeek: 0,
+      growth: { count: 1, period: "week" },
     });
     await expect(
       observeDailySubscriberCount(asRedis(redis), 1_025, { nowMs: nowMs + 1 }),
@@ -64,6 +66,8 @@ describe("subscriberDailyStats", () => {
       baselineSubscribers: 1_000,
       latestSubscribers: 1_025,
       newSubscribersToday: 25,
+      newSubscribersThisWeek: 25,
+      growth: { count: 25, period: "today" },
     });
     await expect(redis.hGetAll(subscriberDailyStatsKey)).resolves.toMatchObject(
       {
@@ -155,5 +159,100 @@ describe("subscriberDailyStats", () => {
     expect(
       new Set(observations.map((value) => value.baselineSubscribers)).size,
     ).toBe(1);
+  });
+
+  it("shows weekly growth below seven and switches to today at seven", async () => {
+    const redis = new InMemoryRedis();
+    const firstDay = Date.UTC(2026, 7, 26);
+    let subscribers = 1_000;
+
+    for (let offset = 0; offset < 6; offset += 1) {
+      const day = firstDay + offset * 24 * 60 * 60 * 1000;
+      await observeDailySubscriberCount(asRedis(redis), subscribers, {
+        nowMs: day,
+      });
+      subscribers += 1;
+      const observation = await observeDailySubscriberCount(
+        asRedis(redis),
+        subscribers,
+        { nowMs: day + 1 },
+      );
+      expect(observation.growth).toEqual({
+        count: offset + 1,
+        period: "week",
+      });
+    }
+
+    const seventhDay = firstDay + 6 * 24 * 60 * 60 * 1000;
+    await observeDailySubscriberCount(asRedis(redis), subscribers, {
+      nowMs: seventhDay,
+    });
+    subscribers += 1;
+    await expect(
+      observeDailySubscriberCount(asRedis(redis), subscribers, {
+        nowMs: seventhDay + 1,
+      }),
+    ).resolves.toMatchObject({
+      newSubscribersToday: 1,
+      newSubscribersThisWeek: 7,
+      growth: { count: 1, period: "today" },
+    });
+  });
+
+  it("uses the minimum daily value when the week is active but today is flat", async () => {
+    const redis = new InMemoryRedis();
+    const yesterday = Date.UTC(2026, 7, 31);
+    await observeDailySubscriberCount(asRedis(redis), 100, {
+      nowMs: yesterday,
+    });
+    await observeDailySubscriberCount(asRedis(redis), 107, {
+      nowMs: yesterday + 1,
+    });
+
+    await expect(
+      observeDailySubscriberCount(asRedis(redis), 107, {
+        nowMs: yesterday + 24 * 60 * 60 * 1000,
+      }),
+    ).resolves.toMatchObject({
+      newSubscribersToday: 0,
+      newSubscribersThisWeek: 7,
+      growth: { count: 1, period: "today" },
+    });
+  });
+
+  it("infers legacy completed-day growth from the following baseline", async () => {
+    const redis = new InMemoryRedis();
+    const today = Date.UTC(2026, 8, 1);
+    const yesterday = today - 24 * 60 * 60 * 1000;
+    await redis.hSet(subscriberDailyStatsKey, {
+      [`baseline:${yesterday}`]: "200",
+      [`baseline:${today}`]: "204",
+    });
+
+    await expect(
+      observeDailySubscriberCount(asRedis(redis), 204, { nowMs: today + 1 }),
+    ).resolves.toMatchObject({
+      newSubscribersThisWeek: 4,
+      growth: { count: 4, period: "week" },
+    });
+  });
+
+  it("prunes daily fields older than the eight retained buckets", async () => {
+    const redis = new InMemoryRedis();
+    const today = Date.UTC(2026, 8, 1);
+    const expiredDay = today - 8 * 24 * 60 * 60 * 1000;
+    await redis.hSet(subscriberDailyStatsKey, {
+      [`baseline:${expiredDay}`]: "100",
+      [`latest:${expiredDay}`]: "101",
+    });
+
+    await observeDailySubscriberCount(asRedis(redis), 200, { nowMs: today });
+
+    await expect(
+      redis.hGetAll(subscriberDailyStatsKey),
+    ).resolves.not.toHaveProperty(`baseline:${expiredDay}`);
+    await expect(
+      redis.hGetAll(subscriberDailyStatsKey),
+    ).resolves.not.toHaveProperty(`latest:${expiredDay}`);
   });
 });

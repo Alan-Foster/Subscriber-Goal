@@ -55,6 +55,7 @@ export const CompletedPage = ({
       <div className="text-2xl font-bold">
         {messages.completedTitle({
           subredditName: state.subreddit.name,
+          ...(state.goal ? { goalCount: state.goal } : {}),
           goalText: state.goal
             ? formatSubscriberCount(state.goal)
             : messages.completedGoalFallback,
