@@ -1,10 +1,12 @@
 import { resolveSubGoalPostHeight } from '../../../shared/subGoalPostHeight';
+import type { SubGoalColorTheme } from '../../../shared/subGoalColorTheme';
 
 type SkeletonPageProps = {
   postHeight?: unknown;
+  colorTheme?: SubGoalColorTheme | undefined;
 };
 
-export const SkeletonPage = ({ postHeight }: SkeletonPageProps) => {
+export const SkeletonPage = ({ postHeight, colorTheme }: SkeletonPageProps) => {
   const skeletonClass =
     'animate-pulse rounded-full bg-[color:var(--sg-surface-muted)]';
   const resolvedPostHeight = resolveSubGoalPostHeight(postHeight);
@@ -13,9 +15,10 @@ export const SkeletonPage = ({ postHeight }: SkeletonPageProps) => {
 
   return (
     <div
-      className={`relative flex ${
-        isTiny ? 'h-[120px]' : isShort ? 'h-[234px]' : 'h-[320px]'
+      className={`sg-goal-frame relative flex ${
+        isTiny ? 'h-[100px]' : isShort ? 'h-[234px]' : 'h-[320px]'
       } w-full flex-col items-center justify-center gap-5 px-4 py-6`}
+      data-sg-theme={colorTheme}
     >
       {isShort || isTiny ? null : (
         <div className={`h-[100px] w-[100px] ${skeletonClass}`} />

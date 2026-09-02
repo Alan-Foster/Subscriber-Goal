@@ -19,5 +19,8 @@ describe("client subscribe attention styles", () => {
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sg-tiny-view-enter,[\s\S]*\.sg-tiny-view-exit\s*\{[\s\S]*animation:\s*none;/,
     );
+    expect(css).toMatch(
+      /\.sg-goal-frame::after\s*\{[^}]*border-radius:\s*24px;[^}]*box-shadow:\s*inset 0 0 0 2px var\(--sg-accent\);[^}]*pointer-events:\s*none;/s,
+    );
   });
 });

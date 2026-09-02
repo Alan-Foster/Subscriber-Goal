@@ -1,4 +1,4 @@
-import { LoadingElement } from './LoadingElement';
+import { LoadingElement } from "./LoadingElement";
 
 type SubredditIconProps = {
   iconUrl?: string;
@@ -22,10 +22,11 @@ export const SubredditIcon = ({
           <img
             src={iconUrl}
             alt="Subreddit icon"
+            data-celebration-interactive={onClick ? "true" : undefined}
             width={size}
             height={size}
             className={`h-full w-full rounded-full object-cover ${
-              onClick ? 'cursor-pointer' : ''
+              onClick ? "cursor-pointer" : ""
             }`}
             onClick={onClick}
           />

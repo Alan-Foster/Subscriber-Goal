@@ -8,7 +8,6 @@ import { TopButtons } from "../components/TopButtons";
 type CompletedPageProps = {
   state: SubscriberGoalState;
   onVisitPromoSub: () => void;
-  onCelebrate: () => void;
 };
 
 const getGregorianLocale = (locale: string): string => `${locale}-u-ca-gregory`;
@@ -16,7 +15,6 @@ const getGregorianLocale = (locale: string): string => `${locale}-u-ca-gregory`;
 export const CompletedPage = ({
   state,
   onVisitPromoSub,
-  onCelebrate,
 }: CompletedPageProps) => {
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
@@ -49,9 +47,7 @@ export const CompletedPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {isShort ? null : (
-        <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
-      )}
+      {isShort ? null : <SubredditIcon iconUrl={state.subreddit.icon} />}
       <div className="text-2xl font-bold">
         {messages.completedTitle({
           subredditName: state.subreddit.name,

@@ -92,7 +92,7 @@ describe("createGoalPost", () => {
       expect.objectContaining({
         entry: "subscribe-only",
         postData: { postKind: "subscribe-only-v1" },
-        styles: { height: 0, heightPixels: 120 },
+        styles: { height: 0, heightPixels: 100 },
       }),
     );
   });
@@ -121,7 +121,7 @@ describe("createGoalPost", () => {
 
     expect(post.setCustomPostStyles).toHaveBeenCalledWith({
       height: EntrypointHeight.HEIGHT_UNSPECIFIED,
-      heightPixels: 120,
+      heightPixels: 100,
     });
   });
 

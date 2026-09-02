@@ -49,14 +49,14 @@ describe("devvit.json route alignment", () => {
     );
   });
 
-  it("keeps Tiny posts on a dedicated 120px entrypoint", () => {
+  it("keeps Tiny posts on a dedicated 100px entrypoint", () => {
     expect(devvitConfig.post.entrypoints.default).toMatchObject({
       entry: "app.html",
       height: "regular",
     });
     expect(devvitConfig.post.entrypoints["subscribe-only"]).toEqual({
       entry: "subscribe-only.html",
-      styles: { height: 120 },
+      styles: { height: 100 },
     });
   });
 

@@ -1,23 +1,27 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from "react";
 
 type ConfettiBurstProps = {
   pieceCount?: number;
+  reducedMotion?: boolean;
 };
 
 type ConfettiStyle = CSSProperties & {
-  '--confetti-drift'?: string;
+  "--confetti-drift"?: string;
 };
 
 const colors = [
-  '#ff4500',
-  '#f59e0b',
-  '#10b981',
-  '#3b82f6',
-  '#a855f7',
-  '#f472b6',
+  "#ff4500",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#a855f7",
+  "#f472b6",
 ];
 
-export const ConfettiBurst = ({ pieceCount = 70 }: ConfettiBurstProps) => {
+export const ConfettiBurst = ({
+  pieceCount = 70,
+  reducedMotion = false,
+}: ConfettiBurstProps) => {
   const pieces = useMemo(
     () =>
       Array.from({ length: pieceCount }, () => ({
@@ -29,17 +33,32 @@ export const ConfettiBurst = ({ pieceCount = 70 }: ConfettiBurstProps) => {
         rotate: Math.random() * 360,
         color: colors[Math.floor(Math.random() * colors.length)],
       })),
-    [pieceCount]
+    [pieceCount],
   );
 
+  if (reducedMotion) {
+    return (
+      <div
+        aria-hidden="true"
+        className="celebration-flash"
+        data-celebration-effect="flash"
+      />
+    );
+  }
+
   return (
-    <div className="confetti">
+    <div
+      aria-hidden="true"
+      className="confetti"
+      data-celebration-effect="confetti"
+      data-confetti-piece-count={pieceCount}
+    >
       {pieces.map((piece, index) => {
         const style: ConfettiStyle = {
           left: `${piece.left}%`,
           animationDelay: `${piece.delay}s`,
           animationDuration: `${piece.duration}s`,
-          '--confetti-drift': `${piece.drift}px`,
+          "--confetti-drift": `${piece.drift}px`,
         };
         return (
           <span key={index} className="confetti-piece" style={style}>

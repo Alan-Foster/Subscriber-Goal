@@ -62,7 +62,7 @@ export function buildOnboardingReminderMessage(
       `Welcome to Subscriber Goal for r/${subredditName}!\n\n` +
       "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.\n\n" +
       "If you have questions, please send a DM to u/Alan-Foster.\n\n" +
-      "If a Subscriber Goal is not created within 24 hours of this installation or update, Subscriber Goal will automatically create one using the default settings for your subreddit.",
+      "If a Subscriber Goal is not created within 5 minutes of this installation or update, Subscriber Goal will automatically create one using the default settings for your subreddit.",
   };
 }
 

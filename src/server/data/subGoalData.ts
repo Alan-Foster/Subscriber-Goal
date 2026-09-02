@@ -55,6 +55,7 @@ export const recentSubscriberIndexMigrationStateKey =
   "recent_subscriber_index_migration_state";
 export const recentSubscriberIndexMigrationVersion =
   "recent_subscriber_index_v1";
+export const autoCreateNextGoalDelayMs = 24 * 60 * 60 * 1000;
 
 const recentSubscriberIndexBatchSize = 25;
 const recentSubscriberIndexCooldownMinMs = 5 * 60 * 1000;
@@ -460,7 +461,7 @@ export async function scheduleAutoCreateNextGoal(
 ): Promise<void> {
   await redis.zAdd(autoCreateNextGoalQueueKey, {
     member: postId,
-    score: completedTime + 24 * 60 * 60 * 1000,
+    score: completedTime + autoCreateNextGoalDelayMs,
   });
 }
 

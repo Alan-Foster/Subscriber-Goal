@@ -48,7 +48,6 @@ describe("ThanksPage", () => {
   const commonProps = {
     onReturn: vi.fn(),
     onVisitPromoSub: vi.fn(),
-    onCelebrate: vi.fn(),
     onAfterSubscribeNavigate: vi.fn(),
   };
 

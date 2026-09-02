@@ -15,7 +15,7 @@
       "subscribe-only": {
         "entry": "subscribe-only.html",
         "styles": {
-          "height": 120
+          "height": 100
         }
       },
       "app": {

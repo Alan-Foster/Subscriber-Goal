@@ -99,6 +99,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     Reflect.deleteProperty(window, "matchMedia");
   });
 
@@ -117,6 +118,8 @@ describe("App", () => {
 
     expect(html).toContain("Show my username when I subscribe");
     expect(html).toContain('checked=""');
+    expect(html).toContain("sg-goal-frame");
+    expect(html).toContain('data-sg-theme="red"');
   });
 
   it("uses the compact shell height for short posts", () => {
@@ -124,6 +127,7 @@ describe("App", () => {
     const html = renderToStaticMarkup(<App />);
 
     expect(html).toContain("h-[234px]");
+    expect(html).toContain("sg-goal-frame");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 
@@ -131,8 +135,251 @@ describe("App", () => {
     hoisted.state = hoisted.createTinyState();
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain("h-[120px]");
+    expect(html).toContain("h-[100px]");
+    expect(html).toContain("sg-goal-frame");
     expect(html).not.toContain('alt="Subreddit icon"');
+  });
+
+  it("shows light confetti for background pointer input", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    const shell = container.querySelector<HTMLElement>(
+      '[data-app-interaction-shell="true"]',
+    );
+    await act(async () => {
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("28");
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(28);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("restarts the light effect from the most recent interaction", async () => {
+    vi.useFakeTimers();
+    useWideViewportWithoutReducedMotion();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    const shell = container.querySelector(
+      '[data-app-interaction-shell="true"]',
+    );
+    await act(async () => {
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      vi.advanceTimersByTime(1000);
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      vi.advanceTimersByTime(700);
+    });
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).not.toBeNull();
+
+    await act(async () => vi.advanceTimersByTime(900));
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+  });
+
+  it("does not show light confetti for interactive controls", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    const shell = container.querySelector<HTMLElement>(
+      '[data-app-interaction-shell="true"]',
+    );
+    const disabledButton = document.createElement("button");
+    disabledButton.disabled = true;
+    const nestedButtonContent = document.createElement("span");
+    disabledButton.append(nestedButtonContent);
+    const link = document.createElement("a");
+    link.href = "https://example.com/";
+    link.addEventListener("click", (event) => event.preventDefault());
+    const roleButton = document.createElement("div");
+    roleButton.setAttribute("role", "button");
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    const markedControl = document.createElement("div");
+    markedControl.dataset.celebrationInteractive = "true";
+    const controls = [
+      disabledButton,
+      document.createElement("button"),
+      link,
+      document.createElement("input"),
+      document.createElement("select"),
+      document.createElement("textarea"),
+      document.createElement("label"),
+      roleButton,
+      editable,
+      markedControl,
+    ];
+    controls.forEach((control) => shell?.append(control));
+
+    const subredditIcon = container.querySelector(
+      'img[alt="Subreddit icon"][data-celebration-interactive="true"]',
+    );
+
+    for (const target of [...controls, nestedButtonContent]) {
+      await act(async () => {
+        target?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+        target?.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            detail: 0,
+          }),
+        );
+      });
+      expect(
+        container.querySelector('[data-celebration-effect="confetti"]'),
+      ).toBeNull();
+    }
+
+    await act(async () => {
+      subredditIcon?.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true }),
+      );
+    });
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows light confetti for a keyboard background click", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+    });
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(28);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("uses a static accent flash when reduced motion is requested", async () => {
+    window.matchMedia = vi.fn(
+      (query: string) =>
+        ({
+          matches: query === "(prefers-reduced-motion: reduce)",
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+
+    expect(
+      container.querySelector('[data-celebration-effect="flash"]'),
+    ).not.toBeNull();
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("automatically celebrates an already-completed goal", async () => {
+    useWideViewportWithoutReducedMotion();
+    hoisted.state = {
+      ...hoisted.createState(),
+      completedTime: Date.now(),
+      subscribed: true,
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "blue",
+      },
+    } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+
+    expect(container.textContent).toContain("reached 1000 subscribers");
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("70");
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("red");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("replaces active click feedback with the automatic completion celebration", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("28");
+
+    hoisted.state = {
+      ...hoisted.createState(),
+      completedTime: Date.now(),
+    } as SubGoalState;
+    await act(async () => root.render(<App />));
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("70");
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("subscribes without a username payload and renders only the tiny confirmation", async () => {
@@ -172,6 +419,11 @@ describe("App", () => {
     expect(container.textContent).not.toContain("Return to Previous Page");
     expect(container.textContent).not.toContain("subscribers in the community");
     expect(hoisted.showNotice).not.toHaveBeenCalled();
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("70");
 
     await act(async () => {
       root.unmount();
@@ -201,6 +453,11 @@ describe("App", () => {
       (button) => button.textContent === "Join the Discord",
     );
     expect(cta?.getAttribute("data-sg-theme")).toBe("pink");
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("pink");
 
     await act(async () => {
       cta?.dispatchEvent(

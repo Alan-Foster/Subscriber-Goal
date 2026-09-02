@@ -33,7 +33,6 @@ const createState = (
 
 const commonProps = {
   onSubscribe: vi.fn(),
-  onCelebrate: vi.fn(),
   onVisitPromoSub: vi.fn(),
   isSubmitting: false,
   shareUsername: false,

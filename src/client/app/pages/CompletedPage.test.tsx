@@ -36,7 +36,6 @@ const baseState: SubscriberGoalState = {
 describe("CompletedPage", () => {
   const commonProps = {
     onVisitPromoSub: vi.fn(),
-    onCelebrate: vi.fn(),
   };
 
   const renderCompletedPage = (language: SubscriberGoalState["language"]) =>

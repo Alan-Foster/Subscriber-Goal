@@ -150,14 +150,12 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("arms once for the configured delay and remains not due before then", async () => {
+  it("re-arms five minutes after each install or upgrade lifecycle event", async () => {
+    expect(onboardingSubscriberGoalDelayMs).toBe(5 * 60 * 1000);
+
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
-    });
-    await initializeOnboardingSubscriberGoal(redis as never, {
-      lifecycleSource: "upgrade",
-      nowMs: nowMs + 100,
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
@@ -167,12 +165,24 @@ describe("onboarding subscriber goal", () => {
       nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
     });
 
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 100,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      lifecycleSource: "upgrade",
+      nextRunAt: String(nowMs + 100 + onboardingSubscriberGoalDelayMs),
+    });
+
     await expect(
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs - 1,
+        nowMs: nowMs + 100 + onboardingSubscriberGoalDelayMs - 1,
       }),
     ).resolves.toMatchObject({ status: "not_due" });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();

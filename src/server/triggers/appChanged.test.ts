@@ -149,20 +149,23 @@ describe("onAppChanged", () => {
     ).toHaveBeenCalledWith(expect.anything(), []);
   });
 
-  it("passes the install or upgrade lifecycle source to onboarding initialization", async () => {
-    hoisted.context.subredditName = "SubGoal";
+  it.each(["install", "upgrade"] as const)(
+    "passes the %s lifecycle source to onboarding initialization",
+    async (lifecycleSource) => {
+      hoisted.context.subredditName = "SubGoal";
 
-    await onAppChanged({ lifecycleSource: "upgrade" });
+      await onAppChanged({ lifecycleSource });
 
-    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
-      expect.anything(),
-      { lifecycleSource: "upgrade" },
-    );
-    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
-      expect.anything(),
-      { lifecycleSource: "upgrade" },
-    );
-  });
+      expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+        expect.anything(),
+        { lifecycleSource },
+      );
+      expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+        expect.anything(),
+        { lifecycleSource },
+      );
+    },
+  );
 
   it("falls back safely when subreddit fetch fails", async () => {
     hoisted.context.subredditId = "t5_abc";

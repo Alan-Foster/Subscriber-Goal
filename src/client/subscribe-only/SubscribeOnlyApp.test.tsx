@@ -32,6 +32,7 @@ vi.mock("../hooks/useSubGoal", () => ({
 import { tinySubscriptionConfirmationDurationMs } from "../app/components/TinySubscriptionConfirmation";
 import { tinySubscriptionConfirmationPhaseDurationMs } from "../app/components/TinySubscriptionConfirmation";
 import { tinyViewTransitionDurationMs } from "../app/components/TinyViewTransition";
+import { confettiPresets } from "../app/confettiPresets";
 import { SubscribeOnlyApp } from "./SubscribeOnlyApp";
 
 const createTinyState = (
@@ -128,6 +129,8 @@ describe("SubscribeOnlyApp", () => {
   it("renders the persisted disabled subscribed button immediately", () => {
     const html = renderToStaticMarkup(<SubscribeOnlyApp />);
 
+    expect(html).toContain("h-[100px]");
+    expect(html).toContain("sg-goal-frame");
     expect(html).toContain("Subscribed to r/ExampleSub");
     expect(html).not.toContain("Subscribe to r/ExampleSub");
     expect(html).toContain('data-subscription-button-mode="subscribed"');
@@ -156,6 +159,40 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain("r/SubGoal");
   });
 
+  it("shows light confetti for Tiny background input", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = await renderApp();
+
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("28");
+  });
+
+  it("does not show light confetti for Tiny controls", async () => {
+    useWideViewportWithoutReducedMotion();
+    const container = await renderApp();
+    const button = getActionButton(container);
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      button?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail: 0 }),
+      );
+    });
+
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
+  });
+
   it("shows confirmation for two seconds before the disabled subscribed button", async () => {
     vi.useFakeTimers();
     useWideViewportWithoutReducedMotion();
@@ -175,6 +212,11 @@ describe("SubscribeOnlyApp", () => {
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
     ).not.toBeNull();
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("70");
 
     await act(async () => {
       vi.advanceTimersByTime(tinyViewTransitionDurationMs);
@@ -201,7 +243,7 @@ describe("SubscribeOnlyApp", () => {
     await act(async () => {
       vi.advanceTimersByTime(tinyViewTransitionDurationMs);
     });
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
     ).toBeNull();
@@ -212,6 +254,17 @@ describe("SubscribeOnlyApp", () => {
       tinySubscriptionConfirmationPhaseDurationMs +
         tinyViewTransitionDurationMs,
     ).toBe(tinySubscriptionConfirmationDurationMs);
+
+    await act(async () => {
+      vi.advanceTimersByTime(
+        confettiPresets.subscribe.durationMs -
+          tinySubscriptionConfirmationDurationMs,
+      );
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
   });
 
   it("shows a localized confirmation before the configured CTA", async () => {
@@ -234,6 +287,11 @@ describe("SubscribeOnlyApp", () => {
         new MouseEvent("click", { bubbles: true }),
       );
     });
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("purple");
     expect(container.textContent).toContain("Suscrito a r/ExampleSub");
     expect(container.textContent).not.toContain("Visitar sitio");
 
@@ -256,6 +314,11 @@ describe("SubscribeOnlyApp", () => {
       container.querySelector('[data-subscription-button-mode="link"]'),
     ).not.toBeNull();
     expect(container.querySelector(".sg-subscribe-attention")).not.toBeNull();
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("pink");
 
     await act(async () => {
       cta?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -293,7 +356,7 @@ describe("SubscribeOnlyApp", () => {
         new MouseEvent("click", { bubbles: true }),
       );
     });
-    expect(vi.getTimerCount()).toBe(2);
+    expect(vi.getTimerCount()).toBe(3);
 
     const mounted = mountedRoots.pop();
     await act(async () => mounted?.root.unmount());

@@ -37,7 +37,7 @@ import { createSubscriberGoal } from "./createSubscriberGoal";
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v2_state";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
-export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
+export const onboardingSubscriberGoalDelayMs = 5 * 60 * 1000;
 export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
@@ -135,10 +135,6 @@ export async function initializeOnboardingSubscriberGoal(
     nowMs?: number;
   },
 ): Promise<void> {
-  const raw = await redis.hGetAll(onboardingSubscriberGoalStateKey);
-  if (parseOnboardingState(raw)) {
-    return;
-  }
   const state: OnboardingSubscriberGoalState = {
     version: onboardingSubscriberGoalVersion,
     status: "pending",

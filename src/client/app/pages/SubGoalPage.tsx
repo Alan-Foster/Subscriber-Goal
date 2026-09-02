@@ -11,7 +11,6 @@ import { TinyActionLayout } from "../components/TinyActionLayout";
 type SubGoalPageProps = {
   state: SubGoalState;
   onSubscribe: () => void;
-  onCelebrate: () => void;
   onVisitPromoSub: () => void;
   isSubmitting: boolean;
   shareUsername: boolean;
@@ -23,7 +22,6 @@ type SubGoalPageProps = {
 export const SubGoalPage = ({
   state,
   onSubscribe,
-  onCelebrate,
   onVisitPromoSub,
   isSubmitting,
   shareUsername,
@@ -50,7 +48,7 @@ export const SubGoalPage = ({
       ? messages.subscribedButton({ subredditName: state.subreddit.name })
       : messages.subscribeButton({ subredditName: state.subreddit.name });
   const handleButtonClick = onSubscribe;
-  const iconAction = state.subscribed ? onCelebrate : onSubscribe;
+  const iconAction = state.subscribed ? undefined : onSubscribe;
   const showNotice = Boolean(notice);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
@@ -94,7 +92,10 @@ export const SubGoalPage = ({
       />
       {isShort ? null : (
         <div className="pt-6">
-          <SubredditIcon iconUrl={state.subreddit.icon} onClick={iconAction} />
+          <SubredditIcon
+            iconUrl={state.subreddit.icon}
+            {...(iconAction ? { onClick: iconAction } : {})}
+          />
         </div>
       )}
       {isShort ? (

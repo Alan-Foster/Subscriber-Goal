@@ -13,9 +13,13 @@ describe('SkeletonPage', () => {
   });
 
   it('uses tiny height with only the button placeholder', () => {
-    const html = renderToStaticMarkup(<SkeletonPage postHeight="tiny" />);
+    const html = renderToStaticMarkup(
+      <SkeletonPage postHeight="tiny" colorTheme="blue" />,
+    );
 
-    expect(html).toContain('h-[120px]');
+    expect(html).toContain('h-[100px]');
+    expect(html).toContain('sg-goal-frame');
+    expect(html).toContain('data-sg-theme="blue"');
     expect(html).not.toContain('h-[100px] w-[100px]');
     expect(html).not.toContain('w-48');
     expect(html).not.toContain('w-[70%]');

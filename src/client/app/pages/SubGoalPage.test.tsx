@@ -47,7 +47,6 @@ const tinyState: SubscribeOnlyState = {
 describe("SubGoalPage", () => {
   const commonProps = {
     onSubscribe: vi.fn(),
-    onCelebrate: vi.fn(),
     onVisitPromoSub: vi.fn(),
     isSubmitting: false,
     shareUsername: false,

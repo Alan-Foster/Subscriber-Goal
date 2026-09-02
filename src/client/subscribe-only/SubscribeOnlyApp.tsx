@@ -13,6 +13,9 @@ import { SubGoalPage } from "../app/pages/SubGoalPage";
 import { ThanksPage } from "../app/pages/ThanksPage";
 import { useSubGoal } from "../hooks/useSubGoal";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
+import { ConfettiBurst } from "../app/components/ConfettiBurst";
+import { confettiPresets } from "../app/confettiPresets";
+import { useCelebration } from "../app/hooks/useCelebration";
 
 type TinySubscribeViewPhase = "subscribe" | "confirmation" | "subscribed";
 
@@ -23,6 +26,14 @@ export const SubscribeOnlyApp = () => {
     useState<TinySubscribeViewPhase>("subscribe");
   const interactionStartedRef = useRef(false);
   const messages = getSubGoalPostMessages(state?.language);
+  const {
+    celebrationKey,
+    interactionHandlers,
+    pieceCount,
+    prefersReducedMotion,
+    showCelebration,
+    triggerCelebration,
+  } = useCelebration();
 
   useEffect(() => {
     if (viewPhase !== "confirmation") {
@@ -36,18 +47,23 @@ export const SubscribeOnlyApp = () => {
 
   if (prohibited) {
     return (
-      <div className="flex h-[120px] w-full items-center justify-center text-center text-sm">
+      <div
+        className="sg-goal-frame relative flex h-[100px] w-full items-center justify-center text-center text-sm"
+        data-sg-theme={state?.colorTheme}
+      >
         {prohibitedContentMessage}
       </div>
     );
   }
 
   if (loading || !state) {
-    return <SkeletonPage postHeight="tiny" />;
+    return (
+      <SkeletonPage postHeight="tiny" colorTheme={state?.colorTheme} />
+    );
   }
 
   if (state.postHeight !== "tiny") {
-    return <SkeletonPage postHeight="tiny" />;
+    return <SkeletonPage postHeight="tiny" colorTheme={state.colorTheme} />;
   }
 
   const handleSubscribe = async () => {
@@ -70,6 +86,7 @@ export const SubscribeOnlyApp = () => {
       return;
     }
     setViewPhase("confirmation");
+    triggerCelebration(confettiPresets.subscribe);
     showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
   };
 
@@ -79,11 +96,18 @@ export const SubscribeOnlyApp = () => {
       : state.subscribed && !interactionStartedRef.current
         ? "subscribed"
         : "subscribe";
+  const frameColorTheme =
+    effectiveViewPhase === "subscribed" &&
+    state.afterSubscribeAction.type !== "disabled"
+      ? state.afterSubscribeAction.colorTheme
+      : state.colorTheme;
 
   return (
     <div
-      className="relative h-[120px] w-full overflow-hidden"
-      data-sg-theme={state.colorTheme}
+      className="sg-goal-frame relative h-[100px] w-full cursor-pointer overflow-hidden"
+      data-app-interaction-shell="true"
+      data-sg-theme={frameColorTheme}
+      {...interactionHandlers}
     >
       <TinyViewTransition transitionKey={effectiveViewPhase}>
         {effectiveViewPhase === "confirmation" ? (
@@ -96,7 +120,6 @@ export const SubscribeOnlyApp = () => {
             state={state}
             onReturn={() => undefined}
             onVisitPromoSub={() => undefined}
-            onCelebrate={() => undefined}
             onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
               navigateTo(target)
             }
@@ -104,7 +127,6 @@ export const SubscribeOnlyApp = () => {
         ) : (
           <SubGoalPage
             state={state}
-            onCelebrate={() => undefined}
             onVisitPromoSub={() => undefined}
             shareUsername={false}
             onShareUsernameChange={() => undefined}
@@ -121,6 +143,13 @@ export const SubscribeOnlyApp = () => {
         promoSubreddit={state.promoSubreddit}
         language={state.language}
       />
+      {showCelebration ? (
+        <ConfettiBurst
+          key={celebrationKey}
+          pieceCount={pieceCount}
+          reducedMotion={prefersReducedMotion}
+        />
+      ) : null}
     </div>
   );
 };

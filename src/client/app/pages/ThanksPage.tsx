@@ -12,7 +12,6 @@ type ThanksPageProps = {
   state: SubGoalState;
   onReturn: () => void;
   onVisitPromoSub: () => void;
-  onCelebrate: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
 };
 
@@ -20,7 +19,6 @@ export const ThanksPage = ({
   state,
   onReturn,
   onVisitPromoSub,
-  onCelebrate,
   onAfterSubscribeNavigate,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
@@ -60,9 +58,7 @@ export const ThanksPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {isShort ? null : (
-        <SubredditIcon iconUrl={state.subreddit.icon} onClick={onCelebrate} />
-      )}
+      {isShort ? null : <SubredditIcon iconUrl={state.subreddit.icon} />}
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
         {messages.thanksBody({

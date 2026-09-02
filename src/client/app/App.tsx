@@ -1,5 +1,5 @@
 import { navigateTo, showToast } from "@devvit/web/client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
 import { useSubGoal } from "../hooks/useSubGoal";
@@ -16,6 +16,7 @@ import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { CompletedPage } from "./pages/CompletedPage";
 import { SubGoalPage } from "./pages/SubGoalPage";
 import { ThanksPage } from "./pages/ThanksPage";
+import { useCelebration } from "./hooks/useCelebration";
 
 type PageName = "subGoal" | "thanks" | "completed" | "tinyConfirmation";
 
@@ -31,12 +32,14 @@ export const App = () => {
     prohibited,
   } = useSubGoal();
   const [page, setPage] = useState<PageName>("subGoal");
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [confettiKey, setConfettiKey] = useState(0);
-  const [confettiPieces, setConfettiPieces] = useState<number>(
-    confettiPresets.default.pieceCount,
-  );
-  const confettiTimeoutRef = useRef<number | null>(null);
+  const {
+    celebrationKey,
+    interactionHandlers,
+    pieceCount,
+    prefersReducedMotion,
+    showCelebration,
+    triggerCelebration,
+  } = useCelebration();
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
   const [shareUsername, setShareUsername] = useState(true);
@@ -66,9 +69,6 @@ export const App = () => {
 
   useEffect(
     () => () => {
-      if (confettiTimeoutRef.current) {
-        window.clearTimeout(confettiTimeoutRef.current);
-      }
       if (returnNoticeTimeoutRef.current) {
         window.clearTimeout(returnNoticeTimeoutRef.current);
       }
@@ -90,42 +90,16 @@ export const App = () => {
     navigateTo(target);
   };
 
-  const triggerConfetti = useCallback(
-    ({
-      pieceCount = confettiPresets.default.pieceCount,
-      durationMs = confettiPresets.default.durationMs,
-      allowRestart = true,
-    }: {
-      pieceCount?: number;
-      durationMs?: number;
-      allowRestart?: boolean;
-    } = {}) => {
-      if (showConfetti && !allowRestart) {
-        return;
-      }
-      setConfettiKey((prev) => prev + 1);
-      setConfettiPieces(pieceCount);
-      setShowConfetti(true);
-      if (confettiTimeoutRef.current) {
-        window.clearTimeout(confettiTimeoutRef.current);
-      }
-      confettiTimeoutRef.current = window.setTimeout(() => {
-        setShowConfetti(false);
-      }, durationMs);
-    },
-    [showConfetti],
-  );
-
   useEffect(() => {
     if (page === "completed") {
       if (!completedConfettiShownRef.current) {
-        triggerConfetti(confettiPresets.completed);
+        triggerCelebration(confettiPresets.completed);
         completedConfettiShownRef.current = true;
       }
     } else {
       completedConfettiShownRef.current = false;
     }
-  }, [page, triggerConfetti]);
+  }, [page, triggerCelebration]);
 
   const handleSubscribe = async () => {
     if (!state) {
@@ -160,7 +134,7 @@ export const App = () => {
     } else {
       setPage("thanks");
     }
-    triggerConfetti(confettiPresets.subscribe);
+    triggerCelebration(confettiPresets.subscribe);
     if (updatedState.postHeight !== "tiny") {
       const noticeMessage = messages.subscriberNotice({
         username: updatedState.recentSubscriber,
@@ -190,10 +164,6 @@ export const App = () => {
     }, 80);
   };
 
-  const handleCelebrate = () => {
-    triggerConfetti(confettiPresets.logoCelebrate);
-  };
-
   let content = null;
   if (state) {
     if (page === "tinyConfirmation" && state.postHeight === "tiny") {
@@ -209,17 +179,12 @@ export const App = () => {
           state={state}
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
-          onCelebrate={handleCelebrate}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
         />
       );
     } else if (page === "completed" && state.postHeight !== "tiny") {
       content = (
-        <CompletedPage
-          state={state}
-          onVisitPromoSub={handleVisitPromo}
-          onCelebrate={handleCelebrate}
-        />
+        <CompletedPage state={state} onVisitPromoSub={handleVisitPromo} />
       );
     } else {
       content = (
@@ -227,7 +192,6 @@ export const App = () => {
           state={state}
           onSubscribe={handleSubscribe}
           onVisitPromoSub={handleVisitPromo}
-          onCelebrate={handleCelebrate}
           isSubmitting={submitting}
           shareUsername={shareUsername}
           onShareUsernameChange={setShareUsername}
@@ -239,19 +203,37 @@ export const App = () => {
   }
 
   if (loading) {
-    return <SkeletonPage postHeight={state?.postHeight} />;
+    return (
+      <SkeletonPage
+        postHeight={state?.postHeight}
+        colorTheme={state?.colorTheme}
+      />
+    );
+  }
+
+  let frameColorTheme = state?.colorTheme;
+  if (
+    state?.subscribed === true &&
+    state.afterSubscribeAction.type !== "disabled" &&
+    page !== "completed" &&
+    page !== "tinyConfirmation"
+  ) {
+    frameColorTheme = state.afterSubscribeAction.colorTheme;
   }
 
   const appHeightClass =
     state?.postHeight === "tiny"
-      ? "h-[120px]"
+      ? "h-[100px]"
       : state?.postHeight === "short"
         ? "h-[234px]"
         : "h-[320px]";
 
   return (
     <div
-      className={`relative flex ${appHeightClass} w-full flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
+      className={`sg-goal-frame relative flex ${appHeightClass} w-full cursor-pointer flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
+      data-app-interaction-shell="true"
+      data-sg-theme={frameColorTheme}
+      {...(state && !prohibited ? interactionHandlers : {})}
     >
       {state?.postHeight === "tiny" && content ? (
         <TinyViewTransition transitionKey={page}>{content}</TinyViewTransition>
@@ -268,8 +250,12 @@ export const App = () => {
           language={state.language}
         />
       ) : null}
-      {showConfetti ? (
-        <ConfettiBurst key={confettiKey} pieceCount={confettiPieces} />
+      {showCelebration ? (
+        <ConfettiBurst
+          key={celebrationKey}
+          pieceCount={pieceCount}
+          reducedMotion={prefersReducedMotion}
+        />
       ) : null}
     </div>
   );
