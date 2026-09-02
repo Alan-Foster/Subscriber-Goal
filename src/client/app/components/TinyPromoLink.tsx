@@ -1,6 +1,5 @@
 import { navigateTo } from "@devvit/web/client";
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
-import { useWideViewport } from "../../hooks/useWideViewport";
 import { TopButtons } from "./TopButtons";
 
 type TinyPromoLinkProps = {
@@ -12,12 +11,6 @@ export const TinyPromoLink = ({
   promoSubreddit,
   language,
 }: TinyPromoLinkProps) => {
-  const isWideViewport = useWideViewport();
-
-  if (!isWideViewport) {
-    return null;
-  }
-
   return (
     <div data-tiny-promo-link="true">
       <TopButtons

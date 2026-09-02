@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.7.1 - Improved tiny subscriber post data on desktop. Auto-goals on subs above 1m members default to tiny.
+- 1.7.1 - Improved tiny subscriber post data on desktop. Colored Borders on all posts. Auto-goals on subs above 1m members default to tiny.
 - 1 6.3 - Creation of SubGoal blacklist. Blacklisted subreddits can't create new goals or load existing goals. Devvit 0.14.2
 - 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Automatic 24h goal creation fallback. Devvit 0.14.1
 - 1.5.1 - Release of Small-Height Goals (goals without subreddit icons). Users can erase their own data. Devvit 0.13.8

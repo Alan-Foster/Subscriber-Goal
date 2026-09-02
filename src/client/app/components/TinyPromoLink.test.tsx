@@ -5,16 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
-  isWide: false,
   navigateTo: vi.fn(),
 }));
 
 vi.mock("@devvit/web/client", () => ({
   navigateTo: hoisted.navigateTo,
-}));
-
-vi.mock("../../hooks/useWideViewport", () => ({
-  useWideViewport: () => hoisted.isWide,
 }));
 
 import { TinyPromoLink } from "./TinyPromoLink";
@@ -25,19 +20,20 @@ describe("TinyPromoLink", () => {
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
-    hoisted.isWide = false;
   });
 
-  it("is absent from narrow Tiny views", () => {
+  it("shows the 20px promo icon in narrow Tiny views", () => {
     const html = renderToStaticMarkup(
       <TinyPromoLink promoSubreddit="SubGoal" language="en" />,
     );
 
-    expect(html).toBe("");
+    expect(html).toContain('data-tiny-promo-link="true"');
+    expect(html).toContain('width="20"');
+    expect(html).toContain('height="20"');
+    expect(html).toContain("group-hover:opacity-100");
   });
 
-  it("reuses the localized promo button and navigates on wide views", async () => {
-    hoisted.isWide = true;
+  it("reuses the localized promo button and navigates", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);

@@ -136,7 +136,9 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain('data-subscription-button-mode="subscribed"');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain("progress");
-    expect(html).not.toContain("r/SubGoal");
+    expect(html).toContain('data-tiny-promo-link="true"');
+    expect(html).toContain('width="20"');
+    expect(html).toContain('height="20"');
   });
 
   it("renders the persisted Tiny CTA immediately on initial load", () => {
@@ -341,8 +343,14 @@ describe("SubscribeOnlyApp", () => {
       );
     });
 
-    expect(container.textContent).toBe("Subscribe to r/ExampleSub");
-    expect(container.querySelector("button")?.disabled).toBe(false);
+    expect(getActionButton(container)?.textContent).toBe(
+      "Subscribe to r/ExampleSub",
+    );
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[data-subscription-button-mode] button',
+      )?.disabled,
+    ).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
 
