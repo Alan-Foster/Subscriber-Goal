@@ -27,7 +27,7 @@ export const afterSubscribePresetTypes = [
 ] as const;
 export type AfterSubscribePreset = (typeof afterSubscribePresetTypes)[number];
 
-export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "green";
+export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "blue";
 export const afterSubscribeCreatePostSubscriberThreshold = 10_000;
 
 export function getDefaultAfterSubscribePreset(

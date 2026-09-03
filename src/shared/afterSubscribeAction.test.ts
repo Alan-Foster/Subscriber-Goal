@@ -18,7 +18,7 @@ describe("after-subscribe defaults", () => {
     },
   );
 
-  it("builds the small-subreddit create-post action in green", () => {
+  it("builds the small-subreddit create-post action in blue", () => {
     expect(
       createDefaultAfterSubscribeAction({
         language: "en",
@@ -33,7 +33,7 @@ describe("after-subscribe defaults", () => {
     });
   });
 
-  it("builds the larger-subreddit top-post action in green", () => {
+  it("builds the larger-subreddit top-post action in blue", () => {
     expect(
       createDefaultAfterSubscribeAction({
         language: "en",

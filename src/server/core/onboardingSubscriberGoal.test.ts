@@ -403,7 +403,7 @@ describe("onboarding subscriber goal", () => {
     );
   });
 
-  it("creates an English Red regular goal with the small-subreddit Green CTA and then becomes terminal", async () => {
+  it("creates an English Red regular goal with the small-subreddit Blue CTA and then becomes terminal", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -445,7 +445,7 @@ describe("onboarding subscriber goal", () => {
             type: "link",
             buttonText: "Create a New Post",
             url: "https://www.reddit.com/r/ExampleSub/submit/",
-            colorTheme: "green",
+            colorTheme: "blue",
           }),
         }),
       }),
@@ -526,7 +526,7 @@ describe("onboarding subscriber goal", () => {
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
             type: "top-post-day",
-            colorTheme: "green",
+            colorTheme: "blue",
           }),
         }),
       }),

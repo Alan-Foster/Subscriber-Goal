@@ -779,13 +779,13 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it.each([
-    ["web-link", undefined, true, "green"],
-    ["discord", "Únete al Discord", true, "green"],
-    ["top-post-day", "Ver la publicación destacada de hoy", false, "green"],
-    ["wiki", "Leer la Wiki", true, "green"],
-    ["create-post", "Crear una publicación", false, "green"],
-    ["share-picture", "Compartir una imagen", false, "green"],
-    ["newest-post", "Ver la publicación más reciente de hoy", false, "green"],
+    ["web-link", undefined, true, "blue"],
+    ["discord", "Únete al Discord", true, "blue"],
+    ["top-post-day", "Ver la publicación destacada de hoy", false, "blue"],
+    ["wiki", "Leer la Wiki", true, "blue"],
+    ["create-post", "Crear una publicación", false, "blue"],
+    ["share-picture", "Compartir una imagen", false, "blue"],
+    ["newest-post", "Ver la publicación más reciente de hoy", false, "blue"],
   ] as const)(
     "builds the %s preset follow-up fields and localized defaults",
     async (preset, buttonText, showUrl, colorTheme) => {
@@ -1027,7 +1027,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "Ver la publicación destacada de hoy",
-        colorTheme: "green",
+        colorTheme: "blue",
       },
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
@@ -1081,7 +1081,7 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("uses the localized Discord label and Green default when only its URL is entered", async () => {
+  it("uses the localized Discord label and Blue default when only its URL is entered", async () => {
     seedCreateGoalDraft("tiny", "es", {
       colorTheme: "pink",
       afterSubscribePreset: "discord",
@@ -1108,7 +1108,7 @@ describe("internalUi color theme create goal routes", () => {
         type: "link",
         buttonText: "Únete al Discord",
         url: "https://discord.gg/example",
-        colorTheme: "green",
+        colorTheme: "blue",
       },
     );
   });
@@ -1181,7 +1181,7 @@ describe("internalUi color theme create goal routes", () => {
         {
           type: "top-post-day",
           buttonText: "View the Top Post Today",
-          colorTheme: "green",
+          colorTheme: "blue",
         },
       );
     },
@@ -1215,7 +1215,7 @@ describe("internalUi color theme create goal routes", () => {
           type: "link",
           buttonText,
           url: "https://www.reddit.com/r/ExampleSub/submit/",
-          colorTheme: "green",
+          colorTheme: "blue",
         },
       );
     },
@@ -1251,7 +1251,7 @@ describe("internalUi color theme create goal routes", () => {
         "en",
         undefined,
         "regular",
-        { type: afterSubscribePreset, buttonText, colorTheme: "green" },
+        { type: afterSubscribePreset, buttonText, colorTheme: "blue" },
       );
     },
   );
@@ -1291,7 +1291,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "green",
+        colorTheme: "blue",
       },
     );
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
@@ -1547,7 +1547,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "green",
+        colorTheme: "blue",
       },
     );
   });
@@ -1666,7 +1666,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "green",
+        colorTheme: "blue",
       },
     );
   });
