@@ -18,7 +18,7 @@ import {
   queueUpdate,
 } from "../data/updaterData";
 import { isLinkId } from "../types";
-import { clearUserStickies } from "../utils/redditUtils";
+import { clearSubscriberGoalStickies } from "../utils/redditUtils";
 import {
   subscribeOnlyTextFallbackMaker,
   textFallbackMaker,
@@ -32,6 +32,8 @@ import {
   isSubredditBlacklisted,
   ProhibitedSubredditError,
 } from "../utils/subredditBlacklist";
+import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
+import { ensureSubscriberGoalPostFlair } from "./subscriberGoalPostFlair";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -84,24 +86,20 @@ export async function createSubscriberGoal({
   if (await isSubredditBlacklisted(reddit, subreddit.name)) {
     throw new ProhibitedSubredditError();
   }
-  const appUser = await reddit.getAppUser();
-  if (!appUser?.username) {
-    throw new Error("Could not resolve app user.");
-  }
-
-  const existingTrackedPosts = await getTrackedPosts(redis);
-  const existingQueuedPosts = await getQueuedUpdates(redis);
-  await clearUserStickies(reddit, appUser.username, {
-    knownPostIds: [
-      ...new Set([...existingTrackedPosts, ...existingQueuedPosts]),
-    ],
-    subreddit,
-  });
-
   const isTinyPost = options.postHeight === "tiny";
   if (!isTinyPost && options.goal === undefined) {
     throw new Error("Subscriber goal is required for non-tiny posts.");
   }
+
+  const [flair, existingGoalPostIds] = await Promise.all([
+    ensureSubscriberGoalPostFlair(reddit, subreddit.name),
+    getSubscriberGoalCandidatePostIds(redis),
+  ]);
+  await clearSubscriberGoalStickies(reddit, {
+    knownPostIds: existingGoalPostIds,
+    subreddit,
+  });
+
   const textFallback = isTinyPost
     ? subscribeOnlyTextFallbackMaker({
         subredditName: options.subredditDisplayName,
@@ -120,6 +118,7 @@ export async function createSubscriberGoal({
     subredditName: subreddit.name,
     textFallback,
     postHeight: options.postHeight,
+    flairId: flair.id,
     ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
   });
   await applyGoalPostFrameStyle(post, options.postHeight);

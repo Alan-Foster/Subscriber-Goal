@@ -1,6 +1,11 @@
 import { cache, type CacheHelper } from "@devvit/web/server";
 import { isLinkId, isSubredditId, type RedditClient } from "../types";
 import { logCrosspostEvent, toErrorMessage } from "./crosspostLogs";
+import { isMissingPostError } from "./postStatus";
+import {
+  subscriberGoalPostKind,
+  subscribeOnlyPostKind,
+} from "../../shared/postKind";
 
 export type WikiPageRevision = {
   id: string;
@@ -158,6 +163,205 @@ export async function clearUserStickies(
       `[sticky] no existing app-owned stickies found: subreddit=${subreddit.name}`,
     );
   }
+}
+
+export type SubscriberGoalStickyCleanupResult = {
+  inspected: number;
+  unstickied: string[];
+  skippedCrossSubreddit: string[];
+  missing: string[];
+};
+
+export class SubscriberGoalStickyCleanupError extends Error {
+  readonly postIds: string[];
+
+  constructor(postIds: string[]) {
+    super(
+      "Subscriber Goal could not replace the current goal because one or more older Subscriber Goal posts could not be safely unpinned. Moderator action is required.",
+    );
+    this.name = "SubscriberGoalStickyCleanupError";
+    this.postIds = postIds;
+  }
+}
+
+type SubscriberGoalPost = Awaited<ReturnType<RedditClient["getPostById"]>>;
+
+async function getPostStickyState(post: SubscriberGoalPost): Promise<boolean> {
+  if (post.stickied) return true;
+  const verifier = (post as { isStickied?: () => boolean | Promise<boolean> })
+    .isStickied;
+  return typeof verifier === "function"
+    ? Boolean(await Promise.resolve(verifier.call(post)))
+    : false;
+}
+
+async function unstickyAndVerify(
+  reddit: RedditClient,
+  post: SubscriberGoalPost,
+): Promise<boolean> {
+  await post.unsticky();
+  try {
+    const refreshed = await reddit.getPostById(post.id);
+    return !(await getPostStickyState(refreshed));
+  } catch (error) {
+    // A post that disappeared after the write cannot remain highlighted.
+    if (isMissingPostError(error)) return true;
+    throw error;
+  }
+}
+
+function hasSubscriberGoalPostKind(post: SubscriberGoalPost): boolean {
+  const data = (post as { postData?: unknown; customPostData?: unknown })
+    .postData ??
+    (post as { customPostData?: unknown }).customPostData;
+  const kind =
+    data && typeof data === "object"
+      ? (data as { postKind?: unknown }).postKind
+      : undefined;
+  return kind === subscriberGoalPostKind || kind === subscribeOnlyPostKind;
+}
+
+/**
+ * Removes only authoritative or self-identifying Subscriber Goal highlights.
+ * Known IDs are trusted regardless of author, but are always constrained to the
+ * current subreddit. Any unresolved known sticky blocks replacement creation.
+ */
+export async function clearSubscriberGoalStickies(
+  reddit: RedditClient,
+  options: {
+    knownPostIds: string[];
+    subreddit: { id: string; name: string };
+  },
+): Promise<SubscriberGoalStickyCleanupResult> {
+  const result: SubscriberGoalStickyCleanupResult = {
+    inspected: 0,
+    unstickied: [],
+    skippedCrossSubreddit: [],
+    missing: [],
+  };
+  const seen = new Set<string>();
+  const blocked = new Set<string>();
+
+  const inspect = async (
+    post: SubscriberGoalPost,
+    trusted: boolean,
+  ): Promise<void> => {
+    if (seen.has(post.id)) return;
+    seen.add(post.id);
+    result.inspected += 1;
+    if (post.subredditId !== options.subreddit.id) {
+      result.skippedCrossSubreddit.push(post.id);
+      return;
+    }
+    if (!trusted && !hasSubscriberGoalPostKind(post)) return;
+    try {
+      if (!(await getPostStickyState(post))) return;
+      if (!(await unstickyAndVerify(reddit, post))) {
+        blocked.add(post.id);
+        return;
+      }
+      result.unstickied.push(post.id);
+      console.info(
+        `[sticky] unstickied Subscriber Goal: subreddit=${options.subreddit.name} postId=${post.id}`,
+      );
+    } catch (error) {
+      blocked.add(post.id);
+      console.warn(
+        `[sticky] failed to unsticky Subscriber Goal: subreddit=${options.subreddit.name} postId=${post.id} error=${toErrorMessage(error)}`,
+      );
+    }
+  };
+
+  for (const postId of [...new Set(options.knownPostIds)]) {
+    if (!isLinkId(postId)) continue;
+    try {
+      await inspect(await reddit.getPostById(postId), true);
+    } catch (error) {
+      if (isMissingPostError(error)) {
+        result.missing.push(postId);
+      } else {
+        blocked.add(postId);
+      }
+    }
+  }
+
+  // This catches recognizable custom goals from older installs without ever
+  // treating an unrelated highlight as an app goal.
+  try {
+    const hotPosts = await reddit
+      .getHotPosts({ limit: 100, subredditName: options.subreddit.name })
+      .get(100);
+    for (const post of hotPosts) await inspect(post, false);
+  } catch (error) {
+    console.warn(
+      `[sticky] failed to inspect hot posts for legacy Subscriber Goals: subreddit=${options.subreddit.name} error=${toErrorMessage(error)}`,
+    );
+  }
+
+  if (blocked.size) throw new SubscriberGoalStickyCleanupError([...blocked]);
+  return result;
+}
+
+export async function reconcileSubscriberGoalStickies(
+  reddit: RedditClient,
+  options: {
+    knownPostIds: string[];
+    subreddit: { id: string; name: string };
+  },
+): Promise<{ keptPostId?: string; unstickied: string[]; failed: string[] }> {
+  const pinned: SubscriberGoalPost[] = [];
+  const orderedPostIds = [...new Set(options.knownPostIds)];
+  const candidateOrder = new Map(
+    orderedPostIds.map((postId, index) => [postId, index]),
+  );
+  for (const postId of orderedPostIds) {
+    if (!isLinkId(postId)) continue;
+    try {
+      const post = await reddit.getPostById(postId);
+      if (
+        post.subredditId === options.subreddit.id &&
+        (await getPostStickyState(post))
+      ) {
+        pinned.push(post);
+      }
+    } catch (error) {
+      if (!isMissingPostError(error)) {
+        console.warn(
+          `[sticky] lifecycle candidate fetch failed: subreddit=${options.subreddit.name} postId=${postId} error=${toErrorMessage(error)}`,
+        );
+      }
+    }
+  }
+  const createdAtMs = (post: SubscriberGoalPost): number => {
+    const value = post.createdAt;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") return value;
+    return 0;
+  };
+  pinned.sort(
+    (a, b) =>
+      createdAtMs(b) - createdAtMs(a) ||
+      (candidateOrder.get(b.id) ?? 0) - (candidateOrder.get(a.id) ?? 0),
+  );
+  const keep = pinned[0];
+  const unstickied: string[] = [];
+  const failed: string[] = [];
+  for (const post of pinned.slice(1)) {
+    try {
+      if (await unstickyAndVerify(reddit, post)) unstickied.push(post.id);
+      else failed.push(post.id);
+    } catch (error) {
+      failed.push(post.id);
+      console.warn(
+        `[sticky] lifecycle reconciliation failed: subreddit=${options.subreddit.name} postId=${post.id} error=${toErrorMessage(error)}`,
+      );
+    }
+  }
+  return {
+    ...(keep ? { keptPostId: keep.id } : {}),
+    unstickied,
+    failed,
+  };
 }
 
 export async function safeGetWikiPageRevisions(

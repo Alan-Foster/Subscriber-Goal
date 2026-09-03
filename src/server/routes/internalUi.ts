@@ -56,6 +56,7 @@ import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { toErrorMessage } from "../utils/crosspostLogs";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
+import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
 import {
   createTopPostFallbackAction,
   defaultAfterSubscribeColorTheme,
@@ -1029,7 +1030,8 @@ async function submitCreateGoalFollowUp(
     console.error("Error creating goal post:", error);
     res.json({
       showToast:
-        error instanceof ProhibitedSubredditError
+        error instanceof ProhibitedSubredditError ||
+        error instanceof SubscriberGoalStickyCleanupError
           ? error.message
           : "An error occurred while creating the post.",
     });

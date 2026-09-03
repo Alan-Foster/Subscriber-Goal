@@ -40,6 +40,19 @@ describe("createGoalPost", () => {
     });
   });
 
+  it("forwards the Subscriber Goal flair during submission", async () => {
+    await createGoalPost({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: "Fallback text",
+      flairId: "flair_subgoal",
+    });
+
+    expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith(
+      expect.objectContaining({ flairId: "flair_subgoal" }),
+    );
+  });
+
   it("uses runAs USER with required user generated content when submitAsUser is true", async () => {
     await createGoalPost({
       title: "Welcome!",

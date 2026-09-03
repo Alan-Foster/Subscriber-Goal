@@ -188,7 +188,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("validates an existing tracked post before suppressing creation", async () => {
+  it("trusts an existing moderator-authored tracked goal before suppressing creation", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs,
@@ -196,7 +196,7 @@ describe("onboarding subscriber goal", () => {
     hoisted.getTrackedPosts.mockResolvedValue(["t3_existing"]);
     reddit.getPostById.mockResolvedValue({
       id: "t3_existing",
-      authorName: "subscriber-goal",
+      authorName: "community-mod",
       subredditId: "t5_example",
       postData: { postKind: "subscriber-goal-v1" },
       createdAt: new Date(nowMs),

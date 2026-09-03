@@ -39,6 +39,9 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
+  clearSubscriberGoalStickies: vi.fn(),
+  getSubscriberGoalCandidatePostIds: vi.fn(),
+  ensureSubscriberGoalPostFlair: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
@@ -89,8 +92,19 @@ vi.mock("../data/subscriberGoalPostRegistry", () => ({
   removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
 }));
 
-vi.mock("../utils/redditUtils", () => ({
+vi.mock("../utils/redditUtils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/redditUtils")>()),
   clearUserStickies: hoisted.clearUserStickies,
+  clearSubscriberGoalStickies: hoisted.clearSubscriberGoalStickies,
+}));
+
+vi.mock("../data/subscriberGoalCandidates", () => ({
+  getSubscriberGoalCandidatePostIds:
+    hoisted.getSubscriberGoalCandidatePostIds,
+}));
+
+vi.mock("../core/subscriberGoalPostFlair", () => ({
+  ensureSubscriberGoalPostFlair: hoisted.ensureSubscriberGoalPostFlair,
 }));
 
 vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
@@ -234,6 +248,16 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.eraseFromRecentSubscribers.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({
+      id: "flair_subgoal",
+    });
+    hoisted.clearSubscriberGoalStickies.mockResolvedValue({
+      inspected: 0,
+      unstickied: [],
+      skippedCrossSubreddit: [],
+      missing: [],
+    });
   });
 
   afterEach(() => {
@@ -1302,6 +1326,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 suscriptores / 200 suscriptores.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
     });
   });
 
@@ -1335,6 +1360,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
       submitAsUser: true,
     });
   });
@@ -1391,7 +1417,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
-    expect(hoisted.clearUserStickies).not.toHaveBeenCalled();
+    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast: "Experimental selfPost submitted to r/u_ExampleMod.",
       navigateTo:
@@ -1502,6 +1528,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
       submitAsUser: true,
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
@@ -1553,6 +1580,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
     });
   });
 
@@ -1586,6 +1614,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
     });
   });
 
@@ -1619,6 +1648,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       hoisted.reddit,

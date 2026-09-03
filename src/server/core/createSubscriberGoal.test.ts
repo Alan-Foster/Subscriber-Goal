@@ -17,6 +17,9 @@ const hoisted = vi.hoisted(() => ({
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
   clearUserStickies: vi.fn(),
+  clearSubscriberGoalStickies: vi.fn(),
+  getSubscriberGoalCandidatePostIds: vi.fn(),
+  ensureSubscriberGoalPostFlair: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
 }));
@@ -45,6 +48,16 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   clearUserStickies: hoisted.clearUserStickies,
+  clearSubscriberGoalStickies: hoisted.clearSubscriberGoalStickies,
+}));
+
+vi.mock("../data/subscriberGoalCandidates", () => ({
+  getSubscriberGoalCandidatePostIds:
+    hoisted.getSubscriberGoalCandidatePostIds,
+}));
+
+vi.mock("./subscriberGoalPostFlair", () => ({
+  ensureSubscriberGoalPostFlair: hoisted.ensureSubscriberGoalPostFlair,
 }));
 
 vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
@@ -119,6 +132,16 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.applyGoalPostFrameStyle.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({
+      id: "flair_subgoal",
+    });
+    hoisted.clearSubscriberGoalStickies.mockResolvedValue({
+      inspected: 0,
+      unstickied: [],
+      skippedCrossSubreddit: [],
+      missing: [],
+    });
     hoisted.reddit.getPostById.mockResolvedValue(undefined);
   });
 
@@ -138,7 +161,7 @@ describe("createSubscriberGoal sticky handling", () => {
       });
 
       expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
-      expect(hoisted.clearUserStickies).not.toHaveBeenCalled();
+      expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
       expect(hoisted.createGoalPost).not.toHaveBeenCalled();
       expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
       expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
@@ -158,6 +181,7 @@ describe("createSubscriberGoal sticky handling", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      flairId: "flair_subgoal",
     });
     expect(post.approve).toHaveBeenCalled();
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(
@@ -174,11 +198,13 @@ describe("createSubscriberGoal sticky handling", () => {
     });
   });
 
-  it("passes existing tracked and queued post ids to sticky cleanup before creating the new post", async () => {
+  it("passes authoritative goal candidates, including registry-only tiny goals, to cleanup before creation", async () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
-    hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked", "invalid"]);
-    hoisted.getQueuedUpdates.mockResolvedValue(["t3_queued", "t3_tracked"]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
+      "t3_oldtiny",
+      "t3_tracked",
+    ]);
     hoisted.reddit.getPostById.mockImplementation(async (postId) => ({
       id: postId,
       subredditId: "t5_example",
@@ -187,11 +213,10 @@ describe("createSubscriberGoal sticky handling", () => {
 
     await createGoal();
 
-    expect(hoisted.clearUserStickies).toHaveBeenCalledWith(
+    expect(hoisted.clearSubscriberGoalStickies).toHaveBeenCalledWith(
       hoisted.reddit,
-      "subscriber-goal",
       {
-        knownPostIds: ["t3_tracked", "invalid", "t3_queued"],
+        knownPostIds: ["t3_oldtiny", "t3_tracked"],
         subreddit: {
           id: "t5_example",
           name: "ExampleSub",
@@ -200,9 +225,23 @@ describe("createSubscriberGoal sticky handling", () => {
         },
       },
     );
-    expect(hoisted.clearUserStickies.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(
+      hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
+    ).toBeLessThan(
       hoisted.createGoalPost.mock.invocationCallOrder[0],
     );
+  });
+
+  it("does not submit a replacement when an older goal cannot be unpinned", async () => {
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_old"]);
+    hoisted.clearSubscriberGoalStickies.mockRejectedValue(
+      new Error("moderator action required"),
+    );
+
+    await expect(createGoal()).rejects.toThrow("moderator action required");
+
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
 
   it("passes runAs creation through with fallback text without post-creation fallback updates", async () => {
@@ -219,6 +258,7 @@ describe("createSubscriberGoal sticky handling", () => {
       ),
       postHeight: "regular",
       submitAsUser: true,
+      flairId: "flair_subgoal",
     });
     expect(result.post).toBe(post);
     expect(result.stickyResult.status).toBe("pinned");

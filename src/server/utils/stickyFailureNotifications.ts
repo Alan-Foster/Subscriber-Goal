@@ -41,7 +41,7 @@ export function buildStickyFailureMessage({
       `The new Subscriber Goal post was created successfully, but it could not be pinned in r/${subredditName}.\n\n` +
       "The app attempted to pin it automatically, but could not confirm that the post was pinned. This usually means the subreddit already has too many pinned or stickied posts.\n\n" +
       "Manual moderator action is required. Please remove or unpin an existing pinned post if appropriate, then manually pin the new Subscriber Goal post.\n\n" +
-      "The app did not remove or modify existing pinned posts because it should not do that without moderator permission.\n\n" +
+      "The app removes older recognized Subscriber Goal pins during replacement, but never removes unrelated Community Highlights.\n\n" +
       `Subreddit: r/${subredditName}\n` +
       `${moderatorLine}\n\n` +
       `New Subscriber Goal:\n${postTitle}${postUrlLine}` +

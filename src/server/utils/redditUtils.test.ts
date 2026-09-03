@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  clearSubscriberGoalStickies,
   clearUserStickies,
   getSubredditIcon,
+  reconcileSubscriberGoalStickies,
   safeGetWikiPageRevisions,
+  SubscriberGoalStickyCleanupError,
 } from "./redditUtils";
 import * as crosspostLogs from "./crosspostLogs";
 
@@ -240,6 +243,101 @@ describe("clearUserStickies", () => {
     );
     expect(hotPost.unsticky).toHaveBeenCalledOnce();
     warnSpy.mockRestore();
+  });
+});
+
+describe("Subscriber Goal sticky enforcement", () => {
+  it("unstickies a trusted moderator-authored tiny goal and verifies removal", async () => {
+    let pinned = true;
+    const post = {
+      id: "t3_tiny",
+      subredditId: "t5_abc123",
+      authorName: "community-mod",
+      stickied: false,
+      isStickied: vi.fn(() => pinned),
+      unsticky: vi.fn(async () => {
+        pinned = false;
+      }),
+    };
+    const reddit = {
+      getPostById: vi.fn(async () => post),
+      getHotPosts: vi.fn(() => ({ get: vi.fn(async () => []) })),
+    };
+
+    const result = await clearSubscriberGoalStickies(reddit as never, {
+      knownPostIds: ["t3_tiny"],
+      subreddit: { id: "t5_abc123", name: "ExampleSub" },
+    });
+
+    expect(post.unsticky).toHaveBeenCalledOnce();
+    expect(result.unstickied).toEqual(["t3_tiny"]);
+  });
+
+  it("never unsticks unrelated or cross-subreddit posts", async () => {
+    const crossSubreddit = createPost({ subredditId: "t5_other" });
+    const unrelated = createPost({ id: "t3_unrelated" });
+    const reddit = {
+      getPostById: vi.fn(async () => crossSubreddit),
+      getHotPosts: vi.fn(() => ({ get: vi.fn(async () => [unrelated]) })),
+    };
+
+    await clearSubscriberGoalStickies(reddit as never, {
+      knownPostIds: ["t3_known"],
+      subreddit: { id: "t5_abc123", name: "ExampleSub" },
+    });
+
+    expect(crossSubreddit.unsticky).not.toHaveBeenCalled();
+    expect(unrelated.unsticky).not.toHaveBeenCalled();
+  });
+
+  it("throws a typed blocking error when an old goal remains pinned", async () => {
+    const post = createPost();
+    const reddit = {
+      getPostById: vi.fn(async () => post),
+      getHotPosts: vi.fn(() => ({ get: vi.fn(async () => []) })),
+    };
+
+    await expect(
+      clearSubscriberGoalStickies(reddit as never, {
+        knownPostIds: ["t3_known"],
+        subreddit: { id: "t5_abc123", name: "ExampleSub" },
+      }),
+    ).rejects.toBeInstanceOf(SubscriberGoalStickyCleanupError);
+  });
+
+  it("keeps the newest pinned goal during lifecycle reconciliation", async () => {
+    const pinned = new Map([
+      ["t3_old", true],
+      ["t3_new", true],
+    ]);
+    const posts = new Map(
+      [
+        ["t3_old", new Date("2026-01-01")],
+        ["t3_new", new Date("2026-02-01")],
+      ].map(([id, createdAt]) => [
+        id,
+        {
+          id,
+          createdAt,
+          subredditId: "t5_abc123",
+          stickied: false,
+          isStickied: vi.fn(() => pinned.get(id as string)),
+          unsticky: vi.fn(async () => pinned.set(id as string, false)),
+        },
+      ]),
+    );
+    const reddit = {
+      getPostById: vi.fn(async (id: string) => posts.get(id)),
+    };
+
+    const result = await reconcileSubscriberGoalStickies(reddit as never, {
+      knownPostIds: ["t3_old", "t3_new"],
+      subreddit: { id: "t5_abc123", name: "ExampleSub" },
+    });
+
+    expect(result.keptPostId).toBe("t3_new");
+    expect(result.unstickied).toEqual(["t3_old"]);
+    expect(posts.get("t3_new")?.unsticky).not.toHaveBeenCalled();
   });
 });
 

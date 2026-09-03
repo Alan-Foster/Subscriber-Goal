@@ -16,6 +16,10 @@ const hoisted = vi.hoisted(() => ({
   queueUpdates: vi.fn(),
   initializePostKindMigration: vi.fn(),
   initializeLegacyAfterSubscribeActionMigration: vi.fn(),
+  getSubscriberGoalCandidatePostIds: vi.fn(),
+  ensureSubscriberGoalPostFlair: vi.fn(),
+  backfillSubscriberGoalPostFlair: vi.fn(),
+  reconcileSubscriberGoalStickies: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -65,6 +69,20 @@ vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
     hoisted.initializeLegacyAfterSubscribeActionMigration,
 }));
 
+vi.mock("../data/subscriberGoalCandidates", () => ({
+  getSubscriberGoalCandidatePostIds:
+    hoisted.getSubscriberGoalCandidatePostIds,
+}));
+
+vi.mock("../core/subscriberGoalPostFlair", () => ({
+  ensureSubscriberGoalPostFlair: hoisted.ensureSubscriberGoalPostFlair,
+  backfillSubscriberGoalPostFlair: hoisted.backfillSubscriberGoalPostFlair,
+}));
+
+vi.mock("../utils/redditUtils", () => ({
+  reconcileSubscriberGoalStickies: hoisted.reconcileSubscriberGoalStickies,
+}));
+
 import { onAppChanged } from "./appChanged";
 
 describe("onAppChanged", () => {
@@ -72,6 +90,10 @@ describe("onAppChanged", () => {
     hoisted.context.subredditName = undefined;
     hoisted.context.subredditId = undefined;
     hoisted.getCurrentSubreddit.mockReset();
+    hoisted.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_subgoal",
+      name: "SubGoal",
+    });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
     hoisted.initializeRecentSubscriberIndexMigration.mockReset();
@@ -82,6 +104,10 @@ describe("onAppChanged", () => {
     hoisted.queueUpdates.mockReset();
     hoisted.initializePostKindMigration.mockReset();
     hoisted.initializeLegacyAfterSubscribeActionMigration.mockReset();
+    hoisted.getSubscriberGoalCandidatePostIds.mockReset();
+    hoisted.ensureSubscriberGoalPostFlair.mockReset();
+    hoisted.backfillSubscriberGoalPostFlair.mockReset();
+    hoisted.reconcileSubscriberGoalStickies.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -94,6 +120,16 @@ describe("onAppChanged", () => {
     hoisted.initializeLegacyAfterSubscribeActionMigration.mockResolvedValue(
       undefined,
     );
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({ id: "flair_1" });
+    hoisted.backfillSubscriberGoalPostFlair.mockResolvedValue({
+      applied: 0,
+      failed: [],
+    });
+    hoisted.reconcileSubscriberGoalStickies.mockResolvedValue({
+      unstickied: [],
+      failed: [],
+    });
   });
 
   it("skips gracefully when lifecycle trigger has no subreddit context", async () => {
@@ -113,12 +149,16 @@ describe("onAppChanged", () => {
     expect(hoisted.queueUpdates).not.toHaveBeenCalled();
   });
 
-  it("uses subredditName from context without calling reddit.getCurrentSubreddit", async () => {
+  it("uses subredditName from context and resolves the subreddit for lifecycle repairs", async () => {
     hoisted.context.subredditName = "SubGoal";
+    hoisted.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_subgoal",
+      name: "SubGoal",
+    });
 
     await expect(onAppChanged()).resolves.toBeUndefined();
 
-    expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.ensureSavedSubredditDisplayName).toHaveBeenCalledWith(
       expect.anything(),
       "SubGoal",
@@ -164,8 +204,25 @@ describe("onAppChanged", () => {
         expect.anything(),
         { lifecycleSource },
       );
+      expect(hoisted.ensureSubscriberGoalPostFlair).toHaveBeenCalledWith(
+        expect.anything(),
+        "SubGoal",
+      );
+      expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
     },
   );
+
+  it("keeps lifecycle initialization running when flair repair fails", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.ensureSubscriberGoalPostFlair.mockRejectedValue(
+      new Error("flair permission denied"),
+    );
+
+    await expect(onAppChanged({ lifecycleSource: "upgrade" })).resolves.toBeUndefined();
+
+    expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
+    expect(hoisted.initializePostKindMigration).toHaveBeenCalled();
+  });
 
   it("falls back safely when subreddit fetch fails", async () => {
     hoisted.context.subredditId = "t5_abc";

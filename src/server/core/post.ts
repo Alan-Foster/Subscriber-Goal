@@ -16,6 +16,7 @@ type CreateGoalPostParams = {
   textFallback: string;
   postHeight?: SubGoalPostHeight;
   submitAsUser?: boolean;
+  flairId?: string;
 };
 
 export const createGoalPost = async ({
@@ -24,6 +25,7 @@ export const createGoalPost = async ({
   textFallback,
   postHeight = "regular",
   submitAsUser = false,
+  flairId,
 }: CreateGoalPostParams) => {
   const isSubscribeOnly = postHeight === "tiny";
   return await reddit.submitCustomPost({
@@ -42,6 +44,7 @@ export const createGoalPost = async ({
         }
       : { height: EntrypointHeight.REGULAR },
     textFallback: { text: textFallback },
+    ...(flairId ? { flairId } : {}),
     ...(submitAsUser
       ? {
           runAs: "USER" as const,

@@ -33,6 +33,7 @@ import {
   isMissingPostError,
 } from "../utils/postStatus";
 import { createSubscriberGoal } from "./createSubscriberGoal";
+import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v2_state";
@@ -348,7 +349,7 @@ export async function findExistingSubscriberGoal(
     getRegisteredSubscriberGoalPosts(redis),
     getTrackedPosts(redis),
     getQueuedUpdates(redis),
-    getPersistedSubscriberGoalCandidates(redis),
+    getPersistedSubscriberGoalPostIds(redis),
   ]);
   const [subreddit, appUser] = await Promise.all([
     reddit.getCurrentSubreddit(),
@@ -394,6 +395,7 @@ export async function findExistingSubscriberGoal(
           post,
           subreddit,
           appUser.username,
+          true,
         ))
       ) {
         await pruneStaleCandidate(redis, postId);
@@ -474,10 +476,11 @@ async function isSubscriberGoalCandidate(
   post: CandidatePost,
   subreddit: { id: string; name: string },
   appUsername: string,
+  trustedIdentity = false,
 ): Promise<boolean> {
   if (
     !post.id ||
-    post.authorName !== appUsername ||
+    (!trustedIdentity && post.authorName !== appUsername) ||
     getTerminalRemovedByCategory(post) !== undefined
   ) {
     return false;
@@ -500,34 +503,6 @@ async function isSubscriberGoalCandidate(
     return true;
   }
   return await hasCompatiblePersistedPostData(redis, post.id);
-}
-
-async function getPersistedSubscriberGoalCandidates(
-  redis: RedisClient,
-): Promise<string[]> {
-  const postIds = new Set<string>();
-  let cursor = 0;
-  do {
-    const page = await redis.hScan(subscriberGoalsKey, cursor, undefined, 500);
-    cursor = page.cursor;
-    for (const { field, value } of page.fieldValues) {
-      if (
-        field.endsWith(postKindSuffix) &&
-        (value === subscriberGoalPostKind || value === subscribeOnlyPostKind)
-      ) {
-        postIds.add(field.slice(0, -postKindSuffix.length));
-      } else if (
-        field.endsWith(postGoalSuffix) &&
-        Number.isFinite(Number(value)) &&
-        Number(value) > 0
-      ) {
-        postIds.add(field.slice(0, -postGoalSuffix.length));
-      } else if (field.endsWith(postHeightSuffix) && value === "tiny") {
-        postIds.add(field.slice(0, -postHeightSuffix.length));
-      }
-    }
-  } while (cursor !== 0);
-  return [...postIds];
 }
 
 async function hasCompatiblePersistedPostData(
