@@ -10,6 +10,11 @@ import type {
 } from "../../../shared/types/api";
 import { apiRoutes } from "../../../shared/routes";
 import { SubscriptionButton } from "./SubscriptionButton";
+import {
+  getAfterSubscribeAnalyticsActionType,
+  goalJourneyAnalytics,
+} from "../../analytics/goalJourneyAnalytics";
+import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 
 type ActionableAfterSubscribeAction = Exclude<
   AfterSubscribeAction,
@@ -20,12 +25,14 @@ type AfterSubscribeButtonProps = {
   action: ActionableAfterSubscribeAction;
   language: SubGoalLanguage;
   onNavigate: (target: string | NavigationTarget) => void;
+  analyticsContext?: GoalJourneyContext;
 };
 
 export const AfterSubscribeButton = ({
   action,
   language,
   onNavigate,
+  analyticsContext,
 }: AfterSubscribeButtonProps) => {
   const [resolving, setResolving] = useState(false);
   const resolvingRef = useRef(false);
@@ -35,11 +42,24 @@ export const AfterSubscribeButton = ({
     if (resolvingRef.current) {
       return;
     }
+    resolvingRef.current = true;
+    const actionType = getAfterSubscribeAnalyticsActionType(action);
+    if (analyticsContext) {
+      goalJourneyAnalytics.afterSubscribeCtaActivated(
+        analyticsContext,
+        actionType,
+      );
+    }
     if (action.type === "link") {
+      if (analyticsContext) {
+        goalJourneyAnalytics.afterSubscribeCtaOpened(
+          analyticsContext,
+          actionType,
+        );
+      }
       onNavigate(action.url);
       return;
     }
-    resolvingRef.current = true;
     setResolving(true);
     try {
       const response = await fetch(apiRoutes.afterSubscribeTarget);
@@ -56,11 +76,31 @@ export const AfterSubscribeButton = ({
             ? messages.dynamicPostUnavailable
             : messages.dynamicPostError,
         );
+        if (analyticsContext) {
+          goalJourneyAnalytics.afterSubscribeCtaFailed(
+            analyticsContext,
+            actionType,
+            response.status === 404 ? "target_unavailable" : "target_error",
+          );
+        }
         return;
+      }
+      if (analyticsContext) {
+        goalJourneyAnalytics.afterSubscribeCtaOpened(
+          analyticsContext,
+          actionType,
+        );
       }
       onNavigate(payload.target);
     } catch {
       showToast(messages.dynamicPostError);
+      if (analyticsContext) {
+        goalJourneyAnalytics.afterSubscribeCtaFailed(
+          analyticsContext,
+          actionType,
+          "target_error",
+        );
+      }
     } finally {
       resolvingRef.current = false;
       setResolving(false);

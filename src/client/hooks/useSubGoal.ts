@@ -12,6 +12,7 @@ import type {
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import { requestJsonWithRetry } from "../utils/fetchWithRetry";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
+import { goalJourneyAnalytics } from "../analytics/goalJourneyAnalytics";
 
 type RequestResult<T> = {
   data: T | null;
@@ -21,6 +22,7 @@ type RequestResult<T> = {
 type SubscribeResult = {
   state: SubGoalState | null;
   error: string | null;
+  journeyTelemetryHandled: boolean;
 };
 
 const initRetryOptions = {
@@ -294,25 +296,40 @@ export const useSubGoal = () => {
   const subscribe = useCallback(
     async (payload?: SubscribeRequest): Promise<SubscribeResult> => {
       if (submitting) {
-        return { state: null, error: null };
+        return {
+          state: null,
+          error: null,
+          journeyTelemetryHandled: false,
+        };
       }
       setSubmitting(true);
       const result = await requestJson<SubscribeResponse>("/api/subscribe", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...goalJourneyAnalytics.journeyHeaders(),
+        },
         body: JSON.stringify(payload ?? {}),
       });
       setSubmitting(false);
 
       if (result.error) {
         setError(result.error);
-        return { state: null, error: result.error };
+        return {
+          state: null,
+          error: result.error,
+          journeyTelemetryHandled: false,
+        };
       }
 
       const nextState = result.data?.state ?? null;
       setState(nextState);
       setError(null);
-      return { state: nextState, error: null };
+      return {
+        state: nextState,
+        error: null,
+        journeyTelemetryHandled: result.data?.journeyTelemetryHandled === true,
+      };
     },
     [submitting],
   );

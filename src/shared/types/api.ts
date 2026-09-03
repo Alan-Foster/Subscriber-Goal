@@ -69,6 +69,7 @@ export type SubscribeResponse = {
   type: "subscribe";
   postId: string;
   state: SubGoalState;
+  journeyTelemetryHandled?: boolean;
 };
 
 export type SubscribeRequest = {

@@ -21,6 +21,10 @@ import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { subscribeOnlyPostKind } from "../../shared/postKind";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { isSubredditBlacklisted } from "../utils/subredditBlacklist";
+import {
+  getRequestJourneyId,
+  recordServerSubscribeSuccess,
+} from "../analytics/goalJourneyAnalytics";
 
 const buildState = async (
   postId: string,
@@ -302,6 +306,7 @@ export function registerPublicApiRoutes(router: Router): void {
 
   router.post(apiRoutes.subscribe, async (req, res): Promise<void> => {
     const { postId, userId } = context;
+    const journeyId = getRequestJourneyId(req);
     if (!postId) {
       res.status(400).json({
         status: "error",
@@ -352,13 +357,19 @@ export function registerPublicApiRoutes(router: Router): void {
         };
         await realtime.send("subscriber_updates", realtimeMessage);
 
+        const state = await buildSubscribeOnlyState(subGoalData, {
+          subscribersOverride: newSubscriberCount,
+          observedSubscribers: subreddit.numberOfSubscribers,
+        });
+        const journeyTelemetryHandled = recordServerSubscribeSuccess(
+          journeyId,
+          state,
+        );
         res.json({
           type: "subscribe",
           postId,
-          state: await buildSubscribeOnlyState(subGoalData, {
-            subscribersOverride: newSubscriberCount,
-            observedSubscribers: subreddit.numberOfSubscribers,
-          }),
+          state,
+          journeyTelemetryHandled,
         } satisfies SubscribeResponse);
         return;
       }
@@ -415,10 +426,15 @@ export function registerPublicApiRoutes(router: Router): void {
           : {}),
       });
 
+      const journeyTelemetryHandled = recordServerSubscribeSuccess(
+        journeyId,
+        state,
+      );
       res.json({
         type: "subscribe",
         postId,
         state,
+        journeyTelemetryHandled,
       } satisfies SubscribeResponse);
     } catch (error) {
       console.error(`Subscribe Error for post ${postId}:`, error);

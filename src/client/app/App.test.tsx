@@ -165,7 +165,7 @@ describe("App", () => {
     container.remove();
   });
 
-  it("restarts the light effect from the most recent interaction", async () => {
+  it("keeps staggered light effects on independent timelines", async () => {
     vi.useFakeTimers();
     useWideViewportWithoutReducedMotion();
     const container = document.createElement("div");
@@ -180,13 +180,19 @@ describe("App", () => {
       shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
       vi.advanceTimersByTime(1000);
       shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-      vi.advanceTimersByTime(700);
     });
     expect(
-      container.querySelector('[data-celebration-effect="confetti"]'),
-    ).not.toBeNull();
+      container.querySelectorAll('[data-celebration-effect="confetti"]'),
+    ).toHaveLength(2);
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(56);
 
-    await act(async () => vi.advanceTimersByTime(900));
+    await act(async () => vi.advanceTimersByTime(600));
+    expect(
+      container.querySelectorAll('[data-celebration-effect="confetti"]'),
+    ).toHaveLength(1);
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(28);
+
+    await act(async () => vi.advanceTimersByTime(1000));
     expect(
       container.querySelector('[data-celebration-effect="confetti"]'),
     ).toBeNull();
@@ -300,14 +306,16 @@ describe("App", () => {
 
     await act(async () => root.render(<App />));
     await act(async () => {
-      container
-        .querySelector('[data-app-interaction-shell="true"]')
-        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      const shell = container.querySelector(
+        '[data-app-interaction-shell="true"]',
+      );
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
     });
 
     expect(
-      container.querySelector('[data-celebration-effect="flash"]'),
-    ).not.toBeNull();
+      container.querySelectorAll('[data-celebration-effect="flash"]'),
+    ).toHaveLength(2);
     expect(container.querySelector(".confetti-piece")).toBeNull();
 
     await act(async () => root.unmount());
@@ -349,7 +357,7 @@ describe("App", () => {
     container.remove();
   });
 
-  it("replaces active click feedback with the automatic completion celebration", async () => {
+  it("keeps active click feedback during automatic completion celebration", async () => {
     useWideViewportWithoutReducedMotion();
     const container = document.createElement("div");
     document.body.append(container);
@@ -373,10 +381,11 @@ describe("App", () => {
     } as SubGoalState;
     await act(async () => root.render(<App />));
     expect(
-      container
-        .querySelector('[data-celebration-effect="confetti"]')
-        ?.getAttribute("data-confetti-piece-count"),
-    ).toBe("70");
+      Array.from(
+        container.querySelectorAll('[data-celebration-effect="confetti"]'),
+      ).map((effect) => effect.getAttribute("data-confetti-piece-count")),
+    ).toEqual(["28", "70"]);
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(98);
 
     await act(async () => root.unmount());
     container.remove();

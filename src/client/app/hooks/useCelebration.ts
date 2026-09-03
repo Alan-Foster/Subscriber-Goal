@@ -15,6 +15,11 @@ export type CelebrationOptions = {
   allowRestart?: boolean;
 };
 
+export type CelebrationBurst = {
+  id: number;
+  pieceCount: number;
+};
+
 const interactiveTargetSelector = [
   "button",
   "a[href]",
@@ -29,23 +34,26 @@ const interactiveTargetSelector = [
   '[data-celebration-interactive="true"]',
 ].join(",");
 
-const isInteractiveTarget = (target: EventTarget | null) =>
+export const isCelebrationInteractiveTarget = (target: EventTarget | null) =>
   target instanceof Element &&
   target.closest(interactiveTargetSelector) !== null;
 
 export const useCelebration = () => {
-  const [showCelebration, setShowCelebration] = useState(false);
-  const [celebrationKey, setCelebrationKey] = useState(0);
-  const [pieceCount, setPieceCount] = useState<number>(
-    confettiPresets.default.pieceCount,
-  );
-  const timeoutRef = useRef<number | null>(null);
-  const activeRef = useRef(false);
+  const [celebrationBursts, setCelebrationBursts] = useState<
+    CelebrationBurst[]
+  >([]);
+  const nextBurstIdRef = useRef(0);
+  const activeBurstIdsRef = useRef(new Set<number>());
+  const timeoutIdsRef = useRef(new Map<number, number>());
   const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(
     () => () => {
-      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+      for (const timeoutId of timeoutIdsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutIdsRef.current.clear();
+      activeBurstIdsRef.current.clear();
     },
     [],
   );
@@ -56,24 +64,30 @@ export const useCelebration = () => {
       durationMs = confettiPresets.default.durationMs,
       allowRestart = true,
     }: CelebrationOptions = {}) => {
-      if (activeRef.current && !allowRestart) return;
+      if (activeBurstIdsRef.current.size > 0 && !allowRestart) return;
 
-      activeRef.current = true;
-      setCelebrationKey((previous) => previous + 1);
-      setPieceCount(nextPieceCount);
-      setShowCelebration(true);
-      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-      timeoutRef.current = window.setTimeout(() => {
-        activeRef.current = false;
-        setShowCelebration(false);
+      const id = nextBurstIdRef.current + 1;
+      nextBurstIdRef.current = id;
+      activeBurstIdsRef.current.add(id);
+      setCelebrationBursts((previous) => [
+        ...previous,
+        { id, pieceCount: nextPieceCount },
+      ]);
+      const timeoutId = window.setTimeout(() => {
+        activeBurstIdsRef.current.delete(id);
+        timeoutIdsRef.current.delete(id);
+        setCelebrationBursts((previous) =>
+          previous.filter((burst) => burst.id !== id),
+        );
       }, durationMs);
+      timeoutIdsRef.current.set(id, timeoutId);
     },
     [],
   );
 
   const onPointerDownCapture = useCallback<PointerEventHandler<HTMLDivElement>>(
     (event) => {
-      if (!isInteractiveTarget(event.target)) {
+      if (!isCelebrationInteractiveTarget(event.target)) {
         triggerCelebration(confettiPresets.click);
       }
     },
@@ -81,7 +95,7 @@ export const useCelebration = () => {
   );
   const onClickCapture = useCallback<MouseEventHandler<HTMLDivElement>>(
     (event) => {
-      if (event.detail === 0 && !isInteractiveTarget(event.target)) {
+      if (event.detail === 0 && !isCelebrationInteractiveTarget(event.target)) {
         triggerCelebration(confettiPresets.click);
       }
     },
@@ -89,11 +103,9 @@ export const useCelebration = () => {
   );
 
   return {
-    celebrationKey,
+    celebrationBursts,
     interactionHandlers: { onPointerDownCapture, onClickCapture },
-    pieceCount,
     prefersReducedMotion,
-    showCelebration,
     triggerCelebration,
   };
 };

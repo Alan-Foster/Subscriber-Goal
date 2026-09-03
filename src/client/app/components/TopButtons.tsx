@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 
@@ -19,6 +19,7 @@ export const TopButtons = ({
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
   const messages = getSubGoalPostMessages(language);
+  const activatedRef = useRef(false);
 
   useEffect(() => {
     hasAnimatedOnce = true;
@@ -32,7 +33,11 @@ export const TopButtons = ({
         className={`${
           shouldAnimate ? "sg-fade-in" : ""
         } ${revealTextOnInteraction ? "group relative" : "gap-1.5"} inline-flex cursor-pointer items-center whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
-        onClick={onVisitPromoSubPressed}
+        onClick={() => {
+          if (activatedRef.current) return;
+          activatedRef.current = true;
+          onVisitPromoSubPressed();
+        }}
       >
         <span
           className={

@@ -16,6 +16,11 @@ import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { ConfettiBurst } from "../app/components/ConfettiBurst";
 import { confettiPresets } from "../app/confettiPresets";
 import { useCelebration } from "../app/hooks/useCelebration";
+import { isCelebrationInteractiveTarget } from "../app/hooks/useCelebration";
+import {
+  getGoalJourneyContext,
+  goalJourneyAnalytics,
+} from "../analytics/goalJourneyAnalytics";
 
 type TinySubscribeViewPhase = "subscribe" | "confirmation" | "subscribed";
 
@@ -25,15 +30,29 @@ export const SubscribeOnlyApp = () => {
   const [viewPhase, setViewPhase] =
     useState<TinySubscribeViewPhase>("subscribe");
   const interactionStartedRef = useRef(false);
+  const subscribeAttemptRef = useRef(false);
+  const readyReportedRef = useRef(false);
   const messages = getSubGoalPostMessages(state?.language);
   const {
-    celebrationKey,
+    celebrationBursts,
     interactionHandlers,
-    pieceCount,
     prefersReducedMotion,
-    showCelebration,
     triggerCelebration,
   } = useCelebration();
+
+  useEffect(() => {
+    if (
+      readyReportedRef.current ||
+      loading ||
+      prohibited ||
+      state === null ||
+      state.postHeight !== "tiny"
+    ) {
+      return;
+    }
+    readyReportedRef.current = true;
+    goalJourneyAnalytics.appReady();
+  }, [loading, prohibited, state]);
 
   useEffect(() => {
     if (viewPhase !== "confirmation") {
@@ -57,9 +76,7 @@ export const SubscribeOnlyApp = () => {
   }
 
   if (loading || !state) {
-    return (
-      <SkeletonPage postHeight="tiny" colorTheme={state?.colorTheme} />
-    );
+    return <SkeletonPage postHeight="tiny" colorTheme={state?.colorTheme} />;
   }
 
   if (state.postHeight !== "tiny") {
@@ -67,24 +84,38 @@ export const SubscribeOnlyApp = () => {
   }
 
   const handleSubscribe = async () => {
+    if (subscribeAttemptRef.current) return;
+    subscribeAttemptRef.current = true;
+    const analyticsContext = getGoalJourneyContext(state);
+    goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!state.authenticated) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "login_required");
       setError(messages.loginRequired);
       showToast(messages.loginRequired);
+      subscribeAttemptRef.current = false;
       return;
     }
     interactionStartedRef.current = true;
     const result = await subscribe();
     if (result.error) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "api_error");
       interactionStartedRef.current = false;
       showToast(
         state.language === "en" ? result.error : messages.subscribeErrorToast,
       );
+      subscribeAttemptRef.current = false;
       return;
     }
     if (!result.state) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "missing_result");
       interactionStartedRef.current = false;
+      subscribeAttemptRef.current = false;
       return;
     }
+    goalJourneyAnalytics.subscribeSucceeded(
+      analyticsContext,
+      result.journeyTelemetryHandled === true,
+    );
     setViewPhase("confirmation");
     triggerCelebration(confettiPresets.subscribe);
     showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
@@ -108,6 +139,15 @@ export const SubscribeOnlyApp = () => {
       data-app-interaction-shell="true"
       data-sg-theme={frameColorTheme}
       {...interactionHandlers}
+      onClickCapture={(event) => {
+        interactionHandlers.onClickCapture(event);
+        goalJourneyAnalytics.committedInteraction();
+        if (!isCelebrationInteractiveTarget(event.target)) {
+          goalJourneyAnalytics.celebrationTriggered(
+            getGoalJourneyContext(state),
+          );
+        }
+      }}
     >
       <TinyViewTransition transitionKey={effectiveViewPhase}>
         {effectiveViewPhase === "confirmation" ? (
@@ -142,14 +182,15 @@ export const SubscribeOnlyApp = () => {
       <TinyPromoLink
         promoSubreddit={state.promoSubreddit}
         language={state.language}
+        analyticsContext={getGoalJourneyContext(state)}
       />
-      {showCelebration ? (
+      {celebrationBursts.map((burst) => (
         <ConfettiBurst
-          key={celebrationKey}
-          pieceCount={pieceCount}
+          key={burst.id}
+          pieceCount={burst.pieceCount}
           reducedMotion={prefersReducedMotion}
         />
-      ) : null}
+      ))}
     </div>
   );
 };

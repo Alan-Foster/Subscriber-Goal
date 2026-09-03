@@ -178,6 +178,35 @@ describe("SubscribeOnlyApp", () => {
     ).toBe("28");
   });
 
+  it("keeps repeated Tiny bursts on independent timelines", async () => {
+    vi.useFakeTimers();
+    useWideViewportWithoutReducedMotion();
+    const container = await renderApp();
+    const shell = container.querySelector(
+      '[data-app-interaction-shell="true"]',
+    );
+
+    await act(async () => {
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      vi.advanceTimersByTime(1000);
+      shell?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+    expect(
+      container.querySelectorAll('[data-celebration-effect="confetti"]'),
+    ).toHaveLength(2);
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(56);
+
+    await act(async () => vi.advanceTimersByTime(600));
+    expect(
+      container.querySelectorAll('[data-celebration-effect="confetti"]'),
+    ).toHaveLength(1);
+
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
+  });
+
   it("does not show light confetti for Tiny controls", async () => {
     useWideViewportWithoutReducedMotion();
     const container = await renderApp();
@@ -348,7 +377,7 @@ describe("SubscribeOnlyApp", () => {
     );
     expect(
       container.querySelector<HTMLButtonElement>(
-        '[data-subscription-button-mode] button',
+        "[data-subscription-button-mode] button",
       )?.disabled,
     ).toBe(false);
     expect(vi.getTimerCount()).toBe(0);

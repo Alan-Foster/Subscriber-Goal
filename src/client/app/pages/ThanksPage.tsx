@@ -7,6 +7,7 @@ import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
 import { SubscriptionButton } from "../components/SubscriptionButton";
 import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
+import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 
 type ThanksPageProps = {
   state: SubGoalState;
@@ -30,6 +31,7 @@ export const ThanksPage = ({
           <TinyActionLayout state={state}>
             <AfterSubscribeButton
               action={state.afterSubscribeAction}
+              analyticsContext={getGoalJourneyContext(state)}
               language={state.language}
               onNavigate={onAfterSubscribeNavigate}
             />
@@ -70,6 +72,7 @@ export const ThanksPage = ({
         {state.subscribed && state.afterSubscribeAction.type !== "disabled" ? (
           <AfterSubscribeButton
             action={state.afterSubscribeAction}
+            analyticsContext={getGoalJourneyContext(state)}
             language={state.language}
             onNavigate={onAfterSubscribeNavigate}
           />

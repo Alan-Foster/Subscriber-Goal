@@ -19,6 +19,7 @@
     "type-check": "tsc --build"
   },
   "dependencies": {
+    "@devvit/analytics": "0.14.2",
     "@devvit/start": "0.14.2",
     "@devvit/web": "0.14.2",
     "clsx": "2.1.1",

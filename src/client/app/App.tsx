@@ -17,6 +17,11 @@ import { CompletedPage } from "./pages/CompletedPage";
 import { SubGoalPage } from "./pages/SubGoalPage";
 import { ThanksPage } from "./pages/ThanksPage";
 import { useCelebration } from "./hooks/useCelebration";
+import { isCelebrationInteractiveTarget } from "./hooks/useCelebration";
+import {
+  getGoalJourneyContext,
+  goalJourneyAnalytics,
+} from "../analytics/goalJourneyAnalytics";
 
 type PageName = "subGoal" | "thanks" | "completed" | "tinyConfirmation";
 
@@ -33,17 +38,25 @@ export const App = () => {
   } = useSubGoal();
   const [page, setPage] = useState<PageName>("subGoal");
   const {
-    celebrationKey,
+    celebrationBursts,
     interactionHandlers,
-    pieceCount,
     prefersReducedMotion,
-    showCelebration,
     triggerCelebration,
   } = useCelebration();
   const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
+  const subscribeAttemptRef = useRef(false);
   const [shareUsername, setShareUsername] = useState(true);
   const messages = getSubGoalPostMessages(state?.language);
+  const readyReportedRef = useRef(false);
+
+  useEffect(() => {
+    if (readyReportedRef.current || loading || prohibited || state === null) {
+      return;
+    }
+    readyReportedRef.current = true;
+    goalJourneyAnalytics.appReady();
+  }, [loading, prohibited, state]);
 
   useEffect(() => {
     if (state && state.postHeight !== "tiny" && state.subreddit.isNsfw) {
@@ -81,9 +94,10 @@ export const App = () => {
       ? state?.appSettings.promoSubreddit
       : undefined;
   const handleVisitPromo = () => {
-    if (!promoSubreddit) {
+    if (!promoSubreddit || !state) {
       return;
     }
+    goalJourneyAnalytics.promoSubgoalActivated(getGoalJourneyContext(state));
     navigateTo(`https://www.reddit.com/r/${promoSubreddit}/`);
   };
   const handleAfterSubscribeNavigate = (target: string | NavigationTarget) => {
@@ -102,31 +116,47 @@ export const App = () => {
   }, [page, triggerCelebration]);
 
   const handleSubscribe = async () => {
-    if (!state) {
+    if (!state || subscribeAttemptRef.current) {
       return;
     }
+    subscribeAttemptRef.current = true;
     const authenticated =
       state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
+    const analyticsContext = getGoalJourneyContext(state);
+    goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!authenticated) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "login_required");
       setError(messages.loginRequired);
       showToast(messages.loginRequired);
+      subscribeAttemptRef.current = false;
       return;
     }
     const payload =
       state.postHeight === "tiny"
         ? undefined
         : { shareUsername: state.subreddit.isNsfw ? false : shareUsername };
-    const { state: updatedState, error: subscribeError } =
-      await subscribe(payload);
+    const {
+      state: updatedState,
+      error: subscribeError,
+      journeyTelemetryHandled,
+    } = await subscribe(payload);
     if (subscribeError) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "api_error");
       showToast(
         state.language === "en" ? subscribeError : messages.subscribeErrorToast,
       );
+      subscribeAttemptRef.current = false;
       return;
     }
     if (!updatedState) {
+      goalJourneyAnalytics.subscribeFailed(analyticsContext, "missing_result");
+      subscribeAttemptRef.current = false;
       return;
     }
+    goalJourneyAnalytics.subscribeSucceeded(
+      analyticsContext,
+      journeyTelemetryHandled === true,
+    );
     if (updatedState.postHeight !== "tiny" && updatedState.completedTime) {
       setPage("completed");
     } else if (updatedState.postHeight === "tiny") {
@@ -234,6 +264,19 @@ export const App = () => {
       data-app-interaction-shell="true"
       data-sg-theme={frameColorTheme}
       {...(state && !prohibited ? interactionHandlers : {})}
+      onClickCapture={
+        state && !prohibited
+          ? (event) => {
+              interactionHandlers.onClickCapture(event);
+              goalJourneyAnalytics.committedInteraction();
+              if (!isCelebrationInteractiveTarget(event.target)) {
+                goalJourneyAnalytics.celebrationTriggered(
+                  getGoalJourneyContext(state),
+                );
+              }
+            }
+          : undefined
+      }
     >
       {state?.postHeight === "tiny" && content ? (
         <TinyViewTransition transitionKey={page}>{content}</TinyViewTransition>
@@ -248,15 +291,16 @@ export const App = () => {
         <TinyPromoLink
           promoSubreddit={state.promoSubreddit}
           language={state.language}
+          analyticsContext={getGoalJourneyContext(state)}
         />
       ) : null}
-      {showCelebration ? (
+      {celebrationBursts.map((burst) => (
         <ConfettiBurst
-          key={celebrationKey}
-          pieceCount={pieceCount}
+          key={burst.id}
+          pieceCount={burst.pieceCount}
           reducedMotion={prefersReducedMotion}
         />
-      ) : null}
+      ))}
     </div>
   );
 };

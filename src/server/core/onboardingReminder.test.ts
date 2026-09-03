@@ -85,7 +85,7 @@ describe("onboarding reminder", () => {
       "https://developers.reddit.com/apps/subscriber-goal",
     );
     expect(message.bodyMarkdown).toContain("u/Alan-Foster");
-    expect(message.bodyMarkdown).toContain("5 minutes");
+    expect(message.bodyMarkdown).toContain("23 hours and 59 minutes");
   });
 
   it("waits one minute, then sends one modmail when no goal exists", async () => {

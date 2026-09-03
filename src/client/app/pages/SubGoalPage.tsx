@@ -7,6 +7,7 @@ import { TopButtons } from "../components/TopButtons";
 import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
 import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
+import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 
 type SubGoalPageProps = {
   state: SubGoalState;
@@ -55,6 +56,7 @@ export const SubGoalPage = ({
     const actionButton = afterSubscribeAction ? (
       <AfterSubscribeButton
         action={afterSubscribeAction}
+        analyticsContext={getGoalJourneyContext(state)}
         language={state.language}
         onNavigate={onAfterSubscribeNavigate}
       />
@@ -140,6 +142,7 @@ export const SubGoalPage = ({
       {afterSubscribeAction ? (
         <AfterSubscribeButton
           action={afterSubscribeAction}
+          analyticsContext={getGoalJourneyContext(state)}
           language={state.language}
           onNavigate={onAfterSubscribeNavigate}
         />

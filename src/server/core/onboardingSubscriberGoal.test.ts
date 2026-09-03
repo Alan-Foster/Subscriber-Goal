@@ -150,8 +150,10 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("re-arms five minutes after each install or upgrade lifecycle event", async () => {
-    expect(onboardingSubscriberGoalDelayMs).toBe(5 * 60 * 1000);
+  it("re-arms 23 hours and 59 minutes after each install or upgrade lifecycle event", async () => {
+    expect(onboardingSubscriberGoalDelayMs).toBe(
+      (23 * 60 + 59) * 60 * 1000,
+    );
 
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
