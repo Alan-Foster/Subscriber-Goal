@@ -4,6 +4,7 @@ import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
 import { useSubGoal } from "../hooks/useSubGoal";
 import { ConfettiBurst } from "./components/ConfettiBurst";
+import { AmbientConfetti } from "./components/AmbientConfetti";
 import { SkeletonPage } from "./components/SkeletonPage";
 import {
   TinySubscriptionConfirmation,
@@ -43,7 +44,6 @@ export const App = () => {
     prefersReducedMotion,
     triggerCelebration,
   } = useCelebration();
-  const completedConfettiShownRef = useRef(false);
   const returnNoticeTimeoutRef = useRef<number | null>(null);
   const subscribeAttemptRef = useRef(false);
   const [shareUsername, setShareUsername] = useState(true);
@@ -103,17 +103,6 @@ export const App = () => {
   const handleAfterSubscribeNavigate = (target: string | NavigationTarget) => {
     navigateTo(target);
   };
-
-  useEffect(() => {
-    if (page === "completed") {
-      if (!completedConfettiShownRef.current) {
-        triggerCelebration(confettiPresets.completed);
-        completedConfettiShownRef.current = true;
-      }
-    } else {
-      completedConfettiShownRef.current = false;
-    }
-  }, [page, triggerCelebration]);
 
   const handleSubscribe = async () => {
     if (!state || subscribeAttemptRef.current) {
@@ -278,21 +267,28 @@ export const App = () => {
           : undefined
       }
     >
-      {state?.postHeight === "tiny" && content ? (
-        <TinyViewTransition transitionKey={page}>{content}</TinyViewTransition>
-      ) : content ? (
-        content
-      ) : (
-        <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
-          {prohibited ? prohibitedContentMessage : messages.loadError}
-        </div>
-      )}
-      {state?.postHeight === "tiny" ? (
-        <TinyPromoLink
-          promoSubreddit={state.promoSubreddit}
-          language={state.language}
-          analyticsContext={getGoalJourneyContext(state)}
-        />
+      <div className="sg-goal-ui flex h-full w-full flex-col items-center justify-center">
+        {state?.postHeight === "tiny" && content ? (
+          <TinyViewTransition transitionKey={page}>
+            {content}
+          </TinyViewTransition>
+        ) : content ? (
+          content
+        ) : (
+          <div className="text-center text-sm text-[color:var(--sg-text-muted)]">
+            {prohibited ? prohibitedContentMessage : messages.loadError}
+          </div>
+        )}
+        {state?.postHeight === "tiny" ? (
+          <TinyPromoLink
+            promoSubreddit={state.promoSubreddit}
+            language={state.language}
+            analyticsContext={getGoalJourneyContext(state)}
+          />
+        ) : null}
+      </div>
+      {page === "completed" && state && state.postHeight !== "tiny" ? (
+        <AmbientConfetti reducedMotion={prefersReducedMotion} />
       ) : null}
       {celebrationBursts.map((burst) => (
         <ConfettiBurst

@@ -27,6 +27,17 @@ export const afterSubscribePresetTypes = [
 ] as const;
 export type AfterSubscribePreset = (typeof afterSubscribePresetTypes)[number];
 
+export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "green";
+export const afterSubscribeCreatePostSubscriberThreshold = 10_000;
+
+export function getDefaultAfterSubscribePreset(
+  numberOfSubscribers: number,
+): AfterSubscribePreset {
+  return numberOfSubscribers < afterSubscribeCreatePostSubscriberThreshold
+    ? "create-post"
+    : "top-post-day";
+}
+
 export type AfterSubscribeAction =
   | { type: "disabled" }
   | {
@@ -66,6 +77,29 @@ export function createTopPostFallbackAction({
     buttonText: getAfterSubscribePresetMessages(language).viewTopPostToday,
     colorTheme,
   };
+}
+
+export function createDefaultAfterSubscribeAction({
+  language,
+  subredditName,
+  numberOfSubscribers,
+}: {
+  language: SubGoalLanguage;
+  subredditName: string;
+  numberOfSubscribers: number;
+}): AfterSubscribeAction {
+  if (getDefaultAfterSubscribePreset(numberOfSubscribers) === "create-post") {
+    return {
+      type: "link",
+      buttonText: getAfterSubscribePresetMessages(language).createNewPost,
+      url: `https://www.reddit.com/r/${subredditName}/submit/`,
+      colorTheme: defaultAfterSubscribeColorTheme,
+    };
+  }
+  return createTopPostFallbackAction({
+    language,
+    colorTheme: defaultAfterSubscribeColorTheme,
+  });
 }
 
 export function resolveAfterSubscribeAction({

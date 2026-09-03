@@ -10,7 +10,7 @@ describe("confettiPresets", () => {
     });
   });
 
-  it("keeps subscribe and completed celebrations unchanged", () => {
+  it("keeps interaction celebrations unchanged", () => {
     expect(confettiPresets.default).toEqual({
       pieceCount: 70,
       durationMs: 2600,
@@ -21,10 +21,6 @@ describe("confettiPresets", () => {
     });
     expect(confettiPresets.subscribe).toEqual({
       durationMs: 2800,
-    });
-    expect(confettiPresets.completed).toEqual({
-      durationMs: 2800,
-      allowRestart: true,
     });
   });
 });

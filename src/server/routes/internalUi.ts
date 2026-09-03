@@ -58,6 +58,8 @@ import { toErrorMessage } from "../utils/crosspostLogs";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import {
   createTopPostFallbackAction,
+  defaultAfterSubscribeColorTheme,
+  getDefaultAfterSubscribePreset,
   isAfterSubscribePreset,
   resolveAfterSubscribeAction,
   type AfterSubscribeActionType,
@@ -548,7 +550,7 @@ function buildCreateGoalDetailsForm(
               "This controls the subscribe button and button glow color.",
             required: true,
           },
-          getAfterSubscribeActionField(),
+          getAfterSubscribeActionField(subreddit.numberOfSubscribers),
         ],
       },
     };
@@ -591,7 +593,7 @@ function buildCreateGoalDetailsForm(
             "This controls the subscribe button, progress bar, and button glow color.",
           required: true,
         },
-        getAfterSubscribeActionField(),
+        getAfterSubscribeActionField(subreddit.numberOfSubscribers),
         {
           name: "autoCreateNextGoal",
           label: "Create a New Subscriber Goal 24 Hours after Goal Success",
@@ -619,7 +621,6 @@ function buildCreateGoalFollowUpForm(
   const presetDefaults = getAfterSubscribePresetDefaults(
     draft.details.afterSubscribePreset,
     draft.language,
-    draft.details.colorTheme,
   );
   const sharedFields = [
     {
@@ -699,23 +700,26 @@ function getColorOptions(): Array<{ label: string; value: string }> {
   return subGoalColorThemes.map((value) => ({ label: labels[value], value }));
 }
 
-function getAfterSubscribeActionField() {
+function getAfterSubscribeActionField(numberOfSubscribers: number) {
   return {
     name: "afterSubscribePreset",
     label: "What Should the Button Do After Subscription?",
     type: "select" as const,
-    defaultValue: ["top-post-day"],
+    defaultValue: [getDefaultAfterSubscribePreset(numberOfSubscribers)],
     options: [
       { label: "Link to the Top Post Today", value: "top-post-day" },
       {
         label: "Link to the Most Recent Post Today",
         value: "newest-post",
       },
+      { label: "Link to Create a New Text Post", value: "create-post" },
+      {
+        label: "Link to Create a New Image Post",
+        value: "share-picture",
+      },
       { label: "Link to a Discord Server", value: "discord" },
       { label: "Link to a Webpage URL", value: "web-link" },
       { label: "Link to the Subreddit Wiki", value: "wiki" },
-      { label: "Link to Create a New Text Post", value: "create-post" },
-      { label: "Link to Create an Image Post", value: "share-picture" },
     ],
     helpText: "Choose what subscribed users can do from the post.",
     required: true,
@@ -725,7 +729,6 @@ function getAfterSubscribeActionField() {
 function getAfterSubscribePresetDefaults(
   preset: AfterSubscribePreset,
   language: (typeof subGoalLanguages)[number],
-  primaryColorTheme: (typeof subGoalColorThemes)[number],
 ): {
   buttonText: string;
   colorTheme: (typeof subGoalColorThemes)[number];
@@ -736,41 +739,45 @@ function getAfterSubscribePresetDefaults(
     case "discord":
       return {
         buttonText: messages.joinDiscord,
-        colorTheme: "blue",
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: true,
       };
     case "top-post-day":
       return {
         buttonText: messages.viewTopPostToday,
-        colorTheme: primaryColorTheme,
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: false,
       };
     case "wiki":
       return {
         buttonText: messages.readWiki,
-        colorTheme: primaryColorTheme,
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: true,
       };
     case "create-post":
       return {
         buttonText: messages.createNewPost,
-        colorTheme: primaryColorTheme,
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: false,
       };
     case "share-picture":
       return {
         buttonText: messages.sharePicture,
-        colorTheme: primaryColorTheme,
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: false,
       };
     case "newest-post":
       return {
         buttonText: messages.viewMostRecentPostToday,
-        colorTheme: primaryColorTheme,
+        colorTheme: defaultAfterSubscribeColorTheme,
         showUrl: false,
       };
     case "web-link":
-      return { buttonText: "", colorTheme: primaryColorTheme, showUrl: true };
+      return {
+        buttonText: "",
+        colorTheme: defaultAfterSubscribeColorTheme,
+        showUrl: true,
+      };
   }
 }
 
@@ -809,7 +816,7 @@ async function submitCreateGoalStepTwo(
     const requestedPreset = values.afterSubscribePreset?.[0];
     const afterSubscribePreset = isAfterSubscribePreset(requestedPreset)
       ? requestedPreset
-      : "top-post-day";
+      : getDefaultAfterSubscribePreset(subreddit.numberOfSubscribers);
     let details: CreateGoalDraftDetails;
     if (expectedKind === "subscribe-only") {
       details = {
@@ -932,7 +939,6 @@ async function submitCreateGoalFollowUp(
     const presetDefaults = getAfterSubscribePresetDefaults(
       draft.details.afterSubscribePreset,
       draft.language,
-      draft.details.colorTheme,
     );
     const resolvedActionInput = resolvePresetActionInput(
       draft.details.afterSubscribePreset,
@@ -950,7 +956,7 @@ async function submitCreateGoalFollowUp(
         language: draft.language,
         colorTheme: isSubGoalColorTheme(values.afterSubscribeColorTheme?.[0])
           ? values.afterSubscribeColorTheme[0]
-          : draft.details.colorTheme,
+          : presetDefaults.colorTheme,
       }),
     });
     const appSettings = getAppSettings();

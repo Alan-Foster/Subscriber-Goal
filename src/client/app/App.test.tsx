@@ -322,42 +322,52 @@ describe("App", () => {
     container.remove();
   });
 
-  it("automatically celebrates an already-completed goal", async () => {
-    useWideViewportWithoutReducedMotion();
-    hoisted.state = {
-      ...hoisted.createState(),
-      completedTime: Date.now(),
-      subscribed: true,
-      afterSubscribeAction: {
-        type: "link",
-        buttonText: "Join the Discord",
-        url: "https://discord.com/invite/example",
-        colorTheme: "blue",
-      },
-    } as SubGoalState;
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
+  it.each(["regular", "short"] as const)(
+    "shows continuous ambient confetti on an already-completed %s goal",
+    async (postHeight) => {
+      useWideViewportWithoutReducedMotion();
+      hoisted.state = {
+        ...hoisted.createState(),
+        postHeight,
+        completedTime: Date.now(),
+        subscribed: true,
+        afterSubscribeAction: {
+          type: "link",
+          buttonText: "Join the Discord",
+          url: "https://discord.com/invite/example",
+          colorTheme: "blue",
+        },
+      } as SubGoalState;
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
 
-    await act(async () => root.render(<App />));
+      await act(async () => root.render(<App />));
 
-    expect(container.textContent).toContain("reached 1000 subscribers");
-    expect(
-      container
-        .querySelector('[data-celebration-effect="confetti"]')
-        ?.getAttribute("data-confetti-piece-count"),
-    ).toBe("70");
-    expect(
-      container
-        .querySelector('[data-app-interaction-shell="true"]')
-        ?.getAttribute("data-sg-theme"),
-    ).toBe("red");
+      expect(container.textContent).toContain("reached 1000 subscribers");
+      expect(
+        container
+          .querySelector('[data-celebration-effect="ambient-confetti"]')
+          ?.getAttribute("data-confetti-piece-count"),
+      ).toBe("30");
+      expect(
+        container.querySelectorAll(".ambient-confetti-piece"),
+      ).toHaveLength(30);
+      expect(
+        container.querySelector('[data-celebration-effect="confetti"]'),
+      ).toBeNull();
+      expect(
+        container
+          .querySelector('[data-app-interaction-shell="true"]')
+          ?.getAttribute("data-sg-theme"),
+      ).toBe("red");
 
-    await act(async () => root.unmount());
-    container.remove();
-  });
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  );
 
-  it("keeps active click feedback during automatic completion celebration", async () => {
+  it("keeps active click feedback when continuous completion confetti starts", async () => {
     useWideViewportWithoutReducedMotion();
     const container = document.createElement("div");
     document.body.append(container);
@@ -384,8 +394,112 @@ describe("App", () => {
       Array.from(
         container.querySelectorAll('[data-celebration-effect="confetti"]'),
       ).map((effect) => effect.getAttribute("data-confetti-piece-count")),
-    ).toEqual(["28", "70"]);
-    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(98);
+    ).toEqual(["28"]);
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(28);
+    expect(container.querySelectorAll(".ambient-confetti-piece")).toHaveLength(
+      30,
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("does not duplicate ambient confetti during completed-state refreshes", async () => {
+    useWideViewportWithoutReducedMotion();
+    const completedTime = Date.now();
+    hoisted.state = {
+      ...hoisted.createState(),
+      completedTime,
+    } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    hoisted.state = { ...hoisted.state } as SubGoalState;
+    await act(async () => root.render(<App />));
+
+    expect(
+      container.querySelectorAll(
+        '[data-celebration-effect="ambient-confetti"]',
+      ),
+    ).toHaveLength(1);
+    expect(container.querySelectorAll(".ambient-confetti-piece")).toHaveLength(
+      30,
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps the Subscribe burst when a subscription completes the goal", async () => {
+    useWideViewportWithoutReducedMotion();
+    const completedState = {
+      ...hoisted.createState(),
+      completedTime: Date.now(),
+      subscribed: true,
+      subreddit: {
+        ...hoisted.createState().subreddit,
+        subscribers: 1000,
+      },
+    } as SubGoalState;
+    hoisted.subscribe.mockResolvedValue({
+      state: completedState,
+      error: null,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => {
+      subscribeButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("70");
+    expect(container.querySelectorAll(".ambient-confetti-piece")).toHaveLength(
+      30,
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("does not show ambient completion confetti for reduced motion", async () => {
+    window.matchMedia = vi.fn(
+      (query: string) =>
+        ({
+          matches: query === "(prefers-reduced-motion: reduce)",
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+    hoisted.state = {
+      ...hoisted.createState(),
+      completedTime: Date.now(),
+    } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+
+    expect(
+      container.querySelector('[data-celebration-effect="ambient-confetti"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-celebration-effect="flash"]'),
+    ).toBeNull();
 
     await act(async () => root.unmount());
     container.remove();

@@ -23,5 +23,18 @@ describe("client subscribe attention styles", () => {
     expect(css).toMatch(
       /\.sg-goal-frame::after\s*\{[^}]*border-radius:\s*var\(--sg-goal-frame-radius\);[^}]*box-shadow:\s*inset 0 0 0 2px var\(--sg-accent\);[^}]*pointer-events:\s*none;/s,
     );
+    expect(css).toMatch(/\.sg-goal-frame\s*\{[^}]*isolation:\s*isolate;/s);
+    expect(css).toMatch(
+      /\.sg-goal-ui\s*\{[^}]*position:\s*relative;[^}]*z-index:\s*10;/s,
+    );
+    expect(css).toMatch(
+      /\.confetti\s*\{[^}]*z-index:\s*0;[\s\S]*\.ambient-confetti\s*\{[^}]*z-index:\s*0;[\s\S]*\.celebration-flash\s*\{[^}]*z-index:\s*0;/s,
+    );
+    expect(css).toMatch(
+      /\.ambient-confetti-piece\s*\{[^}]*animation-name:\s*ambient-confetti-fall;[^}]*animation-timing-function:\s*linear;[^}]*animation-iteration-count:\s*infinite;/s,
+    );
+    expect(css).toMatch(
+      /@keyframes ambient-confetti-fall\s*\{[\s\S]*transform:\s*translate3d\([\s\S]*calc\(100% \+ 28px\)/,
+    );
   });
 });

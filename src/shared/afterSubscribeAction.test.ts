@@ -1,8 +1,52 @@
 import { describe, expect, it } from "vitest";
 import {
+  createDefaultAfterSubscribeAction,
   createTopPostFallbackAction,
+  defaultAfterSubscribeColorTheme,
+  getDefaultAfterSubscribePreset,
   resolveAfterSubscribeAction,
 } from "./afterSubscribeAction";
+
+describe("after-subscribe defaults", () => {
+  it.each([
+    [9_999, "create-post"],
+    [10_000, "top-post-day"],
+  ] as const)(
+    "selects the default preset at %i subscribers",
+    (count, preset) => {
+      expect(getDefaultAfterSubscribePreset(count)).toBe(preset);
+    },
+  );
+
+  it("builds the small-subreddit create-post action in green", () => {
+    expect(
+      createDefaultAfterSubscribeAction({
+        language: "en",
+        subredditName: "ExampleSub",
+        numberOfSubscribers: 9_999,
+      }),
+    ).toEqual({
+      type: "link",
+      buttonText: "Create a New Post",
+      url: "https://www.reddit.com/r/ExampleSub/submit/",
+      colorTheme: defaultAfterSubscribeColorTheme,
+    });
+  });
+
+  it("builds the larger-subreddit top-post action in green", () => {
+    expect(
+      createDefaultAfterSubscribeAction({
+        language: "en",
+        subredditName: "ExampleSub",
+        numberOfSubscribers: 10_000,
+      }),
+    ).toEqual({
+      type: "top-post-day",
+      buttonText: "View the Top Post Today",
+      colorTheme: defaultAfterSubscribeColorTheme,
+    });
+  });
+});
 
 describe("resolveAfterSubscribeAction", () => {
   it("keeps the existing disabled behavior", () => {

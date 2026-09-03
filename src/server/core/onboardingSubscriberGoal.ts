@@ -1,4 +1,4 @@
-import { createTopPostFallbackAction } from "../../shared/afterSubscribeAction";
+import { createDefaultAfterSubscribeAction } from "../../shared/afterSubscribeAction";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import {
   subscriberGoalPostKind,
@@ -256,9 +256,10 @@ export async function processDueOnboardingSubscriberGoal({
         postHeight: useTinyPost ? "tiny" : "regular",
         autoCreateNextGoal: !useTinyPost,
         language: "en",
-        afterSubscribeAction: createTopPostFallbackAction({
+        afterSubscribeAction: createDefaultAfterSubscribeAction({
           language: "en",
-          colorTheme: "red",
+          subredditName: subreddit.name,
+          numberOfSubscribers: subreddit.numberOfSubscribers,
         }),
       },
     });

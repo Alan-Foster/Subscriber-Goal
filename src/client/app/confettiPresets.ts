@@ -10,10 +10,6 @@ export const confettiPresets = {
   subscribe: {
     durationMs: 2800,
   },
-  completed: {
-    durationMs: 2800,
-    allowRestart: true,
-  },
   logoCelebrate: {
     pieceCount: 48,
     durationMs: 3600,

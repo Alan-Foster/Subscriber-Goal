@@ -487,6 +487,20 @@ describe("internalUi color theme create goal routes", () => {
       ),
     ).toMatchObject({ defaultValue: 150 });
     expect(
+      response.showForm.form.fields.find(
+        (field) => field.name === "colorTheme",
+      ),
+    ).toMatchObject({
+      defaultValue: ["red"],
+      options: [
+        { label: "Red", value: "red" },
+        { label: "Blue", value: "blue" },
+        { label: "Green", value: "green" },
+        { label: "Purple", value: "purple" },
+        { label: "Pink", value: "pink" },
+      ],
+    });
+    expect(
       response.showForm.form.fields.find((field) => field.name === "crosspost"),
     ).toMatchObject({ defaultValue: true, disabled: false });
     expect(
@@ -494,18 +508,21 @@ describe("internalUi color theme create goal routes", () => {
         (field) => field.name === "afterSubscribePreset",
       ),
     ).toMatchObject({
-      defaultValue: ["top-post-day"],
+      defaultValue: ["create-post"],
       options: [
         { label: "Link to the Top Post Today", value: "top-post-day" },
         {
           label: "Link to the Most Recent Post Today",
           value: "newest-post",
         },
+        { label: "Link to Create a New Text Post", value: "create-post" },
+        {
+          label: "Link to Create a New Image Post",
+          value: "share-picture",
+        },
         { label: "Link to a Discord Server", value: "discord" },
         { label: "Link to a Webpage URL", value: "web-link" },
         { label: "Link to the Subreddit Wiki", value: "wiki" },
-        { label: "Link to Create a New Text Post", value: "create-post" },
-        { label: "Link to Create an Image Post", value: "share-picture" },
       ],
     });
     expect(
@@ -569,8 +586,53 @@ describe("internalUi color theme create goal routes", () => {
       response.showForm.form.fields.find(
         (field) => field.name === "afterSubscribePreset",
       ),
-    ).toMatchObject({ defaultValue: ["top-post-day"] });
+    ).toMatchObject({ defaultValue: ["create-post"] });
   });
+
+  it.each([
+    ["regular", 9_999, "create-post"],
+    ["short", 9_999, "create-post"],
+    ["tiny", 9_999, "create-post"],
+    ["regular", 10_000, "top-post-day"],
+    ["short", 10_000, "top-post-day"],
+    ["tiny", 10_000, "top-post-day"],
+  ] as const)(
+    "defaults %s posts at %i subscribers to %s",
+    async (postHeight, numberOfSubscribers, expectedPreset) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers,
+        isNsfw: false,
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.forms.createGoalSetup)?.(
+        {
+          body: {
+            language: ["en"],
+            subredditDisplayName: "ExampleSub",
+            postHeight: [postHeight],
+          },
+        } as Request,
+        { json } as unknown as Response,
+      );
+
+      const fields = (
+        json.mock.calls[0]?.[0] as {
+          showForm: {
+            form: {
+              fields: Array<{ name: string; defaultValue?: unknown }>;
+            };
+          };
+        }
+      ).showForm.form.fields;
+      expect(
+        fields.find((field) => field.name === "afterSubscribePreset"),
+      ).toMatchObject({ defaultValue: [expectedPreset] });
+    },
+  );
 
   it("stores goal Step 2 and opens the numbered goal follow-up form", async () => {
     seedCreateGoalDraft("regular", "en", { stage: "details" });
@@ -642,7 +704,7 @@ describe("internalUi color theme create goal routes", () => {
         subscriberGoal: 250,
         colorTheme: "pink",
         crosspost: true,
-        afterSubscribePreset: "top-post-day",
+        afterSubscribePreset: "create-post",
         autoCreateNextGoal: false,
       },
     });
@@ -687,19 +749,19 @@ describe("internalUi color theme create goal routes", () => {
         kind: "subscribe-only",
         postTitle: "Subscribe Here",
         colorTheme: "pink",
-        afterSubscribePreset: "top-post-day",
+        afterSubscribePreset: "create-post",
       },
     });
   });
 
   it.each([
-    ["web-link", undefined, true, "pink"],
-    ["discord", "Únete al Discord", true, "blue"],
-    ["top-post-day", "Ver la publicación destacada de hoy", false, "pink"],
-    ["wiki", "Leer la Wiki", true, "pink"],
-    ["create-post", "Crear una publicación", false, "pink"],
-    ["share-picture", "Compartir una imagen", false, "pink"],
-    ["newest-post", "Ver la publicación más reciente de hoy", false, "pink"],
+    ["web-link", undefined, true, "green"],
+    ["discord", "Únete al Discord", true, "green"],
+    ["top-post-day", "Ver la publicación destacada de hoy", false, "green"],
+    ["wiki", "Leer la Wiki", true, "green"],
+    ["create-post", "Crear una publicación", false, "green"],
+    ["share-picture", "Compartir una imagen", false, "green"],
+    ["newest-post", "Ver la publicación más reciente de hoy", false, "green"],
   ] as const)(
     "builds the %s preset follow-up fields and localized defaults",
     async (preset, buttonText, showUrl, colorTheme) => {
@@ -722,7 +784,11 @@ describe("internalUi color theme create goal routes", () => {
         json.mock.calls[0]?.[0] as {
           showForm: {
             form: {
-              fields: Array<{ name: string; defaultValue?: unknown }>;
+              fields: Array<{
+                name: string;
+                defaultValue?: unknown;
+                options?: Array<{ label: string; value: string }>;
+              }>;
             };
           };
         }
@@ -741,6 +807,16 @@ describe("internalUi color theme create goal routes", () => {
         fields.find((field) => field.name === "afterSubscribeColorTheme")
           ?.defaultValue,
       ).toEqual([colorTheme]);
+      expect(
+        fields.find((field) => field.name === "afterSubscribeColorTheme")
+          ?.options,
+      ).toEqual([
+        { label: "Red", value: "red" },
+        { label: "Blue", value: "blue" },
+        { label: "Green", value: "green" },
+        { label: "Purple", value: "purple" },
+        { label: "Pink", value: "pink" },
+      ]);
     },
   );
 
@@ -927,7 +1003,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "Ver la publicación destacada de hoy",
-        colorTheme: "blue",
+        colorTheme: "green",
       },
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
@@ -981,7 +1057,7 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("uses the localized Discord label and Blue default when only its URL is entered", async () => {
+  it("uses the localized Discord label and Green default when only its URL is entered", async () => {
     seedCreateGoalDraft("tiny", "es", {
       colorTheme: "pink",
       afterSubscribePreset: "discord",
@@ -1008,7 +1084,7 @@ describe("internalUi color theme create goal routes", () => {
         type: "link",
         buttonText: "Únete al Discord",
         url: "https://discord.gg/example",
-        colorTheme: "blue",
+        colorTheme: "green",
       },
     );
   });
@@ -1081,7 +1157,7 @@ describe("internalUi color theme create goal routes", () => {
         {
           type: "top-post-day",
           buttonText: "View the Top Post Today",
-          colorTheme: "red",
+          colorTheme: "green",
         },
       );
     },
@@ -1115,7 +1191,7 @@ describe("internalUi color theme create goal routes", () => {
           type: "link",
           buttonText,
           url: "https://www.reddit.com/r/ExampleSub/submit/",
-          colorTheme: "pink",
+          colorTheme: "green",
         },
       );
     },
@@ -1191,7 +1267,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "red",
+        colorTheme: "green",
       },
     );
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
@@ -1444,7 +1520,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "red",
+        colorTheme: "green",
       },
     );
   });
@@ -1560,7 +1636,7 @@ describe("internalUi color theme create goal routes", () => {
       {
         type: "top-post-day",
         buttonText: "View the Top Post Today",
-        colorTheme: "red",
+        colorTheme: "green",
       },
     );
   });

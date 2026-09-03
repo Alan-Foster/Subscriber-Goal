@@ -149,41 +149,43 @@ export const SubscribeOnlyApp = () => {
         }
       }}
     >
-      <TinyViewTransition transitionKey={effectiveViewPhase}>
-        {effectiveViewPhase === "confirmation" ? (
-          <TinySubscriptionConfirmation
-            language={state.language}
-            subredditName={state.subreddit.name}
-          />
-        ) : effectiveViewPhase === "subscribed" ? (
-          <ThanksPage
-            state={state}
-            onReturn={() => undefined}
-            onVisitPromoSub={() => undefined}
-            onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-              navigateTo(target)
-            }
-          />
-        ) : (
-          <SubGoalPage
-            state={state}
-            onVisitPromoSub={() => undefined}
-            shareUsername={false}
-            onShareUsernameChange={() => undefined}
-            onSubscribe={() => void handleSubscribe()}
-            isSubmitting={submitting}
-            notice={null}
-            onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-              navigateTo(target)
-            }
-          />
-        )}
-      </TinyViewTransition>
-      <TinyPromoLink
-        promoSubreddit={state.promoSubreddit}
-        language={state.language}
-        analyticsContext={getGoalJourneyContext(state)}
-      />
+      <div className="sg-goal-ui h-full w-full">
+        <TinyViewTransition transitionKey={effectiveViewPhase}>
+          {effectiveViewPhase === "confirmation" ? (
+            <TinySubscriptionConfirmation
+              language={state.language}
+              subredditName={state.subreddit.name}
+            />
+          ) : effectiveViewPhase === "subscribed" ? (
+            <ThanksPage
+              state={state}
+              onReturn={() => undefined}
+              onVisitPromoSub={() => undefined}
+              onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+                navigateTo(target)
+              }
+            />
+          ) : (
+            <SubGoalPage
+              state={state}
+              onVisitPromoSub={() => undefined}
+              shareUsername={false}
+              onShareUsernameChange={() => undefined}
+              onSubscribe={() => void handleSubscribe()}
+              isSubmitting={submitting}
+              notice={null}
+              onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+                navigateTo(target)
+              }
+            />
+          )}
+        </TinyViewTransition>
+        <TinyPromoLink
+          promoSubreddit={state.promoSubreddit}
+          language={state.language}
+          analyticsContext={getGoalJourneyContext(state)}
+        />
+      </div>
       {celebrationBursts.map((burst) => (
         <ConfettiBurst
           key={burst.id}

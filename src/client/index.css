@@ -127,6 +127,15 @@ body {
   will-change: opacity, transform;
 }
 
+.sg-goal-frame {
+  isolation: isolate;
+}
+
+.sg-goal-ui {
+  position: relative;
+  z-index: 10;
+}
+
 .sg-goal-frame::after {
   content: "";
   position: absolute;
@@ -140,13 +149,34 @@ body {
 .confetti {
   position: absolute;
   inset: 0;
+  z-index: 0;
   pointer-events: none;
   overflow: hidden;
+}
+
+.ambient-confetti {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ambient-confetti-piece {
+  position: absolute;
+  top: -14px;
+  height: 100%;
+  opacity: 1;
+  animation-name: ambient-confetti-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
 }
 
 .celebration-flash {
   position: absolute;
   inset: 0;
+  z-index: 0;
   border: 3px solid color-mix(in srgb, var(--sg-accent) 72%, transparent);
   box-shadow: inset 0 0 22px
     color-mix(in srgb, var(--sg-accent) 38%, transparent);
@@ -171,6 +201,19 @@ body {
   100% {
     transform: translateY(420px) translateX(var(--confetti-drift, 0px));
     opacity: 1;
+  }
+}
+
+@keyframes ambient-confetti-fall {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(
+      var(--ambient-confetti-drift, 0px),
+      calc(100% + 28px),
+      0
+    );
   }
 }
 

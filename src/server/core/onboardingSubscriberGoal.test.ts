@@ -151,9 +151,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("re-arms 23 hours and 59 minutes after each install or upgrade lifecycle event", async () => {
-    expect(onboardingSubscriberGoalDelayMs).toBe(
-      (23 * 60 + 59) * 60 * 1000,
-    );
+    expect(onboardingSubscriberGoalDelayMs).toBe((23 * 60 + 59) * 60 * 1000);
 
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -405,7 +403,7 @@ describe("onboarding subscriber goal", () => {
     );
   });
 
-  it("creates the requested English Red regular goal and then becomes terminal", async () => {
+  it("creates an English Red regular goal with the small-subreddit Green CTA and then becomes terminal", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -444,8 +442,10 @@ describe("onboarding subscriber goal", () => {
           autoCreateNextGoal: true,
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
-            type: "top-post-day",
-            colorTheme: "red",
+            type: "link",
+            buttonText: "Create a New Post",
+            url: "https://www.reddit.com/r/ExampleSub/submit/",
+            colorTheme: "green",
           }),
         }),
       }),
@@ -526,7 +526,7 @@ describe("onboarding subscriber goal", () => {
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
             type: "top-post-day",
-            colorTheme: "red",
+            colorTheme: "green",
           }),
         }),
       }),
