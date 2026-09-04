@@ -51,6 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
+- 1 7.2 - Hotfix for "Most Upvoted Today" buttons not supporting crossposts and self-referencing SubGoals.
 - 1.7.1 - Improved tiny subscriber post on desktop. Colored Borders on all posts. SubGoal post flairs. Auto-goals on subs above 1m members default to tiny.
 - 1 6.3 - Creation of SubGoal blacklist. Blacklisted subreddits can't create new goals or load existing goals. Devvit 0.14.2
 - 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Automatic 24h goal creation fallback. Devvit 0.14.1
