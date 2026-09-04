@@ -527,8 +527,8 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
       subredditName: "ExampleSub",
       timeframe: "day",
-      limit: 1,
-      pageSize: 1,
+      limit: 25,
+      pageSize: 25,
     });
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
     expect(all).toHaveBeenCalledOnce();
@@ -540,7 +540,64 @@ describe("publicApi routes", () => {
     });
   });
 
-  it("falls back from day to week and month until it finds a valid top post", async () => {
+  it("allows app-authored crossposts in the promo subreddit and skips the current post", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.context.postId = "t3_current";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_subgoal",
+      name: "sUbGoAl",
+      numberOfSubscribers: 100,
+      isNsfw: false,
+    });
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "red",
+      },
+    });
+    hoisted.reddit.getTopPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_current",
+          authorName: "subscriber-goal",
+          url: "https://www.reddit.com/r/SubGoal/comments/current",
+          permalink: "/r/SubGoal/comments/current",
+        },
+        {
+          id: "t3_crosspost",
+          authorName: "/u/SUBSCRIBER-GOAL",
+          crosspostParentId: "t3_source",
+          url: "/r/SourceSub/comments/source",
+          permalink: "/r/SubGoal/comments/crosspost",
+        },
+      ]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
+      subredditName: "sUbGoAl",
+      timeframe: "day",
+      limit: 25,
+      pageSize: 25,
+    });
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(1);
+    expect(json).toHaveBeenCalledWith({
+      target: {
+        url: "https://www.reddit.com/r/SubGoal/comments/crosspost",
+        permalink: "/r/SubGoal/comments/crosspost",
+      },
+    });
+  });
+
+  it("skips app-authored posts outside the promo subreddit", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -550,19 +607,28 @@ describe("publicApi routes", () => {
         colorTheme: "red",
       },
     });
-    hoisted.reddit.getTopPosts
-      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([{ url: " " }]) })
-      .mockReturnValueOnce({
-        all: vi.fn().mockResolvedValue([{ url: "not a URL" }]),
-      })
-      .mockReturnValueOnce({
-        all: vi.fn().mockResolvedValue([
-          {
-            url: "https://www.reddit.com/r/ExampleSub/comments/monthly",
-            permalink: "/r/ExampleSub/comments/monthly",
-          },
-        ]),
-      });
+    hoisted.reddit.getTopPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_app_post",
+          authorName: "Subscriber-Goal",
+          url: "https://www.reddit.com/r/ExampleSub/comments/app",
+          permalink: "/r/ExampleSub/comments/app",
+        },
+        {
+          id: "t3_malformed",
+          authorName: "AnotherMember",
+          url: "not a URL",
+          permalink: "https://example.com/not-a-reddit-post",
+        },
+        {
+          id: "t3_other_post",
+          authorName: "CommunityMember",
+          url: "https://i.redd.it/image.png",
+          permalink: "/r/ExampleSub/comments/other",
+        },
+      ]),
+    });
     const routes = createRouteHarness();
     const json = vi.fn();
 
@@ -571,15 +637,11 @@ describe("publicApi routes", () => {
       { json } as unknown as Response,
     );
 
-    expect(
-      hoisted.reddit.getTopPosts.mock.calls.map(
-        ([options]) => options.timeframe,
-      ),
-    ).toEqual(["day", "week", "month"]);
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(1);
     expect(json).toHaveBeenCalledWith({
       target: {
-        url: "https://www.reddit.com/r/ExampleSub/comments/monthly",
-        permalink: "/r/ExampleSub/comments/monthly",
+        url: "https://www.reddit.com/r/ExampleSub/comments/other",
+        permalink: "/r/ExampleSub/comments/other",
       },
     });
   });
@@ -685,7 +747,7 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
-  it("returns unavailable when a dynamic listing is empty", async () => {
+  it("returns unavailable when all 25 daily candidates are excluded", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -696,7 +758,14 @@ describe("publicApi routes", () => {
       },
     });
     hoisted.reddit.getTopPosts.mockReturnValue({
-      all: vi.fn().mockResolvedValue([]),
+      all: vi.fn().mockResolvedValue(
+        Array.from({ length: 25 }, (_, index) => ({
+          id: `t3_app_${index}`,
+          authorName: "subscriber-goal",
+          url: `https://www.reddit.com/r/ExampleSub/comments/app_${index}`,
+          permalink: `/r/ExampleSub/comments/app_${index}`,
+        })),
+      ),
     });
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -708,11 +777,7 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(404);
-    expect(
-      hoisted.reddit.getTopPosts.mock.calls.map(
-        ([options]) => options.timeframe,
-      ),
-    ).toEqual(["day", "week", "month", "all"]);
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(1);
     expect(json).toHaveBeenCalledWith({
       status: "error",
       message: "No post is currently available.",
@@ -746,8 +811,8 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
       subredditName: "ExampleSub",
       timeframe: "day",
-      limit: 1,
-      pageSize: 1,
+      limit: 25,
+      pageSize: 25,
     });
   });
 

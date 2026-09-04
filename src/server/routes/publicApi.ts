@@ -4,6 +4,7 @@ import type {
   ErrorResponse,
   AfterSubscribeTargetResponse,
   InitResponse,
+  NavigationTarget,
   RefreshResponse,
   RealtimeMessage,
   SubGoalState,
@@ -78,6 +79,9 @@ const buildState = async (
     },
   };
 };
+
+const dynamicPostCandidateLimit = 25;
+const appAccountUsername = "subscriber-goal";
 
 const buildSubscribeOnlyState = async (
   subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
@@ -156,32 +160,43 @@ export function registerPublicApiRoutes(router: Router): void {
           return;
         }
         const subreddit = await reddit.getCurrentSubreddit();
-        let targetPost: { url?: string; permalink?: string | null } | undefined;
+        let target: NavigationTarget | undefined;
         if (action.type === "top-post-day") {
-          for (const timeframe of ["day", "week", "month", "all"] as const) {
-            const [candidate] = await reddit
-              .getTopPosts({
-                subredditName: subreddit.name,
-                timeframe,
-                limit: 1,
-                pageSize: 1,
-              })
-              .all();
-            if (hasUsableNavigationUrl(candidate?.url)) {
-              targetPost = candidate;
-              break;
+          const candidates = await reddit
+            .getTopPosts({
+              subredditName: subreddit.name,
+              timeframe: "day",
+              limit: dynamicPostCandidateLimit,
+              pageSize: dynamicPostCandidateLimit,
+            })
+            .all();
+          const promoSubreddit = getPublicAppSettings().promoSubreddit;
+          const allowAppAccountPosts =
+            subreddit.name.toLowerCase() === promoSubreddit.toLowerCase();
+
+          for (const candidate of candidates) {
+            if (candidate.id.toLowerCase() === postId.toLowerCase()) continue;
+            if (
+              !allowAppAccountPosts &&
+              normalizeRedditUsername(candidate.authorName) ===
+                appAccountUsername
+            ) {
+              continue;
             }
+            target = createPostNavigationTarget(candidate);
+            if (target) break;
           }
         } else {
-          [targetPost] = await reddit
+          const [targetPost] = await reddit
             .getNewPosts({
               subredditName: subreddit.name,
               limit: 1,
               pageSize: 1,
             })
             .all();
+          target = createPostNavigationTarget(targetPost);
         }
-        if (!targetPost || !hasUsableNavigationUrl(targetPost.url)) {
+        if (!target) {
           res.status(404).json({
             status: "error",
             message: "No post is currently available.",
@@ -189,12 +204,7 @@ export function registerPublicApiRoutes(router: Router): void {
           return;
         }
         res.json({
-          target: {
-            url: targetPost.url,
-            ...(targetPost.permalink
-              ? { permalink: targetPost.permalink }
-              : {}),
-          },
+          target,
         } satisfies AfterSubscribeTargetResponse);
       } catch (error) {
         console.error(
@@ -463,4 +473,46 @@ function hasUsableNavigationUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function createPostNavigationTarget(
+  post:
+    | {
+        url?: string;
+        permalink?: string | null;
+      }
+    | undefined,
+): NavigationTarget | undefined {
+  if (typeof post?.permalink === "string" && post.permalink.trim().length > 0) {
+    try {
+      const permalink = post.permalink.trim();
+      const url = new URL(permalink, "https://www.reddit.com");
+      if (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        isRedditHostname(url.hostname)
+      ) {
+        return { url: url.toString(), permalink };
+      }
+    } catch {
+      // Fall back to an absolute post URL below.
+    }
+  }
+  return hasUsableNavigationUrl(post?.url) ? { url: post.url } : undefined;
+}
+
+function isRedditHostname(hostname: string): boolean {
+  const normalizedHostname = hostname.toLowerCase();
+  return (
+    normalizedHostname === "reddit.com" ||
+    normalizedHostname.endsWith(".reddit.com")
+  );
+}
+
+function normalizeRedditUsername(value: unknown): string {
+  return typeof value === "string"
+    ? value
+        .trim()
+        .replace(/^\/?u\//i, "")
+        .toLowerCase()
+    : "";
 }
