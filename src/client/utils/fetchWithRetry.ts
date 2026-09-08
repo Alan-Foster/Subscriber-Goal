@@ -268,6 +268,7 @@ export async function requestJsonWithRetry<T>(
         try {
           await sleep(wait, abortSignal);
         } catch {
+          // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
           emit({
             event: 'terminal',
             attempt,
@@ -331,6 +332,7 @@ export async function requestJsonWithRetry<T>(
       try {
         await sleep(wait, abortSignal);
       } catch {
+        // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
         emit({
           event: 'terminal',
           attempt,
@@ -343,6 +345,12 @@ export async function requestJsonWithRetry<T>(
       nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
     } catch (error) {
       if (didAttemptTimeout) {
+        logDiagnostic(
+          'warn',
+          'client_request_attempt_timeout',
+          { workflow: requestLabel, phase: 'attempt', attempt },
+          error
+        );
         const remaining = timeLeft();
         if (remaining <= 0) {
           emit({
@@ -367,6 +375,7 @@ export async function requestJsonWithRetry<T>(
         try {
           await sleep(wait, abortSignal);
         } catch {
+          // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
           emit({
             event: 'terminal',
             attempt,
@@ -392,6 +401,13 @@ export async function requestJsonWithRetry<T>(
         });
         return { data: null, error: null, aborted: true };
       }
+
+      logDiagnostic(
+        'warn',
+        'client_request_attempt_failed',
+        { workflow: requestLabel, phase: 'attempt', attempt },
+        error
+      );
 
       const message = error instanceof Error ? error.message : 'Request failed';
       const remaining = timeLeft();
@@ -429,6 +445,7 @@ export async function requestJsonWithRetry<T>(
       try {
         await sleep(wait, abortSignal);
       } catch {
+        // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
         emit({
           event: 'terminal',
           attempt,

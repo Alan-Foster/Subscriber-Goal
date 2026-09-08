@@ -286,7 +286,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(
       consoleWarnSpy.mock.calls.filter(([message]) =>
-        String(message).includes('unexpected new-post reason')
+        String(message).includes('unexpected_new_post_reason')
       )
     ).toHaveLength(1);
     consoleWarnSpy.mockRestore();

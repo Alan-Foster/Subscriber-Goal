@@ -1,5 +1,6 @@
 import { createTopPostFallbackAction } from "../../shared/afterSubscribeAction";
 import { subscriberGoalPostKind } from "../../shared/postKind";
+import { logDiagnostic } from "../../shared/diagnostics";
 import { isLinkId, type RedisClient } from "../types";
 import {
   getSubGoalData,
@@ -115,8 +116,11 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
       await redis.zRem(legacyAfterSubscribeActionMigrationQueueKey, [postId]);
     } catch (error) {
       summary.failed += 1;
-      console.error(
-        `[legacyAfterSubscribeActionMigration] failed: postId=${postId} error=${String(error)}`,
+      logDiagnostic(
+        "error",
+        "migration_record_failed",
+        { workflow: "legacy_after_subscribe_action_migration", phase: "record", postId },
+        error,
       );
     }
   }

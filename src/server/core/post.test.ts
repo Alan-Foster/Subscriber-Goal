@@ -193,7 +193,7 @@ describe("createGoalPost", () => {
     ).resolves.toBeUndefined();
 
     expect(warnSpy).toHaveBeenCalledWith(
-      "[postHeight] failed to apply short post height: postId=t3_newpost error=Error: style denied",
+      expect.stringMatching(/post_style_failed.*style denied.*stack/),
     );
   });
 });

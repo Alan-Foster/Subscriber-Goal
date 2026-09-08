@@ -1,6 +1,7 @@
 import { cache, type CacheHelper } from "@devvit/web/server";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import type { RedditClient } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export const blacklistSubredditName = "SubGoal";
 export const blacklistWikiPage = "blacklist";
@@ -45,8 +46,11 @@ export async function isSubredditBlacklisted(
     );
     return names.includes(normalizeSubredditName(subredditName));
   } catch (error) {
-    console.warn(
-      `[blacklist] allowing content because the blacklist cache could not be read: ${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "blacklist_check_degraded",
+      { workflow: "subreddit_blacklist", phase: "cache_read" },
+      error,
     );
     return false;
   }
@@ -73,8 +77,11 @@ async function fetchBlacklistNames(
 
     return [...new Set(parsed.map(({ name }) => normalizeSubredditName(name)))];
   } catch (error) {
-    console.warn(
-      `[blacklist] allowing content because r/${blacklistSubredditName}/wiki/${blacklistWikiPage} could not be read: ${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "blacklist_check_degraded",
+      { workflow: "subreddit_blacklist", phase: "wiki_read" },
+      error,
     );
     return [];
   }

@@ -168,10 +168,10 @@ export async function getSubscriberStats(
         subscribers: parsed.subscribers,
       };
     }
-    console.error(
-      "Found malformed indexed subscriber stats record: ",
-      JSON.stringify(indexedMember),
-    );
+    logDiagnostic("warn", "persisted_json_invalid", {
+      workflow: "subscriber_stats",
+      phase: "indexed_record_schema",
+    });
   }
 }
 

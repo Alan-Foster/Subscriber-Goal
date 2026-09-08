@@ -476,7 +476,7 @@ describe("subGoalData subreddit display name", () => {
       completedTime: 123,
     });
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("preserving subscriber goal"),
+      expect.stringContaining('"event":"stored_state_conflict"'),
     );
     warnSpy.mockRestore();
   });

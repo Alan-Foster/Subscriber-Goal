@@ -176,7 +176,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
     try {
       const subGoalData = await getSubGoalData(redis, postId);
       if (!subGoalData.goal) {
-        console.error(`Missing subGoalData for post ${postId}`);
+        logDiagnostic("error", "scheduler_post_update_failed", {
+          workflow: "post_update",
+          phase: "missing_state",
+          postId,
+        });
         await cleanupInactivePost(postId, "missing_goal_data");
         continue;
       }
@@ -196,7 +200,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
         ? new Date(subGoalData.completedTime)
         : null;
       if (!isLinkId(postId)) {
-        console.error(`Skipping invalid post id in scheduler queue: ${postId}`);
+        logDiagnostic("error", "scheduler_post_update_failed", {
+          workflow: "post_update",
+          phase: "invalid_post_id",
+          postId,
+        });
         await cleanupInactivePost(postId, "invalid_post_id");
         continue;
       }

@@ -3,7 +3,10 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
-import type { SubscribeOnlyState } from "../../shared/types/api";
+import type {
+  SubscriberGoalState,
+  SubscribeOnlyState,
+} from "../../shared/types/api";
 
 const hoisted = vi.hoisted(() => ({
   connectRealtime: vi.fn(),
@@ -27,6 +30,7 @@ vi.mock("../analytics/goalJourneyAnalytics", () => ({
 
 import {
   reconcileSubscriptionStatus,
+  isSubGoalState,
   requestSubscribeJson,
   useSubGoal,
 } from "./useSubGoal";
@@ -43,6 +47,27 @@ const tinyState: SubscribeOnlyState = {
     name: "ExampleSub",
     subscribers: 123,
     growth: { count: 4, period: "today" },
+  },
+};
+
+const regularState: SubscriberGoalState = {
+  colorTheme: "red",
+  postHeight: "regular",
+  language: "en",
+  afterSubscribeAction: { type: "disabled" },
+  goal: 200,
+  recentSubscriber: null,
+  completedTime: null,
+  headerText: null,
+  subscribed: false,
+  user: { id: "t2_user", username: "ExampleUser" },
+  appSettings: { promoSubreddit: "SubGoal" },
+  subreddit: {
+    id: "t5_example",
+    name: "ExampleSub",
+    icon: "",
+    subscribers: 100,
+    isNsfw: false,
   },
 };
 
@@ -172,6 +197,39 @@ describe("useSubGoal tiny behavior", () => {
     container.remove();
   });
 
+  it("disconnects a realtime connection that resolves after unmount", async () => {
+    let resolveConnection:
+      | ((connection: { disconnect: () => Promise<void> }) => void)
+      | undefined;
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    hoisted.connectRealtime.mockReturnValue(
+      new Promise((resolve) => {
+        resolveConnection = resolve;
+      }),
+    );
+    hoisted.requestJsonWithRetry.mockResolvedValue({
+      data: { type: "init", postId: "t3_regular", state: regularState },
+      error: null,
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<Harness />);
+      await Promise.resolve();
+    });
+    await act(async () => root.unmount());
+    await act(async () => {
+      resolveConnection?.({ disconnect });
+      await Promise.resolve();
+    });
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    container.remove();
+  });
+
   it("marks a prohibited initialization as terminal without scheduling recovery", async () => {
     const setTimeoutSpy = vi.spyOn(window, "setTimeout");
     hoisted.requestJsonWithRetry.mockResolvedValue({
@@ -252,6 +310,103 @@ describe("useSubGoal tiny behavior", () => {
     ).toHaveLength(1);
 
     await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("times out one hanging POST, reconciles for 30 seconds, and re-enables the button", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockImplementation((_input, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            type: "refresh",
+            postId: "t3_tiny",
+            state: tinyState,
+            subscriptionAttemptConfirmed: false,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    hoisted.requestJsonWithRetry.mockResolvedValue({
+      data: { type: "init", postId: "t3_tiny", state: tinyState },
+      error: null,
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<SubscribeHarness />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector("button")?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector("button")?.disabled).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(40_000);
+    });
+
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(1);
+    expect(container.querySelector("button")?.disabled).toBe(false);
+    expect(container.textContent).toContain("unsubscribed:");
+
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("aborts a pending subscription POST on unmount without error-level noise", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_input, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        return new Promise((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<SubscribeHarness />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector("button")?.click();
+      await Promise.resolve();
+      root.unmount();
+      await Promise.resolve();
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
     container.remove();
     vi.unstubAllGlobals();
   });
@@ -687,7 +842,23 @@ describe("reconcileSubscriptionStatus", () => {
 
 describe("requestSubscribeJson", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("accepts complete state and rejects malformed variants", () => {
+    expect(isSubGoalState(tinyState)).toBe(true);
+    expect(isSubGoalState({ ...tinyState, language: "invalid" })).toBe(false);
+    expect(
+      isSubGoalState({
+        ...tinyState,
+        subreddit: { ...tinyState.subreddit, subscribers: Number.NaN },
+      }),
+    ).toBe(false);
+    expect(
+      isSubGoalState({ ...tinyState, afterSubscribeAction: { type: "link" } }),
+    ).toBe(false);
+    expect(isSubGoalState({ postHeight: "cta", subreddit: {} })).toBe(false);
   });
 
   it("parses successful JSON", async () => {
@@ -776,5 +947,67 @@ describe("requestSubscribeJson", () => {
       errorKind: "network",
       status: null,
     });
+  });
+
+  it("classifies the bounded mutation timeout without an error-level log", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_input, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+      ),
+    );
+
+    const request = requestSubscribeJson(
+      "/api/subscribe",
+      undefined,
+      undefined,
+      { timeoutMs: 10_000 },
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(request).resolves.toMatchObject({
+      error: "Subscription request could not be completed.",
+      errorKind: "timeout",
+      status: null,
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("treats external cancellation as expected control flow", async () => {
+    const controller = new AbortController();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_input, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+      ),
+    );
+
+    const request = requestSubscribeJson("/api/subscribe", {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(request).resolves.toEqual({
+      data: null,
+      error: null,
+      errorKind: "aborted",
+      status: null,
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

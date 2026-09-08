@@ -26,6 +26,7 @@ import {
   textFallbackMaker,
 } from "../utils/textFallback";
 import { toErrorMessage } from "../utils/crosspostLogs";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   defaultAfterSubscribeAction,
   type AfterSubscribeAction,
@@ -206,10 +207,11 @@ export async function createSubscriberGoal({
       );
       await queueUpdate(redis, activePostId, new Date());
     } catch (backfillError) {
-      console.warn(
-        `Failed to backfill subreddit display name for active post ${activePostId}: ${String(
-          backfillError,
-        )}`,
+      logDiagnostic(
+        "warn",
+        "goal_backfill_failed",
+        { workflow: "create_subscriber_goal", phase: "display_name_backfill", postId: activePostId },
+        backfillError,
       );
     }
   }
@@ -231,8 +233,11 @@ export async function createSubscriberGoal({
     });
   } catch (error) {
     const errorMessage = toErrorMessage(error);
-    console.warn(
-      `[sticky] replacement cleanup failed; keeping new post unpinned: subreddit=${subreddit.name} postId=${post.id} error=${errorMessage}`,
+    logDiagnostic(
+      "warn",
+      "sticky_operation_failed",
+      { workflow: "create_subscriber_goal", phase: "replacement_cleanup", postId: post.id },
+      error,
     );
     stickyResult = {
       status: "not_pinned",
@@ -271,8 +276,11 @@ async function stickyAndVerifyPost(
     );
   } catch (error) {
     stickyErrorMessage = toErrorMessage(error);
-    console.warn(
-      `[sticky] append failed: mode=append operation=write subreddit=${subredditName} postId=${post.id} error=${stickyErrorMessage}`,
+    logDiagnostic(
+      "warn",
+      "sticky_operation_failed",
+      { workflow: "sticky", phase: "write", postId: post.id },
+      error,
     );
   }
 
@@ -296,8 +304,11 @@ async function stickyAndVerifyPost(
     } catch (error) {
       const refetchErrorMessage = toErrorMessage(error);
       lastVerificationErrorMessage = refetchErrorMessage;
-      console.warn(
-        `[sticky] verification refetch failed: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} error=${refetchErrorMessage}`,
+      logDiagnostic(
+        "warn",
+        "sticky_operation_failed",
+        { workflow: "sticky", phase: "verification_refetch", postId: post.id, attempt, elapsedMs },
+        error,
       );
     }
 
@@ -307,9 +318,14 @@ async function stickyAndVerifyPost(
     if (typeof verifier !== "function") {
       lastVerificationErrorMessage =
         "Unable to verify sticky status because post.isStickied is unavailable.";
-      console.warn(
-        `[sticky] verification unavailable: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
-      );
+      logDiagnostic("warn", "sticky_verification_unavailable", {
+        workflow: "sticky",
+        phase: "verification",
+        postId: post.id,
+        attempt,
+        elapsedMs,
+        refetched,
+      });
     } else {
       try {
         const verifiedStickied = await Promise.resolve(
@@ -324,8 +340,11 @@ async function stickyAndVerifyPost(
         }
       } catch (error) {
         lastVerificationErrorMessage = toErrorMessage(error);
-        console.warn(
-          `[sticky] verification failed: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} error=${lastVerificationErrorMessage}`,
+        logDiagnostic(
+          "warn",
+          "sticky_operation_failed",
+          { workflow: "sticky", phase: "verification", postId: post.id, attempt, elapsedMs, refetched },
+          error,
         );
       }
     }

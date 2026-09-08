@@ -237,9 +237,7 @@ describe("clearUserStickies", () => {
     );
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "[sticky] failed to fetch known app-owned sticky candidate:",
-      ),
+      expect.stringMatching(/sticky_operation_failed.*known_post_fetch/),
     );
     expect(hotPost.unsticky).toHaveBeenCalledOnce();
     warnSpy.mockRestore();

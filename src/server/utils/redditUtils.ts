@@ -2,6 +2,7 @@ import { cache, type CacheHelper } from "@devvit/web/server";
 import { isLinkId, isSubredditId, type RedditClient } from "../types";
 import { logCrosspostEvent, toErrorMessage } from "./crosspostLogs";
 import { isMissingPostError } from "./postStatus";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   ctaOnlyPostKind,
   subscriberGoalPostKind,
@@ -109,10 +110,11 @@ export async function clearUserStickies(
       try {
         isStickied = await Promise.resolve(verifier.call(post));
       } catch (error) {
-        console.warn(
-          `[sticky] failed to verify existing app-owned sticky: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
-            error,
-          )}`,
+        logDiagnostic(
+          "warn",
+          "sticky_operation_failed",
+          { workflow: "sticky_cleanup", phase: "verify", postId: post.id, category: source },
+          error,
         );
       }
     }
@@ -128,10 +130,11 @@ export async function clearUserStickies(
         `[sticky] unstickied app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source}`,
       );
     } catch (error) {
-      console.warn(
-        `[sticky] failed to unsticky app-owned post: subreddit=${subreddit.name} postId=${post.id} source=${source} error=${toErrorMessage(
-          error,
-        )}`,
+      logDiagnostic(
+        "warn",
+        "sticky_operation_failed",
+        { workflow: "sticky_cleanup", phase: "unsticky", postId: post.id, category: source },
+        error,
       );
     }
   };
@@ -143,10 +146,11 @@ export async function clearUserStickies(
     try {
       await unstickyIfAppOwned(await reddit.getPostById(postId), "known_post");
     } catch (error) {
-      console.warn(
-        `[sticky] failed to fetch known app-owned sticky candidate: subreddit=${subreddit.name} postId=${postId} error=${toErrorMessage(
-          error,
-        )}`,
+      logDiagnostic(
+        "warn",
+        "sticky_operation_failed",
+        { workflow: "sticky_cleanup", phase: "known_post_fetch", postId },
+        error,
       );
     }
   }
@@ -271,8 +275,11 @@ export async function clearSubscriberGoalStickies(
       );
     } catch (error) {
       blocked.add(post.id);
-      console.warn(
-        `[sticky] failed to unsticky Subscriber Goal: subreddit=${options.subreddit.name} postId=${post.id} error=${toErrorMessage(error)}`,
+      logDiagnostic(
+        "warn",
+        "sticky_operation_failed",
+        { workflow: "sticky_cleanup", phase: "subscriber_goal_unsticky", postId: post.id },
+        error,
       );
     }
   };
@@ -285,8 +292,11 @@ export async function clearSubscriberGoalStickies(
       if (isMissingPostError(error)) {
         result.missing.push(postId);
       } else {
-        console.warn(
-          `[sticky] failed to inspect known Subscriber Goal post: subreddit=${options.subreddit.name} postId=${postId} error=${toErrorMessage(error)}`,
+        logDiagnostic(
+          "warn",
+          "sticky_operation_failed",
+          { workflow: "sticky_cleanup", phase: "subscriber_goal_inspection", postId },
+          error,
         );
         blocked.add(postId);
       }
@@ -301,8 +311,11 @@ export async function clearSubscriberGoalStickies(
       .get(100);
     for (const post of hotPosts) await inspect(post, false);
   } catch (error) {
-    console.warn(
-      `[sticky] failed to inspect hot posts for legacy Subscriber Goals: subreddit=${options.subreddit.name} error=${toErrorMessage(error)}`,
+    logDiagnostic(
+      "warn",
+      "sticky_operation_failed",
+      { workflow: "sticky_cleanup", phase: "legacy_hot_post_inspection" },
+      error,
     );
   }
 
@@ -334,8 +347,11 @@ export async function reconcileSubscriberGoalStickies(
       }
     } catch (error) {
       if (!isMissingPostError(error)) {
-        console.warn(
-          `[sticky] lifecycle candidate fetch failed: subreddit=${options.subreddit.name} postId=${postId} error=${toErrorMessage(error)}`,
+        logDiagnostic(
+          "warn",
+          "sticky_operation_failed",
+          { workflow: "sticky_reconciliation", phase: "candidate_fetch", postId },
+          error,
         );
       }
     }
@@ -360,8 +376,11 @@ export async function reconcileSubscriberGoalStickies(
       else failed.push(post.id);
     } catch (error) {
       failed.push(post.id);
-      console.warn(
-        `[sticky] lifecycle reconciliation failed: subreddit=${options.subreddit.name} postId=${post.id} error=${toErrorMessage(error)}`,
+      logDiagnostic(
+        "warn",
+        "sticky_operation_failed",
+        { workflow: "sticky_reconciliation", phase: "unsticky", postId: post.id },
+        error,
       );
     }
   }

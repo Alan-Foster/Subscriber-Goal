@@ -3,6 +3,7 @@ import {
   getDefaultAfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   ctaOnlyPostKind,
   subscriberGoalPostKind,
@@ -179,7 +180,10 @@ export async function processDueOnboardingSubscriberGoal({
     );
   }
   if (!state) {
-    console.error("[onboardingSubscriberGoal] failed to initialize state");
+    logDiagnostic("error", "onboarding_goal_failed", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "state_initialization",
+    });
     return { status: "failed", ...base, errorMessage: "state_unavailable" };
   }
   if (state.status === "complete") {
@@ -281,8 +285,11 @@ export async function processDueOnboardingSubscriberGoal({
           errorMessage: stickyResult.errorMessage,
         });
       } catch (notificationError) {
-        console.warn(
-          `[onboardingSubscriberGoal] failed to notify sticky failure: ${String(notificationError)}`,
+        logDiagnostic(
+          "warn",
+          "onboarding_goal_notification_failed",
+          { workflow: "onboarding_subscriber_goal", phase: "sticky_notification", postId: post.id },
+          notificationError,
         );
       }
     }
@@ -314,12 +321,18 @@ export async function processDueOnboardingSubscriberGoal({
         errorMessage,
       });
     } catch (stateError) {
-      console.error(
-        `[onboardingSubscriberGoal] failed to persist terminal failure: ${String(stateError)}`,
+      logDiagnostic(
+        "error",
+        "onboarding_goal_failed",
+        { workflow: "onboarding_subscriber_goal", phase: "failure_persistence" },
+        stateError,
       );
     }
-    console.error(
-      `[onboardingSubscriberGoal] complete: status=failed error=${errorMessage} ${formatDetectionDiagnostics(inspected)}`,
+    logDiagnostic(
+      "error",
+      "onboarding_goal_failed",
+      { workflow: "onboarding_subscriber_goal", phase: "execution" },
+      error,
     );
     return {
       status: "failed",

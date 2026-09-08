@@ -5,6 +5,7 @@ import {
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
 import { shortSubGoalPostHeightPixels } from "../../shared/subGoalPostHeight";
+import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedditClient, RedisClient } from "../types";
 import { isLinkId } from "../types";
 import {
@@ -124,8 +125,11 @@ export async function processPostKindMigrationBatch(
       await redis.zRem(postKindMigrationQueueKey, [postId]);
     } catch (error) {
       summary.failed += 1;
-      console.error(
-        `[postKindMigration] failed: postId=${postId} error=${String(error)}`,
+      logDiagnostic(
+        "error",
+        "migration_record_failed",
+        { workflow: "post_kind_migration", phase: "record", postId },
+        error,
       );
     }
   }

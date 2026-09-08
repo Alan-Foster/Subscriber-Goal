@@ -351,9 +351,6 @@ describe("internalUi color theme create goal routes", () => {
     ["post_lookup", "getPostById"],
     ["crosspost_delete_dispatch", "dispatchPostAction"],
     ["reddit_post_delete", "deletePost"],
-    ["update_cancellation", "cancelUpdates"],
-    ["post_untracking", "untrackPost"],
-    ["registry_cleanup", "removeSubscriberGoalPost"],
   ] as const)(
     "logs the failed Delete a Goal %s phase",
     async (phase, mockName) => {
@@ -380,6 +377,45 @@ describe("internalUi color theme create goal routes", () => {
       );
       expect(json).toHaveBeenCalledWith({
         showToast: expect.stringContaining("Reference: delete-goal-"),
+      });
+      errorSpy.mockRestore();
+    },
+  );
+
+  it.each([
+    ["update_cancellation", "cancelUpdates"],
+    ["post_untracking", "untrackPost"],
+    ["registry_cleanup", "removeSubscriberGoalPost"],
+  ] as const)(
+    "continues Delete a Goal cleanup after a failed %s phase",
+    async (phase, mockName) => {
+      const mocks = {
+        cancelUpdates: hoisted.cancelUpdates,
+        untrackPost: hoisted.untrackPost,
+        removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
+      };
+      mocks[mockName].mockRejectedValueOnce(new Error(`${phase} unavailable`));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.forms.deleteGoal)?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(hoisted.cancelUpdates).toHaveBeenCalledOnce();
+      expect(hoisted.untrackPost).toHaveBeenCalledOnce();
+      expect(hoisted.removeSubscriberGoalPost).toHaveBeenCalledOnce();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(`delete_goal_cleanup_failed.*"phase":"${phase}"`),
+        ),
+      );
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringMatching(
+          /^The post was deleted, but some cleanup is still pending\. Reference: delete-goal-/,
+        ),
       });
       errorSpy.mockRestore();
     },
@@ -1808,8 +1844,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
-      showToast:
-        "Experimental selfPost to r/u_ExampleMod failed: user feed denied",
+      showToast: "The experimental self-post could not be submitted.",
     });
   });
 

@@ -1,4 +1,5 @@
 import type { RedditClient, RedisClient } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   findExistingSubscriberGoal,
   getDetectionDiagnosticsFromError,
@@ -206,12 +207,18 @@ export async function processDueOnboardingReminder({
         errorMessage,
       });
     } catch (stateError) {
-      console.error(
-        `[onboardingReminder] failed to persist terminal failure: ${String(stateError)}`,
+      logDiagnostic(
+        "error",
+        "onboarding_reminder_failed",
+        { workflow: "onboarding_reminder", phase: "failure_persistence" },
+        stateError,
       );
     }
-    console.error(
-      `[onboardingReminder] complete: status=failed error=${errorMessage} ${formatReminderDiagnostics(inspected)}`,
+    logDiagnostic(
+      "error",
+      "onboarding_reminder_failed",
+      { workflow: "onboarding_reminder", phase: "execution" },
+      error,
     );
     return { status: "failed", errorMessage, ...inspected };
   } finally {
@@ -220,8 +227,11 @@ export async function processDueOnboardingReminder({
         await redis.del(onboardingReminderLockKey);
       }
     } catch (error) {
-      console.warn(
-        `[onboardingReminder] failed to release lock: ${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "onboarding_reminder_cleanup_failed",
+        { workflow: "onboarding_reminder", phase: "lock_release" },
+        error,
       );
     }
   }

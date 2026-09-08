@@ -1,4 +1,5 @@
 import { isLinkId, type RedditClient } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export const subscriberGoalPostFlairText = "Subscriber Goal";
 export const subscriberGoalPostFlairBackgroundColor = "#FF4500";
@@ -21,9 +22,11 @@ export async function ensureSubscriberGoalPostFlair(
     (template) => template.text === subscriberGoalPostFlairText,
   );
   if (matches.length > 1) {
-    console.warn(
-      `[flair] multiple Subscriber Goal templates found; reusing ${matches[0]!.id}: subreddit=${subredditName} count=${matches.length}`,
-    );
+    logDiagnostic("warn", "post_flair_duplicate_templates", {
+      workflow: "subscriber_goal_flair",
+      phase: "template_lookup",
+      count: matches.length,
+    });
   }
   const existing = matches[0];
   if (!existing) {
@@ -75,8 +78,11 @@ export async function backfillSubscriberGoalPostFlair(
       applied += 1;
     } catch (error) {
       failed.push(postId);
-      console.warn(
-        `[flair] failed to backfill Subscriber Goal post: subreddit=${subreddit.name} postId=${postId} error=${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "post_flair_failed",
+        { workflow: "subscriber_goal_flair", phase: "backfill", postId },
+        error,
       );
     }
   }

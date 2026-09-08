@@ -30,6 +30,7 @@ import { getTrackedPosts } from '../data/updaterData';
 import { safeGetWikiPageRevisions } from '../utils/redditUtils';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 import { isLinkId, type LinkId, type RedisClient } from '../types';
+import { logDiagnostic } from '../../shared/diagnostics';
 
 export type ModActionEvent = {
   action?: string;
@@ -469,10 +470,11 @@ async function findExistingTargetCrosspost(
       }
     }
   } catch (error) {
-    console.warn(
-      `[crosspost] existing-target detection failed; continuing: sourcePostId=${sourcePostId} targetSubreddit=${targetSubreddit} error=${toErrorMessage(
-        error
-      )}`
+    logDiagnostic(
+      'warn',
+      'crosspost_phase_failed',
+      { workflow: 'crosspost', phase: 'existing_target_detection', postId: sourcePostId },
+      error
     );
   }
   return undefined;
@@ -652,9 +654,11 @@ async function getNewPosts(
           'unexpected_new_post_reason'
         )
       ) {
-        console.warn(
-          `[crosspost] skipping revision with unexpected new-post reason: revisionId=${revision.id} reason=${revision.reason}`
-        );
+        logDiagnostic('warn', 'crosspost_revision_skipped', {
+          workflow: 'crosspost',
+          phase: 'unexpected_new_post_reason',
+          recordId: revision.id,
+        });
       }
       continue;
     }
@@ -667,9 +671,11 @@ async function getNewPosts(
           'invalid_new_post_payload'
         )
       ) {
-        console.warn(
-          `[crosspost] skipping new-post revision with invalid payload: revisionId=${revision.id} postId=${postId} goal=${goal}`
-        );
+        logDiagnostic('warn', 'crosspost_revision_skipped', {
+          workflow: 'crosspost',
+          phase: 'invalid_new_post_payload',
+          recordId: revision.id,
+        });
       }
       continue;
     }
@@ -733,9 +739,12 @@ async function getNewPostActions(
           `unexpected_action_reason_${actionType}`
         )
       ) {
-        console.warn(
-          `[crosspost] skipping revision with unexpected action reason: revisionId=${revision.id} action=${actionType} reason=${revision.reason}`
-        );
+        logDiagnostic('warn', 'crosspost_revision_skipped', {
+          workflow: 'crosspost',
+          phase: 'unexpected_action_reason',
+          category: actionType,
+          recordId: revision.id,
+        });
       }
       continue;
     }
@@ -748,9 +757,12 @@ async function getNewPostActions(
           `invalid_action_post_id_${actionType}`
         )
       ) {
-        console.warn(
-          `[crosspost] skipping action revision with invalid post id: revisionId=${revision.id} action=${actionType} postId=${postId}`
-        );
+        logDiagnostic('warn', 'crosspost_revision_skipped', {
+          workflow: 'crosspost',
+          phase: 'invalid_action_post_id',
+          category: actionType,
+          recordId: revision.id,
+        });
       }
       continue;
     }
@@ -904,9 +916,6 @@ async function updateFromWikis(
         },
         'warn'
       );
-      console.warn(
-        `[crosspost] crosspost_terminal_failed: revisionId=${pending.revisionId} postId=${pending.postId} reason=${reason}_retry_window_expired`
-      );
       return;
     }
 
@@ -988,9 +997,6 @@ async function updateFromWikis(
         ...(errorMessage ? { errorMessage } : {}),
       },
       'warn'
-    );
-    console.warn(
-      `[crosspost] crosspost_terminal_failed: revisionId=${pending.revisionId} postId=${pending.postId} reason=${reason}`
     );
   };
 
@@ -1198,8 +1204,11 @@ async function updateFromWikis(
             sourceCreateLock.lockToken
           );
         } catch (lockError) {
-          console.warn(
-            `[crosspost] failed to release source-create lock: sourcePostId=${pending.postId} revisionId=${pending.revisionId} error=${toErrorMessage(lockError)}`
+          logDiagnostic(
+            'warn',
+            'crosspost_cleanup_failed',
+            { workflow: 'crosspost', phase: 'source_create_lock_release', postId: pending.postId },
+            lockError
           );
         }
       }
@@ -1215,10 +1224,11 @@ async function updateFromWikis(
       try {
         await setSourceCreateCooldown(redis, pending.postId);
       } catch (cooldownError) {
-        console.warn(
-          `[crosspost] failed to set source create cooldown: revisionId=${pending.revisionId} sourcePostId=${pending.postId} error=${toErrorMessage(
-            cooldownError
-          )}`
+        logDiagnostic(
+          'warn',
+          'crosspost_phase_failed',
+          { workflow: 'crosspost', phase: 'source_create_cooldown', postId: pending.postId },
+          cooldownError
         );
       }
 
@@ -1366,9 +1376,6 @@ async function updateFromWikis(
             },
             'warn'
           );
-          console.warn(
-            `[crosspost] missing target while mirroring action; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${resolvedCrosspostId}`
-          );
           await removeCorrespondingPost(redis, postAction.postId);
           terminal = true;
           return null;
@@ -1386,9 +1393,6 @@ async function updateFromWikis(
               revisionId: postAction.revisionId,
             },
             'warn'
-          );
-          console.warn(
-            `[crosspost] mapped target subreddit mismatch; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} crosspostId=${resolvedCrosspostId} expectedSubreddit=${appSettings.promoSubreddit} actualSubreddit=${crosspost.subredditName}`
           );
           await removeCorrespondingPost(redis, postAction.postId);
           terminal = true;
@@ -1412,9 +1416,6 @@ async function updateFromWikis(
                 revisionId: postAction.revisionId,
               },
               'warn'
-            );
-            console.warn(
-              `[crosspost] mapped id is not a valid post id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
             );
             await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
@@ -1442,9 +1443,6 @@ async function updateFromWikis(
               },
               'warn'
             );
-            console.warn(
-              `[crosspost] mapped id is not a valid post id; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
-            );
             await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
             break;
@@ -1470,9 +1468,6 @@ async function updateFromWikis(
                 revisionId: postAction.revisionId,
               },
               'warn'
-            );
-            console.warn(
-              `[crosspost] mapped id is not a valid post id for delete; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} mappedId=${crosspostId}`
             );
             await removeCorrespondingPost(redis, postAction.postId);
             terminal = true;
@@ -1523,9 +1518,6 @@ async function updateFromWikis(
           },
           'warn'
         );
-        console.warn(
-          `[crosspost] terminal mirror error; marking processed: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId} error=${errorText}`
-        );
         if (missingCrosspost) {
           await removeCorrespondingPost(redis, postAction.postId);
         }
@@ -1541,10 +1533,6 @@ async function updateFromWikis(
             errorMessage: errorText,
           },
           'error'
-        );
-        console.error(
-          `[crosspost] error mirroring action: revisionId=${postAction.revisionId} action=${postAction.action} sourcePostId=${postAction.postId}`,
-          e
         );
       }
     }
@@ -1656,10 +1644,11 @@ export async function processCrosspostDispatchQueue(
       try {
         await cleanupCrosspostBookkeeping(redis);
       } catch (cleanupError) {
-        console.warn(
-          `[crosspost] bookkeeping cleanup failed; continuing ingestion: error=${toErrorMessage(
-            cleanupError
-          )}`
+        logDiagnostic(
+          'warn',
+          'crosspost_cleanup_failed',
+          { workflow: 'crosspost', phase: 'bookkeeping_cleanup' },
+          cleanupError
         );
       }
 
@@ -1845,8 +1834,11 @@ export async function processCrosspostDispatchQueue(
           );
         }
       } catch (bookkeepingError) {
-        console.warn(
-          `[crosspost] retry failure bookkeeping failed: error=${toErrorMessage(bookkeepingError)}`
+        logDiagnostic(
+          'warn',
+          'crosspost_cleanup_failed',
+          { workflow: 'crosspost', phase: 'failure_bookkeeping' },
+          bookkeepingError
         );
       }
 
@@ -1889,8 +1881,11 @@ export async function processCrosspostDispatchQueue(
         lock.lockToken
       );
     } catch (lockError) {
-      console.warn(
-        `[crosspost] failed to release ingestion lock: error=${toErrorMessage(lockError)}`
+      logDiagnostic(
+        'warn',
+        'crosspost_cleanup_failed',
+        { workflow: 'crosspost', phase: 'ingestion_lock_release' },
+        lockError
       );
     }
   }
@@ -1920,13 +1915,21 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   }
 
   if (!event.targetPost) {
-    console.warn('ModAction missing targetPost', event);
+    logDiagnostic('warn', 'mod_action_validation_failed', {
+      workflow: 'mod_action',
+      phase: 'missing_target_post',
+      category: typeof event.action === 'string' ? event.action : 'unknown',
+    });
     return;
   }
 
   const appAccount = await reddit.getAppUser();
   if (!appAccount) {
-    console.warn('ModAction missing app account context');
+    logDiagnostic('warn', 'mod_action_context_missing', {
+      workflow: 'mod_action',
+      phase: 'app_account_lookup',
+      postId: event.targetPost.id,
+    });
     return;
   }
   if (event.moderator?.name === appAccount.username) {

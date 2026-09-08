@@ -17,7 +17,7 @@ export function registerInternalSystemRoutes(router: Router): void {
       } catch (error) {
         logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onAppInstall, workflow: "app_install" }, error);
         res
-          .status(400)
+          .status(503)
           .json({ status: "error", message: "Failed to run install trigger" });
       }
     },
@@ -32,7 +32,7 @@ export function registerInternalSystemRoutes(router: Router): void {
       } catch (error) {
         logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onAppUpgrade, workflow: "app_upgrade" }, error);
         res
-          .status(400)
+          .status(503)
           .json({ status: "error", message: "Failed to run upgrade trigger" });
       }
     },
@@ -48,7 +48,7 @@ export function registerInternalSystemRoutes(router: Router): void {
       } catch (error) {
         logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onModAction, workflow: "mod_action" }, error);
         res
-          .status(400)
+          .status(503)
           .json({ status: "error", message: "Failed to handle mod action" });
       }
     },
@@ -70,7 +70,7 @@ export function registerInternalSystemRoutes(router: Router): void {
         res.json({ status: "ok" });
       } catch (error) {
         logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onPostCreate, workflow: "post_create" }, error);
-        res.status(400).json({
+        res.status(503).json({
           status: "error",
           message: "Failed to record post creation",
         });
@@ -87,7 +87,7 @@ export function registerInternalSystemRoutes(router: Router): void {
       } catch (error) {
         logDiagnostic("error", "scheduler_route_failed", { route: internalRoutes.scheduler.postsUpdaterJob, workflow: "posts_updater" }, error);
         res
-          .status(400)
+          .status(503)
           .json({ status: "error", message: "Failed to run scheduler job" });
       }
     },

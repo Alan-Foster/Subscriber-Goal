@@ -190,6 +190,32 @@ describe("publicApi routes", () => {
     expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [apiRoutes.init, "Initialization could not be completed."],
+    [apiRoutes.refresh, "Refresh could not be completed."],
+  ] as const)(
+    "returns a safe runtime message from %s",
+    async (route, safePrefix) => {
+      hoisted.getSubGoalData.mockRejectedValue(
+        new Error("redis password and internal host"),
+      );
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+
+      await routes.get(route)?.(
+        { query: {} } as Request,
+        { status } as unknown as Response,
+      );
+
+      expect(status).toHaveBeenCalledWith(503);
+      const response = json.mock.calls[0]?.[0] as { message: string };
+      expect(response.message).toContain(safePrefix);
+      expect(response.message).toContain("Reference:");
+      expect(response.message).not.toMatch(/password|internal host|redis/i);
+    },
+  );
+
   it("returns custom header text through init state", async () => {
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -601,7 +627,9 @@ describe("publicApi routes", () => {
     expect(status).toHaveBeenCalledWith(503);
     expect(json).toHaveBeenCalledWith({
       status: "error",
-      message: "Subscription failed: redis unavailable",
+      message: expect.stringMatching(
+        /^Subscription could not be completed\. Reference: subscribe-/,
+      ),
     });
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
@@ -623,7 +651,9 @@ describe("publicApi routes", () => {
     expect(status).toHaveBeenCalledWith(503);
     expect(json).toHaveBeenCalledWith({
       status: "error",
-      message: "Subscription failed: reddit unavailable",
+      message: expect.stringMatching(
+        /^Subscription could not be completed\. Reference: subscribe-/,
+      ),
     });
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();

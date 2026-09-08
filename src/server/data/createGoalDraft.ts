@@ -93,14 +93,13 @@ export async function getCreateGoalDraft(
     logDiagnostic("warn", "persisted_json_invalid", {
       workflow: "create_goal_draft",
       phase: "schema_validation",
-      recordId: userId,
     });
     return null;
   } catch (error) {
     logDiagnostic(
       "warn",
       "persisted_json_invalid",
-      { workflow: "create_goal_draft", phase: "json_decode", recordId: userId },
+      { workflow: "create_goal_draft", phase: "json_decode" },
       error,
     );
     return null;

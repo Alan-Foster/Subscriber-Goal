@@ -11,6 +11,7 @@ import {
   type GoalJourneyFailureResult,
 } from "../../shared/goalJourneyAnalytics";
 import type { SubGoalState } from "../../shared/types/api";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export type JourneyClient = Pick<
   TelemetryClient,
@@ -204,7 +205,12 @@ export class GoalJourneyAnalytics {
         logReceipt(event, response);
       })
       .catch((error: unknown) => {
-        console.info(`[journeys] ${event} was not recorded.`, error);
+        logDiagnostic(
+          "warn",
+          "journey_event_failed",
+          { workflow: "journey_analytics", phase: event },
+          error,
+        );
       });
   }
 }

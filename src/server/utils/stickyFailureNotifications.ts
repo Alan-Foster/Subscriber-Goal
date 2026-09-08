@@ -1,5 +1,5 @@
 import type { RedditClient, SubredditId } from "../types";
-import { toErrorMessage } from "./crosspostLogs";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 type StickyFailureNotificationParams = {
   reddit: RedditClient;
@@ -91,37 +91,42 @@ export async function notifyStickyFailure({
       `[sticky] sticky failure modmail sent: subreddit=${subredditName} subredditId=${subredditId}`,
     );
   } catch (error) {
-    console.warn(
-      `[sticky] sticky failure modmail failed: subreddit=${subredditName} subredditId=${subredditId} error=${toErrorMessage(
-        error,
-      )}`,
+    logDiagnostic(
+      "warn",
+      "sticky_notification_failed",
+      { workflow: "sticky_notification", phase: "modmail" },
+      error,
     );
   }
 
   if (!moderatorUsername) {
-    console.warn(
-      `[sticky] sticky failure DM skipped: subreddit=${subredditName} reason=missing_moderator_username`,
-    );
+    logDiagnostic("warn", "sticky_notification_skipped", {
+      workflow: "sticky_notification",
+      phase: "missing_moderator",
+    });
     return;
   }
 
-  console.info(
-    `[sticky] sending sticky failure DM: subreddit=${subredditName} moderator=${moderatorUsername}`,
-  );
+  logDiagnostic("info", "sticky_notification_started", {
+    workflow: "sticky_notification",
+    phase: "direct_message",
+  });
   try {
     await reddit.sendPrivateMessage({
       to: moderatorUsername,
       subject: message.subject,
       text: message.body,
     });
-    console.info(
-      `[sticky] sticky failure DM sent: subreddit=${subredditName} moderator=${moderatorUsername}`,
-    );
+    logDiagnostic("info", "sticky_notification_completed", {
+      workflow: "sticky_notification",
+      phase: "direct_message",
+    });
   } catch (error) {
-    console.warn(
-      `[sticky] sticky failure DM failed: subreddit=${subredditName} moderator=${moderatorUsername} error=${toErrorMessage(
-        error,
-      )}`,
+    logDiagnostic(
+      "warn",
+      "sticky_notification_failed",
+      { workflow: "sticky_notification", phase: "direct_message" },
+      error,
     );
   }
 }

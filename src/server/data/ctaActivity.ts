@@ -1,5 +1,6 @@
 import type { AfterSubscribePreset } from "../../shared/afterSubscribeAction";
 import type { CompactCtaActivityMetric } from "../../shared/types/api";
+import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedditClient, RedisClient } from "../types";
 import { getUtcDayStartMs } from "./subscriberDailyStats";
 
@@ -81,8 +82,11 @@ export async function ensureCommunityPostActivityBackfill(
     try {
       await redis.del(postBackfillLockKey);
     } catch (error) {
-      console.warn(
-        `[ctaActivity] failed to release post backfill lock: ${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "cta_activity_cleanup_failed",
+        { workflow: "cta_activity", phase: "lock_release" },
+        error,
       );
     }
   }

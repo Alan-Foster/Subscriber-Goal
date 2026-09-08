@@ -55,7 +55,6 @@ import {
 } from "../utils/stickyFailureNotifications";
 import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
-import { toErrorMessage } from "../utils/crosspostLogs";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
@@ -77,15 +76,23 @@ export function registerInternalUiRoutes(router: Router): void {
         try {
           await deleteCreateGoalDraft(redis, context.userId);
         } catch (error) {
-          console.warn(
-            `Failed to clear previous create-goal draft for userId=${context.userId}: ${String(error)}`,
+          logDiagnostic(
+            "warn",
+            "create_goal_draft_cleanup_failed",
+            { workflow: "create_goal", phase: "previous_draft_cleanup" },
+            error,
           );
         }
       }
       try {
         res.json({ showForm: await buildCreateGoalSetupForm() });
       } catch (error) {
-        console.error("Error preparing create goal setup form:", error);
+        logDiagnostic(
+          "error",
+          "internal_ui_failed",
+          { workflow: "create_goal", phase: "setup_form" },
+          error,
+        );
         res.json({ showToast: "Error preparing the create-post form." });
       }
     },
@@ -140,7 +147,12 @@ export function registerInternalUiRoutes(router: Router): void {
           showForm: buildCreateGoalDetailsForm(draft, subreddit),
         });
       } catch (error) {
-        console.error("Error preparing create goal details form:", error);
+        logDiagnostic(
+          "error",
+          "internal_ui_failed",
+          { workflow: "create_goal", phase: "details_form" },
+          error,
+        );
         res.json({ showToast: "Error preparing the post details form." });
       }
     },
@@ -315,31 +327,53 @@ export function registerInternalUiRoutes(router: Router): void {
           phase,
           postId,
         });
-        phase = "update_cancellation";
-        await cancelUpdates(redis, postId);
-        logDiagnostic("info", "delete_goal_phase_complete", {
-          operationId,
-          workflow: "delete_goal",
-          phase,
-          postId,
-        });
-        phase = "post_untracking";
-        await untrackPost(redis, postId);
-        logDiagnostic("info", "delete_goal_phase_complete", {
-          operationId,
-          workflow: "delete_goal",
-          phase,
-          postId,
-        });
-        phase = "registry_cleanup";
-        await removeSubscriberGoalPost(redis, postId);
-        logDiagnostic("info", "delete_goal_phase_complete", {
-          operationId,
-          workflow: "delete_goal",
-          phase,
-          postId,
-        });
+        const cleanupFailures: string[] = [];
+        const runCleanupPhase = async (
+          cleanupPhase: string,
+          operation: () => Promise<unknown>,
+        ): Promise<void> => {
+          phase = cleanupPhase;
+          try {
+            await operation();
+            logDiagnostic("info", "delete_goal_phase_complete", {
+              operationId,
+              workflow: "delete_goal",
+              phase,
+              postId,
+            });
+          } catch (error) {
+            cleanupFailures.push(cleanupPhase);
+            logDiagnostic(
+              "error",
+              "delete_goal_cleanup_failed",
+              { operationId, workflow: "delete_goal", phase, postId },
+              error,
+            );
+          }
+        };
+        await runCleanupPhase("update_cancellation", () =>
+          cancelUpdates(redis, postId),
+        );
+        await runCleanupPhase("post_untracking", () =>
+          untrackPost(redis, postId),
+        );
+        await runCleanupPhase("registry_cleanup", () =>
+          removeSubscriberGoalPost(redis, postId),
+        );
         phase = "response_completion";
+        if (cleanupFailures.length > 0) {
+          logDiagnostic("warn", "delete_goal_partially_completed", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+            failedCleanupCount: cleanupFailures.length,
+          });
+          res.json({
+            showToast: `The post was deleted, but some cleanup is still pending. Reference: ${operationId}`,
+          });
+          return;
+        }
         res.json({ showToast: "Post deleted successfully!" });
         logDiagnostic("info", "delete_goal_completed", {
           operationId,
@@ -475,7 +509,12 @@ export function registerInternalUiRoutes(router: Router): void {
           }
         }
       } catch (error) {
-        console.log("Error fetching user details: ", error);
+        logDiagnostic(
+          "warn",
+          "erase_user_identity_lookup_failed",
+          { workflow: "erase_user_data", phase: "identity_lookup" },
+          error,
+        );
         identityLookupWarning =
           "Reddit identity lookup failed, so some associated data may remain. Please retry with the user ID if possible.";
       }
@@ -511,7 +550,12 @@ export function registerInternalUiRoutes(router: Router): void {
 
         res.json({ showToast: "User data has been erased successfully." });
       } catch (error) {
-        console.error("Error erasing user data:", error);
+        logDiagnostic(
+          "error",
+          "erase_user_data_failed",
+          { workflow: "erase_user_data", phase: "erasure" },
+          error,
+        );
         res.json({
           showToast:
             "User data could not be fully erased. Please try again with the user ID.",
@@ -1070,7 +1114,12 @@ async function submitCreateGoalStepTwo(
       showForm: buildCreateGoalFollowUpForm({ version: 4, ...nextDraft }),
     });
   } catch (error) {
-    console.error("Error preparing create goal follow-up form:", error);
+    logDiagnostic(
+      "error",
+      "internal_ui_failed",
+      { workflow: "create_goal", phase: "follow_up_form" },
+      error,
+    );
     res.json({ showToast: "Error preparing the follow-up options form." });
   }
 }
@@ -1111,7 +1160,11 @@ async function submitCreateGoalFollowUp(
       );
     }
     for (const warning of developerCommands.warnings) {
-      console.warn(`[developerField] ${warning}`);
+      logDiagnostic("warn", "developer_command_warning", {
+        workflow: "developer_command",
+        phase: "validation",
+        category: warning,
+      });
     }
 
     const subreddit = await reddit.getCurrentSubreddit();
@@ -1244,7 +1297,12 @@ async function submitCreateGoalFollowUp(
       navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
     });
   } catch (error) {
-    console.error("Error creating goal post:", error);
+    logDiagnostic(
+      "error",
+      "create_goal_failed",
+      { workflow: "create_goal", phase: "post_creation", postId: context.postId },
+      error,
+    );
     res.json({
       showToast:
         error instanceof ProhibitedSubredditError ||
@@ -1282,7 +1340,12 @@ async function respondWithCreateGoalRestart(
   try {
     res.json({ showToast, showForm: await buildCreateGoalSetupForm() });
   } catch (error) {
-    console.error("Error rebuilding create goal setup form:", error);
+    logDiagnostic(
+      "error",
+      "internal_ui_failed",
+      { workflow: "create_goal", phase: "restart_form" },
+      error,
+    );
     res.json({ showToast });
   }
 }
@@ -1291,8 +1354,11 @@ async function safelyDeleteCreateGoalDraft(userId: string): Promise<void> {
   try {
     await deleteCreateGoalDraft(redis, userId);
   } catch (error) {
-    console.warn(
-      `Failed to delete completed create-goal draft for userId=${userId}: ${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "create_goal_draft_cleanup_failed",
+      { workflow: "create_goal", phase: "completed_draft_cleanup" },
+      error,
     );
   }
 }
@@ -1304,10 +1370,11 @@ async function resolveCurrentUsername(): Promise<string | undefined> {
       return username;
     }
   } catch (error) {
-    console.warn(
-      `Failed to resolve current username for sticky failure notification: ${String(
-        error,
-      )}`,
+    logDiagnostic(
+      "warn",
+      "username_resolution_failed",
+      { workflow: "sticky_notification", phase: "username_lookup" },
+      error,
     );
   }
 
@@ -1322,8 +1389,11 @@ async function submitExperimentalSelfPost(
   try {
     username = await reddit.getCurrentUsername();
   } catch (error) {
-    console.warn(
-      `[developerField:selfPost] failed to resolve current username: subreddit=${subreddit.name} userId=${context.userId ?? "unknown"} error=${toErrorMessage(error)}`,
+    logDiagnostic(
+      "warn",
+      "developer_command_failed",
+      { workflow: "self_post", phase: "username_lookup" },
+      error,
     );
   }
 
@@ -1364,12 +1434,14 @@ async function submitExperimentalSelfPost(
     });
     return true;
   } catch (error) {
-    const errorMessage = toErrorMessage(error);
-    console.error(
-      `[developerField:selfPost] submit failed: sourceSubreddit=${subreddit.name} targetSubreddit=${targetSubreddit} userId=${context.userId ?? "unknown"} error=${errorMessage}`,
+    logDiagnostic(
+      "error",
+      "developer_command_failed",
+      { workflow: "self_post", phase: "submission" },
+      error,
     );
     res.json({
-      showToast: `Experimental selfPost to r/${targetSubreddit} failed: ${errorMessage}`,
+      showToast: "The experimental self-post could not be submitted.",
     });
     return false;
   }

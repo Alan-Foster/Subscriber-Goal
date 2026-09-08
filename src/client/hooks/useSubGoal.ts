@@ -10,6 +10,8 @@ import type {
   SubscribeResponse,
 } from "../../shared/types/api";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import { subGoalLanguages } from "../../shared/subGoalPostI18n";
+import { isSubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import { requestJsonWithRetry } from "../utils/fetchWithRetry";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { goalJourneyAnalytics } from "../analytics/goalJourneyAnalytics";
@@ -18,7 +20,14 @@ import { logDiagnostic } from "../../shared/diagnostics";
 type RequestResult<T> = {
   data: T | null;
   error: string | null;
-  errorKind: "api" | "gateway" | "network" | "protocol" | null;
+  errorKind:
+    | "api"
+    | "gateway"
+    | "network"
+    | "protocol"
+    | "timeout"
+    | "aborted"
+    | null;
   status: number | null;
 };
 
@@ -45,6 +54,7 @@ const recoveryIntervalMs = 5000;
 const regularRefreshIntervalMs = 30000;
 const tinyRefreshIntervalMs = 60000;
 const subscriptionReconciliationTimeoutMs = 30000;
+const subscriptionMutationTimeoutMs = 10000;
 const subscriptionReconciliationOffsetsMs = [
   0, 1000, 2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000,
 ] as const;
@@ -61,9 +71,23 @@ export const requestSubscribeJson = async <T>(
   input: RequestInfo,
   init?: RequestInit,
   validate?: (payload: unknown) => payload is T,
+  options: { timeoutMs?: number } = {},
 ): Promise<RequestResult<T>> => {
+  const externalSignal = init?.signal ?? undefined;
+  const controller = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  if (externalSignal?.aborted) controller.abort();
+  const timeoutId =
+    options.timeoutMs === undefined
+      ? null
+      : window.setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, options.timeoutMs);
   try {
-    const res = await fetch(input, init);
+    const res = await fetch(input, { ...(init ?? {}), signal: controller.signal });
     const body = await res.text();
     let payload: T | ErrorResponse;
     try {
@@ -122,6 +146,32 @@ export const requestSubscribeJson = async <T>(
       status: res.status,
     };
   } catch (error) {
+    if (controller.signal.aborted) {
+      if (timedOut) {
+        logDiagnostic(
+          "warn",
+          "subscribe_request_timeout",
+          { workflow: "subscribe", phase: "mutation", timeoutMs: options.timeoutMs },
+          error,
+        );
+        return {
+          data: null,
+          error: safeSubscribeRequestError,
+          errorKind: "timeout",
+          status: null,
+        };
+      }
+      logDiagnostic("info", "subscribe_request_aborted", {
+        workflow: "subscribe",
+        phase: "cancellation",
+      });
+      return {
+        data: null,
+        error: null,
+        errorKind: "aborted",
+        status: null,
+      };
+    }
     logDiagnostic(
       "error",
       "subscribe_network_error",
@@ -134,29 +184,135 @@ export const requestSubscribeJson = async <T>(
       errorKind: "network",
       status: null,
     };
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object";
 
-const isSubGoalState = (value: unknown): value is SubGoalState => {
-  if (!isObject(value) || !isObject(value.subreddit)) return false;
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isNullableFiniteNumber = (value: unknown): boolean =>
+  value === null || isFiniteNumber(value);
+
+const isNullableString = (value: unknown): boolean =>
+  value === null || typeof value === "string";
+
+const isHttpUrl = (value: unknown): value is string => {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || url.protocol === "http:") &&
+      url.hostname.length > 0
+    );
+  } catch {
+    // diagnostic-allow-silent: URL parsing is an expected validation probe.
+    return false;
+  }
+};
+
+const isAfterSubscribeAction = (value: unknown): boolean => {
+  if (!isObject(value) || typeof value.type !== "string") return false;
+  if (value.type === "disabled") return true;
   if (
-    value.postHeight !== "tiny" &&
-    value.postHeight !== "cta" &&
-    value.postHeight !== "short" &&
-    value.postHeight !== "regular"
+    value.type !== "link" &&
+    value.type !== "top-post-day" &&
+    value.type !== "newest-post"
   ) {
     return false;
   }
-  return value.postHeight === "cta" || typeof value.subscribed === "boolean";
+  if (
+    typeof value.buttonText !== "string" ||
+    value.buttonText.length === 0 ||
+    !isSubGoalColorTheme(value.colorTheme)
+  ) {
+    return false;
+  }
+  return value.type !== "link" || isHttpUrl(value.url);
+};
+
+const isCtaActivity = (value: unknown): boolean =>
+  isObject(value) &&
+  (value.kind === "posts" || value.kind === "clicks") &&
+  isFiniteNumber(value.count) &&
+  value.count >= 0 &&
+  (value.period === "today" || value.period === "week");
+
+const isCompactSubreddit = (value: unknown): boolean =>
+  isObject(value) &&
+  typeof value.name === "string" &&
+  value.name.length > 0 &&
+  isFiniteNumber(value.subscribers) &&
+  value.subscribers >= 0 &&
+  isObject(value.growth) &&
+  isFiniteNumber(value.growth.count) &&
+  (value.growth.period === "today" || value.growth.period === "week");
+
+const hasValidSharedState = (value: Record<string, unknown>): boolean =>
+  isSubGoalColorTheme(value.colorTheme) &&
+  subGoalLanguages.includes(value.language as (typeof subGoalLanguages)[number]) &&
+  isAfterSubscribeAction(value.afterSubscribeAction) &&
+  (value.trackCtaClicks === undefined ||
+    typeof value.trackCtaClicks === "boolean");
+
+export const isSubGoalState = (value: unknown): value is SubGoalState => {
+  if (!isObject(value) || !hasValidSharedState(value)) return false;
+  if (value.postHeight === "tiny" || value.postHeight === "cta") {
+    return (
+      typeof value.promoSubreddit === "string" &&
+      value.promoSubreddit.length > 0 &&
+      isCompactSubreddit(value.subreddit) &&
+      (value.ctaActivity === undefined || isCtaActivity(value.ctaActivity)) &&
+      (value.postHeight === "cta" ||
+        (typeof value.subscribed === "boolean" &&
+          typeof value.authenticated === "boolean"))
+    );
+  }
+  if (value.postHeight !== "short" && value.postHeight !== "regular") {
+    return false;
+  }
+  const subreddit = value.subreddit;
+  const user = value.user;
+  const appSettings = value.appSettings;
+  return (
+    isObject(subreddit) &&
+    typeof subreddit.id === "string" &&
+    subreddit.id.length > 0 &&
+    typeof subreddit.name === "string" &&
+    subreddit.name.length > 0 &&
+    typeof subreddit.icon === "string" &&
+    isFiniteNumber(subreddit.subscribers) &&
+    subreddit.subscribers >= 0 &&
+    typeof subreddit.isNsfw === "boolean" &&
+    typeof value.subscribed === "boolean" &&
+    isNullableFiniteNumber(value.goal) &&
+    (value.goal === null || (value.goal as number) > 0) &&
+    isNullableString(value.recentSubscriber) &&
+    isNullableFiniteNumber(value.completedTime) &&
+    (value.completedTime === null || (value.completedTime as number) >= 0) &&
+    isNullableString(value.headerText) &&
+    (user === null ||
+      (isObject(user) &&
+        typeof user.id === "string" &&
+        user.id.length > 0 &&
+        typeof user.username === "string" &&
+        user.username.length > 0)) &&
+    isObject(appSettings) &&
+    typeof appSettings.promoSubreddit === "string" &&
+    appSettings.promoSubreddit.length > 0
+  );
 };
 
 const isRefreshResponse = (value: unknown): value is RefreshResponse =>
   isObject(value) &&
   value.type === "refresh" &&
   typeof value.postId === "string" &&
+  value.postId.length > 0 &&
   isSubGoalState(value.state) &&
   (value.subscriptionAttemptConfirmed === undefined ||
     typeof value.subscriptionAttemptConfirmed === "boolean");
@@ -165,12 +321,14 @@ const isInitResponse = (value: unknown): value is InitResponse =>
   isObject(value) &&
   value.type === "init" &&
   typeof value.postId === "string" &&
+  value.postId.length > 0 &&
   isSubGoalState(value.state);
 
 const isSubscribeResponse = (value: unknown): value is SubscribeResponse =>
   isObject(value) &&
   value.type === "subscribe" &&
   typeof value.postId === "string" &&
+  value.postId.length > 0 &&
   isSubGoalState(value.state) &&
   (value.journeyTelemetryHandled === undefined ||
     typeof value.journeyTelemetryHandled === "boolean");
@@ -221,6 +379,7 @@ export const reconcileSubscriptionStatus = async (
   attemptId: string,
   externalSignal?: AbortSignal,
 ): Promise<SubscriptionReconciliationResult> => {
+  const attemptRef = attemptId.slice(0, 8);
   const controller = new AbortController();
   let timedOut = false;
   const onExternalAbort = () => controller.abort();
@@ -268,14 +427,20 @@ export const reconcileSubscriptionStatus = async (
       const confirmed =
         refreshedState !== null &&
         result.data?.subscriptionAttemptConfirmed === true;
-      console.info("[subscribe-reconciliation] attempt", {
+      logDiagnostic("info", "subscription_reconciliation_attempt", {
+        workflow: "subscribe",
+        phase: "reconciliation",
+        attemptRef,
         attempt: attempts,
         elapsedMs: Date.now() - startedAt,
         category: confirmed ? "confirmed" : (result.errorKind ?? "unconfirmed"),
         outcome: confirmed ? "success" : "continue",
       });
       if (confirmed) {
-        console.info("[subscribe-reconciliation] terminal", {
+        logDiagnostic("info", "subscription_reconciliation_completed", {
+          workflow: "subscribe",
+          phase: "reconciliation",
+          attemptRef,
           attempt: attempts,
           elapsedMs: Date.now() - startedAt,
           outcome: "confirmed",
@@ -305,11 +470,20 @@ export const reconcileSubscriptionStatus = async (
       timedOut || Date.now() - startedAt >= subscriptionReconciliationTimeoutMs
         ? "timeout"
         : "aborted";
-    console.info("[subscribe-reconciliation] terminal", {
-      attempts,
-      elapsedMs: Date.now() - startedAt,
-      outcome,
-    });
+    logDiagnostic(
+      outcome === "timeout" ? "error" : "info",
+      outcome === "timeout"
+        ? "subscription_reconciliation_timeout"
+        : "subscription_reconciliation_aborted",
+      {
+        workflow: "subscribe",
+        phase: "reconciliation",
+        attemptRef,
+        attempts,
+        elapsedMs: Date.now() - startedAt,
+        outcome,
+      },
+    );
     return { outcome, state: null };
   } finally {
     window.clearTimeout(timeoutId);
@@ -326,7 +500,8 @@ export const useSubGoal = () => {
   const prohibited = error === prohibitedContentMessage;
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
-  const reconciliationAbortRef = useRef<AbortController | null>(null);
+  const subscriptionAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
   const messages = getSubGoalPostMessages(state?.language);
   const postHeight = state?.postHeight;
   const recentSubscriber =
@@ -395,12 +570,13 @@ export const useSubGoal = () => {
     [],
   );
 
-  useEffect(
-    () => () => {
-      reconciliationAbortRef.current?.abort();
-    },
-    [],
-  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      subscriptionAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!recentSubscriber) {
@@ -566,11 +742,30 @@ export const useSubGoal = () => {
     realtimeConnectedRef.current = true;
 
     let connection: { disconnect: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const disconnect = (
+      target: { disconnect: () => Promise<void> },
+      phase: string,
+    ) => {
+      void target.disconnect().catch((error: unknown) => {
+        logDiagnostic(
+          "warn",
+          "realtime_disconnect_failed",
+          { workflow: "realtime", phase },
+          error,
+        );
+      });
+    };
     const connect = async () => {
-      connection = await connectRealtime({
+      const connected = await connectRealtime({
         channel: "subscriber_updates",
         onMessage: handleRealtimeMessage,
       });
+      if (cancelled) {
+        disconnect(connected, "late_connect_cleanup");
+        return;
+      }
+      connection = connected;
     };
     void connect().catch((error: unknown) => {
       realtimeConnectedRef.current = false;
@@ -583,15 +778,9 @@ export const useSubGoal = () => {
     });
 
     return () => {
+      cancelled = true;
       if (connection) {
-        void connection.disconnect().catch((error: unknown) => {
-          logDiagnostic(
-            "warn",
-            "realtime_disconnect_failed",
-            { workflow: "realtime", phase: "disconnect" },
-            error,
-          );
-        });
+        disconnect(connection, "disconnect");
       }
       realtimeConnectedRef.current = false;
     };
@@ -630,77 +819,91 @@ export const useSubGoal = () => {
       }
       setSubmitting(true);
       const attemptId = createSubscriptionAttemptId();
-      const result = await requestSubscribeJson<SubscribeResponse>(
-        "/api/subscribe",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...goalJourneyAnalytics.journeyHeaders(),
+      const subscriptionController = new AbortController();
+      subscriptionAbortRef.current = subscriptionController;
+      try {
+        const result = await requestSubscribeJson<SubscribeResponse>(
+          "/api/subscribe",
+          {
+            method: "POST",
+            signal: subscriptionController.signal,
+            headers: {
+              "Content-Type": "application/json",
+              ...goalJourneyAnalytics.journeyHeaders(),
+            },
+            body: JSON.stringify({
+              ...(payload ?? {}),
+              attemptId,
+            } satisfies SubscribeRequest),
           },
-          body: JSON.stringify({
-            ...(payload ?? {}),
-            attemptId,
-          } satisfies SubscribeRequest),
-        },
-        isSubscribeResponse,
-      );
-      if (result.error) {
-        if (result.status === 400 || result.status === 401) {
-          setError(result.error);
-          setSubmitting(false);
-          return {
-            state: null,
-            error: result.error,
-            journeyTelemetryHandled: false,
-          };
-        }
-        const reconciliationController = new AbortController();
-        reconciliationAbortRef.current = reconciliationController;
-        const reconciliation = await reconcileSubscriptionStatus(
-          attemptId,
-          reconciliationController.signal,
+          isSubscribeResponse,
+          { timeoutMs: subscriptionMutationTimeoutMs },
         );
-        if (reconciliationAbortRef.current === reconciliationController) {
-          reconciliationAbortRef.current = null;
-        }
-        if (reconciliation.outcome === "aborted") {
+        if (result.errorKind === "aborted") {
           return {
             state: null,
             error: null,
             journeyTelemetryHandled: false,
           };
         }
-        if (reconciliation.outcome === "confirmed") {
-          setState(reconciliation.state);
-          setError(null);
-          setSubmitting(false);
+        if (result.error) {
+          if (result.status === 400 || result.status === 401) {
+            if (mountedRef.current) setError(result.error);
+            return {
+              state: null,
+              error: result.error,
+              journeyTelemetryHandled: false,
+            };
+          }
+          const reconciliation = await reconcileSubscriptionStatus(
+            attemptId,
+            subscriptionController.signal,
+          );
+          if (reconciliation.outcome === "aborted") {
+            return {
+              state: null,
+              error: null,
+              journeyTelemetryHandled: false,
+            };
+          }
+          if (reconciliation.outcome === "confirmed") {
+            if (mountedRef.current) {
+              setState(reconciliation.state);
+              setError(null);
+            }
+            return {
+              state: reconciliation.state,
+              error: null,
+              journeyTelemetryHandled: false,
+            };
+          }
+
+          const userSafeError = messages.subscribeErrorToast;
+          if (mountedRef.current) setError(userSafeError);
           return {
-            state: reconciliation.state,
-            error: null,
+            state: null,
+            error: userSafeError,
             journeyTelemetryHandled: false,
           };
         }
 
-        const userSafeError = messages.subscribeErrorToast;
-        setError(userSafeError);
-        setSubmitting(false);
+        const nextState = result.data?.state ?? null;
+        if (mountedRef.current) {
+          setState(nextState);
+          setError(null);
+        }
         return {
-          state: null,
-          error: userSafeError,
-          journeyTelemetryHandled: false,
+          state: nextState,
+          error: null,
+          journeyTelemetryHandled:
+            result.data?.journeyTelemetryHandled === true,
         };
+      } finally {
+        if (subscriptionAbortRef.current === subscriptionController) {
+          subscriptionAbortRef.current = null;
+        }
+        if (mountedRef.current) setSubmitting(false);
       }
-
-      const nextState = result.data?.state ?? null;
-      setState(nextState);
-      setError(null);
-      setSubmitting(false);
-      return {
-        state: nextState,
-        error: null,
-        journeyTelemetryHandled: result.data?.journeyTelemetryHandled === true,
-      };
     },
     [messages.subscribeErrorToast, submitting],
   );

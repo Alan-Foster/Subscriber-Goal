@@ -5,6 +5,7 @@ import {
   journeyIdHeader,
 } from "../../shared/goalJourneyAnalytics";
 import type { SubGoalState } from "../../shared/types/api";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export function getRequestJourneyId(req: Request): string | undefined {
   const value =
@@ -54,8 +55,10 @@ export function recordServerSubscribeSuccess(
       await telemetry.endJourney({ journeyId, complete: true });
     }
   })().catch((error: unknown) => {
-    console.info(
-      "[journeys] Server subscription result was not recorded.",
+    logDiagnostic(
+      "warn",
+      "journey_event_failed",
+      { workflow: "journey_analytics", phase: "subscribe_result" },
       error,
     );
   });

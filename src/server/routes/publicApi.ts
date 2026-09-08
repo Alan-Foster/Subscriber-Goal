@@ -41,6 +41,7 @@ import {
   isValidSubscriptionAttemptId,
   storeSubscriptionAttemptReceipt,
 } from "../data/subscriptionAttempt";
+import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 
 const buildState = async (
   postId: string,
@@ -103,16 +104,22 @@ const dynamicPostCandidateLimit = 25;
 const appAccountUsername = "subscriber-goal";
 
 const logSubscribePhase = (
+  operationId: string,
   postId: string,
   phase: string,
   details: Record<string, string | number | boolean> = {},
 ): void => {
-  console.info(
-    `[api/subscribe] ${JSON.stringify({ postId, phase, ...details })}`,
-  );
+  logDiagnostic("info", "subscribe_phase", {
+    operationId,
+    workflow: "subscribe",
+    postId,
+    phase,
+    ...details,
+  });
 };
 
 const runSubscribeSideEffect = async (
+  operationId: string,
   postId: string,
   phase: string,
   operation: () => Promise<unknown>,
@@ -120,13 +127,11 @@ const runSubscribeSideEffect = async (
   try {
     await operation();
   } catch (error) {
-    console.warn(
-      `[api/subscribe] ${JSON.stringify({
-        postId,
-        phase,
-        outcome: "failed",
-        errorType: error instanceof Error ? error.name : "unknown",
-      })}`,
+    logDiagnostic(
+      "warn",
+      "subscribe_side_effect_failed",
+      { operationId, workflow: "subscribe", postId, phase },
+      error,
     );
   }
 };
@@ -229,7 +234,12 @@ export function registerPublicApiRoutes(router: Router): void {
       await recordCtaClick(redis, postId);
       res.json({ status: "ok" } satisfies RecordCtaClickResponse);
     } catch (error) {
-      console.error(`CTA click recording error for post ${postId}:`, error);
+      logDiagnostic(
+        "error",
+        "api_request_failed",
+        { route: apiRoutes.ctaClick, workflow: "cta_click", postId, status: 503 },
+        error,
+      );
       res.status(503).json({
         status: "error",
         message: "The CTA click could not be recorded.",
@@ -334,8 +344,15 @@ export function registerPublicApiRoutes(router: Router): void {
           target,
         } satisfies AfterSubscribeTargetResponse);
       } catch (error) {
-        console.error(
-          `After-subscribe target error for post ${postId}:`,
+        logDiagnostic(
+          "error",
+          "api_request_failed",
+          {
+            route: apiRoutes.afterSubscribeTarget,
+            workflow: "after_subscribe_target",
+            postId,
+            status: 503,
+          },
           error,
         );
         res.status(503).json({
@@ -349,7 +366,12 @@ export function registerPublicApiRoutes(router: Router): void {
   router.get(apiRoutes.init, async (_req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
-      console.warn("[api/init] returning 400 validation_error: missing postId");
+      logDiagnostic("warn", "api_validation_failed", {
+        route: apiRoutes.init,
+        workflow: "init",
+        phase: "missing_post_id",
+        status: 400,
+      });
       res.status(400).json({
         status: "error",
         message: "postId is required but missing from context",
@@ -374,17 +396,16 @@ export function registerPublicApiRoutes(router: Router): void {
         state,
       } satisfies InitResponse);
     } catch (error) {
-      console.error(`API Init Error for post ${postId}:`, error);
-      const errorMessage =
-        error instanceof Error
-          ? `Initialization failed: ${error.message}`
-          : "Unknown error during initialization";
-      console.warn(
-        `[api/init] returning 503 runtime_failure: postId=${postId} message=${errorMessage}`,
+      const operationId = createOperationId("init");
+      logDiagnostic(
+        "error",
+        "api_request_failed",
+        { operationId, route: apiRoutes.init, workflow: "init", postId, status: 503 },
+        error,
       );
       res.status(503).json({
         status: "error",
-        message: errorMessage,
+        message: `Initialization could not be completed. Reference: ${operationId}`,
       } satisfies ErrorResponse);
     }
   });
@@ -392,9 +413,12 @@ export function registerPublicApiRoutes(router: Router): void {
   router.get(apiRoutes.refresh, async (req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
-      console.warn(
-        "[api/refresh] returning 400 validation_error: missing postId",
-      );
+      logDiagnostic("warn", "api_validation_failed", {
+        route: apiRoutes.refresh,
+        workflow: "refresh",
+        phase: "missing_post_id",
+        status: 400,
+      });
       res.status(400).json({
         status: "error",
         message: "postId is required but missing from context",
@@ -462,17 +486,16 @@ export function registerPublicApiRoutes(router: Router): void {
         ...attemptConfirmation,
       } satisfies RefreshResponse);
     } catch (error) {
-      console.error(`API Refresh Error for post ${postId}:`, error);
-      const errorMessage =
-        error instanceof Error
-          ? `Refresh failed: ${error.message}`
-          : "Unknown error during refresh";
-      console.warn(
-        `[api/refresh] returning 503 runtime_failure: postId=${postId} message=${errorMessage}`,
+      const operationId = createOperationId("refresh");
+      logDiagnostic(
+        "error",
+        "api_request_failed",
+        { operationId, route: apiRoutes.refresh, workflow: "refresh", postId, status: 503 },
+        error,
       );
       res.status(503).json({
         status: "error",
-        message: errorMessage,
+        message: `Refresh could not be completed. Reference: ${operationId}`,
       } satisfies ErrorResponse);
     }
   });
@@ -480,6 +503,7 @@ export function registerPublicApiRoutes(router: Router): void {
   router.post(apiRoutes.subscribe, async (req, res): Promise<void> => {
     const { postId, userId } = context;
     const journeyId = getRequestJourneyId(req);
+    const operationId = createOperationId("subscribe");
     if (!postId) {
       res.status(400).json({
         status: "error",
@@ -489,7 +513,7 @@ export function registerPublicApiRoutes(router: Router): void {
     }
 
     try {
-      logSubscribePhase(postId, "started");
+      logSubscribePhase(operationId, postId, "started");
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
       const body = req.body as SubscribeRequest | undefined;
       const attemptId = body?.attemptId;
@@ -499,6 +523,11 @@ export function registerPublicApiRoutes(router: Router): void {
           message: "Invalid subscription attempt ID.",
         } satisfies ErrorResponse);
         return;
+      }
+      if (attemptId) {
+        logSubscribePhase(operationId, postId, "attempt_validated", {
+          attemptRef: attemptId.slice(0, 8),
+        });
       }
       if (subGoalData.postKind === ctaOnlyPostKind) {
         res.status(400).json({
@@ -525,7 +554,7 @@ export function registerPublicApiRoutes(router: Router): void {
         }
 
         await reddit.subscribeToCurrentSubreddit();
-        logSubscribePhase(postId, "reddit_subscribed");
+        logSubscribePhase(operationId, postId, "reddit_subscribed");
         if (attemptId) {
           await storeSubscriptionAttemptReceipt(
             redis,
@@ -533,7 +562,7 @@ export function registerPublicApiRoutes(router: Router): void {
             postId,
             userId,
           );
-          logSubscribePhase(postId, "attempt_receipt_stored");
+          logSubscribePhase(operationId, postId, "attempt_receipt_stored");
         }
         const subreddit = await reddit.getCurrentSubreddit();
         const sourceSubredditIsNsfw =
@@ -548,7 +577,7 @@ export function registerPublicApiRoutes(router: Router): void {
           { id: userId, username },
           shareUsername,
         );
-        logSubscribePhase(postId, "tracking_complete", {
+        logSubscribePhase(operationId, postId, "tracking_complete", {
           subscriberCreated,
         });
 
@@ -562,7 +591,7 @@ export function registerPublicApiRoutes(router: Router): void {
             newSubscriberCount,
             ...(shareUsername ? { recentSubscriber: username } : {}),
           };
-          await runSubscribeSideEffect(postId, "realtime_publish", () =>
+          await runSubscribeSideEffect(operationId, postId, "realtime_publish", () =>
             realtime.send("subscriber_updates", realtimeMessage),
           );
         }
@@ -571,7 +600,7 @@ export function registerPublicApiRoutes(router: Router): void {
           subscribersOverride: displayedSubscriberCount,
           observedSubscribers: subreddit.numberOfSubscribers,
         });
-        logSubscribePhase(postId, "state_built");
+        logSubscribePhase(operationId, postId, "state_built");
         const journeyTelemetryHandled = recordServerSubscribeSuccess(
           journeyId,
           state,
@@ -582,7 +611,7 @@ export function registerPublicApiRoutes(router: Router): void {
           state,
           journeyTelemetryHandled,
         } satisfies SubscribeResponse);
-        logSubscribePhase(postId, "response_sent");
+        logSubscribePhase(operationId, postId, "response_sent");
         return;
       }
 
@@ -598,10 +627,10 @@ export function registerPublicApiRoutes(router: Router): void {
       const shareUsername = body?.shareUsername === true;
 
       await reddit.subscribeToCurrentSubreddit();
-      logSubscribePhase(postId, "reddit_subscribed");
+      logSubscribePhase(operationId, postId, "reddit_subscribed");
       if (attemptId) {
         await storeSubscriptionAttemptReceipt(redis, attemptId, postId, userId);
-        logSubscribePhase(postId, "attempt_receipt_stored");
+        logSubscribePhase(operationId, postId, "attempt_receipt_stored");
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
@@ -623,7 +652,7 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         effectiveShareUsername,
       );
-      logSubscribePhase(postId, "tracking_complete", { subscriberCreated });
+      logSubscribePhase(operationId, postId, "tracking_complete", { subscriberCreated });
 
       const displayedSubscriberCount = subscriberCreated
         ? newSubscriberCount
@@ -634,7 +663,7 @@ export function registerPublicApiRoutes(router: Router): void {
         subGoalData.goal &&
         newSubscriberCount >= subGoalData.goal
       ) {
-        await runSubscribeSideEffect(postId, "completion_check", () =>
+        await runSubscribeSideEffect(operationId, postId, "completion_check", () =>
           checkCompletionStatus(reddit, redis, postId),
         );
       }
@@ -645,7 +674,7 @@ export function registerPublicApiRoutes(router: Router): void {
           newSubscriberCount,
           ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
         };
-        await runSubscribeSideEffect(postId, "realtime_publish", () =>
+        await runSubscribeSideEffect(operationId, postId, "realtime_publish", () =>
           realtime.send("subscriber_updates", realtimeMessage),
         );
       }
@@ -656,7 +685,7 @@ export function registerPublicApiRoutes(router: Router): void {
           ? { recentSubscriberOverride: username }
           : {}),
       });
-      logSubscribePhase(postId, "state_built");
+      logSubscribePhase(operationId, postId, "state_built");
 
       const journeyTelemetryHandled = recordServerSubscribeSuccess(
         journeyId,
@@ -668,16 +697,17 @@ export function registerPublicApiRoutes(router: Router): void {
         state,
         journeyTelemetryHandled,
       } satisfies SubscribeResponse);
-      logSubscribePhase(postId, "response_sent");
+      logSubscribePhase(operationId, postId, "response_sent");
     } catch (error) {
-      console.error(`Subscribe Error for post ${postId}:`, error);
-      const errorMessage =
-        error instanceof Error
-          ? `Subscription failed: ${error.message}`
-          : "Subscription failed.";
+      logDiagnostic(
+        "error",
+        "api_request_failed",
+        { operationId, route: apiRoutes.subscribe, workflow: "subscribe", postId, status: 503 },
+        error,
+      );
       res.status(503).json({
         status: "error",
-        message: errorMessage,
+        message: `Subscription could not be completed. Reference: ${operationId}`,
       } satisfies ErrorResponse);
     }
   });

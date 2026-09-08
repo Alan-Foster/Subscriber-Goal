@@ -73,7 +73,8 @@ export function logCrosspostEvent(
     ) {
       continue;
     }
-    compactPayload[key] = value;
+    compactPayload[key] =
+      typeof value === 'string' ? sanitizeDiagnosticText(value) : value;
   }
   const logLine = JSON.stringify(compactPayload);
 
@@ -88,6 +89,7 @@ export function logCrosspostEvent(
     }
     console.info(`[crosspost] ${logLine}`);
   } catch {
+    // diagnostic-allow-silent: this compatibility logger is attempting its fallback transport.
     try {
       const fallbackLine = `[crosspost:fallback:${level}] ${logLine}\n`;
       if (level === 'error') {
@@ -100,3 +102,4 @@ export function logCrosspostEvent(
     }
   }
 }
+import { sanitizeDiagnosticText } from '../../shared/diagnostics';

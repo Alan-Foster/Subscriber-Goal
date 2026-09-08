@@ -302,9 +302,11 @@ export async function getSubGoalData(
       rawHeight === "tiny" ||
       rawHeight === "cta");
   if (conflictingTinyGoal) {
-    console.warn(
-      `[postKind] preserving subscriber goal with conflicting Tiny metadata: postId=${postId}`,
-    );
+    logDiagnostic("warn", "stored_state_conflict", {
+      workflow: "sub_goal_data",
+      phase: "post_kind_resolution",
+      postId,
+    });
   }
   const postKind: PostKind = hasPositiveGoal
     ? subscriberGoalPostKind

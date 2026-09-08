@@ -19,6 +19,7 @@ import {
   getPostUrl,
   notifyStickyFailure,
 } from "../utils/stickyFailureNotifications";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -129,9 +130,11 @@ export async function processDueAutoCreateNextGoals({
         },
       });
       if (stickyResult.status === "not_pinned") {
-        console.warn(
-          `[autoCreateNextGoal] created next goal but failed to pin it: sourcePostId=${sourcePostId} postId=${post.id} subreddit=${subreddit.name} error=${stickyResult.errorMessage ?? "none"}`,
-        );
+        logDiagnostic("warn", "auto_create_goal_degraded", {
+          workflow: "auto_create_next_goal",
+          phase: "sticky",
+          postId: post.id,
+        });
         await notifyStickyFailure({
           reddit,
           subredditId: subreddit.id,
@@ -144,20 +147,32 @@ export async function processDueAutoCreateNextGoals({
       try {
         await cancelAllAutoCreateNextGoals(redis);
       } catch (cancelError) {
-        console.error(
-          `[autoCreateNextGoal] next goal created but pending jobs could not all be cleared: sourcePostId=${sourcePostId} error=${String(cancelError)}`,
+        logDiagnostic(
+          "error",
+          "auto_create_cleanup_failed",
+          { workflow: "auto_create_next_goal", phase: "cancel_all", postId: sourcePostId },
+          cancelError,
         );
         try {
           await cancelAutoCreateNextGoal(redis, sourcePostId);
         } catch (sourceCancelError) {
-          console.error(
-            `[autoCreateNextGoal] next goal created but source job could not be cleared: sourcePostId=${sourcePostId} error=${String(sourceCancelError)}`,
+          logDiagnostic(
+            "error",
+            "auto_create_cleanup_failed",
+            { workflow: "auto_create_next_goal", phase: "cancel_source", postId: sourcePostId },
+            sourceCancelError,
           );
         }
       }
       summary.created += 1;
       break;
     } catch (error) {
+      logDiagnostic(
+        "error",
+        "auto_create_goal_failed",
+        { workflow: "auto_create_next_goal", phase: "create", postId: sourcePostId },
+        error,
+      );
       summary.failed += 1;
       const retry = await recordAutoCreateNextGoalFailure(
         redis,
@@ -166,14 +181,20 @@ export async function processDueAutoCreateNextGoals({
       );
       if (retry.retryAt !== null) {
         summary.rescheduled += 1;
-        console.warn(
-          `[autoCreateNextGoal] creation failed; retry scheduled: sourcePostId=${sourcePostId} failureCount=${retry.failureCount} retryAt=${new Date(retry.retryAt).toISOString()} error=${String(error)}`,
+        logDiagnostic(
+          "warn",
+          "auto_create_goal_retry_scheduled",
+          { workflow: "auto_create_next_goal", phase: "retry", postId: sourcePostId, failureCount: retry.failureCount },
+          error,
         );
       } else {
         summary.exhausted += 1;
         await cancelAutoCreateNextGoal(redis, sourcePostId);
-        console.error(
-          `[autoCreateNextGoal] creation failed; retries exhausted: sourcePostId=${sourcePostId} failureCount=${retry.failureCount} error=${String(error)}`,
+        logDiagnostic(
+          "error",
+          "auto_create_goal_retries_exhausted",
+          { workflow: "auto_create_next_goal", phase: "terminal", postId: sourcePostId, failureCount: retry.failureCount },
+          error,
         );
       }
     }

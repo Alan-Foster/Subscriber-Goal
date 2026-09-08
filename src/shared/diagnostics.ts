@@ -12,6 +12,8 @@ export type DiagnosticContext = {
 };
 
 const maxDiagnosticTextLength = 1200;
+const maxDiagnosticContextTextLength = 300;
+const maxDiagnosticContextFields = 24;
 
 export const sanitizeDiagnosticText = (value: unknown): string => {
   const text = value instanceof Error ? value.message : String(value);
@@ -21,10 +23,30 @@ export const sanitizeDiagnosticText = (value: unknown): string => {
       /([?&](?:token|key|secret|auth|authorization)=)[^&\s]+/gi,
       "$1[redacted]",
     )
+    .replace(/([?&](?:userId|access_token)=)[^&\s]+/gi, "$1[redacted]")
     .replace(/\b(?:u\/|\/u\/)[A-Za-z0-9_-]+/gi, "u/[redacted]")
+    .replace(/\b\/user\/[A-Za-z0-9_-]+/gi, "/user/[redacted]")
+    .replace(/([/\\]Users[/\\])[^/\\\s]+/gi, "$1[redacted]")
+    .replace(/(\/home\/)[^/\s]+/gi, "$1[redacted]")
+    .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[redacted]@")
     .replace(/(["']username["']\s*:\s*["'])[^"']+/gi, "$1[redacted]")
+    .replace(/(["']userId["']\s*:\s*["'])[^"']+/gi, "$1[redacted]")
     .slice(0, maxDiagnosticTextLength);
 };
+
+const sanitizeContext = (context: DiagnosticContext): DiagnosticContext =>
+  Object.fromEntries(
+    Object.entries(context)
+      .slice(0, maxDiagnosticContextFields)
+      .map(([key, value]) => {
+      if (value === undefined || typeof value !== "string") return [key, value];
+      if (/^(?:userId|username)$/i.test(key)) return [key, "[redacted]"];
+      return [
+        key,
+        sanitizeDiagnosticText(value).slice(0, maxDiagnosticContextTextLength),
+      ];
+    }),
+  ) as DiagnosticContext;
 
 const errorDetails = (error: unknown): Record<string, string> => {
   if (!(error instanceof Error)) {
@@ -34,7 +56,7 @@ const errorDetails = (error: unknown): Record<string, string> => {
     };
   }
   const details: Record<string, string> = {
-    errorName: error.name,
+    errorName: sanitizeDiagnosticText(error.name),
     errorMessage: sanitizeDiagnosticText(error.message),
   };
   if (error.stack) details.stack = sanitizeDiagnosticText(error.stack);
@@ -59,8 +81,8 @@ export function logDiagnostic(
   error?: unknown,
 ): void {
   const payload = {
-    event,
-    ...context,
+    event: sanitizeDiagnosticText(event),
+    ...sanitizeContext(context),
     ...(error === undefined ? {} : errorDetails(error)),
   };
   try {

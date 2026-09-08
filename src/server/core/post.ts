@@ -1,5 +1,6 @@
 import { EntrypointHeight, reddit } from "@devvit/web/server";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   resolveSubGoalPostHeight,
   shortSubGoalPostHeightPixels,
@@ -81,9 +82,12 @@ export async function applyGoalPostFrameStyle(
       ? tinySubGoalPostHeightPixels
       : shortSubGoalPostHeightPixels;
   if (typeof post.setCustomPostStyles !== "function") {
-    console.warn(
-      `[postHeight] cannot apply ${resolvedPostHeight} post height; post.setCustomPostStyles is unavailable: postId=${post.id ?? "unknown"}`,
-    );
+    logDiagnostic("warn", "post_style_unavailable", {
+      workflow: "post_style",
+      phase: "set_height",
+      postId: post.id,
+      category: resolvedPostHeight,
+    });
     return;
   }
 
@@ -93,8 +97,11 @@ export async function applyGoalPostFrameStyle(
       heightPixels,
     });
   } catch (error) {
-    console.warn(
-      `[postHeight] failed to apply ${resolvedPostHeight} post height: postId=${post.id ?? "unknown"} error=${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "post_style_failed",
+      { workflow: "post_style", phase: "set_height", postId: post.id },
+      error,
     );
   }
 }

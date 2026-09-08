@@ -208,7 +208,10 @@ function hasUsableNavigationTarget(
     const url = new URL(target.url);
     return (
       (url.protocol === "https:" || url.protocol === "http:") &&
-      url.hostname.length > 0
+      url.hostname.length > 0 &&
+      (!("permalink" in target) ||
+        target.permalink === undefined ||
+        typeof target.permalink === "string")
     );
   } catch {
     // diagnostic-allow-silent: malformed navigation targets are validation input.

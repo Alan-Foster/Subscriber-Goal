@@ -391,7 +391,7 @@ describe('processDueAutoCreateNextGoals', () => {
       errorMessage: 'sticky slots full'
     });
     expect(warnSpy).toHaveBeenCalledWith(
-      '[autoCreateNextGoal] created next goal but failed to pin it: sourcePostId=t3_source postId=t3_next subreddit=examplesub error=sticky slots full'
+      expect.stringContaining('"event":"auto_create_goal_degraded"')
     );
     warnSpy.mockRestore();
   });

@@ -17,6 +17,7 @@ import {
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { reconcileSubscriberGoalStickies } from "../utils/redditUtils";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 export async function onAppChanged({
   lifecycleSource = "unknown",
@@ -36,8 +37,11 @@ export async function onAppChanged({
       const subreddit = await reddit.getCurrentSubreddit();
       subredditName = subreddit.name;
     } catch (error) {
-      console.warn(
-        `[appChanged] skipping subreddit setup: failed to resolve current subreddit (${String(error)})`,
+      logDiagnostic(
+        "warn",
+        "app_changed_phase_failed",
+        { workflow: "app_changed", phase: "subreddit_resolution" },
+        error,
       );
       return;
     }
@@ -52,8 +56,11 @@ export async function onAppChanged({
   try {
     await ensureCommunityPostActivityBackfill(reddit, redis, subredditName);
   } catch (error) {
-    console.warn(
-      `[appChanged] community post activity backfill deferred: ${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "app_changed_phase_failed",
+      { workflow: "app_changed", phase: "activity_backfill" },
+      error,
     );
   }
 
@@ -65,8 +72,11 @@ export async function onAppChanged({
     try {
       lifecycleSubreddit = await reddit.getCurrentSubreddit();
     } catch (error) {
-      console.warn(
-        `[appChanged] Subscriber Goal post repair could not resolve subreddit: ${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "app_changed_phase_failed",
+        { workflow: "app_changed", phase: "repair_subreddit_resolution" },
+        error,
       );
     }
   }
@@ -75,8 +85,11 @@ export async function onAppChanged({
   try {
     candidatePostIds = await getSubscriberGoalCandidatePostIds(redis);
   } catch (error) {
-    console.warn(
-      `[appChanged] failed to discover Subscriber Goal repair candidates: ${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "app_changed_phase_failed",
+      { workflow: "app_changed", phase: "repair_candidate_discovery" },
+      error,
     );
   }
 
@@ -84,8 +97,11 @@ export async function onAppChanged({
   try {
     flairId = (await ensureSubscriberGoalPostFlair(reddit, subredditName)).id;
   } catch (error) {
-    console.warn(
-      `[appChanged] failed to ensure Subscriber Goal post flair: subreddit=${subredditName} error=${String(error)}`,
+    logDiagnostic(
+      "warn",
+      "app_changed_phase_failed",
+      { workflow: "app_changed", phase: "flair_ensure" },
+      error,
     );
   }
   if (lifecycleSubreddit && candidatePostIds && flairId) {
@@ -97,8 +113,11 @@ export async function onAppChanged({
         flairId,
       );
     } catch (error) {
-      console.warn(
-        `[appChanged] failed to backfill Subscriber Goal post flair: subreddit=${subredditName} error=${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "app_changed_phase_failed",
+        { workflow: "app_changed", phase: "flair_backfill" },
+        error,
       );
     }
   }
@@ -112,8 +131,11 @@ export async function onAppChanged({
         `[appChanged] Subscriber Goal pin reconciliation: kept=${result.keptPostId ?? "none"} unstickied=${result.unstickied.length} failed=${result.failed.length}`,
       );
     } catch (error) {
-      console.warn(
-        `[appChanged] failed to reconcile Subscriber Goal pins: subreddit=${subredditName} error=${String(error)}`,
+      logDiagnostic(
+        "warn",
+        "app_changed_phase_failed",
+        { workflow: "app_changed", phase: "sticky_reconciliation" },
+        error,
       );
     }
   }
