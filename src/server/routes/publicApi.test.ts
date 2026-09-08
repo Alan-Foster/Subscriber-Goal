@@ -483,12 +483,132 @@ describe("publicApi routes", () => {
 
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
-    expect(status).toHaveBeenCalledWith(400);
+    expect(status).toHaveBeenCalledWith(503);
     expect(json).toHaveBeenCalledWith({
       status: "error",
       message: "Subscription failed: redis unavailable",
     });
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
+  });
+
+  it("returns JSON service unavailable when Reddit subscription fails", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.subscribeToCurrentSubreddit.mockRejectedValue(
+      new Error("reddit unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "Subscription failed: reddit unavailable",
+    });
+    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.realtime.send).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate Tiny tracking or realtime for an existing subscriber", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.setNewSubscriber.mockResolvedValue(false);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as SubscribeResponse;
+    expect(response.state).toMatchObject({
+      subscribed: true,
+      subreddit: { subscribers: 100 },
+    });
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
+    expect(hoisted.realtime.send).not.toHaveBeenCalled();
+    expect(hoisted.checkCompletionStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps Tiny subscription success when realtime publication fails", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.realtime.send.mockRejectedValue(new Error("realtime unavailable"));
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscribe",
+        state: expect.objectContaining({ subscribed: true }),
+      }),
+    );
+  });
+
+  it("keeps regular subscription success when completion checking fails", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.checkCompletionStatus.mockRejectedValue(
+      new Error("completion unavailable"),
+    );
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      goal: 101,
+      recentSubscriber: null,
+      completedTime: 0,
+      subredditDisplayName: "ExampleSub",
+      headerText: null,
+      colorTheme: "red",
+      postHeight: "regular",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { shareUsername: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.checkCompletionStatus).toHaveBeenCalledOnce();
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "subscribe",
+        state: expect.objectContaining({
+          subscribed: true,
+          subreddit: expect.objectContaining({ subscribers: 101 }),
+        }),
+      }),
+    );
   });
 
   it("records NSFW Tiny subscriptions without publicly sharing the username", async () => {

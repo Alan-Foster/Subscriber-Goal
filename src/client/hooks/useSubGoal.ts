@@ -17,6 +17,7 @@ import { goalJourneyAnalytics } from "../analytics/goalJourneyAnalytics";
 type RequestResult<T> = {
   data: T | null;
   error: string | null;
+  errorKind: "api" | "gateway" | "network" | "protocol" | null;
 };
 
 type SubscribeResult = {
@@ -38,24 +39,56 @@ const recoveryIntervalMs = 5000;
 const regularRefreshIntervalMs = 30000;
 const tinyRefreshIntervalMs = 60000;
 
-const requestJson = async <T>(
+const safeSubscribeRequestError =
+  "Subscription request could not be completed.";
+
+const classifyNonJsonResponse = (body: string): "gateway" | "protocol" =>
+  body.trimStart().toLowerCase().startsWith("failed to call devvit application")
+    ? "gateway"
+    : "protocol";
+
+export const requestSubscribeJson = async <T>(
   input: RequestInfo,
   init?: RequestInit,
 ): Promise<RequestResult<T>> => {
   try {
     const res = await fetch(input, init);
-    const payload = (await res.json()) as T | ErrorResponse;
+    const body = await res.text();
+    let payload: T | ErrorResponse;
+    try {
+      payload = JSON.parse(body) as T | ErrorResponse;
+    } catch {
+      const errorKind = classifyNonJsonResponse(body);
+      console.info("[subscribe] non_json_response", {
+        status: res.status,
+        contentType: res.headers.get("content-type") ?? "unknown",
+        category: errorKind,
+        bodyLength: body.length,
+      });
+      return {
+        data: null,
+        error: safeSubscribeRequestError,
+        errorKind,
+      };
+    }
     if (!res.ok) {
       const message =
         typeof (payload as ErrorResponse).message === "string"
           ? (payload as ErrorResponse).message
           : `HTTP ${res.status}`;
-      return { data: null, error: message };
+      return { data: null, error: message, errorKind: "api" };
     }
-    return { data: payload as T, error: null };
+    return { data: payload as T, error: null, errorKind: null };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Request failed";
-    return { data: null, error: message };
+    console.info("[subscribe] network_error", {
+      category: "network",
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+    return {
+      data: null,
+      error: safeSubscribeRequestError,
+      errorKind: "network",
+    };
   }
 };
 
@@ -312,21 +345,50 @@ export const useSubGoal = () => {
         };
       }
       setSubmitting(true);
-      const result = await requestJson<SubscribeResponse>("/api/subscribe", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...goalJourneyAnalytics.journeyHeaders(),
+      const result = await requestSubscribeJson<SubscribeResponse>(
+        "/api/subscribe",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...goalJourneyAnalytics.journeyHeaders(),
+          },
+          body: JSON.stringify(payload ?? {}),
         },
-        body: JSON.stringify(payload ?? {}),
-      });
-      setSubmitting(false);
-
+      );
       if (result.error) {
-        setError(result.error);
+        const reconciliation = await requestJsonWithRetry<RefreshResponse>(
+          "/api/refresh",
+          undefined,
+          {},
+        );
+        const reconciledState = reconciliation.data?.state ?? null;
+        if (
+          !reconciliation.aborted &&
+          !reconciliation.error &&
+          reconciledState &&
+          "subscribed" in reconciledState &&
+          reconciledState.subscribed
+        ) {
+          setState(reconciledState);
+          setError(null);
+          setSubmitting(false);
+          return {
+            state: reconciledState,
+            error: null,
+            journeyTelemetryHandled: false,
+          };
+        }
+
+        const userSafeError =
+          result.errorKind === "api"
+            ? result.error
+            : messages.subscribeErrorToast;
+        setError(userSafeError);
+        setSubmitting(false);
         return {
           state: null,
-          error: result.error,
+          error: userSafeError,
           journeyTelemetryHandled: false,
         };
       }
@@ -334,13 +396,14 @@ export const useSubGoal = () => {
       const nextState = result.data?.state ?? null;
       setState(nextState);
       setError(null);
+      setSubmitting(false);
       return {
         state: nextState,
         error: null,
         journeyTelemetryHandled: result.data?.journeyTelemetryHandled === true,
       };
     },
-    [submitting],
+    [messages.subscribeErrorToast, submitting],
   );
 
   return {

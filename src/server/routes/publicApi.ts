@@ -97,6 +97,35 @@ const buildState = async (
 const dynamicPostCandidateLimit = 25;
 const appAccountUsername = "subscriber-goal";
 
+const logSubscribePhase = (
+  postId: string,
+  phase: string,
+  details: Record<string, string | number | boolean> = {},
+): void => {
+  console.info(
+    `[api/subscribe] ${JSON.stringify({ postId, phase, ...details })}`,
+  );
+};
+
+const runSubscribeSideEffect = async (
+  postId: string,
+  phase: string,
+  operation: () => Promise<unknown>,
+): Promise<void> => {
+  try {
+    await operation();
+  } catch (error) {
+    console.warn(
+      `[api/subscribe] ${JSON.stringify({
+        postId,
+        phase,
+        outcome: "failed",
+        errorType: error instanceof Error ? error.name : "unknown",
+      })}`,
+    );
+  }
+};
+
 const buildSubscribeOnlyState = async (
   postId: string,
   subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
@@ -427,6 +456,7 @@ export function registerPublicApiRoutes(router: Router): void {
     }
 
     try {
+      logSubscribePhase(postId, "started");
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
       if (subGoalData.postKind === ctaOnlyPostKind) {
         res.status(400).json({
@@ -453,31 +483,44 @@ export function registerPublicApiRoutes(router: Router): void {
         }
 
         await reddit.subscribeToCurrentSubreddit();
+        logSubscribePhase(postId, "reddit_subscribed");
         const subreddit = await reddit.getCurrentSubreddit();
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
         const newSubscriberCount = subreddit.numberOfSubscribers + 1;
         const shareUsername = !sourceSubredditIsNsfw;
 
-        await setNewSubscriber(
+        const subscriberCreated = await setNewSubscriber(
           redis,
           postId,
           newSubscriberCount,
           { id: userId, username },
           shareUsername,
         );
+        logSubscribePhase(postId, "tracking_complete", {
+          subscriberCreated,
+        });
 
-        const realtimeMessage: RealtimeMessage = {
-          type: "sub",
-          newSubscriberCount,
-          ...(shareUsername ? { recentSubscriber: username } : {}),
-        };
-        await realtime.send("subscriber_updates", realtimeMessage);
+        const displayedSubscriberCount = subscriberCreated
+          ? newSubscriberCount
+          : subreddit.numberOfSubscribers;
+
+        if (subscriberCreated) {
+          const realtimeMessage: RealtimeMessage = {
+            type: "sub",
+            newSubscriberCount,
+            ...(shareUsername ? { recentSubscriber: username } : {}),
+          };
+          await runSubscribeSideEffect(postId, "realtime_publish", () =>
+            realtime.send("subscriber_updates", realtimeMessage),
+          );
+        }
 
         const state = await buildSubscribeOnlyState(postId, subGoalData, {
-          subscribersOverride: newSubscriberCount,
+          subscribersOverride: displayedSubscriberCount,
           observedSubscribers: subreddit.numberOfSubscribers,
         });
+        logSubscribePhase(postId, "state_built");
         const journeyTelemetryHandled = recordServerSubscribeSuccess(
           journeyId,
           state,
@@ -488,6 +531,7 @@ export function registerPublicApiRoutes(router: Router): void {
           state,
           journeyTelemetryHandled,
         } satisfies SubscribeResponse);
+        logSubscribePhase(postId, "response_sent");
         return;
       }
 
@@ -504,6 +548,7 @@ export function registerPublicApiRoutes(router: Router): void {
       const shareUsername = body?.shareUsername === true;
 
       await reddit.subscribeToCurrentSubreddit();
+      logSubscribePhase(postId, "reddit_subscribed");
 
       const subreddit = await reddit.getCurrentSubreddit();
       const sourceSubredditIsNsfw =
@@ -514,7 +559,7 @@ export function registerPublicApiRoutes(router: Router): void {
       );
       const newSubscriberCount = subreddit.numberOfSubscribers + 1;
 
-      await setNewSubscriber(
+      const subscriberCreated = await setNewSubscriber(
         redis,
         postId,
         newSubscriberCount,
@@ -524,24 +569,40 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         effectiveShareUsername,
       );
+      logSubscribePhase(postId, "tracking_complete", { subscriberCreated });
 
-      if (subGoalData.goal && newSubscriberCount >= subGoalData.goal) {
-        await checkCompletionStatus(reddit, redis, postId);
+      const displayedSubscriberCount = subscriberCreated
+        ? newSubscriberCount
+        : subreddit.numberOfSubscribers;
+
+      if (
+        subscriberCreated &&
+        subGoalData.goal &&
+        newSubscriberCount >= subGoalData.goal
+      ) {
+        await runSubscribeSideEffect(postId, "completion_check", () =>
+          checkCompletionStatus(reddit, redis, postId),
+        );
       }
 
-      const realtimeMessage: RealtimeMessage = {
-        type: "sub",
-        newSubscriberCount,
-        ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
-      };
-      await realtime.send("subscriber_updates", realtimeMessage);
+      if (subscriberCreated) {
+        const realtimeMessage: RealtimeMessage = {
+          type: "sub",
+          newSubscriberCount,
+          ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
+        };
+        await runSubscribeSideEffect(postId, "realtime_publish", () =>
+          realtime.send("subscriber_updates", realtimeMessage),
+        );
+      }
 
       const state = await buildState(postId, {
-        subscribersOverride: newSubscriberCount,
-        ...(effectiveShareUsername
+        subscribersOverride: displayedSubscriberCount,
+        ...(subscriberCreated && effectiveShareUsername
           ? { recentSubscriberOverride: username }
           : {}),
       });
+      logSubscribePhase(postId, "state_built");
 
       const journeyTelemetryHandled = recordServerSubscribeSuccess(
         journeyId,
@@ -553,13 +614,14 @@ export function registerPublicApiRoutes(router: Router): void {
         state,
         journeyTelemetryHandled,
       } satisfies SubscribeResponse);
+      logSubscribePhase(postId, "response_sent");
     } catch (error) {
       console.error(`Subscribe Error for post ${postId}:`, error);
       const errorMessage =
         error instanceof Error
           ? `Subscription failed: ${error.message}`
           : "Subscription failed.";
-      res.status(400).json({
+      res.status(503).json({
         status: "error",
         message: errorMessage,
       } satisfies ErrorResponse);
