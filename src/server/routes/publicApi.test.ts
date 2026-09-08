@@ -28,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
   getPublicAppSettings: vi.fn(),
   getSubGoalData: vi.fn(),
   getSubredditIcon: vi.fn(),
+  getUtcDayStartMs: vi.fn(),
   observeDailySubscriberCount: vi.fn(),
   isTrackedSubscriber: vi.fn(),
   setNewSubscriber: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("../data/subscriberStats", () => ({
 }));
 
 vi.mock("../data/subscriberDailyStats", () => ({
+  getUtcDayStartMs: hoisted.getUtcDayStartMs,
   observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
 }));
 
@@ -112,6 +114,9 @@ describe("publicApi routes", () => {
     hoisted.reddit.getNewPosts.mockReturnValue({ all: vi.fn() });
     hoisted.getPublicAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
+    hoisted.getUtcDayStartMs.mockReturnValue(
+      Date.parse("2026-09-08T00:00:00.000Z"),
+    );
     hoisted.observeDailySubscriberCount.mockResolvedValue({
       growth: { count: 5, period: "today" },
     });
@@ -723,11 +728,28 @@ describe("publicApi routes", () => {
         colorTheme: "blue",
       },
     });
-    const all = vi
-      .fn()
-      .mockResolvedValue([
-        { url: "https://www.reddit.com/r/ExampleSub/comments/newest" },
-      ]);
+    const all = vi.fn().mockResolvedValue([
+      {
+        id: "t3_post",
+        createdAt: new Date("2026-09-08T12:00:00.000Z"),
+        url: "https://www.reddit.com/r/ExampleSub/comments/current",
+      },
+      {
+        id: "t3_invalid",
+        createdAt: new Date("2026-09-08T11:00:00.000Z"),
+        url: "not a URL",
+      },
+      {
+        id: "t3_old",
+        createdAt: new Date("2026-09-07T23:59:59.999Z"),
+        url: "https://www.reddit.com/r/ExampleSub/comments/old",
+      },
+      {
+        id: "t3_newest",
+        createdAt: new Date("2026-09-08T10:00:00.000Z"),
+        url: "https://www.reddit.com/r/ExampleSub/comments/newest",
+      },
+    ]);
     hoisted.reddit.getNewPosts.mockReturnValue({ all });
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -739,8 +761,8 @@ describe("publicApi routes", () => {
 
     expect(hoisted.reddit.getNewPosts).toHaveBeenCalledWith({
       subredditName: "ExampleSub",
-      limit: 1,
-      pageSize: 1,
+      limit: 25,
+      pageSize: 25,
     });
     expect(json).toHaveBeenCalledWith({
       target: {
@@ -760,7 +782,18 @@ describe("publicApi routes", () => {
       },
     });
     hoisted.reddit.getNewPosts.mockReturnValue({
-      all: vi.fn().mockResolvedValue([{ url: "not a URL" }]),
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_invalid",
+          createdAt: new Date("2026-09-08T10:00:00.000Z"),
+          url: "not a URL",
+        },
+        {
+          id: "t3_old",
+          createdAt: new Date("2026-09-07T23:59:59.999Z"),
+          url: "https://www.reddit.com/r/ExampleSub/comments/old",
+        },
+      ]),
     });
     const routes = createRouteHarness();
     const json = vi.fn();

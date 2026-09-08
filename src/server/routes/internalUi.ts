@@ -377,6 +377,7 @@ export function registerInternalUiRoutes(router: Router): void {
 
       let resolvedUserId = userId;
       let resolvedUsername = username;
+      let identityLookupWarning: string | null = null;
 
       if (resolvedUserId && !resolvedUserId.startsWith("t2_")) {
         resolvedUserId = `t2_${resolvedUserId}`;
@@ -398,34 +399,47 @@ export function registerInternalUiRoutes(router: Router): void {
         }
       } catch (error) {
         console.log("Error fetching user details: ", error);
-        res.json({
-          showToast:
-            "Could not fetch all user details. Deletion will proceed, but may not catch all data. Please try again with the user ID if possible.",
-        });
+        identityLookupWarning =
+          "Reddit identity lookup failed, so some associated data may remain. Please retry with the user ID if possible.";
       }
 
-      if (resolvedUserId) {
-        await untrackSubscriberById(redis, resolvedUserId, resolvedUsername);
-      } else if (resolvedUsername) {
-        const result = await untrackSubscriberByUsername(
-          redis,
-          resolvedUsername,
-        );
-        if (result.status === "partial") {
+      try {
+        if (resolvedUserId) {
+          await untrackSubscriberById(redis, resolvedUserId, resolvedUsername);
+        } else if (resolvedUsername) {
+          const result = await untrackSubscriberByUsername(
+            redis,
+            resolvedUsername,
+          );
+          if (result.status === "partial") {
+            await eraseFromRecentSubscribers(redis, resolvedUsername);
+            res.json({
+              showToast:
+                "Recent subscriber references were erased where indexed. Subscriber stats could not be fully erased by username; please try again with the user ID if possible.",
+            });
+            return;
+          }
+        }
+
+        if (resolvedUsername) {
           await eraseFromRecentSubscribers(redis, resolvedUsername);
+        }
+
+        if (identityLookupWarning) {
           res.json({
-            showToast:
-              "Recent subscriber references were erased where indexed. Subscriber stats could not be fully erased by username; please try again with the user ID if possible.",
+            showToast: `Available user data was erased. ${identityLookupWarning}`,
           });
           return;
         }
-      }
 
-      if (resolvedUsername) {
-        await eraseFromRecentSubscribers(redis, resolvedUsername);
+        res.json({ showToast: "User data has been erased successfully." });
+      } catch (error) {
+        console.error("Error erasing user data:", error);
+        res.json({
+          showToast:
+            "User data could not be fully erased. Please try again with the user ID.",
+        });
       }
-
-      res.json({ showToast: "User data has been erased successfully." });
     },
   );
 

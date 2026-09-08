@@ -17,9 +17,11 @@ const baseSettings: ServerAppSettings = {
 };
 
 const hoisted = vi.hoisted(() => ({
+  cancelAllAutoCreateNextGoals: vi.fn(),
   cancelAutoCreateNextGoal: vi.fn(),
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
+  recordAutoCreateNextGoalFailure: vi.fn(),
   createSubscriberGoal: vi.fn(),
   notifyStickyFailure: vi.fn(),
   reddit: {
@@ -30,9 +32,11 @@ const hoisted = vi.hoisted(() => ({
 }));
 
 vi.mock('../data/subGoalData', () => ({
+  cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
-  getSubGoalData: hoisted.getSubGoalData
+  getSubGoalData: hoisted.getSubGoalData,
+  recordAutoCreateNextGoalFailure: hoisted.recordAutoCreateNextGoalFailure
 }));
 
 vi.mock('./createSubscriberGoal', () => ({
@@ -50,6 +54,10 @@ describe('processDueAutoCreateNextGoals', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
+    hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
+      failureCount: 1,
+      retryAt: 301_000
+    });
     hoisted.getSubGoalData.mockResolvedValue({
       goal: 5,
       recentSubscriber: '',
@@ -96,7 +104,14 @@ describe('processDueAutoCreateNextGoals', () => {
         appSettings: baseSettings,
         nowMs: 10
       })
-    ).resolves.toEqual({ due: 0, created: 0, skipped: 0, failed: 0 });
+    ).resolves.toEqual({
+      due: 0,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
@@ -111,7 +126,14 @@ describe('processDueAutoCreateNextGoals', () => {
         appSettings: baseSettings,
         nowMs: 86_401_000
       })
-    ).resolves.toEqual({ due: 1, created: 1, skipped: 0, failed: 0 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 1,
+      skipped: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith({
       reddit: hoisted.reddit,
@@ -133,10 +155,10 @@ describe('processDueAutoCreateNextGoals', () => {
           colorTheme: 'pink'
         },
         afterSubscribePreset: 'discord',
-        cancelPendingAutoCreateGoals: true
+        cancelPendingAutoCreateGoals: false
       }
     });
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
+    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
   });
 
   it('disables crossposting for NSFW subreddits', async () => {
@@ -209,7 +231,14 @@ describe('processDueAutoCreateNextGoals', () => {
         redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
         appSettings: baseSettings
       })
-    ).resolves.toEqual({ due: 1, created: 0, skipped: 1, failed: 0 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
@@ -229,7 +258,14 @@ describe('processDueAutoCreateNextGoals', () => {
         redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
         appSettings: baseSettings
       })
-    ).resolves.toEqual({ due: 1, created: 0, skipped: 1, failed: 0 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
@@ -248,13 +284,20 @@ describe('processDueAutoCreateNextGoals', () => {
         redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
         appSettings: baseSettings
       })
-    ).resolves.toEqual({ due: 1, created: 0, skipped: 1, failed: 0 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
   });
 
-  it('clears the due job after a failed single attempt', async () => {
+  it('reschedules a failed automatic creation', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.createSubscriberGoal.mockRejectedValue(new Error('post failed'));
 
@@ -264,7 +307,45 @@ describe('processDueAutoCreateNextGoals', () => {
         redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
         appSettings: baseSettings
       })
-    ).resolves.toEqual({ due: 1, created: 0, skipped: 0, failed: 1 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 0,
+      failed: 1,
+      rescheduled: 1,
+      exhausted: 0
+    });
+
+    expect(hoisted.recordAutoCreateNextGoalFailure).toHaveBeenCalledWith(
+      hoisted.redis,
+      't3_source',
+      expect.any(Number)
+    );
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+  });
+
+  it('clears a failed automatic creation after retries are exhausted', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.createSubscriberGoal.mockRejectedValue(new Error('post failed'));
+    hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
+      failureCount: 6,
+      retryAt: null
+    });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
+      })
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 0,
+      failed: 1,
+      rescheduled: 0,
+      exhausted: 1
+    });
 
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
   });
@@ -292,7 +373,14 @@ describe('processDueAutoCreateNextGoals', () => {
         redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
         appSettings: baseSettings
       })
-    ).resolves.toEqual({ due: 1, created: 1, skipped: 0, failed: 0 });
+    ).resolves.toEqual({
+      due: 1,
+      created: 1,
+      skipped: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
 
     expect(hoisted.notifyStickyFailure).toHaveBeenCalledWith({
       reddit: hoisted.reddit,
@@ -308,4 +396,3 @@ describe('processDueAutoCreateNextGoals', () => {
     warnSpy.mockRestore();
   });
 });
-

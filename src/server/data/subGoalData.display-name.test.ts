@@ -2,12 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,
+  autoCreateNextGoalRetryAttemptsKey,
+  autoCreateNextGoalRetryDelayMs,
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
   eraseFromRecentSubscribers,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
+  recordAutoCreateNextGoalFailure,
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
   registerNewSubGoalPost,
@@ -74,6 +77,14 @@ class InMemoryRedis {
     for (const field of fields) {
       map.delete(field);
     }
+  }
+
+  async hIncrBy(key: string, field: string, value: number): Promise<number> {
+    const current = this.hashes.get(key) ?? new Map<string, string>();
+    const next = Number(current.get(field) ?? 0) + value;
+    current.set(field, String(next));
+    this.hashes.set(key, current);
+    return next;
   }
 
   async zAdd(key: string, ...entries: ZEntry[]): Promise<void> {
@@ -682,6 +693,36 @@ describe("subGoalData subreddit display name", () => {
         86_401_000,
       ),
     ).resolves.toEqual([]);
+  });
+
+  it("reschedules five bounded auto-create retries and then exhausts", async () => {
+    const redis = new InMemoryRedis();
+    const typedRedis = redis as unknown as Parameters<
+      typeof recordAutoCreateNextGoalFailure
+    >[0];
+    const nowMs = 10_000;
+
+    for (const [index, delay] of autoCreateNextGoalRetryDelayMs.entries()) {
+      await expect(
+        recordAutoCreateNextGoalFailure(typedRedis, "t3_retry", nowMs),
+      ).resolves.toEqual({
+        failureCount: index + 1,
+        retryAt: nowMs + delay,
+      });
+      expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+        { member: "t3_retry", score: nowMs + delay },
+      ]);
+    }
+
+    await expect(
+      recordAutoCreateNextGoalFailure(typedRedis, "t3_retry", nowMs),
+    ).resolves.toEqual({ failureCount: 6, retryAt: null });
+
+    await cancelAutoCreateNextGoal(typedRedis, "t3_retry");
+    await expect(
+      redis.hGet(autoCreateNextGoalRetryAttemptsKey, "t3_retry"),
+    ).resolves.toBeUndefined();
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
   });
 
   it("queues auto-create when an enabled goal reaches completion", async () => {

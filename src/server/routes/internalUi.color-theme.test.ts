@@ -13,6 +13,8 @@ const hoisted = vi.hoisted(() => ({
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
     getCurrentUsername: vi.fn(),
+    getUserById: vi.fn(),
+    getUserByUsername: vi.fn(),
     submitPost: vi.fn(),
     modMail: {
       createModNotification: vi.fn(),
@@ -220,6 +222,8 @@ describe("internalUi color theme create goal routes", () => {
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
+    hoisted.reddit.getUserById.mockResolvedValue(undefined);
+    hoisted.reddit.getUserByUsername.mockResolvedValue(undefined);
     hoisted.reddit.submitPost.mockResolvedValue({
       id: "t3_selfpost",
       permalink: "/user/ExampleMod/comments/selfpost/subscriber_goal_test/",
@@ -386,6 +390,50 @@ describe("internalUi color theme create goal routes", () => {
     );
     expect(json).toHaveBeenCalledWith({
       showToast: "Your Sub Goal user data has been erased.",
+    });
+  });
+
+  it("responds once after moderator erasure continues past an identity lookup failure", async () => {
+    hoisted.reddit.getUserById.mockRejectedValue(
+      new Error("identity service unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.eraseData)?.(
+      { body: { userId: "user", confirm: true } } as Request,
+      res,
+    );
+
+    expect(hoisted.untrackSubscriberById).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t2_user",
+      undefined,
+    );
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("Available user data was erased"),
+    });
+  });
+
+  it("responds once with a failure when moderator erasure throws", async () => {
+    hoisted.untrackSubscriberById.mockRejectedValue(
+      new Error("redis unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const res = { json } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.eraseData)?.(
+      { body: { userId: "t2_user", confirm: true } } as Request,
+      res,
+    );
+
+    expect(json).toHaveBeenCalledTimes(1);
+    expect(json).toHaveBeenCalledWith({
+      showToast:
+        "User data could not be fully erased. Please try again with the user ID.",
     });
   });
 

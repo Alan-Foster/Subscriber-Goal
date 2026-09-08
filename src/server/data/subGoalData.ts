@@ -53,6 +53,15 @@ export const postAfterSubscribeColorThemeSuffix =
   "_after_subscribe_color_theme";
 export const postAfterSubscribePresetSuffix = "_after_subscribe_preset";
 export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
+export const autoCreateNextGoalRetryAttemptsKey =
+  "auto_create_next_goal_retry_attempts_v1";
+export const autoCreateNextGoalRetryDelayMs = [
+  5 * 60 * 1000,
+  15 * 60 * 1000,
+  30 * 60 * 1000,
+  60 * 60 * 1000,
+  180 * 60 * 1000,
+] as const;
 export const recentSubscriberPostsByUsernameKey =
   "recent_subscriber_posts_by_username";
 export const recentSubscriberIndexMigrationStateKey =
@@ -522,17 +531,45 @@ export async function scheduleAutoCreateNextGoal(
   postId: string,
   completedTime: number,
 ): Promise<void> {
+  await Promise.all([
+    redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: postId,
+      score: completedTime + autoCreateNextGoalDelayMs,
+    }),
+    redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+  ]);
+}
+
+export async function recordAutoCreateNextGoalFailure(
+  redis: RedisClient,
+  postId: string,
+  nowMs: number,
+): Promise<{ failureCount: number; retryAt: number | null }> {
+  const failureCount = await redis.hIncrBy(
+    autoCreateNextGoalRetryAttemptsKey,
+    postId,
+    1,
+  );
+  const retryDelay = autoCreateNextGoalRetryDelayMs[failureCount - 1];
+  if (retryDelay === undefined) {
+    return { failureCount, retryAt: null };
+  }
+  const retryAt = nowMs + retryDelay;
   await redis.zAdd(autoCreateNextGoalQueueKey, {
     member: postId,
-    score: completedTime + autoCreateNextGoalDelayMs,
+    score: retryAt,
   });
+  return { failureCount, retryAt };
 }
 
 export async function cancelAutoCreateNextGoal(
   redis: RedisClient,
   postId: string,
 ): Promise<void> {
-  await redis.zRem(autoCreateNextGoalQueueKey, [postId]);
+  await Promise.all([
+    redis.zRem(autoCreateNextGoalQueueKey, [postId]),
+    redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+  ]);
 }
 
 export async function cancelAllAutoCreateNextGoals(
@@ -541,7 +578,10 @@ export async function cancelAllAutoCreateNextGoals(
   const pending = await redis.zRange(autoCreateNextGoalQueueKey, 0, -1);
   const postIds = pending.map((entry) => entry.member);
   if (postIds.length) {
-    await redis.zRem(autoCreateNextGoalQueueKey, postIds);
+    await Promise.all([
+      redis.zRem(autoCreateNextGoalQueueKey, postIds),
+      redis.hDel(autoCreateNextGoalRetryAttemptsKey, postIds),
+    ]);
   }
 }
 

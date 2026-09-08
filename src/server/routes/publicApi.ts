@@ -18,7 +18,10 @@ import { apiRoutes } from "../../shared/routes";
 import { getPublicAppSettings } from "../settings";
 import { checkCompletionStatus, getSubGoalData } from "../data/subGoalData";
 import { isTrackedSubscriber, setNewSubscriber } from "../data/subscriberStats";
-import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
+import {
+  getUtcDayStartMs,
+  observeDailySubscriberCount,
+} from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
@@ -263,14 +266,28 @@ export function registerPublicApiRoutes(router: Router): void {
             if (target) break;
           }
         } else {
-          const [targetPost] = await reddit
+          const candidates = await reddit
             .getNewPosts({
               subredditName: subreddit.name,
-              limit: 1,
-              pageSize: 1,
+              limit: dynamicPostCandidateLimit,
+              pageSize: dynamicPostCandidateLimit,
             })
             .all();
-          target = createPostNavigationTarget(targetPost);
+          const todayStartMs = getUtcDayStartMs(Date.now());
+          for (const candidate of candidates) {
+            if (
+              typeof candidate.id === "string" &&
+              candidate.id.toLowerCase() === postId.toLowerCase()
+            ) {
+              continue;
+            }
+            const createdAtMs = normalizePostCreatedAtMs(candidate.createdAt);
+            if (createdAtMs === null || createdAtMs < todayStartMs) {
+              continue;
+            }
+            target = createPostNavigationTarget(candidate);
+            if (target) break;
+          }
         }
         if (!target) {
           res.status(404).json({
@@ -563,6 +580,18 @@ function hasUsableNavigationUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function normalizePostCreatedAtMs(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1_000_000_000_000 ? value * 1_000 : value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function createPostNavigationTarget(

@@ -111,10 +111,6 @@ export async function createSubscriberGoal({
     ensureSubscriberGoalPostFlair(reddit, subreddit.name),
     getSubscriberGoalCandidatePostIds(redis),
   ]);
-  await clearSubscriberGoalStickies(reddit, {
-    knownPostIds: existingGoalPostIds,
-    subreddit,
-  });
 
   const textFallback = isCtaOnlyPost
     ? ctaOnlyTextFallbackMaker(
@@ -219,12 +215,31 @@ export async function createSubscriberGoal({
   }
 
   await post.approve();
-  const stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
-    maxWaitMs:
-      options.stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
-    intervalMs:
-      options.stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
-  });
+  let stickyResult: StickyResult;
+  try {
+    await clearSubscriberGoalStickies(reddit, {
+      knownPostIds: existingGoalPostIds,
+      subreddit,
+    });
+    stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
+      maxWaitMs:
+        options.stickyVerification?.maxWaitMs ??
+        STICKY_VERIFICATION_MAX_WAIT_MS,
+      intervalMs:
+        options.stickyVerification?.intervalMs ??
+        STICKY_VERIFICATION_INTERVAL_MS,
+    });
+  } catch (error) {
+    const errorMessage = toErrorMessage(error);
+    console.warn(
+      `[sticky] replacement cleanup failed; keeping new post unpinned: subreddit=${subreddit.name} postId=${post.id} error=${errorMessage}`,
+    );
+    stickyResult = {
+      status: "not_pinned",
+      errorMessage,
+      verifiedStickied: false,
+    };
+  }
 
   if (options.cancelPendingAutoCreateGoals) {
     await cancelAllAutoCreateNextGoals(redis);

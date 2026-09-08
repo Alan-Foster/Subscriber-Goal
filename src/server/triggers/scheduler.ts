@@ -147,10 +147,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
       autoCreateSummary.due > 0 ||
       autoCreateSummary.created > 0 ||
       autoCreateSummary.skipped > 0 ||
-      autoCreateSummary.failed > 0
+      autoCreateSummary.failed > 0 ||
+      autoCreateSummary.rescheduled > 0 ||
+      autoCreateSummary.exhausted > 0
     ) {
       console.info(
-        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed}`,
+        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed} rescheduled=${autoCreateSummary.rescheduled} exhausted=${autoCreateSummary.exhausted}`,
       );
     }
   } catch (error) {

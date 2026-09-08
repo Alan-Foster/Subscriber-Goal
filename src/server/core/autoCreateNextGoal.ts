@@ -1,9 +1,11 @@
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import {
+  cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
+  recordAutoCreateNextGoalFailure,
 } from "../data/subGoalData";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import { createSubscriberGoal } from "./createSubscriberGoal";
@@ -23,6 +25,8 @@ export type AutoCreateNextGoalSummary = {
   created: number;
   skipped: number;
   failed: number;
+  rescheduled: number;
+  exhausted: number;
 };
 
 export async function processDueAutoCreateNextGoals({
@@ -42,12 +46,15 @@ export async function processDueAutoCreateNextGoals({
     created: 0,
     skipped: 0,
     failed: 0,
+    rescheduled: 0,
+    exhausted: 0,
   };
 
   for (const sourcePostId of duePostIds) {
     try {
       if (!isLinkId(sourcePostId)) {
         summary.skipped += 1;
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
         console.info(
           `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=invalid_post_id`,
         );
@@ -61,6 +68,7 @@ export async function processDueAutoCreateNextGoals({
         !sourceGoalData.autoCreateNextGoal
       ) {
         summary.skipped += 1;
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
         continue;
       }
 
@@ -69,6 +77,7 @@ export async function processDueAutoCreateNextGoals({
         const removedByCategory = getTerminalRemovedByCategory(sourcePost);
         if (removedByCategory) {
           summary.skipped += 1;
+          await cancelAutoCreateNextGoal(redis, sourcePostId);
           console.info(
             `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=removedByCategory:${removedByCategory}`,
           );
@@ -77,6 +86,7 @@ export async function processDueAutoCreateNextGoals({
       } catch (sourcePostError) {
         if (isMissingPostError(sourcePostError)) {
           summary.skipped += 1;
+          await cancelAutoCreateNextGoal(redis, sourcePostId);
           console.info(
             `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=missing_post`,
           );
@@ -115,7 +125,7 @@ export async function processDueAutoCreateNextGoals({
           ...(sourceGoalData.afterSubscribePreset
             ? { afterSubscribePreset: sourceGoalData.afterSubscribePreset }
             : {}),
-          cancelPendingAutoCreateGoals: true,
+          cancelPendingAutoCreateGoals: false,
         },
       });
       if (stickyResult.status === "not_pinned") {
@@ -131,15 +141,41 @@ export async function processDueAutoCreateNextGoals({
           errorMessage: stickyResult.errorMessage,
         });
       }
+      try {
+        await cancelAllAutoCreateNextGoals(redis);
+      } catch (cancelError) {
+        console.error(
+          `[autoCreateNextGoal] next goal created but pending jobs could not all be cleared: sourcePostId=${sourcePostId} error=${String(cancelError)}`,
+        );
+        try {
+          await cancelAutoCreateNextGoal(redis, sourcePostId);
+        } catch (sourceCancelError) {
+          console.error(
+            `[autoCreateNextGoal] next goal created but source job could not be cleared: sourcePostId=${sourcePostId} error=${String(sourceCancelError)}`,
+          );
+        }
+      }
       summary.created += 1;
       break;
     } catch (error) {
       summary.failed += 1;
-      console.error(
-        `Failed to auto-create next subscriber goal from ${sourcePostId}: ${String(error)}`,
+      const retry = await recordAutoCreateNextGoalFailure(
+        redis,
+        sourcePostId,
+        nowMs,
       );
-    } finally {
-      await cancelAutoCreateNextGoal(redis, sourcePostId);
+      if (retry.retryAt !== null) {
+        summary.rescheduled += 1;
+        console.warn(
+          `[autoCreateNextGoal] creation failed; retry scheduled: sourcePostId=${sourcePostId} failureCount=${retry.failureCount} retryAt=${new Date(retry.retryAt).toISOString()} error=${String(error)}`,
+        );
+      } else {
+        summary.exhausted += 1;
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        console.error(
+          `[autoCreateNextGoal] creation failed; retries exhausted: sourcePostId=${sourcePostId} failureCount=${retry.failureCount} error=${String(error)}`,
+        );
+      }
     }
   }
 

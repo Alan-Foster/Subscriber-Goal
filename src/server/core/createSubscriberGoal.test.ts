@@ -200,7 +200,7 @@ describe("createSubscriberGoal sticky handling", () => {
     });
   });
 
-  it("passes authoritative goal candidates, including registry-only tiny goals, to cleanup before creation", async () => {
+  it("cleans up authoritative old goals only after the replacement is registered and approved", async () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
@@ -228,20 +228,67 @@ describe("createSubscriberGoal sticky handling", () => {
       },
     );
     expect(
+      hoisted.registerNewSubGoalPost.mock.invocationCallOrder[0],
+    ).toBeLessThan(
       hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
-    ).toBeLessThan(hoisted.createGoalPost.mock.invocationCallOrder[0]);
+    );
+    expect(post.approve.mock.invocationCallOrder[0]).toBeLessThan(
+      hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
+    );
   });
 
-  it("does not submit a replacement when an older goal cannot be unpinned", async () => {
+  it("keeps a ready replacement unpinned when an older goal cannot be unpinned", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_old"]);
     hoisted.clearSubscriberGoalStickies.mockRejectedValue(
       new Error("moderator action required"),
     );
 
-    await expect(createGoal()).rejects.toThrow("moderator action required");
+    const result = await createGoal();
 
-    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
-    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
+    expect(post.approve).toHaveBeenCalled();
+    expect(post.sticky).not.toHaveBeenCalled();
+    expect(result.stickyResult).toEqual({
+      status: "not_pinned",
+      errorMessage: "moderator action required",
+      verifiedStickied: false,
+    });
+  });
+
+  it.each([
+    ["submission", "createGoalPost"],
+    ["registration", "registerNewSubGoalPost"],
+  ] as const)(
+    "leaves existing pins untouched after a %s failure",
+    async (_failureStage, mockName) => {
+      const post = createPost();
+      if (mockName === "createGoalPost") {
+        hoisted.createGoalPost.mockRejectedValue(
+          new Error("submission failed"),
+        );
+      } else {
+        hoisted.createGoalPost.mockResolvedValue(post);
+        hoisted.registerNewSubGoalPost.mockRejectedValue(
+          new Error("registration failed"),
+        );
+      }
+
+      await expect(createGoal()).rejects.toThrow(/failed/);
+
+      expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves existing pins untouched when replacement approval fails", async () => {
+    const post = createPost();
+    post.approve.mockRejectedValue(new Error("approval failed"));
+    hoisted.createGoalPost.mockResolvedValue(post);
+
+    await expect(createGoal()).rejects.toThrow("approval failed");
+
+    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
   });
 
   it("passes runAs creation through with fallback text without post-creation fallback updates", async () => {

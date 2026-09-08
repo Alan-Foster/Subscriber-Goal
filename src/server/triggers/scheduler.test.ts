@@ -202,6 +202,8 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       created: 0,
       skipped: 0,
       failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
     });
     hoisted.processDueOnboardingSubscriberGoal.mockResolvedValue({
       status: "not_due",
