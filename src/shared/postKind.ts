@@ -1,16 +1,20 @@
 export const subscriberGoalPostKind = "subscriber-goal-v1" as const;
 export const subscribeOnlyPostKind = "subscribe-only-v1" as const;
+export const ctaOnlyPostKind = "cta-only-v1" as const;
 
 export type PostKind =
   | typeof subscriberGoalPostKind
-  | typeof subscribeOnlyPostKind;
+  | typeof subscribeOnlyPostKind
+  | typeof ctaOnlyPostKind;
 
 export type SubscriberGoalPostData = {
   postKind: PostKind;
 };
 
 export function resolvePostKind(value: unknown): PostKind | undefined {
-  return value === subscriberGoalPostKind || value === subscribeOnlyPostKind
+  return value === subscriberGoalPostKind ||
+    value === subscribeOnlyPostKind ||
+    value === ctaOnlyPostKind
     ? value
     : undefined;
 }

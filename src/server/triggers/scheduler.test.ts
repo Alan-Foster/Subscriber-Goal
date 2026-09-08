@@ -62,6 +62,7 @@ const hoisted = vi.hoisted(() => ({
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
   observeDailySubscriberCount: vi.fn(),
+  ensureCommunityPostActivityBackfill: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -98,6 +99,11 @@ vi.mock("../data/subscriberStats", () => ({
 
 vi.mock("../data/subscriberDailyStats", () => ({
   observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
+}));
+
+vi.mock("../data/ctaActivity", () => ({
+  ensureCommunityPostActivityBackfill:
+    hoisted.ensureCommunityPostActivityBackfill,
 }));
 
 vi.mock("../data/postKindMigration", () => ({

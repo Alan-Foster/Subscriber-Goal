@@ -26,6 +26,7 @@ type AfterSubscribeButtonProps = {
   language: SubGoalLanguage;
   onNavigate: (target: string | NavigationTarget) => void;
   analyticsContext?: GoalJourneyContext;
+  trackClicks?: boolean;
 };
 
 export const AfterSubscribeButton = ({
@@ -33,6 +34,7 @@ export const AfterSubscribeButton = ({
   language,
   onNavigate,
   analyticsContext,
+  trackClicks = false,
 }: AfterSubscribeButtonProps) => {
   const [resolving, setResolving] = useState(false);
   const resolvingRef = useRef(false);
@@ -51,12 +53,19 @@ export const AfterSubscribeButton = ({
       );
     }
     if (action.type === "link") {
+      if (trackClicks) {
+        void fetch(apiRoutes.ctaClick, {
+          method: "POST",
+          keepalive: true,
+        }).catch(() => undefined);
+      }
       if (analyticsContext) {
         goalJourneyAnalytics.afterSubscribeCtaOpened(
           analyticsContext,
           actionType,
         );
       }
+      resolvingRef.current = false;
       onNavigate(action.url);
       return;
     }

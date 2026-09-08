@@ -11,6 +11,8 @@ import { TinyViewTransition } from "../app/components/TinyViewTransition";
 import { TinyPromoLink } from "../app/components/TinyPromoLink";
 import { SubGoalPage } from "../app/pages/SubGoalPage";
 import { ThanksPage } from "../app/pages/ThanksPage";
+import { AfterSubscribeButton } from "../app/components/AfterSubscribeButton";
+import { TinyActionLayout } from "../app/components/TinyActionLayout";
 import { useSubGoal } from "../hooks/useSubGoal";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { ConfettiBurst } from "../app/components/ConfettiBurst";
@@ -46,7 +48,7 @@ export const SubscribeOnlyApp = () => {
       loading ||
       prohibited ||
       state === null ||
-      state.postHeight !== "tiny"
+      (state.postHeight !== "tiny" && state.postHeight !== "cta")
     ) {
       return;
     }
@@ -79,8 +81,48 @@ export const SubscribeOnlyApp = () => {
     return <SkeletonPage postHeight="tiny" colorTheme={state?.colorTheme} />;
   }
 
-  if (state.postHeight !== "tiny") {
+  if (state.postHeight !== "tiny" && state.postHeight !== "cta") {
     return <SkeletonPage postHeight="tiny" colorTheme={state.colorTheme} />;
+  }
+
+  if (state.postHeight === "cta") {
+    return (
+      <div
+        className="sg-goal-frame relative h-[100px] w-full cursor-pointer overflow-hidden"
+        data-app-interaction-shell="true"
+        data-sg-theme={
+          state.afterSubscribeAction.type === "disabled"
+            ? state.colorTheme
+            : state.afterSubscribeAction.colorTheme
+        }
+        {...interactionHandlers}
+        onClickCapture={(event) => {
+          interactionHandlers.onClickCapture(event);
+          goalJourneyAnalytics.committedInteraction();
+        }}
+      >
+        <div className="sg-goal-ui flex h-full w-full items-center justify-center px-4 py-3 text-center">
+          <TinyActionLayout state={state} showCtaActivity>
+            {state.afterSubscribeAction.type === "disabled" ? null : (
+              <AfterSubscribeButton
+                action={state.afterSubscribeAction}
+                analyticsContext={getGoalJourneyContext(state)}
+                language={state.language}
+                onNavigate={(target: string | NavigationTarget) =>
+                  navigateTo(target)
+                }
+                trackClicks={state.trackCtaClicks === true}
+              />
+            )}
+          </TinyActionLayout>
+          <TinyPromoLink
+            promoSubreddit={state.promoSubreddit}
+            language={state.language}
+            analyticsContext={getGoalJourneyContext(state)}
+          />
+        </div>
+      </div>
+    );
   }
 
   const handleSubscribe = async () => {

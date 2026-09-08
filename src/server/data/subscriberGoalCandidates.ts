@@ -8,6 +8,7 @@ import {
 import { getRegisteredSubscriberGoalPosts } from "./subscriberGoalPostRegistry";
 import { getQueuedUpdates, getTrackedPosts } from "./updaterData";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -35,7 +36,9 @@ export async function getPersistedSubscriberGoalPostIds(
     for (const { field, value } of page.fieldValues) {
       if (
         field.endsWith(postKindSuffix) &&
-        (value === subscriberGoalPostKind || value === subscribeOnlyPostKind)
+        (value === subscriberGoalPostKind ||
+          value === subscribeOnlyPostKind ||
+          value === ctaOnlyPostKind)
       ) {
         postIds.add(field.slice(0, -postKindSuffix.length));
       } else if (
@@ -44,7 +47,10 @@ export async function getPersistedSubscriberGoalPostIds(
         Number(value) > 0
       ) {
         postIds.add(field.slice(0, -postGoalSuffix.length));
-      } else if (field.endsWith(postHeightSuffix) && value === "tiny") {
+      } else if (
+        field.endsWith(postHeightSuffix) &&
+        (value === "tiny" || value === "cta")
+      ) {
         postIds.add(field.slice(0, -postHeightSuffix.length));
       }
     }

@@ -6,6 +6,7 @@ import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 import {
   cancelAllAutoCreateNextGoals,
+  registerNewCtaOnlyPost,
   registerNewSubGoalPost,
   registerNewSubscribeOnlyPost,
   setSubredditDisplayNameForPost,
@@ -20,6 +21,7 @@ import {
 import { isLinkId } from "../types";
 import { clearSubscriberGoalStickies } from "../utils/redditUtils";
 import {
+  ctaOnlyTextFallbackMaker,
   subscribeOnlyTextFallbackMaker,
   textFallbackMaker,
 } from "../utils/textFallback";
@@ -27,6 +29,7 @@ import { toErrorMessage } from "../utils/crosspostLogs";
 import {
   defaultAfterSubscribeAction,
   type AfterSubscribeAction,
+  type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import {
   isSubredditBlacklisted,
@@ -48,6 +51,7 @@ type CreateSubscriberGoalOptions = {
   submitAsUser?: boolean;
   headerText?: string;
   afterSubscribeAction?: AfterSubscribeAction;
+  afterSubscribePreset?: AfterSubscribePreset;
   stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
@@ -87,8 +91,20 @@ export async function createSubscriberGoal({
     throw new ProhibitedSubredditError();
   }
   const isTinyPost = options.postHeight === "tiny";
-  if (!isTinyPost && options.goal === undefined) {
-    throw new Error("Subscriber goal is required for non-tiny posts.");
+  const isCtaOnlyPost = options.postHeight === "cta";
+  const isCompactActionPost = isTinyPost || isCtaOnlyPost;
+  const afterSubscribePresetArgs = options.afterSubscribePreset
+    ? ([options.afterSubscribePreset] as const)
+    : ([] as const);
+  if (!isCompactActionPost && options.goal === undefined) {
+    throw new Error("Subscriber goal is required for goal posts.");
+  }
+  if (
+    isCtaOnlyPost &&
+    (!options.afterSubscribeAction ||
+      options.afterSubscribeAction.type === "disabled")
+  ) {
+    throw new Error("CTA-only posts require an actionable CTA.");
   }
 
   const [flair, existingGoalPostIds] = await Promise.all([
@@ -100,18 +116,27 @@ export async function createSubscriberGoal({
     subreddit,
   });
 
-  const textFallback = isTinyPost
-    ? subscribeOnlyTextFallbackMaker({
-        subredditName: options.subredditDisplayName,
-        language: options.language,
-      })
-    : textFallbackMaker({
-        goal: options.goal as number,
-        subscribers: subreddit.numberOfSubscribers,
-        subredditName: options.subredditDisplayName,
-        completedTime: null,
-        language: options.language,
-      });
+  const textFallback = isCtaOnlyPost
+    ? ctaOnlyTextFallbackMaker(
+        (
+          options.afterSubscribeAction as Exclude<
+            AfterSubscribeAction,
+            { type: "disabled" }
+          >
+        ).buttonText,
+      )
+    : isTinyPost
+      ? subscribeOnlyTextFallbackMaker({
+          subredditName: options.subredditDisplayName,
+          language: options.language,
+        })
+      : textFallbackMaker({
+          goal: options.goal as number,
+          subscribers: subreddit.numberOfSubscribers,
+          subredditName: options.subredditDisplayName,
+          completedTime: null,
+          language: options.language,
+        });
 
   const post = await createGoalPost({
     title: options.title,
@@ -124,31 +149,47 @@ export async function createSubscriberGoal({
   await applyGoalPostFrameStyle(post, options.postHeight);
 
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
-  const crosspostDispatchResult = isTinyPost
-    ? await registerNewSubscribeOnlyPost(
+  const crosspostDispatchResult = isCtaOnlyPost
+    ? await registerNewCtaOnlyPost(
         redis,
         appSettings,
         post,
         options.subredditDisplayName,
         options.colorTheme,
         options.language,
-        options.afterSubscribeAction ?? defaultAfterSubscribeAction,
+        options.afterSubscribeAction as Exclude<
+          AfterSubscribeAction,
+          { type: "disabled" }
+        >,
+        ...afterSubscribePresetArgs,
       )
-    : await registerNewSubGoalPost(
-        reddit,
-        redis,
-        appSettings,
-        post,
-        options.goal as number,
-        options.crosspost,
-        options.subredditDisplayName,
-        options.colorTheme,
-        options.autoCreateNextGoal,
-        options.language,
-        options.headerText,
-        options.postHeight as Exclude<SubGoalPostHeight, "tiny">,
-        options.afterSubscribeAction ?? defaultAfterSubscribeAction,
-      );
+    : isTinyPost
+      ? await registerNewSubscribeOnlyPost(
+          redis,
+          appSettings,
+          post,
+          options.subredditDisplayName,
+          options.colorTheme,
+          options.language,
+          options.afterSubscribeAction ?? defaultAfterSubscribeAction,
+          ...afterSubscribePresetArgs,
+        )
+      : await registerNewSubGoalPost(
+          reddit,
+          redis,
+          appSettings,
+          post,
+          options.goal as number,
+          options.crosspost,
+          options.subredditDisplayName,
+          options.colorTheme,
+          options.autoCreateNextGoal,
+          options.language,
+          options.headerText,
+          options.postHeight as Exclude<SubGoalPostHeight, "tiny" | "cta">,
+          options.afterSubscribeAction ?? defaultAfterSubscribeAction,
+          ...afterSubscribePresetArgs,
+        );
 
   const trackedPosts = await getTrackedPosts(redis);
   const queuedPosts = await getQueuedUpdates(redis);

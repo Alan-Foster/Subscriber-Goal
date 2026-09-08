@@ -33,6 +33,9 @@ const hoisted = vi.hoisted(() => ({
   setNewSubscriber: vi.fn(),
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
+  getCtaActivityMetric: vi.fn(),
+  isClickActivityPreset: vi.fn(),
+  recordCtaClick: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -66,6 +69,12 @@ vi.mock("../utils/redditUtils", () => ({
 
 vi.mock("../utils/subredditBlacklist", () => ({
   isSubredditBlacklisted: hoisted.isSubredditBlacklisted,
+}));
+
+vi.mock("../data/ctaActivity", () => ({
+  getCtaActivityMetric: hoisted.getCtaActivityMetric,
+  isClickActivityPreset: hoisted.isClickActivityPreset,
+  recordCtaClick: hoisted.recordCtaClick,
 }));
 
 import { registerPublicApiRoutes } from "./publicApi";
@@ -110,6 +119,12 @@ describe("publicApi routes", () => {
     hoisted.setNewSubscriber.mockResolvedValue(true);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
+    hoisted.getCtaActivityMetric.mockResolvedValue({
+      kind: "posts",
+      count: 1,
+      period: "week",
+    });
+    hoisted.isClickActivityPreset.mockReturnValue(false);
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscriber-goal-v1",
       goal: 200,
@@ -215,6 +230,8 @@ describe("publicApi routes", () => {
       },
       subscribed: true,
       authenticated: true,
+      trackCtaClicks: false,
+      ctaActivity: { kind: "posts", count: 1, period: "week" },
       subreddit: {
         name: "ExampleSub",
         subscribers: 100,
@@ -234,6 +251,51 @@ describe("publicApi routes", () => {
       100,
       { displayedSubscribers: 100 },
     );
+  });
+
+  it("initializes CTA-only posts without subscriber state", async () => {
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "cta-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "blue",
+      postHeight: "cta",
+      language: "en",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Create a New Post",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        colorTheme: "blue",
+      },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as InitResponse;
+    expect(response.state).toEqual({
+      colorTheme: "blue",
+      postHeight: "cta",
+      promoSubreddit: "SubGoal",
+      language: "en",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Create a New Post",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        colorTheme: "blue",
+      },
+      trackCtaClicks: false,
+      ctaActivity: { kind: "posts", count: 1, period: "week" },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 100,
+        growth: { count: 5, period: "today" },
+      },
+    });
+    expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
   });
 
   it("keeps Tiny subscribed state during refresh", async () => {
@@ -726,8 +788,65 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(403);
-    expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
+    expect(hoisted.getSubGoalData).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+  });
+
+  it("allows anonymous CTA-only posts to resolve a dynamic target", async () => {
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "cta-only-v1",
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "blue",
+      },
+    });
+    hoisted.reddit.getTopPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_target",
+          authorName: "member",
+          url: "https://www.reddit.com/r/ExampleSub/comments/target",
+          permalink: "/r/ExampleSub/comments/target",
+        },
+      ]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { status, json } as unknown as Response,
+    );
+
+    expect(status).not.toHaveBeenCalledWith(403);
+    expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledWith({
+      target: {
+        url: "https://www.reddit.com/r/ExampleSub/comments/target",
+        permalink: "/r/ExampleSub/comments/target",
+      },
+    });
+  });
+
+  it("rejects subscription attempts for CTA-only posts before authentication", async () => {
+    hoisted.getSubGoalData.mockResolvedValue({ postKind: "cta-only-v1" });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "This post does not support subscribing.",
+    });
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
   });
 
   it("does not query Reddit for a persisted link action", async () => {
@@ -843,5 +962,54 @@ describe("publicApi routes", () => {
       status: "error",
       message: "The post target could not be loaded.",
     });
+  });
+
+  it("records external CTA clicks without requiring authentication", async () => {
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribePreset: "discord",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.gg/example",
+        colorTheme: "blue",
+      },
+    });
+    hoisted.isClickActivityPreset.mockReturnValue(true);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.ctaClick)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.recordCtaClick).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_post",
+    );
+    expect(json).toHaveBeenCalledWith({ status: "ok" });
+  });
+
+  it("rejects click recording for post-activity CTAs", async () => {
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribePreset: "create-post",
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Create a New Post",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        colorTheme: "blue",
+      },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.ctaClick)?.(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
   });
 });

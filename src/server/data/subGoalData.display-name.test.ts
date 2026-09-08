@@ -11,6 +11,7 @@ import {
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
   registerNewSubGoalPost,
+  registerNewCtaOnlyPost,
   registerNewSubscribeOnlyPost,
   scheduleAutoCreateNextGoal,
   setSubGoalData,
@@ -20,6 +21,7 @@ import {
   postAfterSubscribeActionSuffix,
   postAfterSubscribeButtonTextSuffix,
   postAfterSubscribeColorThemeSuffix,
+  postAfterSubscribePresetSuffix,
   postAfterSubscribeUrlSuffix,
   postHeaderTextSuffix,
   postHeightSuffix,
@@ -27,6 +29,7 @@ import {
   postSubredditDisplayNameSuffix,
 } from "./subGoalData";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -133,6 +136,13 @@ describe("subGoalData subreddit display name", () => {
         postHeight: "short",
         autoCreateNextGoal: true,
         language: "es",
+        afterSubscribePreset: "discord",
+        afterSubscribeAction: {
+          type: "link",
+          buttonText: "Únete al Discord",
+          url: "https://discord.gg/example",
+          colorTheme: "blue",
+        },
       },
     );
 
@@ -145,9 +155,16 @@ describe("subGoalData subreddit display name", () => {
     expect(data.autoCreateNextGoal).toBe(true);
     expect(data.language).toBe("es");
     expect(data.postHeight).toBe("short");
+    expect(data.afterSubscribePreset).toBe("discord");
     expect(
       await redis.hGet(subscriberGoalsKey, `t3_post${postHeaderTextSuffix}`),
     ).toBe("Custom Header");
+    expect(
+      await redis.hGet(
+        subscriberGoalsKey,
+        `t3_post${postAfterSubscribePresetSuffix}`,
+      ),
+    ).toBe("discord");
   });
 
   it("updates display name independently for a post", async () => {
@@ -520,6 +537,45 @@ describe("subGoalData subreddit display name", () => {
       expect.stringContaining('"reason":"tiny_post_height"'),
     );
     infoSpy.mockRestore();
+  });
+
+  it("persists CTA-only identity, frame color, and action without updater tracking", async () => {
+    const redis = new InMemoryRedis();
+    const action = {
+      type: "link" as const,
+      buttonText: "Create a New Post",
+      url: "https://www.reddit.com/r/ExampleSub/submit/",
+      colorTheme: "blue" as const,
+    };
+
+    const result = await registerNewCtaOnlyPost(
+      redis as unknown as Parameters<typeof registerNewCtaOnlyPost>[0],
+      { promoSubreddit: "SubGoal" } as never,
+      {
+        id: "t3_cta",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      } as never,
+      "ExampleSub",
+      "blue",
+      "en",
+      action,
+    );
+
+    await expect(
+      getSubGoalData(
+        redis as unknown as Parameters<typeof getSubGoalData>[0],
+        "t3_cta",
+        { postKind: ctaOnlyPostKind },
+      ),
+    ).resolves.toMatchObject({
+      postKind: ctaOnlyPostKind,
+      postHeight: "cta",
+      colorTheme: "blue",
+      afterSubscribeAction: action,
+    });
+    expect(result).toEqual({ status: "skipped" });
+    await expect(redis.zRange(postsKey, 0, -1)).resolves.toEqual([]);
+    await expect(redis.zRange(updatesKey, 0, -1)).resolves.toEqual([]);
   });
 
   it("registers regular goals in both the durable registry and updater indexes", async () => {

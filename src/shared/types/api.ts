@@ -3,6 +3,12 @@ import type { SubGoalPostHeight } from "../subGoalPostHeight";
 import type { SubGoalLanguage } from "../subGoalPostI18n";
 import type { AfterSubscribeAction } from "../afterSubscribeAction";
 
+export type CompactCtaActivityMetric = {
+  kind: "posts" | "clicks";
+  count: number;
+  period: "today" | "week";
+};
+
 export type BasicSubredditData = {
   id: string;
   name: string;
@@ -24,10 +30,11 @@ type SharedPostState = {
   colorTheme: SubGoalColorTheme;
   language: SubGoalLanguage;
   afterSubscribeAction: AfterSubscribeAction;
+  trackCtaClicks?: boolean;
 };
 
 export type SubscriberGoalState = SharedPostState & {
-  postHeight: Exclude<SubGoalPostHeight, "tiny">;
+  postHeight: Exclude<SubGoalPostHeight, "tiny" | "cta">;
   goal: number | null;
   recentSubscriber: string | null;
   completedTime: number | null;
@@ -43,6 +50,7 @@ export type SubscribeOnlyState = SharedPostState & {
   promoSubreddit: string;
   subscribed: boolean;
   authenticated: boolean;
+  ctaActivity?: CompactCtaActivityMetric;
   subreddit: Pick<BasicSubredditData, "name" | "subscribers"> & {
     growth: {
       count: number;
@@ -51,7 +59,22 @@ export type SubscribeOnlyState = SharedPostState & {
   };
 };
 
-export type SubGoalState = SubscriberGoalState | SubscribeOnlyState;
+export type CtaOnlyState = SharedPostState & {
+  postHeight: "cta";
+  promoSubreddit: string;
+  ctaActivity?: CompactCtaActivityMetric;
+  subreddit: Pick<BasicSubredditData, "name" | "subscribers"> & {
+    growth: {
+      count: number;
+      period: "today" | "week";
+    };
+  };
+};
+
+export type SubGoalState =
+  | SubscriberGoalState
+  | SubscribeOnlyState
+  | CtaOnlyState;
 
 export type InitResponse = {
   type: "init";
@@ -80,6 +103,10 @@ export type NavigationTarget = { url: string; permalink?: string };
 
 export type AfterSubscribeTargetResponse = {
   target: NavigationTarget;
+};
+
+export type RecordCtaClickResponse = {
+  status: "ok";
 };
 
 export type RealtimeMessage = {
@@ -113,6 +140,11 @@ export type CreateSubscriberGoalFormValues = CreateGoalDetailsFormValues & {
 
 export type CreateSubscribeOnlyFormValues = CreateGoalDetailsFormValues;
 
+export type CreateCtaOnlyFormValues = Pick<
+  CreateGoalDetailsFormValues,
+  "postTitle" | "afterSubscribePreset"
+>;
+
 type CreateAfterSubscribeFormValues = {
   afterSubscribeButtonText?: string;
   afterSubscribeUrl?: string;
@@ -125,6 +157,8 @@ export type CreateSubscriberGoalFollowUpFormValues =
 
 export type CreateSubscribeOnlyFollowUpFormValues =
   CreateAfterSubscribeFormValues;
+
+export type CreateCtaOnlyFollowUpFormValues = CreateAfterSubscribeFormValues;
 
 export type DeleteGoalFormValues = {
   confirm?: boolean;

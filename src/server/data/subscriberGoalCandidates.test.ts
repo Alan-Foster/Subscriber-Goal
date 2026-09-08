@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { getSubscriberGoalCandidatePostIds } from "./subscriberGoalCandidates";
-import {
-  subscriberGoalPostRegistryKey,
-} from "./subscriberGoalPostRegistry";
+import { subscriberGoalPostRegistryKey } from "./subscriberGoalPostRegistry";
 import { postsKey, updatesKey } from "./updaterData";
 
 describe("getSubscriberGoalCandidatePostIds", () => {
@@ -19,6 +17,7 @@ describe("getSubscriberGoalCandidatePostIds", () => {
         cursor: 0,
         fieldValues: [
           { field: "t3_persisted_post_kind", value: "subscribe-only-v1" },
+          { field: "t3_cta_post_kind", value: "cta-only-v1" },
           { field: "t3_registry_post_height", value: "tiny" },
         ],
       })),
@@ -31,6 +30,7 @@ describe("getSubscriberGoalCandidatePostIds", () => {
       "t3_tracked",
       "t3_queued",
       "t3_persisted",
+      "t3_cta",
     ]);
   });
 });

@@ -1,5 +1,5 @@
-import { resolveSubGoalPostHeight } from '../../../shared/subGoalPostHeight';
-import type { SubGoalColorTheme } from '../../../shared/subGoalColorTheme';
+import { resolveSubGoalPostHeight } from "../../../shared/subGoalPostHeight";
+import type { SubGoalColorTheme } from "../../../shared/subGoalColorTheme";
 
 type SkeletonPageProps = {
   postHeight?: unknown;
@@ -8,17 +8,17 @@ type SkeletonPageProps = {
 
 export const SkeletonPage = ({ postHeight, colorTheme }: SkeletonPageProps) => {
   const skeletonClass =
-    'animate-pulse rounded-full bg-[color:var(--sg-surface-muted)]';
+    "animate-pulse rounded-full bg-[color:var(--sg-surface-muted)]";
   const resolvedPostHeight = resolveSubGoalPostHeight(postHeight);
-  const isShort = resolvedPostHeight === 'short';
-  const isTiny = resolvedPostHeight === 'tiny';
+  const isShort = resolvedPostHeight === "short";
+  const isTiny = resolvedPostHeight === "tiny" || resolvedPostHeight === "cta";
 
   return (
     <div
       className={`sg-goal-frame relative flex ${
-        isTiny ? 'h-[100px]' : isShort ? 'h-[234px]' : 'h-[320px]'
+        isTiny ? "h-[100px]" : isShort ? "h-[234px]" : "h-[320px]"
       } w-full flex-col items-center justify-center gap-5 px-4 py-6`}
-      data-sg-theme={colorTheme}
+      data-sg-theme={colorTheme ?? "loading"}
     >
       {isShort || isTiny ? null : (
         <div className={`h-[100px] w-[100px] ${skeletonClass}`} />

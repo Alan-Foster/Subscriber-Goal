@@ -14,6 +14,7 @@ import {
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { resolveSubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import {
+  ctaOnlyPostKind,
   resolvePostKind,
   resolvePostKindFromPostData,
   subscriberGoalPostKind,
@@ -26,8 +27,10 @@ import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
 import {
   createTopPostFallbackAction,
   defaultAfterSubscribeAction,
+  resolveAfterSubscribePreset,
   resolveAfterSubscribeAction,
   type AfterSubscribeAction,
+  type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import { registerSubscriberGoalPost } from "./subscriberGoalPostRegistry";
 
@@ -48,6 +51,7 @@ export const postAfterSubscribeButtonTextSuffix =
 export const postAfterSubscribeUrlSuffix = "_after_subscribe_url";
 export const postAfterSubscribeColorThemeSuffix =
   "_after_subscribe_color_theme";
+export const postAfterSubscribePresetSuffix = "_after_subscribe_preset";
 export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
 export const recentSubscriberPostsByUsernameKey =
   "recent_subscriber_posts_by_username";
@@ -73,6 +77,7 @@ export type SubGoalData = {
   language: SubGoalLanguage;
   postHeight: SubGoalPostHeight;
   afterSubscribeAction: AfterSubscribeAction;
+  afterSubscribePreset: AfterSubscribePreset | null;
 };
 
 type RedditPost = Awaited<ReturnType<RedditClient["submitCustomPost"]>>;
@@ -228,6 +233,7 @@ export async function getSubGoalData(
     afterSubscribeButtonText,
     afterSubscribeUrl,
     afterSubscribeColorTheme,
+    afterSubscribePreset,
   ] = (await redis.hMGet(subscriberGoalsKey, [
     `${postId}${postGoalSuffix}`,
     `${postId}${postRecentSubscriberSuffix}`,
@@ -243,7 +249,9 @@ export async function getSubGoalData(
     `${postId}${postAfterSubscribeButtonTextSuffix}`,
     `${postId}${postAfterSubscribeUrlSuffix}`,
     `${postId}${postAfterSubscribeColorThemeSuffix}`,
+    `${postId}${postAfterSubscribePresetSuffix}`,
   ])) as [
+    string | null,
     string | null,
     string | null,
     string | null,
@@ -268,8 +276,11 @@ export async function getSubGoalData(
   const conflictingTinyGoal =
     hasPositiveGoal &&
     (postDataKind === subscribeOnlyPostKind ||
+      postDataKind === ctaOnlyPostKind ||
       persistedKind === subscribeOnlyPostKind ||
-      rawHeight === "tiny");
+      persistedKind === ctaOnlyPostKind ||
+      rawHeight === "tiny" ||
+      rawHeight === "cta");
   if (conflictingTinyGoal) {
     console.warn(
       `[postKind] preserving subscriber goal with conflicting Tiny metadata: postId=${postId}`,
@@ -277,20 +288,24 @@ export async function getSubGoalData(
   }
   const postKind: PostKind = hasPositiveGoal
     ? subscriberGoalPostKind
-    : postDataKind === subscriberGoalPostKind ||
-        persistedKind === subscriberGoalPostKind
-      ? subscriberGoalPostKind
-      : postDataKind === subscribeOnlyPostKind ||
-          persistedKind === subscribeOnlyPostKind ||
-          (rawHeight === "tiny" && !hasGoalField)
-        ? subscribeOnlyPostKind
-        : subscriberGoalPostKind;
+    : postDataKind === ctaOnlyPostKind || persistedKind === ctaOnlyPostKind
+      ? ctaOnlyPostKind
+      : postDataKind === subscriberGoalPostKind ||
+          persistedKind === subscriberGoalPostKind
+        ? subscriberGoalPostKind
+        : postDataKind === subscribeOnlyPostKind ||
+            persistedKind === subscribeOnlyPostKind ||
+            (rawHeight === "tiny" && !hasGoalField)
+          ? subscribeOnlyPostKind
+          : subscriberGoalPostKind;
   const resolvedHeight: SubGoalPostHeight =
-    postKind === subscribeOnlyPostKind
-      ? "tiny"
-      : rawHeight === "short"
-        ? "short"
-        : "regular";
+    postKind === ctaOnlyPostKind
+      ? "cta"
+      : postKind === subscribeOnlyPostKind
+        ? "tiny"
+        : rawHeight === "short"
+          ? "short"
+          : "regular";
   const resolvedColorTheme = resolveSubGoalColorTheme(colorTheme);
   const resolvedLanguage = resolveSubGoalLanguage(language);
   const hasActionMetadata =
@@ -335,15 +350,23 @@ export async function getSubGoalData(
     language: resolvedLanguage,
     postHeight: resolvedHeight,
     afterSubscribeAction,
+    afterSubscribePreset: resolveAfterSubscribePreset(
+      afterSubscribePreset,
+      afterSubscribeAction,
+    ),
   };
 }
 
 export async function setSubGoalData(
   redis: RedisClient,
   postId: string,
-  data: Omit<SubGoalData, "postKind" | "afterSubscribeAction"> & {
+  data: Omit<
+    SubGoalData,
+    "postKind" | "afterSubscribeAction" | "afterSubscribePreset"
+  > & {
     postKind?: PostKind;
     afterSubscribeAction?: AfterSubscribeAction;
+    afterSubscribePreset?: AfterSubscribePreset | null;
   },
 ): Promise<void> {
   const afterSubscribeAction =
@@ -375,6 +398,10 @@ export async function setSubGoalData(
       afterSubscribeAction.type !== "disabled"
         ? afterSubscribeAction.colorTheme
         : data.colorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]:
+      data.afterSubscribePreset ??
+      resolveAfterSubscribePreset(undefined, afterSubscribeAction) ??
+      "",
   });
 }
 
@@ -428,6 +455,7 @@ export async function setSubscribeOnlyPostData(
     colorTheme: SubGoalColorTheme;
     language: SubGoalLanguage;
     afterSubscribeAction?: AfterSubscribeAction;
+    afterSubscribePreset?: AfterSubscribePreset;
   },
 ): Promise<void> {
   const afterSubscribeAction =
@@ -451,6 +479,41 @@ export async function setSubscribeOnlyPostData(
       afterSubscribeAction.type !== "disabled"
         ? afterSubscribeAction.colorTheme
         : data.colorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]:
+      data.afterSubscribePreset ??
+      resolveAfterSubscribePreset(undefined, afterSubscribeAction) ??
+      "",
+  });
+}
+
+export async function setCtaOnlyPostData(
+  redis: RedisClient,
+  postId: string,
+  data: {
+    subredditDisplayName: string;
+    colorTheme: SubGoalColorTheme;
+    language: SubGoalLanguage;
+    action: Exclude<AfterSubscribeAction, { type: "disabled" }>;
+    afterSubscribePreset?: AfterSubscribePreset;
+  },
+): Promise<void> {
+  await redis.hSet(subscriberGoalsKey, {
+    [`${postId}${postKindSuffix}`]: ctaOnlyPostKind,
+    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName,
+    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
+      data.colorTheme,
+    ),
+    [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
+    [`${postId}${postHeightSuffix}`]: "cta",
+    [`${postId}${postAfterSubscribeActionSuffix}`]: data.action.type,
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]: data.action.buttonText,
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      data.action.type === "link" ? data.action.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]: data.action.colorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]:
+      data.afterSubscribePreset ??
+      resolveAfterSubscribePreset(undefined, data.action) ??
+      "",
   });
 }
 
@@ -541,8 +604,9 @@ export async function registerNewSubGoalPost(
   autoCreateNextGoal = false,
   language: SubGoalLanguage = defaultSubGoalLanguage,
   headerText?: string,
-  postHeight: Exclude<SubGoalPostHeight, "tiny"> = "regular",
+  postHeight: Exclude<SubGoalPostHeight, "tiny" | "cta"> = "regular",
   afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
+  afterSubscribePreset?: AfterSubscribePreset,
 ): Promise<CrosspostDispatchResult> {
   await setSubGoalData(redis, post.id, {
     goal,
@@ -555,6 +619,9 @@ export async function registerNewSubGoalPost(
     language,
     postHeight,
     afterSubscribeAction,
+    afterSubscribePreset:
+      afterSubscribePreset ??
+      resolveAfterSubscribePreset(undefined, afterSubscribeAction),
   });
   await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   await trackPost(redis, post.id, post.createdAt);
@@ -625,12 +692,14 @@ export async function registerNewSubscribeOnlyPost(
   colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
   language: SubGoalLanguage = defaultSubGoalLanguage,
   afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
+  afterSubscribePreset?: AfterSubscribePreset,
 ): Promise<CrosspostDispatchResult> {
   await setSubscribeOnlyPostData(redis, post.id, {
     subredditDisplayName,
     colorTheme,
     language,
     afterSubscribeAction,
+    ...(afterSubscribePreset ? { afterSubscribePreset } : {}),
   });
   await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   logCrosspostEvent({
@@ -638,6 +707,33 @@ export async function registerNewSubscribeOnlyPost(
     sourcePostId: post.id,
     targetSubreddit: appSettings.promoSubreddit,
     reason: "tiny_post_height",
+  });
+  return { status: "skipped" };
+}
+
+export async function registerNewCtaOnlyPost(
+  redis: RedisClient,
+  appSettings: ServerAppSettings,
+  post: RedditPost,
+  subredditDisplayName: string,
+  colorTheme: SubGoalColorTheme,
+  language: SubGoalLanguage,
+  action: Exclude<AfterSubscribeAction, { type: "disabled" }>,
+  afterSubscribePreset?: AfterSubscribePreset,
+): Promise<CrosspostDispatchResult> {
+  await setCtaOnlyPostData(redis, post.id, {
+    subredditDisplayName,
+    colorTheme,
+    language,
+    action,
+    ...(afterSubscribePreset ? { afterSubscribePreset } : {}),
+  });
+  await registerSubscriberGoalPost(redis, post.id, post.createdAt);
+  logCrosspostEvent({
+    event: "crosspost_attempt_skipped",
+    sourcePostId: post.id,
+    targetSubreddit: appSettings.promoSubreddit,
+    reason: "cta_only_post",
   });
   return { status: "skipped" };
 }

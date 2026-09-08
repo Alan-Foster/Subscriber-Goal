@@ -110,6 +110,23 @@ describe("createGoalPost", () => {
     );
   });
 
+  it("submits CTA-only posts through the 100px compact entrypoint", async () => {
+    await createGoalPost({
+      title: "Create a post",
+      subredditName: "ExampleSub",
+      textFallback: "Create a New Post",
+      postHeight: "cta",
+    });
+
+    expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: "subscribe-only",
+        postData: { postKind: "cta-only-v1" },
+        styles: { height: 0, heightPixels: 100 },
+      }),
+    );
+  });
+
   it("applies heightPixels through post-creation styles for short posts", async () => {
     const post = {
       id: "t3_newpost",
@@ -131,6 +148,17 @@ describe("createGoalPost", () => {
     };
 
     await applyGoalPostFrameStyle(post, "tiny");
+
+    expect(post.setCustomPostStyles).toHaveBeenCalledWith({
+      height: EntrypointHeight.HEIGHT_UNSPECIFIED,
+      heightPixels: 100,
+    });
+  });
+
+  it("applies 100px post-creation styles for CTA-only posts", async () => {
+    const post = { id: "t3_newpost", setCustomPostStyles: vi.fn() };
+
+    await applyGoalPostFrameStyle(post, "cta");
 
     expect(post.setCustomPostStyles).toHaveBeenCalledWith({
       height: EntrypointHeight.HEIGHT_UNSPECIFIED,

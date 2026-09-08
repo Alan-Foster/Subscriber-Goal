@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { JourneyReceipt } from "@devvit/analytics/shared/reddit";
 import {
+  getGoalJourneyContext,
   GoalJourneyAnalytics,
   type JourneyClient,
 } from "./goalJourneyAnalytics";
@@ -43,6 +44,32 @@ describe("GoalJourneyAnalytics", () => {
   beforeEach(() => {
     client = createClient();
     analytics = new GoalJourneyAnalytics(client);
+  });
+
+  it("represents CTA-only posts as an immediate CTA journey", () => {
+    expect(
+      getGoalJourneyContext({
+        postHeight: "cta",
+        promoSubreddit: "SubGoal",
+        colorTheme: "blue",
+        language: "en",
+        afterSubscribeAction: {
+          type: "link",
+          buttonText: "Create a New Post",
+          url: "https://www.reddit.com/r/ExampleSub/submit/",
+          colorTheme: "blue",
+        },
+        subreddit: {
+          name: "ExampleSub",
+          subscribers: 100,
+          growth: { count: 4, period: "today" },
+        },
+      }),
+    ).toEqual({
+      goalSize: "cta",
+      entryState: "cta",
+      hasFollowupCta: true,
+    });
   });
 
   it("reports App.Ready without starting a journey", async () => {

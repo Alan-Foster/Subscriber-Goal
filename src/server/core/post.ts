@@ -6,6 +6,7 @@ import {
   tinySubGoalPostHeightPixels,
 } from "../../shared/subGoalPostHeight";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -27,17 +28,20 @@ export const createGoalPost = async ({
   submitAsUser = false,
   flairId,
 }: CreateGoalPostParams) => {
-  const isSubscribeOnly = postHeight === "tiny";
+  const isCompactActionPost = postHeight === "tiny" || postHeight === "cta";
   return await reddit.submitCustomPost({
     title,
     subredditName,
-    entry: isSubscribeOnly ? "subscribe-only" : "default",
+    entry: isCompactActionPost ? "subscribe-only" : "default",
     postData: {
-      postKind: isSubscribeOnly
-        ? subscribeOnlyPostKind
-        : subscriberGoalPostKind,
+      postKind:
+        postHeight === "cta"
+          ? ctaOnlyPostKind
+          : postHeight === "tiny"
+            ? subscribeOnlyPostKind
+            : subscriberGoalPostKind,
     },
-    styles: isSubscribeOnly
+    styles: isCompactActionPost
       ? {
           height: EntrypointHeight.HEIGHT_UNSPECIFIED,
           heightPixels: tinySubGoalPostHeightPixels,
@@ -73,7 +77,7 @@ export async function applyGoalPostFrameStyle(
     return;
   }
   const heightPixels =
-    resolvedPostHeight === "tiny"
+    resolvedPostHeight === "tiny" || resolvedPostHeight === "cta"
       ? tinySubGoalPostHeightPixels
       : shortSubGoalPostHeightPixels;
   if (typeof post.setCustomPostStyles !== "function") {

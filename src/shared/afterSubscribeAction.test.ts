@@ -5,16 +5,37 @@ import {
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
   resolveAfterSubscribeAction,
+  resolveAfterSubscribePreset,
 } from "./afterSubscribeAction";
 
 describe("after-subscribe defaults", () => {
+  it("recovers activity categories from legacy resolved actions", () => {
+    expect(
+      resolveAfterSubscribePreset(undefined, {
+        type: "link",
+        buttonText: "Create a New Post",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        colorTheme: "blue",
+      }),
+    ).toBe("create-post");
+    expect(
+      resolveAfterSubscribePreset(undefined, {
+        type: "link",
+        buttonText: "Read the Wiki",
+        url: "https://www.reddit.com/r/ExampleSub/wiki/index/",
+        colorTheme: "blue",
+      }),
+    ).toBe("web-link");
+  });
+
   it.each([
-    [9_999, "create-post"],
-    [10_000, "top-post-day"],
+    ["public", "create-post"],
+    ["private", "create-post"],
+    ["restricted", "top-post-day"],
   ] as const)(
-    "selects the default preset at %i subscribers",
-    (count, preset) => {
-      expect(getDefaultAfterSubscribePreset(count)).toBe(preset);
+    "selects the default preset for a %s subreddit",
+    (subredditType, preset) => {
+      expect(getDefaultAfterSubscribePreset(subredditType)).toBe(preset);
     },
   );
 
@@ -23,7 +44,7 @@ describe("after-subscribe defaults", () => {
       createDefaultAfterSubscribeAction({
         language: "en",
         subredditName: "ExampleSub",
-        numberOfSubscribers: 9_999,
+        subredditType: "public",
       }),
     ).toEqual({
       type: "link",
@@ -33,12 +54,12 @@ describe("after-subscribe defaults", () => {
     });
   });
 
-  it("builds the larger-subreddit top-post action in blue", () => {
+  it("builds the restricted-subreddit top-post action in blue", () => {
     expect(
       createDefaultAfterSubscribeAction({
         language: "en",
         subredditName: "ExampleSub",
-        numberOfSubscribers: 10_000,
+        subredditType: "restricted",
       }),
     ).toEqual({
       type: "top-post-day",

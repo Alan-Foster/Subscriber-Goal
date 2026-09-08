@@ -3,6 +3,7 @@ export const apiRoutes = {
   refresh: "/api/refresh",
   subscribe: "/api/subscribe",
   afterSubscribeTarget: "/api/after-subscribe-target",
+  ctaClick: "/api/cta-click",
 } as const;
 
 export const internalRoutes = {
@@ -10,6 +11,7 @@ export const internalRoutes = {
     onAppInstall: "/internal/triggers/on-app-install",
     onAppUpgrade: "/internal/triggers/on-app-upgrade",
     onModAction: "/internal/triggers/on-mod-action",
+    onPostCreate: "/internal/triggers/on-post-create",
   },
   scheduler: {
     postsUpdaterJob: "/internal/scheduler/posts-updater-job",
@@ -24,10 +26,12 @@ export const internalRoutes = {
     createGoalSetup: "/internal/form/create-goal/setup",
     createSubscriberGoal: "/internal/form/create-goal/subscriber-goal",
     createSubscribeOnly: "/internal/form/create-goal/subscribe-only",
+    createCtaOnly: "/internal/form/create-goal/cta-only",
     createSubscriberGoalFollowUp:
       "/internal/form/create-goal/subscriber-goal/follow-up",
     createSubscribeOnlyFollowUp:
       "/internal/form/create-goal/subscribe-only/follow-up",
+    createCtaOnlyFollowUp: "/internal/form/create-goal/cta-only/follow-up",
     deleteGoal: "/internal/form/delete-goal",
     eraseData: "/internal/form/erase-data",
     eraseMyData: "/internal/form/erase-my-data",
@@ -38,8 +42,10 @@ export const formNames = {
   createGoalSetup: "createGoalSetupForm",
   createSubscriberGoal: "createSubscriberGoalForm",
   createSubscribeOnly: "createSubscribeOnlyForm",
+  createCtaOnly: "createCtaOnlyForm",
   createSubscriberGoalFollowUp: "createSubscriberGoalFollowUpForm",
   createSubscribeOnlyFollowUp: "createSubscribeOnlyFollowUpForm",
+  createCtaOnlyFollowUp: "createCtaOnlyFollowUpForm",
   deleteGoal: "deleteGoalForm",
   eraseData: "eraseDataForm",
   eraseMyData: "eraseMyDataForm",

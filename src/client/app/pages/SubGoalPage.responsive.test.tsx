@@ -119,5 +119,28 @@ describe("SubGoalPage responsive tiny layout", () => {
     expect(subscribedHtml).toContain("Subscribed to r/ExampleSub");
     expect(followUpHtml).toContain("15.1k subscribers");
     expect(followUpHtml).toContain("Visit Website");
+    expect(followUpHtml).toContain("1 new post this week");
+  });
+
+  it("replaces subscriber growth with the configured CTA activity", () => {
+    hoisted.isWide = true;
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={createState({
+          subscribed: true,
+          ctaActivity: { kind: "clicks", count: 4, period: "week" },
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Visit Website",
+            url: "https://example.com/",
+            colorTheme: "blue",
+          },
+        })}
+        {...commonProps}
+      />,
+    );
+    expect(html).toContain("15.1k subscribers");
+    expect(html).toContain("4 clicks this week");
+    expect(html).not.toContain("3 new today");
   });
 });

@@ -10,6 +10,7 @@ const hoisted = vi.hoisted(() => ({
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
   registerNewSubscribeOnlyPost: vi.fn(),
+  registerNewCtaOnlyPost: vi.fn(),
   setSubredditDisplayNameForPost: vi.fn(),
   setSavedSubredditDisplayName: vi.fn(),
   cancelAllAutoCreateNextGoals: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
+  registerNewCtaOnlyPost: hoisted.registerNewCtaOnlyPost,
   setSubredditDisplayNameForPost: hoisted.setSubredditDisplayNameForPost,
 }));
 
@@ -52,8 +54,7 @@ vi.mock("../utils/redditUtils", () => ({
 }));
 
 vi.mock("../data/subscriberGoalCandidates", () => ({
-  getSubscriberGoalCandidatePostIds:
-    hoisted.getSubscriberGoalCandidatePostIds,
+  getSubscriberGoalCandidatePostIds: hoisted.getSubscriberGoalCandidatePostIds,
 }));
 
 vi.mock("./subscriberGoalPostFlair", () => ({
@@ -129,6 +130,7 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
       status: "skipped",
     });
+    hoisted.registerNewCtaOnlyPost.mockResolvedValue({ status: "skipped" });
     hoisted.applyGoalPostFrameStyle.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
@@ -227,9 +229,7 @@ describe("createSubscriberGoal sticky handling", () => {
     );
     expect(
       hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      hoisted.createGoalPost.mock.invocationCallOrder[0],
-    );
+    ).toBeLessThan(hoisted.createGoalPost.mock.invocationCallOrder[0]);
   });
 
   it("does not submit a replacement when an older goal cannot be unpinned", async () => {
@@ -310,6 +310,49 @@ describe("createSubscriberGoal sticky handling", () => {
       { type: "disabled" },
     );
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("creates CTA-only posts without a goal and registers their action", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    const action = {
+      type: "link" as const,
+      buttonText: "Create a New Post",
+      url: "https://www.reddit.com/r/ExampleSub/submit/",
+      colorTheme: "blue" as const,
+    };
+
+    await createGoal({
+      postHeight: "cta",
+      goal: undefined,
+      colorTheme: "blue",
+      afterSubscribeAction: action,
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postHeight: "cta",
+        textFallback: "Create a New Post",
+      }),
+    );
+    expect(hoisted.registerNewCtaOnlyPost).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      post,
+      "ExampleSub",
+      "blue",
+      "en",
+      action,
+    );
+    expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("rejects CTA-only posts without an actionable CTA", async () => {
+    await expect(
+      createGoal({ postHeight: "cta", goal: undefined }),
+    ).rejects.toThrow("CTA-only posts require an actionable CTA.");
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
   it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {

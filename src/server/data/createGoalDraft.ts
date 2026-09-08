@@ -36,9 +36,16 @@ export type SubscribeOnlyDraftDetails = {
   afterSubscribePreset: AfterSubscribePreset;
 };
 
+export type CtaOnlyDraftDetails = {
+  kind: "cta-only";
+  postTitle: string;
+  afterSubscribePreset: AfterSubscribePreset;
+};
+
 export type CreateGoalDraftDetails =
   | SubscriberGoalDraftDetails
-  | SubscribeOnlyDraftDetails;
+  | SubscribeOnlyDraftDetails
+  | CtaOnlyDraftDetails;
 
 export type CreateGoalDraft =
   | ({ version: 4; stage: "details" } & CreateGoalDraftBase)
@@ -116,6 +123,9 @@ function isCreateGoalDraft(
   if (value.postHeight === "tiny") {
     return isSubscribeOnlyDetails(value.details);
   }
+  if (value.postHeight === "cta") {
+    return isCtaOnlyDetails(value.details);
+  }
   return isSubscriberGoalDetails(value.details);
 }
 
@@ -144,6 +154,17 @@ function isSubscribeOnlyDetails(
     typeof value.postTitle === "string" &&
     value.postTitle.length > 0 &&
     isSubGoalColorTheme(value.colorTheme) &&
+    isAfterSubscribePreset(value.afterSubscribePreset)
+  );
+}
+
+function isCtaOnlyDetails(
+  value: CreateGoalDraftDetails,
+): value is CtaOnlyDraftDetails {
+  return (
+    value.kind === "cta-only" &&
+    typeof value.postTitle === "string" &&
+    value.postTitle.length > 0 &&
     isAfterSubscribePreset(value.afterSubscribePreset)
   );
 }

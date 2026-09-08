@@ -21,6 +21,7 @@ describe("AfterSubscribeButton", () => {
   const renderButton = async (
     action: ActionableAction,
     language: "en" | "es" = "en",
+    trackClicks = false,
   ) => {
     await act(async () => {
       root.render(
@@ -28,6 +29,7 @@ describe("AfterSubscribeButton", () => {
           action={action}
           language={language}
           onNavigate={onNavigate}
+          trackClicks={trackClicks}
         />,
       );
     });
@@ -69,6 +71,34 @@ describe("AfterSubscribeButton", () => {
       "https://www.reddit.com/r/ExampleSub/wiki/index/",
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("records every tracked direct-link activation without delaying navigation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    await renderButton(
+      {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.gg/example",
+        colorTheme: "blue",
+      },
+      "en",
+      true,
+    );
+
+    await act(async () => {
+      const button = container.querySelector("button");
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(apiRoutes.ctaClick, {
+      method: "POST",
+      keepalive: true,
+    });
+    expect(onNavigate).toHaveBeenCalledTimes(2);
   });
 
   it("resolves a dynamic target once, disables while loading, and navigates to it", async () => {

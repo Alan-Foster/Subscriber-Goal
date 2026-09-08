@@ -20,6 +20,7 @@ const hoisted = vi.hoisted(() => ({
   ensureSubscriberGoalPostFlair: vi.fn(),
   backfillSubscriberGoalPostFlair: vi.fn(),
   reconcileSubscriberGoalStickies: vi.fn(),
+  ensureCommunityPostActivityBackfill: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -70,8 +71,7 @@ vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
 }));
 
 vi.mock("../data/subscriberGoalCandidates", () => ({
-  getSubscriberGoalCandidatePostIds:
-    hoisted.getSubscriberGoalCandidatePostIds,
+  getSubscriberGoalCandidatePostIds: hoisted.getSubscriberGoalCandidatePostIds,
 }));
 
 vi.mock("../core/subscriberGoalPostFlair", () => ({
@@ -81,6 +81,11 @@ vi.mock("../core/subscriberGoalPostFlair", () => ({
 
 vi.mock("../utils/redditUtils", () => ({
   reconcileSubscriberGoalStickies: hoisted.reconcileSubscriberGoalStickies,
+}));
+
+vi.mock("../data/ctaActivity", () => ({
+  ensureCommunityPostActivityBackfill:
+    hoisted.ensureCommunityPostActivityBackfill,
 }));
 
 import { onAppChanged } from "./appChanged";
@@ -108,6 +113,8 @@ describe("onAppChanged", () => {
     hoisted.ensureSubscriberGoalPostFlair.mockReset();
     hoisted.backfillSubscriberGoalPostFlair.mockReset();
     hoisted.reconcileSubscriberGoalStickies.mockReset();
+    hoisted.ensureCommunityPostActivityBackfill.mockReset();
+    hoisted.ensureCommunityPostActivityBackfill.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -218,7 +225,9 @@ describe("onAppChanged", () => {
       new Error("flair permission denied"),
     );
 
-    await expect(onAppChanged({ lifecycleSource: "upgrade" })).resolves.toBeUndefined();
+    await expect(
+      onAppChanged({ lifecycleSource: "upgrade" }),
+    ).resolves.toBeUndefined();
 
     expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
     expect(hoisted.initializePostKindMigration).toHaveBeenCalled();

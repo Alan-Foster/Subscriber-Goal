@@ -3,10 +3,14 @@ import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SubscribeOnlyState } from "../../shared/types/api";
+import type {
+  CtaOnlyState,
+  SubGoalState,
+  SubscribeOnlyState,
+} from "../../shared/types/api";
 
 const hoisted = vi.hoisted(() => ({
-  state: null as SubscribeOnlyState | null,
+  state: null as SubGoalState | null,
   subscribe: vi.fn(),
   setError: vi.fn(),
   navigateTo: vi.fn(),
@@ -45,6 +49,28 @@ const createTinyState = (
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   authenticated: true,
+  subreddit: {
+    name: "ExampleSub",
+    subscribers: 123,
+    growth: { count: 4, period: "today" },
+  },
+  ...overrides,
+});
+
+const createCtaState = (
+  overrides: Partial<CtaOnlyState> = {},
+): CtaOnlyState => ({
+  postHeight: "cta",
+  promoSubreddit: "SubGoal",
+  colorTheme: "blue",
+  language: "en",
+  afterSubscribeAction: {
+    type: "link",
+    buttonText: "Create a New Post",
+    url: "https://www.reddit.com/r/ExampleSub/submit/",
+    colorTheme: "blue",
+  },
+  ctaActivity: { kind: "posts", count: 4, period: "today" },
   subreddit: {
     name: "ExampleSub",
     subscribers: 123,
@@ -159,6 +185,30 @@ describe("SubscribeOnlyApp", () => {
     expect(html).not.toContain("Subscribed to r/ExampleSub");
     expect(html).not.toContain("Return to Previous Page");
     expect(html).toContain("r/SubGoal");
+  });
+
+  it("renders CTA-only posts immediately without subscription UI", async () => {
+    useWideViewportWithoutReducedMotion();
+    hoisted.state = createCtaState();
+    const container = await renderApp();
+
+    expect(container.textContent).toContain("Create a New Post");
+    expect(container.textContent).toContain("123 subscribers");
+    expect(container.textContent).toContain("4 new posts today");
+    expect(container.textContent).toContain("r/SubGoal");
+    expect(container.textContent).not.toContain("Subscribe to r/ExampleSub");
+    expect(container.textContent).not.toContain("Subscribed to r/ExampleSub");
+
+    await act(async () => {
+      getActionButton(container)?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    expect(hoisted.navigateTo).toHaveBeenCalledWith(
+      "https://www.reddit.com/r/ExampleSub/submit/",
+    );
+    expect(hoisted.subscribe).not.toHaveBeenCalled();
   });
 
   it("shows light confetti for Tiny background input", async () => {

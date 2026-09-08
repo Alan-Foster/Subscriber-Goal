@@ -3,10 +3,12 @@ import { context, reddit, redis, realtime } from "@devvit/web/server";
 import type {
   ErrorResponse,
   AfterSubscribeTargetResponse,
+  CtaOnlyState,
   InitResponse,
   NavigationTarget,
   RefreshResponse,
   RealtimeMessage,
+  RecordCtaClickResponse,
   SubGoalState,
   SubscribeOnlyState,
   SubscribeRequest,
@@ -19,13 +21,18 @@ import { isTrackedSubscriber, setNewSubscriber } from "../data/subscriberStats";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
-import { subscribeOnlyPostKind } from "../../shared/postKind";
+import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { isSubredditBlacklisted } from "../utils/subredditBlacklist";
 import {
   getRequestJourneyId,
   recordServerSubscribeSuccess,
 } from "../analytics/goalJourneyAnalytics";
+import {
+  getCtaActivityMetric,
+  isClickActivityPreset,
+  recordCtaClick,
+} from "../data/ctaActivity";
 
 const buildState = async (
   postId: string,
@@ -36,7 +43,10 @@ const buildState = async (
 ): Promise<SubGoalState> => {
   const subGoalData = await getSubGoalData(redis, postId, context.postData);
   if (subGoalData.postKind === subscribeOnlyPostKind) {
-    return await buildSubscribeOnlyState(subGoalData);
+    return await buildSubscribeOnlyState(postId, subGoalData);
+  }
+  if (subGoalData.postKind === ctaOnlyPostKind) {
+    return await buildCtaOnlyState(postId, subGoalData);
   }
 
   const subreddit = await reddit.getCurrentSubreddit();
@@ -64,6 +74,7 @@ const buildState = async (
     headerText: subGoalData.headerText ?? null,
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
+    trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: subGoalData.postHeight === "short" ? "short" : "regular",
     language: subGoalData.language,
     subscribed,
@@ -84,6 +95,7 @@ const dynamicPostCandidateLimit = 25;
 const appAccountUsername = "subscriber-goal";
 
 const buildSubscribeOnlyState = async (
+  postId: string,
   subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
   options?: {
     subscribersOverride?: number;
@@ -105,11 +117,17 @@ const buildSubscribeOnlyState = async (
   return {
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
+    trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: "tiny",
     promoSubreddit: getPublicAppSettings().promoSubreddit,
     language: subGoalData.language,
     subscribed,
     authenticated: Boolean(context.userId),
+    ctaActivity: await getCtaActivityMetric(
+      redis,
+      postId,
+      subGoalData.afterSubscribePreset,
+    ),
     subreddit: {
       name:
         subGoalData.subredditDisplayName ?? context.subredditName ?? "unknown",
@@ -119,7 +137,69 @@ const buildSubscribeOnlyState = async (
   };
 };
 
+const buildCtaOnlyState = async (
+  postId: string,
+  subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
+): Promise<CtaOnlyState> => {
+  const subreddit = await reddit.getCurrentSubreddit();
+  const { growth } = await observeDailySubscriberCount(
+    redis,
+    subreddit.numberOfSubscribers,
+    { displayedSubscribers: subreddit.numberOfSubscribers },
+  );
+  return {
+    colorTheme: subGoalData.colorTheme,
+    afterSubscribeAction: subGoalData.afterSubscribeAction,
+    trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
+    postHeight: "cta",
+    promoSubreddit: getPublicAppSettings().promoSubreddit,
+    ctaActivity: await getCtaActivityMetric(
+      redis,
+      postId,
+      subGoalData.afterSubscribePreset,
+    ),
+    language: subGoalData.language,
+    subreddit: {
+      name: subGoalData.subredditDisplayName ?? subreddit.name,
+      subscribers: subreddit.numberOfSubscribers,
+      growth,
+    },
+  };
+};
+
 export function registerPublicApiRoutes(router: Router): void {
+  router.post(apiRoutes.ctaClick, async (_req, res): Promise<void> => {
+    const { postId } = context;
+    if (!postId) {
+      res.status(400).json({
+        status: "error",
+        message: "postId is required",
+      } satisfies ErrorResponse);
+      return;
+    }
+    try {
+      const subGoalData = await getSubGoalData(redis, postId, context.postData);
+      if (
+        subGoalData.afterSubscribeAction.type === "disabled" ||
+        !isClickActivityPreset(subGoalData.afterSubscribePreset)
+      ) {
+        res.status(400).json({
+          status: "error",
+          message: "This CTA does not use click activity.",
+        } satisfies ErrorResponse);
+        return;
+      }
+      await recordCtaClick(redis, postId);
+      res.json({ status: "ok" } satisfies RecordCtaClickResponse);
+    } catch (error) {
+      console.error(`CTA click recording error for post ${postId}:`, error);
+      res.status(503).json({
+        status: "error",
+        message: "The CTA click could not be recorded.",
+      } satisfies ErrorResponse);
+    }
+  });
+
   router.get(
     apiRoutes.afterSubscribeTarget,
     async (_req, res): Promise<void> => {
@@ -131,26 +211,22 @@ export function registerPublicApiRoutes(router: Router): void {
         } satisfies ErrorResponse);
         return;
       }
-      if (!userId) {
-        res.status(403).json({
-          status: "error",
-          message: "Subscription is required.",
-        } satisfies ErrorResponse);
-        return;
-      }
       try {
-        if (!(await isTrackedSubscriber(redis, userId))) {
+        const subGoalData = await getSubGoalData(
+          redis,
+          postId,
+          context.postData,
+        );
+        if (
+          subGoalData.postKind !== ctaOnlyPostKind &&
+          (!userId || !(await isTrackedSubscriber(redis, userId)))
+        ) {
           res.status(403).json({
             status: "error",
             message: "Subscription is required.",
           } satisfies ErrorResponse);
           return;
         }
-        const subGoalData = await getSubGoalData(
-          redis,
-          postId,
-          context.postData,
-        );
         const action = subGoalData.afterSubscribeAction;
         if (action.type !== "top-post-day" && action.type !== "newest-post") {
           res.status(400).json({
@@ -281,7 +357,15 @@ export function registerPublicApiRoutes(router: Router): void {
         res.json({
           type: "refresh",
           postId,
-          state: await buildSubscribeOnlyState(subGoalData),
+          state: await buildSubscribeOnlyState(postId, subGoalData),
+        } satisfies RefreshResponse);
+        return;
+      }
+      if (subGoalData.postKind === ctaOnlyPostKind) {
+        res.json({
+          type: "refresh",
+          postId,
+          state: await buildCtaOnlyState(postId, subGoalData),
         } satisfies RefreshResponse);
         return;
       }
@@ -325,16 +409,22 @@ export function registerPublicApiRoutes(router: Router): void {
       return;
     }
 
-    if (!userId) {
-      res.status(401).json({
-        status: "error",
-        message: "Please log in to subscribe.",
-      } satisfies ErrorResponse);
-      return;
-    }
-
     try {
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
+      if (subGoalData.postKind === ctaOnlyPostKind) {
+        res.status(400).json({
+          status: "error",
+          message: "This post does not support subscribing.",
+        } satisfies ErrorResponse);
+        return;
+      }
+      if (!userId) {
+        res.status(401).json({
+          status: "error",
+          message: "Please log in to subscribe.",
+        } satisfies ErrorResponse);
+        return;
+      }
       if (subGoalData.postKind === subscribeOnlyPostKind) {
         const username = await reddit.getCurrentUsername();
         if (!username) {
@@ -367,7 +457,7 @@ export function registerPublicApiRoutes(router: Router): void {
         };
         await realtime.send("subscriber_updates", realtimeMessage);
 
-        const state = await buildSubscribeOnlyState(subGoalData, {
+        const state = await buildSubscribeOnlyState(postId, subGoalData, {
           subscribersOverride: newSubscriberCount,
           observedSubscribers: subreddit.numberOfSubscribers,
         });

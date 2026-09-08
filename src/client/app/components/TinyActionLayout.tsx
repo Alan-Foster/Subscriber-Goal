@@ -3,20 +3,31 @@ import { formatSubscriberCount } from "../../../shared/numberFormat";
 import {
   formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
+  formatLocalizedCtaActivity,
 } from "../../../shared/subGoalPostI18n";
-import type { SubscribeOnlyState } from "../../../shared/types/api";
+import type {
+  CtaOnlyState,
+  SubscribeOnlyState,
+} from "../../../shared/types/api";
 import { useWideViewport } from "../../hooks/useWideViewport";
 
 type TinyActionLayoutProps = {
-  state: SubscribeOnlyState;
+  state: SubscribeOnlyState | CtaOnlyState;
   children: ReactNode;
+  showCtaActivity?: boolean;
 };
 
 export const TinyActionLayout = ({
   state,
   children,
+  showCtaActivity = false,
 }: TinyActionLayoutProps) => {
   const isWideViewport = useWideViewport();
+  const ctaActivity = state.ctaActivity ?? {
+    kind: "posts" as const,
+    count: 1,
+    period: "week" as const,
+  };
 
   if (!isWideViewport) {
     return children;
@@ -38,12 +49,18 @@ export const TinyActionLayout = ({
       </div>
       <div>{children}</div>
       <div className="min-w-0 px-4 text-center text-base font-semibold text-[color:var(--sg-text-secondary)]">
-        <span className="block truncate" data-subscriber-growth="true">
-          {formatLocalizedSubscriberGrowth(
-            state.language,
-            state.subreddit.growth,
-            formatSubscriberCount(state.subreddit.growth.count),
-          )}
+        <span className="block truncate" data-compact-activity="true">
+          {showCtaActivity
+            ? formatLocalizedCtaActivity(
+                state.language,
+                ctaActivity,
+                formatSubscriberCount(ctaActivity.count),
+              )
+            : formatLocalizedSubscriberGrowth(
+                state.language,
+                state.subreddit.growth,
+                formatSubscriberCount(state.subreddit.growth.count),
+              )}
         </span>
       </div>
     </div>

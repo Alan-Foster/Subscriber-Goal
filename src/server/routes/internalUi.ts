@@ -3,6 +3,8 @@ import type { UiResponse } from "@devvit/web/shared";
 import { context, reddit, redis } from "@devvit/web/server";
 import type {
   CreateGoalSetupFormValues,
+  CreateCtaOnlyFollowUpFormValues,
+  CreateCtaOnlyFormValues,
   CreateSubscribeOnlyFollowUpFormValues,
   CreateSubscribeOnlyFormValues,
   CreateSubscriberGoalFollowUpFormValues,
@@ -13,7 +15,6 @@ import type {
 } from "../../shared/types/api";
 import {
   defaultSubGoalColorTheme,
-  isSubGoalColorTheme,
   resolveSubGoalColorTheme,
   subGoalColorThemes,
 } from "../../shared/subGoalColorTheme";
@@ -58,7 +59,7 @@ import { toErrorMessage } from "../utils/crosspostLogs";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
 import {
-  createTopPostFallbackAction,
+  createDefaultAfterSubscribeAction,
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
   isAfterSubscribePreset,
@@ -167,6 +168,17 @@ export function registerInternalUiRoutes(router: Router): void {
   );
 
   router.post(
+    internalRoutes.forms.createCtaOnly,
+    async (req, res: Response<UiResponse>) => {
+      await submitCreateGoalStepTwo(
+        req.body as CreateCtaOnlyFormValues,
+        "cta-only",
+        res,
+      );
+    },
+  );
+
+  router.post(
     internalRoutes.forms.createSubscriberGoalFollowUp,
     async (req, res: Response<UiResponse>) => {
       await submitCreateGoalFollowUp(
@@ -183,6 +195,17 @@ export function registerInternalUiRoutes(router: Router): void {
       await submitCreateGoalFollowUp(
         req.body as CreateSubscribeOnlyFollowUpFormValues,
         "subscribe-only",
+        res,
+      );
+    },
+  );
+
+  router.post(
+    internalRoutes.forms.createCtaOnlyFollowUp,
+    async (req, res: Response<UiResponse>) => {
+      await submitCreateGoalFollowUp(
+        req.body as CreateCtaOnlyFollowUpFormValues,
+        "cta-only",
         res,
       );
     },
@@ -446,13 +469,15 @@ export function registerInternalUiRoutes(router: Router): void {
   );
 }
 
-type CreateGoalPostKind = "subscriber-goal" | "subscribe-only";
+type CreateGoalPostKind = "subscriber-goal" | "subscribe-only" | "cta-only";
 type CreateGoalDetailsValues =
   | CreateSubscriberGoalFormValues
-  | CreateSubscribeOnlyFormValues;
+  | CreateSubscribeOnlyFormValues
+  | CreateCtaOnlyFormValues;
 type CreateGoalFollowUpValues =
   | CreateSubscriberGoalFollowUpFormValues
-  | CreateSubscribeOnlyFollowUpFormValues;
+  | CreateSubscribeOnlyFollowUpFormValues
+  | CreateCtaOnlyFollowUpFormValues;
 
 async function buildCreateGoalSetupForm(): Promise<
   NonNullable<UiResponse["showForm"]>
@@ -495,12 +520,19 @@ async function buildCreateGoalSetupForm(): Promise<
           type: "select",
           defaultValue: [defaultSubGoalPostHeight],
           options: [
-            { label: "Regular", value: "regular" },
-            { label: "Short (no logo)", value: "short" },
-            { label: "Tiny (Only Subscribe Button)", value: "tiny" },
+            { label: "Full Height Subscriber Goal", value: "regular" },
+            { label: "Short Subscriber Goal (No Logo)", value: "short" },
+            {
+              label: "Subscribe Button and CTA Button (No Goal)",
+              value: "tiny",
+            },
+            {
+              label: "CTA Button (No Subscribing at all)",
+              value: "cta",
+            },
           ],
           helpText:
-            "Regular and Short create subscriber goals. Tiny creates only a subscribe button.",
+            "Choose a subscriber goal, a subscribe button with a follow-up CTA, or a CTA with no subscribing.",
           required: true,
         },
       ],
@@ -513,7 +545,12 @@ function buildCreateGoalDetailsForm(
     Extract<CreateGoalDraft, { stage: "details" }>,
     "language" | "postHeight" | "subredditDisplayName"
   >,
-  subreddit: { name: string; numberOfSubscribers: number; isNsfw?: boolean },
+  subreddit: {
+    name: string;
+    numberOfSubscribers: number;
+    type?: unknown;
+    isNsfw?: boolean;
+  },
 ): NonNullable<UiResponse["showForm"]> {
   const defaultPostTitle = getSubGoalPostMessages(
     draft.language,
@@ -551,7 +588,23 @@ function buildCreateGoalDetailsForm(
               "This controls the subscribe button and button glow color.",
             required: true,
           },
-          getAfterSubscribeActionField(subreddit.numberOfSubscribers),
+          getAfterSubscribeActionField(subreddit.type),
+        ],
+      },
+    };
+  }
+
+  if (draft.postHeight === "cta") {
+    return {
+      name: formNames.createCtaOnly,
+      form: {
+        title: "Sub Goal - Step 2/3 - CTA Details",
+        description: "Customize the CTA-only post.",
+        acceptLabel: "Next",
+        cancelLabel: "Cancel",
+        fields: [
+          commonFields.postTitle,
+          getAfterSubscribeActionField(subreddit.type, "cta"),
         ],
       },
     };
@@ -594,7 +647,7 @@ function buildCreateGoalDetailsForm(
             "This controls the subscribe button, progress bar, and button glow color.",
           required: true,
         },
-        getAfterSubscribeActionField(subreddit.numberOfSubscribers),
+        getAfterSubscribeActionField(subreddit.type),
         {
           name: "autoCreateNextGoal",
           label: "Create a New Subscriber Goal 24 Hours after Goal Success",
@@ -623,10 +676,13 @@ function buildCreateGoalFollowUpForm(
     draft.details.afterSubscribePreset,
     draft.language,
   );
+  const isCtaOnly = draft.details.kind === "cta-only";
   const sharedFields = [
     {
       name: "afterSubscribeButtonText",
-      label: "Button Text After a User Subscribes",
+      label: isCtaOnly
+        ? "CTA Button Text"
+        : "Button Text After a User Subscribes",
       type: "string" as const,
       ...(presetDefaults.buttonText
         ? { defaultValue: presetDefaults.buttonText }
@@ -647,7 +703,7 @@ function buildCreateGoalFollowUpForm(
       : []),
     {
       name: "afterSubscribeColorTheme",
-      label: "After-Subscribed Button Color",
+      label: isCtaOnly ? "CTA Button Color" : "After-Subscribed Button Color",
       type: "select" as const,
       defaultValue: [presetDefaults.colorTheme],
       options: getColorOptions(),
@@ -670,6 +726,19 @@ function buildCreateGoalFollowUpForm(
       form: {
         title: "Sub Goal - Step 3/3 - Settings for After Subscribing",
         description: "Choose what subscribed users will see and do.",
+        acceptLabel: "Create",
+        cancelLabel: "Cancel",
+        fields: sharedFields,
+      },
+    };
+  }
+
+  if (draft.details.kind === "cta-only") {
+    return {
+      name: formNames.createCtaOnlyFollowUp,
+      form: {
+        title: "Sub Goal - Step 3/3 - CTA Button Settings",
+        description: "Customize the CTA shown immediately to every viewer.",
         acceptLabel: "Create",
         cancelLabel: "Cancel",
         fields: sharedFields,
@@ -701,12 +770,18 @@ function getColorOptions(): Array<{ label: string; value: string }> {
   return subGoalColorThemes.map((value) => ({ label: labels[value], value }));
 }
 
-function getAfterSubscribeActionField(numberOfSubscribers: number) {
+function getAfterSubscribeActionField(
+  subredditType: unknown,
+  context: "after-subscribe" | "cta" = "after-subscribe",
+) {
   return {
     name: "afterSubscribePreset",
-    label: "What Should the Button Do After Subscription?",
+    label:
+      context === "cta"
+        ? "What Should the CTA Button Do?"
+        : "What Should the Button Do After Subscription?",
     type: "select" as const,
-    defaultValue: [getDefaultAfterSubscribePreset(numberOfSubscribers)],
+    defaultValue: [getDefaultAfterSubscribePreset(subredditType)],
     options: [
       { label: "Link to the Top Post Today", value: "top-post-day" },
       {
@@ -722,7 +797,10 @@ function getAfterSubscribeActionField(numberOfSubscribers: number) {
       { label: "Link to a Webpage URL", value: "web-link" },
       { label: "Link to the Subreddit Wiki", value: "wiki" },
     ],
-    helpText: "Choose what subscribed users can do from the post.",
+    helpText:
+      context === "cta"
+        ? "Choose what every viewer can do from the post."
+        : "Choose what subscribed users can do from the post.",
     required: true,
   };
 }
@@ -798,7 +876,11 @@ async function submitCreateGoalStepTwo(
   try {
     const draft = await getCreateGoalDraft(redis, userId);
     const draftKind =
-      draft?.postHeight === "tiny" ? "subscribe-only" : "subscriber-goal";
+      draft?.postHeight === "tiny"
+        ? "subscribe-only"
+        : draft?.postHeight === "cta"
+          ? "cta-only"
+          : "subscriber-goal";
     if (!draft || draft.stage !== "details" || draftKind !== expectedKind) {
       await respondWithCreateGoalRestart(
         res,
@@ -813,17 +895,25 @@ async function submitCreateGoalStepTwo(
       res.json({ showToast: "Please provide a post title!" });
       return;
     }
-    const colorTheme = resolveSubGoalColorTheme(values.colorTheme?.[0]);
+    const colorTheme = resolveSubGoalColorTheme(
+      "colorTheme" in values ? values.colorTheme?.[0] : undefined,
+    );
     const requestedPreset = values.afterSubscribePreset?.[0];
     const afterSubscribePreset = isAfterSubscribePreset(requestedPreset)
       ? requestedPreset
-      : getDefaultAfterSubscribePreset(subreddit.numberOfSubscribers);
+      : getDefaultAfterSubscribePreset(subreddit.type);
     let details: CreateGoalDraftDetails;
     if (expectedKind === "subscribe-only") {
       details = {
         kind: "subscribe-only",
         postTitle,
         colorTheme,
+        afterSubscribePreset,
+      };
+    } else if (expectedKind === "cta-only") {
+      details = {
+        kind: "cta-only",
+        postTitle,
         afterSubscribePreset,
       };
     } else {
@@ -946,20 +1036,27 @@ async function submitCreateGoalFollowUp(
       subreddit.name,
       values.afterSubscribeUrl,
     );
+    const invalidConfigurationFallback = createDefaultAfterSubscribeAction({
+      language: draft.language,
+      subredditName: subreddit.name,
+      subredditType: subreddit.type,
+    });
     const afterSubscribeResult = resolveAfterSubscribeAction({
       type: resolvedActionInput.type,
       buttonText: values.afterSubscribeButtonText ?? presetDefaults.buttonText,
       url: resolvedActionInput.url,
       colorTheme:
         values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme,
-      fallbackColorTheme: draft.details.colorTheme,
-      invalidConfigurationFallback: createTopPostFallbackAction({
-        language: draft.language,
-        colorTheme: isSubGoalColorTheme(values.afterSubscribeColorTheme?.[0])
-          ? values.afterSubscribeColorTheme[0]
-          : presetDefaults.colorTheme,
-      }),
+      fallbackColorTheme:
+        draft.details.kind === "cta-only"
+          ? defaultAfterSubscribeColorTheme
+          : draft.details.colorTheme,
+      invalidConfigurationFallback,
     });
+    const persistedAfterSubscribePreset =
+      afterSubscribeResult.invalidConfiguration
+        ? getDefaultAfterSubscribePreset(subreddit.type)
+        : draft.details.afterSubscribePreset;
     const appSettings = getAppSettings();
     const autoCreateNextGoal =
       draft.details.kind === "subscriber-goal"
@@ -980,11 +1077,18 @@ async function submitCreateGoalFollowUp(
             draft.details.kind === "subscriber-goal"
               ? draft.details.crosspost
               : false,
-          colorTheme: draft.details.colorTheme,
+          colorTheme:
+            draft.details.kind === "cta-only" &&
+            afterSubscribeResult.action.type !== "disabled"
+              ? afterSubscribeResult.action.colorTheme
+              : draft.details.kind === "cta-only"
+                ? defaultAfterSubscribeColorTheme
+                : draft.details.colorTheme,
           postHeight: draft.postHeight,
           autoCreateNextGoal,
           language: draft.language,
           afterSubscribeAction: afterSubscribeResult.action,
+          afterSubscribePreset: persistedAfterSubscribePreset,
           cancelPendingAutoCreateGoals: true,
           submitAsUser: developerCommands.submitAsUser,
           ...(developerCommands.headerText
@@ -1014,15 +1118,17 @@ async function submitCreateGoalFollowUp(
       });
     }
 
+    const createdPostLabel =
+      draft.details.kind === "cta-only" ? "CTA post" : "Subscriber Goal post";
     const baseToast =
       stickyResult.status === "not_pinned"
-        ? "Subscriber Goal post created, but it could not be pinned. Manual moderator action is required."
+        ? `${createdPostLabel} created, but it could not be pinned. Manual moderator action is required.`
         : crosspostDispatchResult.status === "failed"
-          ? `Subscriber Goal post created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
-          : "Subscriber Goal post created!";
+          ? `${createdPostLabel} created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
+          : `${createdPostLabel} created!`;
     res.json({
       showToast: afterSubscribeResult.invalidConfiguration
-        ? `${baseToast} The after-subscribed button configuration was invalid, so it now defaults to View the Top Post Today.`
+        ? `${baseToast} The button configuration was invalid, so the default action was used.`
         : baseToast,
       navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
     });

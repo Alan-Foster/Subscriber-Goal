@@ -3,6 +3,8 @@ import { internalRoutes } from "../../shared/routes";
 import { onAppChanged } from "../triggers/appChanged";
 import { onModAction, type ModActionEvent } from "../triggers/modAction";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
+import { recordCommunityPostCreated } from "../data/ctaActivity";
+import { redis } from "@devvit/web/server";
 
 export function registerInternalSystemRoutes(router: Router): void {
   router.post(
@@ -50,6 +52,30 @@ export function registerInternalSystemRoutes(router: Router): void {
         res
           .status(400)
           .json({ status: "error", message: "Failed to handle mod action" });
+      }
+    },
+  );
+
+  router.post(
+    internalRoutes.triggers.onPostCreate,
+    async (req, res): Promise<void> => {
+      const post = req.body?.post ?? req.body;
+      try {
+        if (typeof post?.id !== "string") {
+          res.status(400).json({
+            status: "error",
+            message: "Post ID is required.",
+          });
+          return;
+        }
+        await recordCommunityPostCreated(redis, post.id, post.createdAt);
+        res.json({ status: "ok" });
+      } catch (error) {
+        console.error(`on-post-create error: ${String(error)}`);
+        res.status(400).json({
+          status: "error",
+          message: "Failed to record post creation",
+        });
       }
     },
   );

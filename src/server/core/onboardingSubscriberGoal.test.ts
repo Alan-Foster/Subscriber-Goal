@@ -464,6 +464,39 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
   });
 
+  it("defaults restricted onboarding posts to the Blue Top Post CTA", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 50,
+      type: "restricted",
+      isNsfw: false,
+    });
+
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          afterSubscribeAction: {
+            type: "top-post-day",
+            buttonText: "View the Top Post Today",
+            colorTheme: "blue",
+          },
+        }),
+      }),
+    );
+  });
+
   it.each([999_999, onboardingTinySubscriberThreshold])(
     "keeps the regular onboarding goal at %i subscribers",
     async (numberOfSubscribers) => {
@@ -525,7 +558,7 @@ describe("onboarding subscriber goal", () => {
           autoCreateNextGoal: false,
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
-            type: "top-post-day",
+            type: "link",
             colorTheme: "blue",
           }),
         }),

@@ -35,6 +35,13 @@ const logReceipt = (event: string, response: ReceiptResponse): void => {
 };
 
 export function getGoalJourneyContext(state: SubGoalState): GoalJourneyContext {
+  if (state.postHeight === "cta") {
+    return {
+      goalSize: state.postHeight,
+      entryState: "cta",
+      hasFollowupCta: true,
+    };
+  }
   const completed = state.postHeight !== "tiny" && state.completedTime !== null;
   return {
     goalSize: state.postHeight,

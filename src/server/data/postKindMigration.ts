@@ -1,5 +1,6 @@
 import { EntrypointHeight } from "@devvit/web/server";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -89,17 +90,21 @@ export async function processPostKindMigrationBatch(
       const data = await getSubGoalData(redis, postId);
       const post = await reddit.getPostById(postId);
 
-      if (data.postKind === subscribeOnlyPostKind) {
-        await post.mergePostData({ postKind: subscribeOnlyPostKind });
+      if (
+        data.postKind === subscribeOnlyPostKind ||
+        data.postKind === ctaOnlyPostKind
+      ) {
+        await post.mergePostData({ postKind: data.postKind });
         await redis.hSet(subscriberGoalsKey, {
-          [`${postId}${postKindSuffix}`]: subscribeOnlyPostKind,
+          [`${postId}${postKindSuffix}`]: data.postKind,
+          [`${postId}${postHeightSuffix}`]: data.postHeight,
         });
         summary.recognizedTiny += 1;
       } else {
         await post.mergePostData({ postKind: subscriberGoalPostKind });
         const normalizedHeight =
           data.postHeight === "short" ? "short" : "regular";
-        if (rawHeight === "tiny") {
+        if (rawHeight === "tiny" || rawHeight === "cta") {
           summary.conflicting += 1;
           await post.setCustomPostStyles(undefined);
           await post.setCustomPostStyles({ height: EntrypointHeight.REGULAR });

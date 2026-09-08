@@ -12,6 +12,8 @@ import {
 } from "./components/TinySubscriptionConfirmation";
 import { TinyViewTransition } from "./components/TinyViewTransition";
 import { TinyPromoLink } from "./components/TinyPromoLink";
+import { TinyActionLayout } from "./components/TinyActionLayout";
+import { AfterSubscribeButton } from "./components/AfterSubscribeButton";
 import { confettiPresets } from "./confettiPresets";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { CompletedPage } from "./pages/CompletedPage";
@@ -59,13 +61,23 @@ export const App = () => {
   }, [loading, prohibited, state]);
 
   useEffect(() => {
-    if (state && state.postHeight !== "tiny" && state.subreddit.isNsfw) {
+    if (
+      state &&
+      state.postHeight !== "tiny" &&
+      state.postHeight !== "cta" &&
+      state.subreddit.isNsfw
+    ) {
       setShareUsername(false);
     }
   }, [state]);
 
   useEffect(() => {
-    if (state && state.postHeight !== "tiny" && state.completedTime) {
+    if (
+      state &&
+      state.postHeight !== "tiny" &&
+      state.postHeight !== "cta" &&
+      state.completedTime
+    ) {
       setPage("completed");
     }
   }, [state]);
@@ -90,7 +102,7 @@ export const App = () => {
   );
 
   const promoSubreddit =
-    state?.postHeight !== "tiny"
+    state?.postHeight !== "tiny" && state?.postHeight !== "cta"
       ? state?.appSettings.promoSubreddit
       : undefined;
   const handleVisitPromo = () => {
@@ -105,7 +117,7 @@ export const App = () => {
   };
 
   const handleSubscribe = async () => {
-    if (!state || subscribeAttemptRef.current) {
+    if (!state || state.postHeight === "cta" || subscribeAttemptRef.current) {
       return;
     }
     subscribeAttemptRef.current = true;
@@ -146,6 +158,10 @@ export const App = () => {
       analyticsContext,
       journeyTelemetryHandled === true,
     );
+    if (updatedState.postHeight === "cta") {
+      subscribeAttemptRef.current = false;
+      return;
+    }
     if (updatedState.postHeight !== "tiny" && updatedState.completedTime) {
       setPage("completed");
     } else if (updatedState.postHeight === "tiny") {
@@ -164,7 +180,7 @@ export const App = () => {
   };
 
   const handleReturnToSubGoal = () => {
-    if (!state || state.postHeight === "tiny") {
+    if (!state || state.postHeight === "tiny" || state.postHeight === "cta") {
       return;
     }
     setPage("subGoal");
@@ -185,7 +201,22 @@ export const App = () => {
 
   let content = null;
   if (state) {
-    if (page === "tinyConfirmation" && state.postHeight === "tiny") {
+    if (state.postHeight === "cta") {
+      content =
+        state.afterSubscribeAction.type === "disabled" ? null : (
+          <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
+            <TinyActionLayout state={state} showCtaActivity>
+              <AfterSubscribeButton
+                action={state.afterSubscribeAction}
+                analyticsContext={getGoalJourneyContext(state)}
+                language={state.language}
+                onNavigate={handleAfterSubscribeNavigate}
+                trackClicks={state.trackCtaClicks === true}
+              />
+            </TinyActionLayout>
+          </div>
+        );
+    } else if (page === "tinyConfirmation" && state.postHeight === "tiny") {
       content = (
         <TinySubscriptionConfirmation
           language={state.language}
@@ -232,6 +263,12 @@ export const App = () => {
 
   let frameColorTheme = state?.colorTheme;
   if (
+    state?.postHeight === "cta" &&
+    state.afterSubscribeAction.type !== "disabled"
+  ) {
+    frameColorTheme = state.afterSubscribeAction.colorTheme;
+  } else if (
+    state?.postHeight !== "cta" &&
     state?.subscribed === true &&
     state.afterSubscribeAction.type !== "disabled" &&
     page !== "completed" &&
@@ -241,7 +278,7 @@ export const App = () => {
   }
 
   const appHeightClass =
-    state?.postHeight === "tiny"
+    state?.postHeight === "tiny" || state?.postHeight === "cta"
       ? "h-[100px]"
       : state?.postHeight === "short"
         ? "h-[234px]"
@@ -268,7 +305,8 @@ export const App = () => {
       }
     >
       <div className="sg-goal-ui flex h-full w-full flex-col items-center justify-center">
-        {state?.postHeight === "tiny" && content ? (
+        {(state?.postHeight === "tiny" || state?.postHeight === "cta") &&
+        content ? (
           <TinyViewTransition transitionKey={page}>
             {content}
           </TinyViewTransition>
@@ -279,7 +317,7 @@ export const App = () => {
             {prohibited ? prohibitedContentMessage : messages.loadError}
           </div>
         )}
-        {state?.postHeight === "tiny" ? (
+        {state?.postHeight === "tiny" || state?.postHeight === "cta" ? (
           <TinyPromoLink
             promoSubreddit={state.promoSubreddit}
             language={state.language}
@@ -287,7 +325,10 @@ export const App = () => {
           />
         ) : null}
       </div>
-      {page === "completed" && state && state.postHeight !== "tiny" ? (
+      {page === "completed" &&
+      state &&
+      state.postHeight !== "tiny" &&
+      state.postHeight !== "cta" ? (
         <AmbientConfetti reducedMotion={prefersReducedMotion} />
       ) : null}
       {celebrationBursts.map((burst) => (

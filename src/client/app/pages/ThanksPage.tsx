@@ -1,4 +1,4 @@
-import type { SubGoalState } from "../../../shared/types/api";
+import type { CtaOnlyState, SubGoalState } from "../../../shared/types/api";
 import { formatSubscriberCount } from "../../../shared/numberFormat";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { SubredditIcon } from "../components/SubredditIcon";
@@ -10,7 +10,7 @@ import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 
 type ThanksPageProps = {
-  state: SubGoalState;
+  state: Exclude<SubGoalState, CtaOnlyState>;
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
@@ -28,12 +28,13 @@ export const ThanksPage = ({
     if (state.afterSubscribeAction.type !== "disabled") {
       return (
         <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
-          <TinyActionLayout state={state}>
+          <TinyActionLayout state={state} showCtaActivity>
             <AfterSubscribeButton
               action={state.afterSubscribeAction}
               analyticsContext={getGoalJourneyContext(state)}
               language={state.language}
               onNavigate={onAfterSubscribeNavigate}
+              trackClicks={state.trackCtaClicks === true}
             />
           </TinyActionLayout>
         </div>
@@ -75,6 +76,7 @@ export const ThanksPage = ({
             analyticsContext={getGoalJourneyContext(state)}
             language={state.language}
             onNavigate={onAfterSubscribeNavigate}
+            trackClicks={state.trackCtaClicks === true}
           />
         ) : null}
         <button

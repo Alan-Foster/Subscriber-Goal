@@ -16,6 +16,7 @@ import {
 } from "../core/subscriberGoalPostFlair";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { reconcileSubscriberGoalStickies } from "../utils/redditUtils";
+import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 
 export async function onAppChanged({
   lifecycleSource = "unknown",
@@ -48,12 +49,18 @@ export async function onAppChanged({
   await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
   await scheduleOnboardingReminder(redis, { lifecycleSource });
   await initializeRecentSubscriberIndexMigration(redis);
+  try {
+    await ensureCommunityPostActivityBackfill(reddit, redis, subredditName);
+  } catch (error) {
+    console.warn(
+      `[appChanged] community post activity backfill deferred: ${String(error)}`,
+    );
+  }
 
-  let lifecycleSubreddit:
-    | { id: string; name: string }
-    | undefined = context.subredditId
-    ? { id: context.subredditId, name: subredditName }
-    : undefined;
+  let lifecycleSubreddit: { id: string; name: string } | undefined =
+    context.subredditId
+      ? { id: context.subredditId, name: subredditName }
+      : undefined;
   if (!lifecycleSubreddit) {
     try {
       lifecycleSubreddit = await reddit.getCurrentSubreddit();

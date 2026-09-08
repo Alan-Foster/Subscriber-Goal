@@ -162,11 +162,26 @@ describe("create goal drafts", () => {
         afterSubscribePreset: "newest-post",
       },
     });
+    await saveCreateGoalDraft(redis, "t2_cta", {
+      stage: "follow-up",
+      language: "en",
+      postHeight: "cta",
+      subredditDisplayName: "ExampleSub",
+      customDeveloperField: "",
+      details: {
+        kind: "cta-only",
+        postTitle: "Create something",
+        afterSubscribePreset: "create-post",
+      },
+    });
 
     expect((await getCreateGoalDraft(redis, "t2_goal"))?.stage).toBe(
       "follow-up",
     );
     expect((await getCreateGoalDraft(redis, "t2_tiny"))?.stage).toBe(
+      "follow-up",
+    );
+    expect((await getCreateGoalDraft(redis, "t2_cta"))?.stage).toBe(
       "follow-up",
     );
 

@@ -3,6 +3,7 @@ import { isLinkId, isSubredditId, type RedditClient } from "../types";
 import { logCrosspostEvent, toErrorMessage } from "./crosspostLogs";
 import { isMissingPostError } from "./postStatus";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -211,14 +212,18 @@ async function unstickyAndVerify(
 }
 
 function hasSubscriberGoalPostKind(post: SubscriberGoalPost): boolean {
-  const data = (post as { postData?: unknown; customPostData?: unknown })
-    .postData ??
+  const data =
+    (post as { postData?: unknown; customPostData?: unknown }).postData ??
     (post as { customPostData?: unknown }).customPostData;
   const kind =
     data && typeof data === "object"
       ? (data as { postKind?: unknown }).postKind
       : undefined;
-  return kind === subscriberGoalPostKind || kind === subscribeOnlyPostKind;
+  return (
+    kind === subscriberGoalPostKind ||
+    kind === subscribeOnlyPostKind ||
+    kind === ctaOnlyPostKind
+  );
 }
 
 /**

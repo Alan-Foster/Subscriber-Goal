@@ -28,14 +28,11 @@ export const afterSubscribePresetTypes = [
 export type AfterSubscribePreset = (typeof afterSubscribePresetTypes)[number];
 
 export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "blue";
-export const afterSubscribeCreatePostSubscriberThreshold = 10_000;
 
 export function getDefaultAfterSubscribePreset(
-  numberOfSubscribers: number,
+  subredditType: unknown,
 ): AfterSubscribePreset {
-  return numberOfSubscribers < afterSubscribeCreatePostSubscriberThreshold
-    ? "create-post"
-    : "top-post-day";
+  return subredditType === "restricted" ? "top-post-day" : "create-post";
 }
 
 export type AfterSubscribeAction =
@@ -82,13 +79,13 @@ export function createTopPostFallbackAction({
 export function createDefaultAfterSubscribeAction({
   language,
   subredditName,
-  numberOfSubscribers,
+  subredditType,
 }: {
   language: SubGoalLanguage;
   subredditName: string;
-  numberOfSubscribers: number;
+  subredditType: unknown;
 }): AfterSubscribeAction {
-  if (getDefaultAfterSubscribePreset(numberOfSubscribers) === "create-post") {
+  if (getDefaultAfterSubscribePreset(subredditType) === "create-post") {
     return {
       type: "link",
       buttonText: getAfterSubscribePresetMessages(language).createNewPost,
@@ -171,6 +168,34 @@ export function isAfterSubscribePreset(
   value: unknown,
 ): value is AfterSubscribePreset {
   return afterSubscribePresetTypes.includes(value as AfterSubscribePreset);
+}
+
+export function resolveAfterSubscribePreset(
+  value: unknown,
+  action: AfterSubscribeAction,
+): AfterSubscribePreset | null {
+  if (isAfterSubscribePreset(value)) {
+    return value;
+  }
+  if (action.type === "top-post-day" || action.type === "newest-post") {
+    return action.type;
+  }
+  if (action.type === "disabled") {
+    return null;
+  }
+  if (action.type !== "link") {
+    return null;
+  }
+  try {
+    const url = new URL(action.url);
+    if (/^\/r\/[^/]+\/submit\/?$/i.test(url.pathname)) {
+      return "create-post";
+    }
+  } catch {
+    // Resolved link actions already contain a valid URL. Fall through safely
+    // for malformed legacy data.
+  }
+  return "web-link";
 }
 
 function normalizeSecureUrl(value: unknown): string | null {

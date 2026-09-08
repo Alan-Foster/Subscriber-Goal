@@ -310,6 +310,185 @@ export const formatLocalizedSubscriberGrowth = (
     countText,
   );
 
+type LocalizedActivityMessages = {
+  postsToday: string;
+  postsThisWeek: string;
+  clicksThisWeek: string;
+};
+
+const localizedActivityMessages: Record<
+  SubGoalLanguage,
+  LocalizedActivityMessages
+> = {
+  id: {
+    postsToday: "{countText} postingan baru hari ini",
+    postsThisWeek: "{countText} postingan baru minggu ini",
+    clicksThisWeek: "{countText} klik minggu ini",
+  },
+  bs: {
+    postsToday: "{countText} novih objava danas",
+    postsThisWeek: "{countText} novih objava ove sedmice",
+    clicksThisWeek: "{countText} klikova ove sedmice",
+  },
+  ca: {
+    postsToday: "{countText} publicacions noves avui",
+    postsThisWeek: "{countText} publicacions noves aquesta setmana",
+    clicksThisWeek: "{countText} clics aquesta setmana",
+  },
+  da: {
+    postsToday: "{countText} nye opslag i dag",
+    postsThisWeek: "{countText} nye opslag i denne uge",
+    clicksThisWeek: "{countText} klik i denne uge",
+  },
+  de: {
+    postsToday: "{countText} neue Beiträge heute",
+    postsThisWeek: "{countText} neue Beiträge diese Woche",
+    clicksThisWeek: "{countText} Klicks diese Woche",
+  },
+  en: {
+    postsToday:
+      "{count, plural, one {{countText} new post today} other {{countText} new posts today}}",
+    postsThisWeek:
+      "{count, plural, one {{countText} new post this week} other {{countText} new posts this week}}",
+    clicksThisWeek:
+      "{count, plural, one {{countText} click this week} other {{countText} clicks this week}}",
+  },
+  es: {
+    postsToday: "{countText} publicaciones nuevas hoy",
+    postsThisWeek: "{countText} publicaciones nuevas esta semana",
+    clicksThisWeek: "{countText} clics esta semana",
+  },
+  et: {
+    postsToday: "{countText} uut postitust täna",
+    postsThisWeek: "{countText} uut postitust sel nädalal",
+    clicksThisWeek: "{countText} klõpsu sel nädalal",
+  },
+  fr: {
+    postsToday: "{countText} nouvelles publications aujourd’hui",
+    postsThisWeek: "{countText} nouvelles publications cette semaine",
+    clicksThisWeek: "{countText} clics cette semaine",
+  },
+  hr: {
+    postsToday: "{countText} novih objava danas",
+    postsThisWeek: "{countText} novih objava ovaj tjedan",
+    clicksThisWeek: "{countText} klikova ovaj tjedan",
+  },
+  is: {
+    postsToday: "{countText} ný innlegg í dag",
+    postsThisWeek: "{countText} ný innlegg í þessari viku",
+    clicksThisWeek: "{countText} smellir í þessari viku",
+  },
+  it: {
+    postsToday: "{countText} nuovi post oggi",
+    postsThisWeek: "{countText} nuovi post questa settimana",
+    clicksThisWeek: "{countText} clic questa settimana",
+  },
+  lv: {
+    postsToday: "{countText} jauni ieraksti šodien",
+    postsThisWeek: "{countText} jauni ieraksti šonedēļ",
+    clicksThisWeek: "{countText} klikšķi šonedēļ",
+  },
+  lt: {
+    postsToday: "{countText} nauji įrašai šiandien",
+    postsThisWeek: "{countText} nauji įrašai šią savaitę",
+    clicksThisWeek: "{countText} paspaudimai šią savaitę",
+  },
+  hu: {
+    postsToday: "{countText} új bejegyzés ma",
+    postsThisWeek: "{countText} új bejegyzés ezen a héten",
+    clicksThisWeek: "{countText} kattintás ezen a héten",
+  },
+  nl: {
+    postsToday: "{countText} nieuwe berichten vandaag",
+    postsThisWeek: "{countText} nieuwe berichten deze week",
+    clicksThisWeek: "{countText} klikken deze week",
+  },
+  nb: {
+    postsToday: "{countText} nye innlegg i dag",
+    postsThisWeek: "{countText} nye innlegg denne uken",
+    clicksThisWeek: "{countText} klikk denne uken",
+  },
+  pl: {
+    postsToday: "{countText} nowych postów dzisiaj",
+    postsThisWeek: "{countText} nowych postów w tym tygodniu",
+    clicksThisWeek: "{countText} kliknięć w tym tygodniu",
+  },
+  pt: {
+    postsToday: "{countText} novas publicações hoje",
+    postsThisWeek: "{countText} novas publicações esta semana",
+    clicksThisWeek: "{countText} cliques esta semana",
+  },
+  ro: {
+    postsToday: "{countText} postări noi astăzi",
+    postsThisWeek: "{countText} postări noi săptămâna aceasta",
+    clicksThisWeek: "{countText} clicuri săptămâna aceasta",
+  },
+  sq: {
+    postsToday: "{countText} postime të reja sot",
+    postsThisWeek: "{countText} postime të reja këtë javë",
+    clicksThisWeek: "{countText} klikime këtë javë",
+  },
+  sk: {
+    postsToday: "{countText} nových príspevkov dnes",
+    postsThisWeek: "{countText} nových príspevkov tento týždeň",
+    clicksThisWeek: "{countText} kliknutí tento týždeň",
+  },
+  sl: {
+    postsToday: "{countText} novih objav danes",
+    postsThisWeek: "{countText} novih objav ta teden",
+    clicksThisWeek: "{countText} klikov ta teden",
+  },
+  fi: {
+    postsToday: "{countText} uutta julkaisua tänään",
+    postsThisWeek: "{countText} uutta julkaisua tällä viikolla",
+    clicksThisWeek: "{countText} klikkausta tällä viikolla",
+  },
+  sv: {
+    postsToday: "{countText} nya inlägg idag",
+    postsThisWeek: "{countText} nya inlägg den här veckan",
+    clicksThisWeek: "{countText} klick den här veckan",
+  },
+  tl: {
+    postsToday: "{countText} bagong post ngayon",
+    postsThisWeek: "{countText} bagong post ngayong linggo",
+    clicksThisWeek: "{countText} click ngayong linggo",
+  },
+  tr: {
+    postsToday: "bugün {countText} yeni gönderi",
+    postsThisWeek: "bu hafta {countText} yeni gönderi",
+    clicksThisWeek: "bu hafta {countText} tıklama",
+  },
+  yo: {
+    postsToday: "{countText} ìfìwéránṣẹ́ tuntun lónìí",
+    postsThisWeek: "{countText} ìfìwéránṣẹ́ tuntun lọ́sẹ̀ yìí",
+    clicksThisWeek: "{countText} ìtẹ̀ lọ́sẹ̀ yìí",
+  },
+};
+
+export const formatLocalizedCtaActivity = (
+  language: SubGoalLanguage,
+  activity: {
+    kind: "posts" | "clicks";
+    count: number;
+    period: "today" | "week";
+  },
+  countText?: string,
+): string => {
+  const messages = localizedActivityMessages[language];
+  const message =
+    activity.kind === "clicks"
+      ? messages.clicksThisWeek
+      : activity.period === "today"
+        ? messages.postsToday
+        : messages.postsThisWeek;
+  return formatLocalizedCountMessage(
+    language,
+    message,
+    activity.count,
+    countText,
+  );
+};
+
 type CompletedTitleParams = SubredditNameParams & {
   goalCount?: number;
   goalText: string;

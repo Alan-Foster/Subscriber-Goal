@@ -71,6 +71,10 @@ body {
   --sg-accent: #f472b6;
 }
 
+[data-sg-theme="loading"] {
+  --sg-accent: #ffffff;
+}
+
 @media (prefers-color-scheme: dark) {
   [data-sg-theme="red"] {
     --sg-accent: #ff4500;

@@ -64,7 +64,8 @@ describe('processDueAutoCreateNextGoals', () => {
         buttonText: 'Join the Discord',
         url: 'https://discord.com/invite/example',
         colorTheme: 'pink'
-      }
+      },
+      afterSubscribePreset: 'discord'
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: 't5_example',
@@ -131,6 +132,7 @@ describe('processDueAutoCreateNextGoals', () => {
           url: 'https://discord.com/invite/example',
           colorTheme: 'pink'
         },
+        afterSubscribePreset: 'discord',
         cancelPendingAutoCreateGoals: true
       }
     });
@@ -306,3 +308,4 @@ describe('processDueAutoCreateNextGoals', () => {
     warnSpy.mockRestore();
   });
 });
+

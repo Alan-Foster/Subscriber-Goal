@@ -80,8 +80,10 @@
     "createGoalSetupForm": "/internal/form/create-goal/setup",
     "createSubscriberGoalForm": "/internal/form/create-goal/subscriber-goal",
     "createSubscribeOnlyForm": "/internal/form/create-goal/subscribe-only",
+    "createCtaOnlyForm": "/internal/form/create-goal/cta-only",
     "createSubscriberGoalFollowUpForm": "/internal/form/create-goal/subscriber-goal/follow-up",
     "createSubscribeOnlyFollowUpForm": "/internal/form/create-goal/subscribe-only/follow-up",
+    "createCtaOnlyFollowUpForm": "/internal/form/create-goal/cta-only/follow-up",
     "deleteGoalForm": "/internal/form/delete-goal",
     "eraseDataForm": "/internal/form/erase-data",
     "eraseMyDataForm": "/internal/form/erase-my-data"
@@ -89,7 +91,8 @@
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",
     "onAppUpgrade": "/internal/triggers/on-app-upgrade",
-    "onModAction": "/internal/triggers/on-mod-action"
+    "onModAction": "/internal/triggers/on-mod-action",
+    "onPostCreate": "/internal/triggers/on-post-create"
   },
   "scheduler": {
     "tasks": {

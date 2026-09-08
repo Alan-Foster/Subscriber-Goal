@@ -1,4 +1,4 @@
-import type { SubGoalState } from "../../../shared/types/api";
+import type { CtaOnlyState, SubGoalState } from "../../../shared/types/api";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { ProgressBar } from "../components/ProgressBar";
 import { SubscriptionButton } from "../components/SubscriptionButton";
@@ -10,7 +10,7 @@ import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 
 type SubGoalPageProps = {
-  state: SubGoalState;
+  state: Exclude<SubGoalState, CtaOnlyState>;
   onSubscribe: () => void;
   onVisitPromoSub: () => void;
   isSubmitting: boolean;
@@ -59,6 +59,7 @@ export const SubGoalPage = ({
         analyticsContext={getGoalJourneyContext(state)}
         language={state.language}
         onNavigate={onAfterSubscribeNavigate}
+        trackClicks={state.trackCtaClicks === true}
       />
     ) : (
       <SubscriptionButton
@@ -73,7 +74,12 @@ export const SubGoalPage = ({
         className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
         data-sg-theme={state.colorTheme}
       >
-        <TinyActionLayout state={state}>{actionButton}</TinyActionLayout>
+        <TinyActionLayout
+          state={state}
+          showCtaActivity={Boolean(afterSubscribeAction)}
+        >
+          {actionButton}
+        </TinyActionLayout>
       </div>
     );
   }
@@ -145,6 +151,7 @@ export const SubGoalPage = ({
           analyticsContext={getGoalJourneyContext(state)}
           language={state.language}
           onNavigate={onAfterSubscribeNavigate}
+          trackClicks={state.trackCtaClicks === true}
         />
       ) : (
         <SubscriptionButton

@@ -32,6 +32,7 @@ import {
 } from "../utils/postStatus";
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
+import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 
 async function cleanupInactivePost(
   postId: string,
@@ -57,6 +58,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
     await observeDailySubscriberCount(redis, subreddit.numberOfSubscribers);
   } catch (error) {
     console.error(`subscriberDailyStats error: ${String(error)}`);
+  }
+  if (subreddit) {
+    try {
+      await ensureCommunityPostActivityBackfill(reddit, redis, subreddit.name);
+    } catch (error) {
+      console.error(`communityPostActivity backfill error: ${String(error)}`);
+    }
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
   if (

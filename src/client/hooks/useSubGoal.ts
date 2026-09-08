@@ -71,7 +71,9 @@ export const useSubGoal = () => {
   const messages = getSubGoalPostMessages(state?.language);
   const postHeight = state?.postHeight;
   const recentSubscriber =
-    postHeight === "tiny" ? null : state?.recentSubscriber;
+    postHeight === "tiny" || postHeight === "cta"
+      ? null
+      : state?.recentSubscriber;
 
   const showNotice = useCallback((message: string) => {
     setNotice(message);
@@ -104,7 +106,7 @@ export const useSubGoal = () => {
       });
       showNotice(noticeMessage);
       setState((prev) => {
-        if (!prev || prev.postHeight === "tiny") {
+        if (!prev || prev.postHeight === "tiny" || prev.postHeight === "cta") {
           return prev;
         }
         const completedTime =
@@ -258,7 +260,12 @@ export const useSubGoal = () => {
   }, [loading, prohibited, state]);
 
   useEffect(() => {
-    if (!postHeight || postHeight === "tiny" || realtimeConnectedRef.current) {
+    if (
+      !postHeight ||
+      postHeight === "tiny" ||
+      postHeight === "cta" ||
+      realtimeConnectedRef.current
+    ) {
       return;
     }
     realtimeConnectedRef.current = true;
@@ -288,7 +295,9 @@ export const useSubGoal = () => {
       () => {
         void refresh();
       },
-      postHeight === "tiny" ? tinyRefreshIntervalMs : regularRefreshIntervalMs,
+      postHeight === "tiny" || postHeight === "cta"
+        ? tinyRefreshIntervalMs
+        : regularRefreshIntervalMs,
     );
     return () => window.clearInterval(interval);
   }, [postHeight, refresh]);

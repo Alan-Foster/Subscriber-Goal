@@ -1,6 +1,10 @@
-import { createDefaultAfterSubscribeAction } from "../../shared/afterSubscribeAction";
+import {
+  createDefaultAfterSubscribeAction,
+  getDefaultAfterSubscribePreset,
+} from "../../shared/afterSubscribeAction";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import {
+  ctaOnlyPostKind,
   subscriberGoalPostKind,
   subscribeOnlyPostKind,
 } from "../../shared/postKind";
@@ -242,6 +246,7 @@ export async function processDueOnboardingSubscriberGoal({
     const useTinyPost =
       subreddit.numberOfSubscribers > onboardingTinySubscriberThreshold;
     const messages = getSubGoalPostMessages("en");
+    const afterSubscribePreset = getDefaultAfterSubscribePreset(subreddit.type);
     const { post, stickyResult } = await createSubscriberGoal({
       reddit,
       redis,
@@ -260,8 +265,9 @@ export async function processDueOnboardingSubscriberGoal({
         afterSubscribeAction: createDefaultAfterSubscribeAction({
           language: "en",
           subredditName: subreddit.name,
-          numberOfSubscribers: subreddit.numberOfSubscribers,
+          subredditType: subreddit.type,
         }),
+        afterSubscribePreset,
       },
     });
     if (stickyResult.status === "not_pinned") {
@@ -498,7 +504,8 @@ async function isSubscriberGoalCandidate(
       : undefined;
   if (
     postKind === subscriberGoalPostKind ||
-    postKind === subscribeOnlyPostKind
+    postKind === subscribeOnlyPostKind ||
+    postKind === ctaOnlyPostKind
   ) {
     return true;
   }
@@ -517,8 +524,10 @@ async function hasCompatiblePersistedPostData(
   return (
     postKind === subscriberGoalPostKind ||
     postKind === subscribeOnlyPostKind ||
+    postKind === ctaOnlyPostKind ||
     (Number.isFinite(Number(goal)) && Number(goal) > 0) ||
-    height === "tiny"
+    height === "tiny" ||
+    height === "cta"
   );
 }
 

@@ -32,11 +32,17 @@ describe("devvit.json route alignment", () => {
     expect(devvitConfig.forms[formNames.createSubscribeOnly]).toBe(
       internalRoutes.forms.createSubscribeOnly,
     );
+    expect(devvitConfig.forms[formNames.createCtaOnly]).toBe(
+      internalRoutes.forms.createCtaOnly,
+    );
     expect(devvitConfig.forms[formNames.createSubscriberGoalFollowUp]).toBe(
       internalRoutes.forms.createSubscriberGoalFollowUp,
     );
     expect(devvitConfig.forms[formNames.createSubscribeOnlyFollowUp]).toBe(
       internalRoutes.forms.createSubscribeOnlyFollowUp,
+    );
+    expect(devvitConfig.forms[formNames.createCtaOnlyFollowUp]).toBe(
+      internalRoutes.forms.createCtaOnlyFollowUp,
     );
     expect(devvitConfig.forms[formNames.deleteGoal]).toBe(
       internalRoutes.forms.deleteGoal,
@@ -69,6 +75,9 @@ describe("devvit.json route alignment", () => {
     );
     expect(devvitConfig.triggers.onModAction).toBe(
       internalRoutes.triggers.onModAction,
+    );
+    expect(devvitConfig.triggers.onPostCreate).toBe(
+      internalRoutes.triggers.onPostCreate,
     );
   });
 

@@ -22,6 +22,9 @@ export const subscribeOnlyTextFallbackMaker = (
     subredditName: props.subredditName,
   });
 
+export const ctaOnlyTextFallbackMaker = (buttonText: string): string =>
+  buttonText;
+
 export const textFallbackMaker = (props: TextFallbackProps): string => {
   const messages = getSubGoalPostMessages(props.language);
   return props.completedTime

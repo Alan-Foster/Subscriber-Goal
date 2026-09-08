@@ -3,7 +3,11 @@ import type { SubGoalPostHeight } from "./subGoalPostHeight";
 
 export const journeyIdHeader = "x-devvit-journey-id";
 
-export type GoalJourneyEntryState = "unsubscribed" | "subscribed" | "completed";
+export type GoalJourneyEntryState =
+  | "unsubscribed"
+  | "subscribed"
+  | "completed"
+  | "cta";
 
 export type GoalJourneyContext = {
   goalSize: SubGoalPostHeight;
