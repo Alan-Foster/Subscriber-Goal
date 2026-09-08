@@ -26,6 +26,10 @@ type SubscribeResult = {
   journeyTelemetryHandled: boolean;
 };
 
+type SubscriptionReconciliationResult =
+  | { outcome: "confirmed"; state: SubGoalState }
+  | { outcome: "timeout" | "aborted"; state: null };
+
 const initRetryOptions = {
   maxDurationMs: 8000,
   initialDelayMs: 200,
@@ -38,6 +42,10 @@ const recoveryWindowMs = 30000;
 const recoveryIntervalMs = 5000;
 const regularRefreshIntervalMs = 30000;
 const tinyRefreshIntervalMs = 60000;
+const subscriptionReconciliationTimeoutMs = 30000;
+const subscriptionReconciliationOffsetsMs = [
+  0, 1000, 2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000,
+] as const;
 
 const safeSubscribeRequestError =
   "Subscription request could not be completed.";
@@ -92,6 +100,110 @@ export const requestSubscribeJson = async <T>(
   }
 };
 
+const waitForReconciliationOffset = (
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    if (delayMs <= 0) {
+      resolve(true);
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, delayMs);
+    const onAbort = () => {
+      window.clearTimeout(timeoutId);
+      resolve(false);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+export const reconcileSubscriptionStatus = async (
+  externalSignal?: AbortSignal,
+): Promise<SubscriptionReconciliationResult> => {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onExternalAbort = () => controller.abort();
+  externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  if (externalSignal?.aborted) {
+    controller.abort();
+  }
+
+  const startedAt = Date.now();
+  let attempts = 0;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, subscriptionReconciliationTimeoutMs);
+
+  try {
+    for (const [
+      index,
+      offsetMs,
+    ] of subscriptionReconciliationOffsetsMs.entries()) {
+      const delayMs = Math.max(0, startedAt + offsetMs - Date.now());
+      if (!(await waitForReconciliationOffset(delayMs, controller.signal))) {
+        break;
+      }
+
+      attempts = index + 1;
+      const result = await requestSubscribeJson<RefreshResponse>(
+        "/api/refresh",
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) {
+        break;
+      }
+
+      const refreshedState = result.data?.state ?? null;
+      const confirmed =
+        refreshedState !== null &&
+        "subscribed" in refreshedState &&
+        refreshedState.subscribed;
+      console.info("[subscribe-reconciliation] attempt", {
+        attempt: index + 1,
+        elapsedMs: Date.now() - startedAt,
+        category: confirmed ? "confirmed" : (result.errorKind ?? "unconfirmed"),
+        outcome: confirmed ? "success" : "continue",
+      });
+      if (confirmed) {
+        console.info("[subscribe-reconciliation] terminal", {
+          attempt: index + 1,
+          elapsedMs: Date.now() - startedAt,
+          outcome: "confirmed",
+        });
+        return { outcome: "confirmed", state: refreshedState };
+      }
+    }
+
+    if (!controller.signal.aborted) {
+      await waitForReconciliationOffset(
+        Math.max(
+          0,
+          startedAt + subscriptionReconciliationTimeoutMs - Date.now(),
+        ),
+        controller.signal,
+      );
+    }
+    const outcome = timedOut ? "timeout" : "aborted";
+    console.info("[subscribe-reconciliation] terminal", {
+      attempts,
+      elapsedMs: Date.now() - startedAt,
+      outcome,
+    });
+    return { outcome, state: null };
+  } finally {
+    window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+  }
+};
+
 export const useSubGoal = () => {
   const [state, setState] = useState<SubGoalState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,6 +213,7 @@ export const useSubGoal = () => {
   const prohibited = error === prohibitedContentMessage;
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
+  const reconciliationAbortRef = useRef<AbortController | null>(null);
   const messages = getSubGoalPostMessages(state?.language);
   const postHeight = state?.postHeight;
   const recentSubscriber =
@@ -165,6 +278,13 @@ export const useSubGoal = () => {
       if (noticeTimeoutRef.current) {
         window.clearTimeout(noticeTimeoutRef.current);
       }
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      reconciliationAbortRef.current?.abort();
     },
     [],
   );
@@ -357,24 +477,27 @@ export const useSubGoal = () => {
         },
       );
       if (result.error) {
-        const reconciliation = await requestJsonWithRetry<RefreshResponse>(
-          "/api/refresh",
-          undefined,
-          {},
+        const reconciliationController = new AbortController();
+        reconciliationAbortRef.current = reconciliationController;
+        const reconciliation = await reconcileSubscriptionStatus(
+          reconciliationController.signal,
         );
-        const reconciledState = reconciliation.data?.state ?? null;
-        if (
-          !reconciliation.aborted &&
-          !reconciliation.error &&
-          reconciledState &&
-          "subscribed" in reconciledState &&
-          reconciledState.subscribed
-        ) {
-          setState(reconciledState);
+        if (reconciliationAbortRef.current === reconciliationController) {
+          reconciliationAbortRef.current = null;
+        }
+        if (reconciliation.outcome === "aborted") {
+          return {
+            state: null,
+            error: null,
+            journeyTelemetryHandled: false,
+          };
+        }
+        if (reconciliation.outcome === "confirmed") {
+          setState(reconciliation.state);
           setError(null);
           setSubmitting(false);
           return {
-            state: reconciledState,
+            state: reconciliation.state,
             error: null,
             journeyTelemetryHandled: false,
           };

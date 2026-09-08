@@ -25,7 +25,11 @@ vi.mock("../analytics/goalJourneyAnalytics", () => ({
   },
 }));
 
-import { requestSubscribeJson, useSubGoal } from "./useSubGoal";
+import {
+  reconcileSubscriptionStatus,
+  requestSubscribeJson,
+  useSubGoal,
+} from "./useSubGoal";
 
 const tinyState: SubscribeOnlyState = {
   colorTheme: "red",
@@ -192,28 +196,30 @@ describe("useSubGoal tiny behavior", () => {
   });
 
   it("reconciles a non-JSON subscribe failure as success without retrying POST", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("failed to call devvit application: rpc unavailable", {
-        status: 503,
-        headers: { "content-type": "text/plain" },
-      }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("failed to call devvit application: rpc unavailable", {
+          status: 503,
+          headers: { "content-type": "text/plain" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            type: "refresh",
+            postId: "t3_tiny",
+            state: { ...tinyState, subscribed: true },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
-    hoisted.requestJsonWithRetry
-      .mockResolvedValueOnce({
-        data: { type: "init", postId: "t3_tiny", state: tinyState },
-        error: null,
-        aborted: false,
-      })
-      .mockResolvedValueOnce({
-        data: {
-          type: "refresh",
-          postId: "t3_tiny",
-          state: { ...tinyState, subscribed: true },
-        },
-        error: null,
-        aborted: false,
-      });
+    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
+      data: { type: "init", postId: "t3_tiny", state: tinyState },
+      error: null,
+      aborted: false,
+    });
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -229,29 +235,46 @@ describe("useSubGoal tiny behavior", () => {
     });
 
     expect(container.textContent).toBe("subscribed:success");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/subscribe",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(hoisted.requestJsonWithRetry).toHaveBeenLastCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       "/api/refresh",
-      undefined,
-      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(1);
 
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
   });
 
-  it("keeps prior state and permits another attempt when reconciliation is negative", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("<html>gateway error</html>", {
-        status: 502,
-        headers: { "content-type": "text/html" },
-      }),
-    );
+  it("keeps prior state and permits another attempt after reconciliation times out", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("<html>gateway error</html>", {
+          status: 502,
+          headers: { "content-type": "text/html" },
+        }),
+      )
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "refresh",
+              postId: "t3_tiny",
+              state: tinyState,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
     hoisted.requestJsonWithRetry
       .mockResolvedValueOnce({
@@ -278,8 +301,54 @@ describe("useSubGoal tiny behavior", () => {
       await Promise.resolve();
     });
 
+    expect(container.querySelector("button")?.disabled).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+
     expect(container.textContent).toBe("unsubscribed:Subscription failed.");
     expect(container.querySelector("button")?.disabled).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(11);
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(1);
+
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("cancels scheduled reconciliation polls when unmounted", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("failed to call devvit application: unavailable", {
+          status: 503,
+        }),
+      )
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "refresh",
+              postId: "t3_tiny",
+              state: tinyState,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<SubscribeHarness />);
+      await Promise.resolve();
+    });
     await act(async () => {
       container.querySelector("button")?.click();
       await Promise.resolve();
@@ -288,8 +357,144 @@ describe("useSubGoal tiny behavior", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await act(async () => root.unmount());
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
     container.remove();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+});
+
+describe("reconcileSubscriptionStatus", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("polls every second through five seconds and stops when confirmed", async () => {
+    const attemptTimes: number[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      attemptTimes.push(Date.now());
+      const subscribed = attemptTimes.length === 6;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            type: "refresh",
+            postId: "t3_tiny",
+            state: { ...tinyState, subscribed },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reconciliation = reconcileSubscriptionStatus();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(reconciliation).resolves.toMatchObject({
+      outcome: "confirmed",
+      state: { subscribed: true },
+    });
+    expect(attemptTimes).toEqual([0, 1000, 2000, 3000, 4000, 5000]);
+  });
+
+  it("backs off to five seconds after the initial window", async () => {
+    const attemptTimes: number[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      attemptTimes.push(Date.now());
+      const subscribed = attemptTimes.length === 8;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            type: "refresh",
+            postId: "t3_tiny",
+            state: { ...tinyState, subscribed },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reconciliation = reconcileSubscriptionStatus();
+    await vi.advanceTimersByTimeAsync(15000);
+
+    await expect(reconciliation).resolves.toMatchObject({
+      outcome: "confirmed",
+    });
+    expect(attemptTimes).toEqual([
+      0, 1000, 2000, 3000, 4000, 5000, 10000, 15000,
+    ]);
+  });
+
+  it("continues through transient and unconfirmed results until timeout", async () => {
+    const attemptTimes: number[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      attemptTimes.push(Date.now());
+      if (attemptTimes.length === 1) {
+        return Promise.reject(new TypeError("network unavailable"));
+      }
+      if (attemptTimes.length === 2) {
+        return Promise.resolve(
+          new Response("<html>bad gateway</html>", { status: 502 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            type: "refresh",
+            postId: "t3_tiny",
+            state: tinyState,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reconciliation = reconcileSubscriptionStatus();
+    await vi.advanceTimersByTimeAsync(30000);
+
+    await expect(reconciliation).resolves.toEqual({
+      outcome: "timeout",
+      state: null,
+    });
+    expect(attemptTimes).toEqual([
+      0, 1000, 2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000,
+    ]);
+  });
+
+  it("cancels pending polling when externally aborted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          type: "refresh",
+          postId: "t3_tiny",
+          state: tinyState,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const reconciliation = reconcileSubscriptionStatus(controller.signal);
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.abort();
+    await vi.runAllTimersAsync();
+
+    await expect(reconciliation).resolves.toEqual({
+      outcome: "aborted",
+      state: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
