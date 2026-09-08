@@ -102,7 +102,7 @@ describe("AfterSubscribeButton", () => {
   });
 
   it("resolves a dynamic target once, disables while loading, and navigates to it", async () => {
-    let resolveFetch!: (response: unknown) => void;
+    let resolveFetch!: (response: Response) => void;
     const fetchMock = vi.fn(
       () =>
         new Promise((resolve) => {
@@ -130,16 +130,17 @@ describe("AfterSubscribeButton", () => {
     ).not.toBeNull();
 
     await act(async () => {
-      resolveFetch({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({
-          target: {
-            url: "https://www.reddit.com/r/ExampleSub/comments/top",
-            permalink: "/r/ExampleSub/comments/top",
-          },
-        }),
-      });
+      resolveFetch(
+        new Response(
+          JSON.stringify({
+            target: {
+              url: "https://www.reddit.com/r/ExampleSub/comments/top",
+              permalink: "/r/ExampleSub/comments/top",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
     });
 
     expect(onNavigate).toHaveBeenCalledWith({
@@ -155,14 +156,15 @@ describe("AfterSubscribeButton", () => {
   it("shows the localized unavailable message for an empty listing", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: vi.fn().mockResolvedValue({
-          status: "error",
-          message: "No post is currently available.",
-        }),
-      }),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: "error",
+            message: "No post is currently available.",
+          }),
+          { status: 404, headers: { "content-type": "application/json" } },
+        ),
+      ),
     );
     await renderButton(
       {
@@ -210,11 +212,12 @@ describe("AfterSubscribeButton", () => {
   it("does not navigate when a successful response has a malformed target", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({ target: { url: "not a URL" } }),
-      }),
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ target: { url: "not a URL" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
     );
     await renderButton({
       type: "top-post-day",

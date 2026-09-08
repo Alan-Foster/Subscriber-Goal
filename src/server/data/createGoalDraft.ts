@@ -1,5 +1,6 @@
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import { subGoalLanguages } from "../../shared/subGoalPostI18n";
+import { logDiagnostic } from "../../shared/diagnostics";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { subGoalPostHeights } from "../../shared/subGoalPostHeight";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
@@ -88,8 +89,20 @@ export async function getCreateGoalDraft(
 
   try {
     const draft = JSON.parse(rawDraft) as Partial<CreateGoalDraft>;
-    return isCreateGoalDraft(draft) ? draft : null;
-  } catch {
+    if (isCreateGoalDraft(draft)) return draft;
+    logDiagnostic("warn", "persisted_json_invalid", {
+      workflow: "create_goal_draft",
+      phase: "schema_validation",
+      recordId: userId,
+    });
+    return null;
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "persisted_json_invalid",
+      { workflow: "create_goal_draft", phase: "json_decode", recordId: userId },
+      error,
+    );
     return null;
   }
 }

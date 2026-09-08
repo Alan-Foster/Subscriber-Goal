@@ -23,6 +23,7 @@ import {
   getGoalJourneyContext,
   goalJourneyAnalytics,
 } from "../analytics/goalJourneyAnalytics";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 type TinySubscribeViewPhase = "subscribe" | "confirmation" | "subscribed";
 
@@ -125,7 +126,7 @@ export const SubscribeOnlyApp = () => {
     );
   }
 
-  const handleSubscribe = async () => {
+  const performSubscribe = async () => {
     if (subscribeAttemptRef.current) return;
     subscribeAttemptRef.current = true;
     const analyticsContext = getGoalJourneyContext(state);
@@ -161,6 +162,20 @@ export const SubscribeOnlyApp = () => {
     setViewPhase("confirmation");
     triggerCelebration(confettiPresets.subscribe);
     showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
+  };
+
+  const handleSubscribe = () => {
+    void performSubscribe().catch((error: unknown) => {
+      subscribeAttemptRef.current = false;
+      interactionStartedRef.current = false;
+      logDiagnostic(
+        "error",
+        "client_async_handler_failed",
+        { workflow: "subscribe", phase: "tiny_handler" },
+        error,
+      );
+      showToast(messages.subscribeErrorToast);
+    });
   };
 
   const effectiveViewPhase =
@@ -213,7 +228,7 @@ export const SubscribeOnlyApp = () => {
               onVisitPromoSub={() => undefined}
               shareUsername={false}
               onShareUsernameChange={() => undefined}
-              onSubscribe={() => void handleSubscribe()}
+              onSubscribe={handleSubscribe}
               isSubmitting={submitting}
               notice={null}
               onAfterSubscribeNavigate={(target: string | NavigationTarget) =>

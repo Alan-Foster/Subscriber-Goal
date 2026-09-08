@@ -25,6 +25,7 @@ import {
   getGoalJourneyContext,
   goalJourneyAnalytics,
 } from "../analytics/goalJourneyAnalytics";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 type PageName = "subGoal" | "thanks" | "completed" | "tinyConfirmation";
 
@@ -116,7 +117,7 @@ export const App = () => {
     navigateTo(target);
   };
 
-  const handleSubscribe = async () => {
+  const performSubscribe = async () => {
     if (!state || state.postHeight === "cta" || subscribeAttemptRef.current) {
       return;
     }
@@ -177,6 +178,19 @@ export const App = () => {
       showNotice(noticeMessage);
     }
     showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
+  };
+
+  const handleSubscribe = () => {
+    void performSubscribe().catch((error: unknown) => {
+      subscribeAttemptRef.current = false;
+      logDiagnostic(
+        "error",
+        "client_async_handler_failed",
+        { workflow: "subscribe", phase: "app_handler" },
+        error,
+      );
+      showToast(messages.subscribeErrorToast);
+    });
   };
 
   const handleReturnToSubGoal = () => {

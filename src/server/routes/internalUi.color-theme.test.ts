@@ -5,6 +5,7 @@ import { formNames, internalRoutes } from "../../shared/routes";
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
   context: {
+    postId: "t3_post",
     subredditName: "ExampleSub",
     userId: "t2_mod",
   },
@@ -47,6 +48,10 @@ const hoisted = vi.hoisted(() => ({
   ensureSubscriberGoalPostFlair: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
+  dispatchPostAction: vi.fn(),
+  cancelUpdates: vi.fn(),
+  untrackPost: vi.fn(),
+  deletePost: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
 }));
 
@@ -85,11 +90,15 @@ vi.mock("../data/subscriberStats", () => ({
 }));
 
 vi.mock("../data/updaterData", () => ({
-  cancelUpdates: vi.fn(),
+  cancelUpdates: hoisted.cancelUpdates,
   getQueuedUpdates: hoisted.getQueuedUpdates,
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdate: hoisted.queueUpdate,
-  untrackPost: vi.fn(),
+  untrackPost: hoisted.untrackPost,
+}));
+
+vi.mock("../data/crosspostData", () => ({
+  dispatchPostAction: hoisted.dispatchPostAction,
 }));
 
 vi.mock("../data/subscriberGoalPostRegistry", () => ({
@@ -209,6 +218,7 @@ describe("internalUi color theme create goal routes", () => {
       return existed ? 1 : 0;
     });
     hoisted.context.subredditName = "ExampleSub";
+    hoisted.context.postId = "t3_post";
     hoisted.context.userId = "t2_mod";
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -222,6 +232,14 @@ describe("internalUi color theme create goal routes", () => {
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
+    hoisted.deletePost.mockResolvedValue(undefined);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      delete: hoisted.deletePost,
+    });
+    hoisted.dispatchPostAction.mockResolvedValue(undefined);
+    hoisted.cancelUpdates.mockResolvedValue(undefined);
+    hoisted.untrackPost.mockResolvedValue(undefined);
+    hoisted.removeSubscriberGoalPost.mockResolvedValue(undefined);
     hoisted.reddit.getUserById.mockResolvedValue(undefined);
     hoisted.reddit.getUserByUsername.mockResolvedValue(undefined);
     hoisted.reddit.submitPost.mockResolvedValue({
@@ -303,6 +321,69 @@ describe("internalUi color theme create goal routes", () => {
       }),
     ]);
   });
+
+  it("logs Delete a Goal metadata failures instead of leaking an UNKNOWN rejection", async () => {
+    hoisted.context.subredditName = undefined as unknown as string;
+    hoisted.reddit.getCurrentSubreddit.mockRejectedValue(
+      new Error("reddit metadata unavailable"),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("Error deleting post"),
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /"event":"delete_goal_failed".*"phase":"metadata_resolution".*"errorMessage":"reddit metadata unavailable".*"stack":/,
+      ),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it.each([
+    ["post_lookup", "getPostById"],
+    ["crosspost_delete_dispatch", "dispatchPostAction"],
+    ["reddit_post_delete", "deletePost"],
+    ["update_cancellation", "cancelUpdates"],
+    ["post_untracking", "untrackPost"],
+    ["registry_cleanup", "removeSubscriberGoalPost"],
+  ] as const)(
+    "logs the failed Delete a Goal %s phase",
+    async (phase, mockName) => {
+      const mocks = {
+        getPostById: hoisted.reddit.getPostById,
+        dispatchPostAction: hoisted.dispatchPostAction,
+        deletePost: hoisted.deletePost,
+        cancelUpdates: hoisted.cancelUpdates,
+        untrackPost: hoisted.untrackPost,
+        removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
+      };
+      mocks[mockName].mockRejectedValueOnce(new Error(`${phase} unavailable`));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.forms.deleteGoal)?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`"phase":"${phase}"`),
+      );
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Reference: delete-goal-"),
+      });
+      errorSpy.mockRestore();
+    },
+  );
 
   it("keeps moderator erasure fields available for username or user id", async () => {
     const routes = createRouteHarness();

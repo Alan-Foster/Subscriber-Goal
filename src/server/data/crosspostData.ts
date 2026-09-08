@@ -1,5 +1,6 @@
 import type { ServerAppSettings } from '../settings';
 import type { LinkId, RedditClient, RedisClient } from '../types';
+import { logDiagnostic } from '../../shared/diagnostics';
 
 export type PostActionType = 'remove' | 'approve' | 'delete';
 
@@ -223,8 +224,26 @@ export async function getPendingCrosspost(
     return undefined;
   }
   try {
-    return toPendingCrosspost(JSON.parse(raw));
-  } catch {
+    const parsed = toPendingCrosspost(JSON.parse(raw));
+    if (!parsed) {
+      logDiagnostic('warn', 'persisted_json_invalid', {
+        workflow: 'crosspost',
+        phase: 'pending_record_schema',
+        recordId: revisionId,
+      });
+    }
+    return parsed;
+  } catch (error) {
+    logDiagnostic(
+      'warn',
+      'persisted_json_invalid',
+      {
+        workflow: 'crosspost',
+        phase: 'pending_record_decode',
+        recordId: revisionId,
+      },
+      error
+    );
     return undefined;
   }
 }
@@ -293,11 +312,26 @@ export async function listDuePendingCrossposts(
     try {
       const parsed = toPendingCrosspost(JSON.parse(raw));
       if (!parsed) {
+        logDiagnostic('warn', 'persisted_json_invalid', {
+          workflow: 'crosspost',
+          phase: 'pending_index_schema',
+          recordId: revisionId,
+        });
         staleIndexMembers.push(revisionId);
         continue;
       }
       due.push(parsed);
-    } catch {
+    } catch (error) {
+      logDiagnostic(
+        'warn',
+        'persisted_json_invalid',
+        {
+          workflow: 'crosspost',
+          phase: 'pending_index_decode',
+          recordId: revisionId,
+        },
+        error
+      );
       staleIndexMembers.push(revisionId);
     }
   }

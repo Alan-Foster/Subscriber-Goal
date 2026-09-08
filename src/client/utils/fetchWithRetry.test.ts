@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestJsonWithRetry, type RetryEvent } from './fetchWithRetry';
 
 const jsonResponse = (payload: unknown, status: number): Response =>
@@ -9,6 +9,11 @@ const jsonResponse = (payload: unknown, status: number): Response =>
   });
 
 describe('requestJsonWithRetry', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it('retries a transient network error and then succeeds', async () => {
     let calls = 0;
     vi.stubGlobal(
@@ -140,5 +145,52 @@ describe('requestJsonWithRetry', () => {
     expect(result.data).toBeNull();
     expect(result.error).toBe('unavailable');
     expect(result.aborted).toBe(false);
+  });
+
+  it.each([
+    ['gateway', 'failed to call devvit application: unavailable'],
+    ['html', '<html>bad gateway</html>'],
+    ['empty', ''],
+    ['malformed_json', '{broken'],
+  ])('logs and rejects a %s response without logging its body', async (phase, body) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(body, { status: 200, headers: { 'content-type': 'text/plain' } })
+      )
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await requestJsonWithRetry('/api/init', undefined, {
+      maxDurationMs: 0,
+    });
+
+    expect(result).toEqual({
+      data: null,
+      error: 'Invalid JSON response',
+      aborted: false,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`"phase":"${phase}"`)
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('client_request_failed')
+    );
+    expect(warnSpy.mock.calls.flat().join(' ')).not.toContain(body || 'not-present');
+  });
+
+  it('treats a malformed successful payload as a logged protocol failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 200)));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await requestJsonWithRetry('/api/init', undefined, {
+      maxDurationMs: 0,
+      validate: (payload) =>
+        typeof payload === 'object' && payload !== null && 'state' in payload,
+    });
+    expect(result.error).toBe('Invalid JSON response');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('client_invalid_success_payload')
+    );
   });
 });

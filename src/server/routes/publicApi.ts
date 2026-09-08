@@ -36,6 +36,11 @@ import {
   isClickActivityPreset,
   recordCtaClick,
 } from "../data/ctaActivity";
+import {
+  hasSubscriptionAttemptReceipt,
+  isValidSubscriptionAttemptId,
+  storeSubscriptionAttemptReceipt,
+} from "../data/subscriptionAttempt";
 
 const buildState = async (
   postId: string,
@@ -384,7 +389,7 @@ export function registerPublicApiRoutes(router: Router): void {
     }
   });
 
-  router.get(apiRoutes.refresh, async (_req, res): Promise<void> => {
+  router.get(apiRoutes.refresh, async (req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
       console.warn(
@@ -398,12 +403,38 @@ export function registerPublicApiRoutes(router: Router): void {
     }
 
     try {
+      const requestedAttemptId = (
+        req.query as Record<string, unknown> | undefined
+      )?.attemptId;
+      if (
+        requestedAttemptId !== undefined &&
+        !isValidSubscriptionAttemptId(requestedAttemptId)
+      ) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid subscription attempt ID.",
+        } satisfies ErrorResponse);
+        return;
+      }
+      const subscriptionAttemptConfirmed = requestedAttemptId
+        ? await hasSubscriptionAttemptReceipt(
+            redis,
+            requestedAttemptId,
+            postId,
+            context.userId,
+          )
+        : undefined;
+      const attemptConfirmation =
+        subscriptionAttemptConfirmed === undefined
+          ? {}
+          : { subscriptionAttemptConfirmed };
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
       if (subGoalData.postKind === subscribeOnlyPostKind) {
         res.json({
           type: "refresh",
           postId,
           state: await buildSubscribeOnlyState(postId, subGoalData),
+          ...attemptConfirmation,
         } satisfies RefreshResponse);
         return;
       }
@@ -412,6 +443,7 @@ export function registerPublicApiRoutes(router: Router): void {
           type: "refresh",
           postId,
           state: await buildCtaOnlyState(postId, subGoalData),
+          ...attemptConfirmation,
         } satisfies RefreshResponse);
         return;
       }
@@ -427,6 +459,7 @@ export function registerPublicApiRoutes(router: Router): void {
         type: "refresh",
         postId,
         state,
+        ...attemptConfirmation,
       } satisfies RefreshResponse);
     } catch (error) {
       console.error(`API Refresh Error for post ${postId}:`, error);
@@ -458,6 +491,15 @@ export function registerPublicApiRoutes(router: Router): void {
     try {
       logSubscribePhase(postId, "started");
       const subGoalData = await getSubGoalData(redis, postId, context.postData);
+      const body = req.body as SubscribeRequest | undefined;
+      const attemptId = body?.attemptId;
+      if (attemptId !== undefined && !isValidSubscriptionAttemptId(attemptId)) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid subscription attempt ID.",
+        } satisfies ErrorResponse);
+        return;
+      }
       if (subGoalData.postKind === ctaOnlyPostKind) {
         res.status(400).json({
           status: "error",
@@ -484,6 +526,15 @@ export function registerPublicApiRoutes(router: Router): void {
 
         await reddit.subscribeToCurrentSubreddit();
         logSubscribePhase(postId, "reddit_subscribed");
+        if (attemptId) {
+          await storeSubscriptionAttemptReceipt(
+            redis,
+            attemptId,
+            postId,
+            userId,
+          );
+          logSubscribePhase(postId, "attempt_receipt_stored");
+        }
         const subreddit = await reddit.getCurrentSubreddit();
         const sourceSubredditIsNsfw =
           (subreddit as { isNsfw?: boolean }).isNsfw === true;
@@ -544,11 +595,14 @@ export function registerPublicApiRoutes(router: Router): void {
         return;
       }
 
-      const body = req.body as SubscribeRequest | undefined;
       const shareUsername = body?.shareUsername === true;
 
       await reddit.subscribeToCurrentSubreddit();
       logSubscribePhase(postId, "reddit_subscribed");
+      if (attemptId) {
+        await storeSubscriptionAttemptReceipt(redis, attemptId, postId, userId);
+        logSubscribePhase(postId, "attempt_receipt_stored");
+      }
 
       const subreddit = await reddit.getCurrentSubreddit();
       const sourceSubredditIsNsfw =
@@ -640,6 +694,7 @@ function hasUsableNavigationUrl(value: unknown): value is string {
       url.hostname.length > 0
     );
   } catch {
+    // diagnostic-allow-silent: URL parsing is an expected validation probe.
     return false;
   }
 }
@@ -675,6 +730,7 @@ function createPostNavigationTarget(
         return { url: url.toString(), permalink };
       }
     } catch {
+      // diagnostic-allow-silent: malformed candidate URLs fall back to post.url.
       // Fall back to an absolute post URL below.
     }
   }

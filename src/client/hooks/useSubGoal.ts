@@ -13,11 +13,13 @@ import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import { requestJsonWithRetry } from "../utils/fetchWithRetry";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { goalJourneyAnalytics } from "../analytics/goalJourneyAnalytics";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 type RequestResult<T> = {
   data: T | null;
   error: string | null;
   errorKind: "api" | "gateway" | "network" | "protocol" | null;
+  status: number | null;
 };
 
 type SubscribeResult = {
@@ -58,6 +60,7 @@ const classifyNonJsonResponse = (body: string): "gateway" | "protocol" =>
 export const requestSubscribeJson = async <T>(
   input: RequestInfo,
   init?: RequestInit,
+  validate?: (payload: unknown) => payload is T,
 ): Promise<RequestResult<T>> => {
   try {
     const res = await fetch(input, init);
@@ -67,16 +70,18 @@ export const requestSubscribeJson = async <T>(
       payload = JSON.parse(body) as T | ErrorResponse;
     } catch {
       const errorKind = classifyNonJsonResponse(body);
-      console.info("[subscribe] non_json_response", {
+      logDiagnostic("warn", "subscribe_non_json_response", {
+        workflow: "subscribe",
         status: res.status,
         contentType: res.headers.get("content-type") ?? "unknown",
-        category: errorKind,
+        phase: errorKind,
         bodyLength: body.length,
       });
       return {
         data: null,
         error: safeSubscribeRequestError,
         errorKind,
+        status: res.status,
       };
     }
     if (!res.ok) {
@@ -84,20 +89,108 @@ export const requestSubscribeJson = async <T>(
         typeof (payload as ErrorResponse).message === "string"
           ? (payload as ErrorResponse).message
           : `HTTP ${res.status}`;
-      return { data: null, error: message, errorKind: "api" };
+      logDiagnostic("warn", "subscribe_api_error", {
+        workflow: "subscribe",
+        phase: "http_error",
+        status: res.status,
+      });
+      return {
+        data: null,
+        error: message,
+        errorKind: "api",
+        status: res.status,
+      };
     }
-    return { data: payload as T, error: null, errorKind: null };
+    if (validate && !validate(payload)) {
+      logDiagnostic("warn", "subscribe_invalid_success_payload", {
+        workflow: "subscribe",
+        status: res.status,
+        contentType: res.headers.get("content-type") ?? "unknown",
+        phase: "protocol",
+      });
+      return {
+        data: null,
+        error: safeSubscribeRequestError,
+        errorKind: "protocol",
+        status: res.status,
+      };
+    }
+    return {
+      data: payload as T,
+      error: null,
+      errorKind: null,
+      status: res.status,
+    };
   } catch (error) {
-    console.info("[subscribe] network_error", {
-      category: "network",
-      errorName: error instanceof Error ? error.name : "unknown",
-    });
+    logDiagnostic(
+      "error",
+      "subscribe_network_error",
+      { workflow: "subscribe", phase: "network" },
+      error,
+    );
     return {
       data: null,
       error: safeSubscribeRequestError,
       errorKind: "network",
+      status: null,
     };
   }
+};
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object";
+
+const isSubGoalState = (value: unknown): value is SubGoalState => {
+  if (!isObject(value) || !isObject(value.subreddit)) return false;
+  if (
+    value.postHeight !== "tiny" &&
+    value.postHeight !== "cta" &&
+    value.postHeight !== "short" &&
+    value.postHeight !== "regular"
+  ) {
+    return false;
+  }
+  return value.postHeight === "cta" || typeof value.subscribed === "boolean";
+};
+
+const isRefreshResponse = (value: unknown): value is RefreshResponse =>
+  isObject(value) &&
+  value.type === "refresh" &&
+  typeof value.postId === "string" &&
+  isSubGoalState(value.state) &&
+  (value.subscriptionAttemptConfirmed === undefined ||
+    typeof value.subscriptionAttemptConfirmed === "boolean");
+
+const isInitResponse = (value: unknown): value is InitResponse =>
+  isObject(value) &&
+  value.type === "init" &&
+  typeof value.postId === "string" &&
+  isSubGoalState(value.state);
+
+const isSubscribeResponse = (value: unknown): value is SubscribeResponse =>
+  isObject(value) &&
+  value.type === "subscribe" &&
+  typeof value.postId === "string" &&
+  isSubGoalState(value.state) &&
+  (value.journeyTelemetryHandled === undefined ||
+    typeof value.journeyTelemetryHandled === "boolean");
+
+const createSubscriptionAttemptId = (): string => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 };
 
 const waitForReconciliationOffset = (
@@ -125,6 +218,7 @@ const waitForReconciliationOffset = (
   });
 
 export const reconcileSubscriptionStatus = async (
+  attemptId: string,
   externalSignal?: AbortSignal,
 ): Promise<SubscriptionReconciliationResult> => {
   const controller = new AbortController();
@@ -143,42 +237,58 @@ export const reconcileSubscriptionStatus = async (
   }, subscriptionReconciliationTimeoutMs);
 
   try {
-    for (const [
-      index,
-      offsetMs,
-    ] of subscriptionReconciliationOffsetsMs.entries()) {
+    let index = 0;
+    while (index < subscriptionReconciliationOffsetsMs.length) {
+      const offsetMs = subscriptionReconciliationOffsetsMs[index]!;
       const delayMs = Math.max(0, startedAt + offsetMs - Date.now());
       if (!(await waitForReconciliationOffset(delayMs, controller.signal))) {
         break;
       }
+      if (Date.now() - startedAt >= subscriptionReconciliationTimeoutMs) {
+        timedOut = true;
+        break;
+      }
 
-      attempts = index + 1;
+      attempts += 1;
       const result = await requestSubscribeJson<RefreshResponse>(
-        "/api/refresh",
+        `/api/refresh?attemptId=${encodeURIComponent(attemptId)}`,
         { signal: controller.signal },
+        isRefreshResponse,
       );
       if (controller.signal.aborted) {
+        break;
+      }
+      if (Date.now() - startedAt >= subscriptionReconciliationTimeoutMs) {
+        timedOut = true;
+        controller.abort();
         break;
       }
 
       const refreshedState = result.data?.state ?? null;
       const confirmed =
         refreshedState !== null &&
-        "subscribed" in refreshedState &&
-        refreshedState.subscribed;
+        result.data?.subscriptionAttemptConfirmed === true;
       console.info("[subscribe-reconciliation] attempt", {
-        attempt: index + 1,
+        attempt: attempts,
         elapsedMs: Date.now() - startedAt,
         category: confirmed ? "confirmed" : (result.errorKind ?? "unconfirmed"),
         outcome: confirmed ? "success" : "continue",
       });
       if (confirmed) {
         console.info("[subscribe-reconciliation] terminal", {
-          attempt: index + 1,
+          attempt: attempts,
           elapsedMs: Date.now() - startedAt,
           outcome: "confirmed",
         });
         return { outcome: "confirmed", state: refreshedState };
+      }
+      index += 1;
+      const elapsedMs = Date.now() - startedAt;
+      while (
+        index < subscriptionReconciliationOffsetsMs.length &&
+        subscriptionReconciliationOffsetsMs[index]! <= elapsedMs
+      ) {
+        index += 1;
       }
     }
 
@@ -191,7 +301,10 @@ export const reconcileSubscriptionStatus = async (
         controller.signal,
       );
     }
-    const outcome = timedOut ? "timeout" : "aborted";
+    const outcome =
+      timedOut || Date.now() - startedAt >= subscriptionReconciliationTimeoutMs
+        ? "timeout"
+        : "aborted";
     console.info("[subscribe-reconciliation] terminal", {
       attempts,
       elapsedMs: Date.now() - startedAt,
@@ -300,7 +413,7 @@ export const useSubGoal = () => {
     const result = await requestJsonWithRetry<RefreshResponse>(
       "/api/refresh",
       undefined,
-      {},
+      { validate: isRefreshResponse },
     );
     if (result.aborted) {
       return null;
@@ -323,7 +436,7 @@ export const useSubGoal = () => {
       const result = await requestJsonWithRetry<InitResponse>(
         "/api/init",
         { signal },
-        initRetryOptions,
+        { ...initRetryOptions, validate: isInitResponse },
       );
       if (cancelled || result.aborted) {
         return;
@@ -338,7 +451,14 @@ export const useSubGoal = () => {
       setLoading(false);
     };
 
-    void runInit();
+    void runInit().catch((error: unknown) => {
+      logDiagnostic(
+        "error",
+        "client_async_handler_failed",
+        { workflow: "init", phase: "unhandled" },
+        error,
+      );
+    });
 
     return () => {
       cancelled = true;
@@ -366,6 +486,7 @@ export const useSubGoal = () => {
         {
           ...initRetryOptions,
           maxDurationMs: 3000,
+          validate: isInitResponse,
         },
       );
       if (cancelled || result.aborted) {
@@ -378,7 +499,14 @@ export const useSubGoal = () => {
           return;
         }
         timeoutId = window.setTimeout(() => {
-          void runRecovery();
+          void runRecovery().catch((error: unknown) => {
+            logDiagnostic(
+              "error",
+              "client_async_handler_failed",
+              { workflow: "init_recovery", phase: "unhandled" },
+              error,
+            );
+          });
         }, recoveryIntervalMs);
         return;
       }
@@ -391,7 +519,14 @@ export const useSubGoal = () => {
           return;
         }
         timeoutId = window.setTimeout(() => {
-          void runRecovery();
+          void runRecovery().catch((error: unknown) => {
+            logDiagnostic(
+              "error",
+              "client_async_handler_failed",
+              { workflow: "init_recovery", phase: "unhandled" },
+              error,
+            );
+          });
         }, recoveryIntervalMs);
         return;
       }
@@ -401,7 +536,14 @@ export const useSubGoal = () => {
     };
 
     timeoutId = window.setTimeout(() => {
-      void runRecovery();
+      void runRecovery().catch((error: unknown) => {
+        logDiagnostic(
+          "error",
+          "client_async_handler_failed",
+          { workflow: "init_recovery", phase: "unhandled" },
+          error,
+        );
+      });
     }, recoveryIntervalMs);
 
     return () => {
@@ -430,11 +572,26 @@ export const useSubGoal = () => {
         onMessage: handleRealtimeMessage,
       });
     };
-    void connect();
+    void connect().catch((error: unknown) => {
+      realtimeConnectedRef.current = false;
+      logDiagnostic(
+        "error",
+        "realtime_connection_failed",
+        { workflow: "realtime", phase: "connect" },
+        error,
+      );
+    });
 
     return () => {
       if (connection) {
-        void connection.disconnect();
+        void connection.disconnect().catch((error: unknown) => {
+          logDiagnostic(
+            "warn",
+            "realtime_disconnect_failed",
+            { workflow: "realtime", phase: "disconnect" },
+            error,
+          );
+        });
       }
       realtimeConnectedRef.current = false;
     };
@@ -446,7 +603,14 @@ export const useSubGoal = () => {
     }
     const interval = window.setInterval(
       () => {
-        void refresh();
+        void refresh().catch((error: unknown) => {
+          logDiagnostic(
+            "error",
+            "client_async_handler_failed",
+            { workflow: "refresh", phase: "interval" },
+            error,
+          );
+        });
       },
       postHeight === "tiny" || postHeight === "cta"
         ? tinyRefreshIntervalMs
@@ -465,6 +629,7 @@ export const useSubGoal = () => {
         };
       }
       setSubmitting(true);
+      const attemptId = createSubscriptionAttemptId();
       const result = await requestSubscribeJson<SubscribeResponse>(
         "/api/subscribe",
         {
@@ -473,13 +638,27 @@ export const useSubGoal = () => {
             "Content-Type": "application/json",
             ...goalJourneyAnalytics.journeyHeaders(),
           },
-          body: JSON.stringify(payload ?? {}),
+          body: JSON.stringify({
+            ...(payload ?? {}),
+            attemptId,
+          } satisfies SubscribeRequest),
         },
+        isSubscribeResponse,
       );
       if (result.error) {
+        if (result.status === 400 || result.status === 401) {
+          setError(result.error);
+          setSubmitting(false);
+          return {
+            state: null,
+            error: result.error,
+            journeyTelemetryHandled: false,
+          };
+        }
         const reconciliationController = new AbortController();
         reconciliationAbortRef.current = reconciliationController;
         const reconciliation = await reconcileSubscriptionStatus(
+          attemptId,
           reconciliationController.signal,
         );
         if (reconciliationAbortRef.current === reconciliationController) {
@@ -503,10 +682,7 @@ export const useSubGoal = () => {
           };
         }
 
-        const userSafeError =
-          result.errorKind === "api"
-            ? result.error
-            : messages.subscribeErrorToast;
+        const userSafeError = messages.subscribeErrorToast;
         setError(userSafeError);
         setSubmitting(false);
         return {

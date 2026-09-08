@@ -32,6 +32,8 @@ const hoisted = vi.hoisted(() => ({
   observeDailySubscriberCount: vi.fn(),
   isTrackedSubscriber: vi.fn(),
   setNewSubscriber: vi.fn(),
+  hasSubscriptionAttemptReceipt: vi.fn(),
+  storeSubscriptionAttemptReceipt: vi.fn(),
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
   getCtaActivityMetric: vi.fn(),
@@ -59,6 +61,16 @@ vi.mock("../data/subscriberStats", () => ({
   isTrackedSubscriber: hoisted.isTrackedSubscriber,
   setNewSubscriber: hoisted.setNewSubscriber,
 }));
+
+vi.mock("../data/subscriptionAttempt", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../data/subscriptionAttempt")>();
+  return {
+    ...original,
+    hasSubscriptionAttemptReceipt: hoisted.hasSubscriptionAttemptReceipt,
+    storeSubscriptionAttemptReceipt: hoisted.storeSubscriptionAttemptReceipt,
+  };
+});
 
 vi.mock("../data/subscriberDailyStats", () => ({
   getUtcDayStartMs: hoisted.getUtcDayStartMs,
@@ -98,6 +110,8 @@ function createRouteHarness(): Map<string, RouteHandler> {
 }
 
 describe("publicApi routes", () => {
+  const attemptId = "123e4567-e89b-42d3-a456-426614174000";
+
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.context.postId = "t3_post";
@@ -122,6 +136,8 @@ describe("publicApi routes", () => {
     });
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
     hoisted.setNewSubscriber.mockResolvedValue(true);
+    hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
+    hoisted.storeSubscriptionAttemptReceipt.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.getCtaActivityMetric.mockResolvedValue({
@@ -339,6 +355,60 @@ describe("publicApi routes", () => {
     });
   });
 
+  it("returns exact-attempt confirmation bound to the current user and post", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(true);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.refresh)?.(
+      { query: { attemptId } } as unknown as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.hasSubscriptionAttemptReceipt).toHaveBeenCalledWith(
+      hoisted.redis,
+      attemptId,
+      "t3_post",
+      "t2_user",
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionAttemptConfirmed: true }),
+    );
+  });
+
+  it("does not treat historical tracking as exact-attempt confirmation", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.refresh)?.(
+      { query: { attemptId } } as unknown as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as RefreshResponse;
+    expect(response.state).toMatchObject({ subscribed: true });
+    expect(response.subscriptionAttemptConfirmed).toBe(false);
+  });
+
+  it("keeps refresh responses backward-compatible without an attempt ID", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.refresh)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json.mock.calls[0]?.[0]).not.toHaveProperty(
+      "subscriptionAttemptConfirmed",
+    );
+    expect(hoisted.hasSubscriptionAttemptReceipt).not.toHaveBeenCalled();
+  });
+
   it("does not look up subscriber status for logged-out Tiny viewers", async () => {
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscribe-only-v1",
@@ -455,6 +525,51 @@ describe("publicApi routes", () => {
       newSubscriberCount: 101,
       recentSubscriber: "TinyUser",
     });
+  });
+
+  it("stores an exact-attempt receipt immediately after Reddit succeeds", async () => {
+    hoisted.context.userId = "t2_user";
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { attemptId } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.storeSubscriptionAttemptReceipt).toHaveBeenCalledWith(
+      hoisted.redis,
+      attemptId,
+      "t3_post",
+      "t2_user",
+    );
+    expect(
+      hoisted.reddit.subscribeToCurrentSubreddit.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      hoisted.storeSubscriptionAttemptReceipt.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      hoisted.storeSubscriptionAttemptReceipt.mock.invocationCallOrder[0],
+    ).toBeLessThan(hoisted.setNewSubscriber.mock.invocationCallOrder[0]!);
+  });
+
+  it("returns a safe failure when an exact-attempt receipt cannot be stored", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.storeSubscriptionAttemptReceipt.mockRejectedValue(
+      new Error("redis unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { attemptId } } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenCalledWith(503);
+    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
   });
 
   it("does not report Tiny success when subscriber history persistence fails", async () => {

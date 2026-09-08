@@ -1,4 +1,5 @@
 import type { ErrorResponse } from '../../shared/types/api';
+import { logDiagnostic } from '../../shared/diagnostics';
 
 export type JsonRequestResult<T> = {
   data: T | null;
@@ -24,7 +25,7 @@ export type RetryEvent =
       attempt: number;
       waitMs: number;
       remainingMs: number;
-      reason: 'http_retryable' | 'network_error' | 'timeout';
+      reason: 'http_retryable' | 'network_error' | 'timeout' | 'protocol_error';
       status?: number;
       error?: string;
     }
@@ -101,6 +102,7 @@ export type RequestJsonWithRetryOptions = {
   jitterRatio?: number;
   onEvent?: (event: RetryEvent) => void;
   debugLabel?: string;
+  validate?: (payload: unknown) => boolean;
 };
 
 /**
@@ -120,16 +122,49 @@ export async function requestJsonWithRetry<T>(
   const jitterRatio = options.jitterRatio ?? 0.15;
 
   const abortSignal = init?.signal ?? undefined;
+  const requestLabel =
+    options.debugLabel ??
+    (typeof input === 'string' ? (input.split('?')[0] ?? 'request') : 'request');
   const start = Date.now();
   const timeLeft = (): number => Math.max(0, maxDurationMs - (Date.now() - start));
   const emit = (event: RetryEvent): void => {
     options.onEvent?.(event);
-    if (!options.debugLabel) {
-      return;
+    if (options.debugLabel) {
+      console.info(
+        `[fetch-retry:${options.debugLabel}] ${JSON.stringify(event)}`
+      );
     }
-    console.info(
-      `[fetch-retry:${options.debugLabel}] ${JSON.stringify(event)}`
-    );
+    if (event.event === 'retry_wait') {
+      logDiagnostic(
+        'warn',
+        'client_request_retry',
+        {
+          workflow: requestLabel,
+          phase: event.reason,
+          status: event.status,
+          attempt: event.attempt,
+          remainingMs: event.remainingMs,
+        },
+        event.error
+      );
+    } else if (
+      event.event === 'terminal' &&
+      event.reason !== 'success' &&
+      event.reason !== 'aborted'
+    ) {
+      logDiagnostic(
+        'error',
+        'client_request_failed',
+        {
+          workflow: requestLabel,
+          phase: event.reason,
+          status: event.status,
+          attempt: event.attempt,
+          remainingMs: event.remainingMs,
+        },
+        event.error
+      );
+    }
   };
   const withJitter = (baseMs: number): number => {
     if (baseMs <= 0 || jitterRatio <= 0) {
@@ -172,11 +207,77 @@ export async function requestJsonWithRetry<T>(
         input,
         buildFetchInit({ ...(init ?? {}), signal: attemptController.signal })
       );
+      const body = await res.text();
       let payload: unknown = {};
+      let invalidJson = false;
       try {
-        payload = await res.json();
+        payload = JSON.parse(body) as unknown;
       } catch {
+        invalidJson = true;
         payload = {};
+        const normalized = body.trimStart().toLowerCase();
+        logDiagnostic('warn', 'client_non_json_response', {
+          workflow: requestLabel,
+          phase: normalized.startsWith('failed to call devvit application')
+            ? 'gateway'
+            : normalized.startsWith('<!doctype html') || normalized.startsWith('<html')
+              ? 'html'
+              : body.length === 0
+                ? 'empty'
+                : 'malformed_json',
+          status: res.status,
+          contentType: res.headers.get('content-type') ?? 'unknown',
+          bodyLength: body.length,
+        });
+      }
+
+      if (!invalidJson && res.ok && options.validate && !options.validate(payload)) {
+        invalidJson = true;
+        logDiagnostic('warn', 'client_invalid_success_payload', {
+          workflow: requestLabel,
+          phase: 'protocol',
+          status: res.status,
+          contentType: res.headers.get('content-type') ?? 'unknown',
+          bodyLength: body.length,
+        });
+      }
+
+      if (res.ok && invalidJson) {
+        const remaining = timeLeft();
+        if (remaining <= 0) {
+          emit({
+            event: 'terminal',
+            attempt,
+            remainingMs: 0,
+            reason: 'exhausted_budget',
+            status: res.status,
+            error: 'Invalid JSON response',
+          });
+          return { data: null, error: 'Invalid JSON response', aborted: false };
+        }
+        const wait = Math.min(withJitter(nextDelay), remaining);
+        emit({
+          event: 'retry_wait',
+          attempt,
+          waitMs: wait,
+          remainingMs: remaining,
+          reason: 'protocol_error',
+          status: res.status,
+          error: 'Invalid JSON response',
+        });
+        try {
+          await sleep(wait, abortSignal);
+        } catch {
+          emit({
+            event: 'terminal',
+            attempt,
+            remainingMs: timeLeft(),
+            reason: 'aborted',
+          });
+          return { data: null, error: null, aborted: true };
+        }
+        nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+        continue;
       }
 
       if (res.ok) {

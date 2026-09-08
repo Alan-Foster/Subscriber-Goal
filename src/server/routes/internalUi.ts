@@ -58,6 +58,7 @@ import { parseDeveloperCommands } from "../utils/developerCommands";
 import { toErrorMessage } from "../utils/crosspostLogs";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
+import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import {
   createDefaultAfterSubscribeAction,
   defaultAfterSubscribeColorTheme,
@@ -241,44 +242,120 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.forms.deleteGoal,
     async (req, res: Response<UiResponse>) => {
-      const { confirm } = req.body as DeleteGoalFormValues;
-      if (!confirm) {
-        res.json({
-          showToast:
-            "You did not confirm the deletion. If that was a mistake, please try again and enable the confirmation toggle before hitting delete.",
-        });
-        return;
-      }
-
+      const operationId = createOperationId("delete-goal");
       const postId = context.postId;
-      const subredditName =
-        context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-      if (!postId || !subredditName) {
-        res.json({
-          showToast: "Deletion metadata was somehow lost. Please try again.",
-        });
-        return;
-      }
-
+      let phase = "request_validation";
+      logDiagnostic("info", "delete_goal_started", {
+        operationId,
+        workflow: "delete_goal",
+        phase,
+        postId,
+      });
       try {
+        const { confirm } = (req.body ?? {}) as DeleteGoalFormValues;
+        if (!confirm) {
+          res.json({
+            showToast:
+              "You did not confirm the deletion. If that was a mistake, please try again and enable the confirmation toggle before hitting delete.",
+          });
+          return;
+        }
+        if (!postId) {
+          logDiagnostic("warn", "delete_goal_metadata_missing", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+          });
+          res.json({
+            showToast: `Deletion metadata was somehow lost. Please try again. Reference: ${operationId}`,
+          });
+          return;
+        }
+
+        phase = "metadata_resolution";
+        const subredditName =
+          context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
+        if (!subredditName) {
+          throw new Error("Subreddit name was unavailable during deletion.");
+        }
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+
+        phase = "post_lookup";
         const post = await reddit.getPostById(postId);
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
         const appSettings = getAppSettings();
+        phase = "crosspost_delete_dispatch";
         if (
           subredditName.toLowerCase() !==
           appSettings.promoSubreddit.toLowerCase()
         ) {
           await dispatchPostAction(reddit, appSettings, postId, "delete");
         }
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+        phase = "reddit_post_delete";
         await post.delete();
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+        phase = "update_cancellation";
         await cancelUpdates(redis, postId);
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+        phase = "post_untracking";
         await untrackPost(redis, postId);
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+        phase = "registry_cleanup";
         await removeSubscriberGoalPost(redis, postId);
+        logDiagnostic("info", "delete_goal_phase_complete", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
+        phase = "response_completion";
         res.json({ showToast: "Post deleted successfully!" });
+        logDiagnostic("info", "delete_goal_completed", {
+          operationId,
+          workflow: "delete_goal",
+          phase,
+          postId,
+        });
       } catch (error) {
-        console.error("Error deleting post:", error);
+        logDiagnostic(
+          "error",
+          "delete_goal_failed",
+          { operationId, workflow: "delete_goal", phase, postId },
+          error,
+        );
         res.json({
-          showToast:
-            "Error deleting post. Please refresh the page and try again.",
+          showToast: `Error deleting post. Please refresh the page and try again. Reference: ${operationId}`,
         });
       }
     },
@@ -446,39 +523,59 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.forms.eraseMyData,
     async (req, res: Response<UiResponse>) => {
-      const { confirm } = req.body as EraseMyDataFormValues;
-
-      if (!confirm) {
-        res.json({
-          showToast:
-            "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
-        });
-        return;
-      }
-
-      const currentUserId = context.userId;
-      if (!currentUserId) {
-        res.json({
-          showToast: "Please log in to erase your Sub Goal user data.",
-        });
-        return;
-      }
-
-      let currentUsername: string | undefined;
+      const operationId = createOperationId("erase-self");
+      let phase = "request_validation";
       try {
-        currentUsername = await reddit.getCurrentUsername();
+        const { confirm } = (req.body ?? {}) as EraseMyDataFormValues;
+        if (!confirm) {
+          res.json({
+            showToast:
+              "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+          });
+          return;
+        }
+
+        const currentUserId = context.userId;
+        if (!currentUserId) {
+          res.json({
+            showToast: "Please log in to erase your Sub Goal user data.",
+          });
+          return;
+        }
+
+        let currentUsername: string | undefined;
+        phase = "username_resolution";
+        try {
+          currentUsername = await reddit.getCurrentUsername();
+        } catch (error) {
+          logDiagnostic(
+            "warn",
+            "erase_self_username_resolution_failed",
+            { operationId, workflow: "erase_self", phase },
+            error,
+          );
+        }
+
+        phase = "subscriber_untracking";
+        await untrackSubscriberById(redis, currentUserId, currentUsername);
+        if (currentUsername) {
+          phase = "recent_subscriber_cleanup";
+          await eraseFromRecentSubscribers(redis, currentUsername);
+        }
+
+        phase = "response_completion";
+        res.json({ showToast: "Your Sub Goal user data has been erased." });
       } catch (error) {
-        console.warn(
-          `Could not resolve current username for self-erasure: ${String(error)}`,
+        logDiagnostic(
+          "error",
+          "erase_self_failed",
+          { operationId, workflow: "erase_self", phase },
+          error,
         );
+        res.json({
+          showToast: `Your Sub Goal user data could not be fully erased. Reference: ${operationId}`,
+        });
       }
-
-      await untrackSubscriberById(redis, currentUserId, currentUsername);
-      if (currentUsername) {
-        await eraseFromRecentSubscribers(redis, currentUsername);
-      }
-
-      res.json({ showToast: "Your Sub Goal user data has been erased." });
     },
   );
 }

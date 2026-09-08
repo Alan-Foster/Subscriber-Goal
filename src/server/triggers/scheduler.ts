@@ -33,6 +33,7 @@ import {
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
+import { logDiagnostic } from "../../shared/diagnostics";
 
 async function cleanupInactivePost(
   postId: string,
@@ -57,13 +58,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
     subreddit = await reddit.getCurrentSubreddit();
     await observeDailySubscriberCount(redis, subreddit.numberOfSubscribers);
   } catch (error) {
-    console.error(`subscriberDailyStats error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "subscriber_daily_stats" }, error);
   }
   if (subreddit) {
     try {
       await ensureCommunityPostActivityBackfill(reddit, redis, subreddit.name);
     } catch (error) {
-      console.error(`communityPostActivity backfill error: ${String(error)}`);
+      logDiagnostic("error", "scheduler_task_failed", { workflow: "community_post_activity_backfill" }, error);
     }
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
@@ -104,29 +105,27 @@ export async function onPostsUpdaterJob(): Promise<void> {
   try {
     await processPostKindMigrationBatch(reddit, redis);
   } catch (error) {
-    console.error(`postKindMigration error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "post_kind_migration" }, error);
   }
   try {
     await processLegacyAfterSubscribeActionMigrationBatch(redis);
   } catch (error) {
-    console.error(
-      `legacyAfterSubscribeActionMigration error: ${String(error)}`,
-    );
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "after_subscribe_action_migration" }, error);
   }
   try {
     await processSubscriberStatsMigrationBatch(redis);
   } catch (error) {
-    console.error(`subscriberStatsMigration error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "subscriber_stats_migration" }, error);
   }
   try {
     await processRecentSubscriberIndexMigrationBatch(redis);
   } catch (error) {
-    console.error(`recentSubscriberIndexMigration error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "recent_subscriber_migration" }, error);
   }
   try {
     await processDueOnboardingReminder({ reddit, redis });
   } catch (error) {
-    console.error(`onboardingReminder error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "onboarding_reminder" }, error);
   }
   try {
     await processDueOnboardingSubscriberGoal({
@@ -135,7 +134,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       appSettings,
     });
   } catch (error) {
-    console.error(`onboardingSubscriberGoal error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "onboarding_subscriber_goal" }, error);
   }
   try {
     const autoCreateSummary = await processDueAutoCreateNextGoals({
@@ -156,7 +155,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       );
     }
   } catch (error) {
-    console.error(`autoCreateNextGoal error: ${String(error)}`);
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "auto_create_next_goal" }, error);
   }
 
   const postIds = await getQueuedUpdates(redis);
@@ -167,7 +166,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
     try {
       subreddit = await reddit.getCurrentSubreddit();
     } catch (error) {
-      console.error(`updater subreddit lookup error: ${String(error)}`);
+      logDiagnostic("error", "scheduler_task_failed", { workflow: "subreddit_lookup" }, error);
       return;
     }
   }
@@ -230,7 +229,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
         await cleanupInactivePost(postId, "missing_post");
         continue;
       }
-      console.error(`Error updating post ${postId}: ${String(e)}`);
+      logDiagnostic("error", "scheduler_post_update_failed", { workflow: "post_update", postId }, e);
     }
   }
 }

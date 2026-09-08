@@ -1,4 +1,5 @@
 import type { RedisClient } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import type { BasicUserData } from "./basicData";
 import {
   addRecentSubscriberPostIndex,
@@ -88,10 +89,20 @@ const parseStringList = (raw: string | undefined): string[] => {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
+      logDiagnostic("warn", "persisted_json_invalid", {
+        workflow: "subscriber_stats",
+        phase: "legacy_index_schema",
+      });
       return [];
     }
     return parsed.filter((value): value is string => typeof value === "string");
-  } catch {
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "persisted_json_invalid",
+      { workflow: "subscriber_stats", phase: "legacy_index_decode" },
+      error,
+    );
     return [];
   }
 };

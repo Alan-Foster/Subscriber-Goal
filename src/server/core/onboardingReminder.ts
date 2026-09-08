@@ -215,8 +215,14 @@ export async function processDueOnboardingReminder({
     );
     return { status: "failed", errorMessage, ...inspected };
   } finally {
-    if ((await redis.get(onboardingReminderLockKey)) === lockToken) {
-      await redis.del(onboardingReminderLockKey);
+    try {
+      if ((await redis.get(onboardingReminderLockKey)) === lockToken) {
+        await redis.del(onboardingReminderLockKey);
+      }
+    } catch (error) {
+      console.warn(
+        `[onboardingReminder] failed to release lock: ${String(error)}`,
+      );
     }
   }
 }

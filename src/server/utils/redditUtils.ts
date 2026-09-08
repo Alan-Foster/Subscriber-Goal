@@ -285,6 +285,9 @@ export async function clearSubscriberGoalStickies(
       if (isMissingPostError(error)) {
         result.missing.push(postId);
       } else {
+        console.warn(
+          `[sticky] failed to inspect known Subscriber Goal post: subreddit=${options.subreddit.name} postId=${postId} error=${toErrorMessage(error)}`,
+        );
         blocked.add(postId);
       }
     }

@@ -78,7 +78,13 @@ export async function ensureCommunityPostActivityBackfill(
     }
     await redis.set(postBackfillCompleteKey, String(nowMs));
   } finally {
-    await redis.del(postBackfillLockKey);
+    try {
+      await redis.del(postBackfillLockKey);
+    } catch (error) {
+      console.warn(
+        `[ctaActivity] failed to release post backfill lock: ${String(error)}`,
+      );
+    }
   }
 }
 

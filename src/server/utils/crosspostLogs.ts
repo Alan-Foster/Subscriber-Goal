@@ -96,7 +96,7 @@ export function logCrosspostEvent(
         process.stdout.write(fallbackLine);
       }
     } catch {
-      // swallow logger failures to avoid affecting ingestion control flow
+      // diagnostic-allow-silent: no logging transport remains at this point.
     }
   }
 }

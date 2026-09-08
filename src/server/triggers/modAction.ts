@@ -1191,11 +1191,17 @@ async function updateFromWikis(
         );
         throw error;
       } finally {
-        await releaseSourceCreateInFlightLock(
-          redis,
-          sourceCreateLock.lockKey,
-          sourceCreateLock.lockToken
-        );
+        try {
+          await releaseSourceCreateInFlightLock(
+            redis,
+            sourceCreateLock.lockKey,
+            sourceCreateLock.lockToken
+          );
+        } catch (lockError) {
+          console.warn(
+            `[crosspost] failed to release source-create lock: sourcePostId=${pending.postId} revisionId=${pending.revisionId} error=${toErrorMessage(lockError)}`
+          );
+        }
       }
       logCrosspostEvent({
         event: 'crosspost_attempt_succeeded',
@@ -1274,6 +1280,17 @@ async function updateFromWikis(
       }
     } catch (e) {
       const errorMessage = toErrorMessage(e);
+      logCrosspostEvent(
+        {
+          event: 'crosspost_attempt_failed',
+          sourcePostId: pending.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: 'crosspost_processing_failed',
+          revisionId: pending.revisionId,
+          errorMessage,
+        },
+        'error'
+      );
       const permanentFailure = isPermanentCrosspostError(errorMessage);
       const missingSourcePost = isMissingSourcePostError(errorMessage);
       if (permanentFailure || sourceSubredditIsNsfw || missingSourcePost) {
@@ -1791,44 +1808,45 @@ export async function processCrosspostDispatchQueue(
         errorMessage: toErrorMessage(error),
       };
 
-      const previous = parseInt(
-        (await redis.get(crosspostRetryDegradedCountKey)) ?? '0',
-        10
+      logCrosspostEvent(
+        {
+          event: 'crosspost_retry_failed',
+          targetSubreddit: appSettings.promoSubreddit,
+          reason,
+          status: summary.status,
+          ...withErrorMessage(summary.errorMessage),
+          ...logContext,
+        },
+        'error'
       );
-      const consecutiveFailures = Number.isNaN(previous) ? 1 : previous + 1;
-      await redis.set(
-        crosspostRetryDegradedCountKey,
-        consecutiveFailures.toString()
-      );
-      if (consecutiveFailures >= crosspostRetryDegradedThreshold) {
-        logCrosspostEvent(
-          {
-            event: 'crosspost_retry_degraded',
-            targetSubreddit: appSettings.promoSubreddit,
-            reason,
-            status: summary.status,
-            revisionsFetched: summary.revisionsFetched,
-            newPostsSeen: summary.newPostsSeen,
-            crosspostsCreated: summary.crosspostsCreated,
-            crosspostsSkipped: summary.crosspostsSkipped,
-            crosspostsFailed: summary.crosspostsFailed,
-            actionsMirrored: summary.actionsMirrored,
-            actionsFailed: summary.actionsFailed,
-            crosspostsCreatedThisRun: summary.crosspostsCreatedThisRun,
-            crosspostsBlockedByRunCap: summary.crosspostsBlockedByRunCap,
-            crosspostsBlockedByHourlyCap: summary.crosspostsBlockedByHourlyCap,
-            crosspostPersistenceFailedAfterCreate:
-              summary.crosspostPersistenceFailedAfterCreate,
-            crosspostsSkippedBySourceCooldown:
-              summary.crosspostsSkippedBySourceCooldown,
-            crosspostsSkippedByInFlight: summary.crosspostsSkippedByInFlight,
-            crosspostsSkippedByExistingDetection:
-              summary.crosspostsSkippedByExistingDetection,
-            ...withErrorMessage(summary.errorMessage),
-            consecutiveFailures,
-            ...logContext,
-          },
-          'warn'
+
+      try {
+        const previous = parseInt(
+          (await redis.get(crosspostRetryDegradedCountKey)) ?? '0',
+          10
+        );
+        const consecutiveFailures = Number.isNaN(previous) ? 1 : previous + 1;
+        await redis.set(
+          crosspostRetryDegradedCountKey,
+          consecutiveFailures.toString()
+        );
+        if (consecutiveFailures >= crosspostRetryDegradedThreshold) {
+          logCrosspostEvent(
+            {
+              event: 'crosspost_retry_degraded',
+              targetSubreddit: appSettings.promoSubreddit,
+              reason,
+              status: summary.status,
+              ...withErrorMessage(summary.errorMessage),
+              consecutiveFailures,
+              ...logContext,
+            },
+            'warn'
+          );
+        }
+      } catch (bookkeepingError) {
+        console.warn(
+          `[crosspost] retry failure bookkeeping failed: error=${toErrorMessage(bookkeepingError)}`
         );
       }
 
@@ -1864,11 +1882,17 @@ export async function processCrosspostDispatchQueue(
       return summary;
     }
   } finally {
-    await releaseCrosspostIngestionLock(
-      redis,
-      lock.lockKey,
-      lock.lockToken
-    );
+    try {
+      await releaseCrosspostIngestionLock(
+        redis,
+        lock.lockKey,
+        lock.lockToken
+      );
+    } catch (lockError) {
+      console.warn(
+        `[crosspost] failed to release ingestion lock: error=${toErrorMessage(lockError)}`
+      );
+    }
   }
 }
 

@@ -86,6 +86,7 @@ export type RefreshResponse = {
   type: "refresh";
   postId: string;
   state: SubGoalState;
+  subscriptionAttemptConfirmed?: boolean;
 };
 
 export type SubscribeResponse = {
@@ -97,6 +98,7 @@ export type SubscribeResponse = {
 
 export type SubscribeRequest = {
   shareUsername?: boolean;
+  attemptId?: string;
 };
 
 export type NavigationTarget = { url: string; permalink?: string };

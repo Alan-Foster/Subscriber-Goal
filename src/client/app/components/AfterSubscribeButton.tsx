@@ -15,6 +15,7 @@ import {
   goalJourneyAnalytics,
 } from "../../analytics/goalJourneyAnalytics";
 import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
+import { logDiagnostic } from "../../../shared/diagnostics";
 
 type ActionableAfterSubscribeAction = Exclude<
   AfterSubscribeAction,
@@ -57,7 +58,24 @@ export const AfterSubscribeButton = ({
         void fetch(apiRoutes.ctaClick, {
           method: "POST",
           keepalive: true,
-        }).catch(() => undefined);
+        })
+          .then((response) => {
+            if (!response.ok) {
+              logDiagnostic("warn", "cta_click_tracking_failed", {
+                workflow: "after_subscribe_cta",
+                phase: "http_error",
+                status: response.status,
+              });
+            }
+          })
+          .catch((error: unknown) => {
+            logDiagnostic(
+              "warn",
+              "cta_click_tracking_failed",
+              { workflow: "after_subscribe_cta", phase: "network" },
+              error,
+            );
+          });
       }
       if (analyticsContext) {
         goalJourneyAnalytics.afterSubscribeCtaOpened(
@@ -72,14 +90,45 @@ export const AfterSubscribeButton = ({
     setResolving(true);
     try {
       const response = await fetch(apiRoutes.afterSubscribeTarget);
-      const payload = (await response.json()) as
-        | AfterSubscribeTargetResponse
-        | ErrorResponse;
+      const body = await response.text();
+      let payload: AfterSubscribeTargetResponse | ErrorResponse;
+      try {
+        payload = JSON.parse(body) as
+          | AfterSubscribeTargetResponse
+          | ErrorResponse;
+      } catch (error) {
+        const normalized = body.trimStart().toLowerCase();
+        logDiagnostic(
+          "error",
+          "dynamic_target_non_json_response",
+          {
+            workflow: "after_subscribe_cta",
+            phase: normalized.startsWith("failed to call devvit application")
+              ? "gateway"
+              : normalized.startsWith("<html") ||
+                  normalized.startsWith("<!doctype html")
+                ? "html"
+                : body.length === 0
+                  ? "empty"
+                  : "malformed_json",
+            status: response.status,
+            contentType: response.headers.get("content-type") ?? "unknown",
+            bodyLength: body.length,
+          },
+          error,
+        );
+        throw new Error("Dynamic target returned an invalid response.");
+      }
       if (
         !response.ok ||
         !("target" in payload) ||
         !hasUsableNavigationTarget(payload.target)
       ) {
+        logDiagnostic("warn", "dynamic_target_request_failed", {
+          workflow: "after_subscribe_cta",
+          phase: !response.ok ? "http_error" : "invalid_payload",
+          status: response.status,
+        });
         showToast(
           response.status === 404
             ? messages.dynamicPostUnavailable
@@ -101,7 +150,13 @@ export const AfterSubscribeButton = ({
         );
       }
       onNavigate(payload.target);
-    } catch {
+    } catch (error) {
+      logDiagnostic(
+        "error",
+        "dynamic_target_failed",
+        { workflow: "after_subscribe_cta", phase: "request" },
+        error,
+      );
       showToast(messages.dynamicPostError);
       if (analyticsContext) {
         goalJourneyAnalytics.afterSubscribeCtaFailed(
@@ -121,7 +176,18 @@ export const AfterSubscribeButton = ({
       colorTheme={action.colorTheme}
       label={action.buttonText}
       mode={resolving ? "submitting" : "link"}
-      onClick={() => void handleClick()}
+      onClick={() => {
+        void handleClick().catch((error: unknown) => {
+          resolvingRef.current = false;
+          setResolving(false);
+          logDiagnostic(
+            "error",
+            "client_async_handler_failed",
+            { workflow: "after_subscribe_cta", phase: "click_handler" },
+            error,
+          );
+        });
+      }}
     />
   );
 };
@@ -145,6 +211,7 @@ function hasUsableNavigationTarget(
       url.hostname.length > 0
     );
   } catch {
+    // diagnostic-allow-silent: malformed navigation targets are validation input.
     return false;
   }
 }

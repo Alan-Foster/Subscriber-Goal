@@ -291,7 +291,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith(
-      "subscriberDailyStats error: Error: redis unavailable",
+      expect.stringMatching(
+        /scheduler_task_failed.*subscriber_daily_stats.*redis unavailable.*stack/,
+      ),
     );
   });
 
@@ -309,7 +311,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.observeDailySubscriberCount).not.toHaveBeenCalled();
     expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith(
-      "subscriberDailyStats error: Error: reddit unavailable",
+      expect.stringMatching(
+        /scheduler_task_failed.*subscriber_daily_stats.*reddit unavailable.*stack/,
+      ),
     );
   });
 
@@ -491,7 +495,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.untrackPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith(
-      "Error updating post t3_retry: Error: 503 Service Unavailable",
+      expect.stringMatching(
+        /scheduler_post_update_failed.*t3_retry.*503 Service Unavailable.*stack/,
+      ),
     );
   });
 

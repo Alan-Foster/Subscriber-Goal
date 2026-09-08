@@ -1,4 +1,5 @@
 import type { RedditClient, RedisClient } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import type { ServerAppSettings } from "../settings";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import {
@@ -118,10 +119,20 @@ const parsePostIdList = (raw: string | undefined): string[] => {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
+      logDiagnostic("warn", "persisted_json_invalid", {
+        workflow: "sub_goal_data",
+        phase: "post_index_schema",
+      });
       return [];
     }
     return parsed.filter((value): value is string => typeof value === "string");
-  } catch {
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "persisted_json_invalid",
+      { workflow: "sub_goal_data", phase: "post_index_decode" },
+      error,
+    );
     return [];
   }
 };

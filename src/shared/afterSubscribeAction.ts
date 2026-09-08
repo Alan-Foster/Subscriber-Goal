@@ -192,6 +192,7 @@ export function resolveAfterSubscribePreset(
       return "create-post";
     }
   } catch {
+    // diagnostic-allow-silent: malformed legacy URLs intentionally use fallback behavior.
     // Resolved link actions already contain a valid URL. Fall through safely
     // for malformed legacy data.
   }
@@ -209,6 +210,7 @@ function normalizeSecureUrl(value: unknown): string | null {
     }
     return parsed.toString();
   } catch {
+    // diagnostic-allow-silent: URL parsing is an expected validation probe.
     return null;
   }
 }
