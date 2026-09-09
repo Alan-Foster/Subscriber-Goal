@@ -44,6 +44,7 @@ const hoisted = vi.hoisted(() => ({
   }),
   state: undefined as unknown as SubGoalState,
   subscribe: vi.fn(),
+  requestSubscribeJson: vi.fn(),
   setError: vi.fn(),
   showNotice: vi.fn(),
   navigateTo: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("@devvit/web/client", () => ({
 }));
 
 vi.mock("../hooks/useSubGoal", () => ({
+  requestSubscribeJson: hoisted.requestSubscribeJson,
   useSubGoal: () => ({
     state: hoisted.state,
     loading: false,
@@ -95,6 +97,11 @@ describe("App", () => {
     hoisted.state = hoisted.createState() as SubGoalState;
     hoisted.prohibited = false;
     hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
+    hoisted.requestSubscribeJson.mockResolvedValue({
+      type: "notification-settings",
+      authenticated: true,
+      enabled: true,
+    });
     Reflect.deleteProperty(window, "matchMedia");
   });
 
@@ -154,6 +161,63 @@ describe("App", () => {
         )
         ?.click();
     });
+    expect(container.textContent).toContain(
+      "Show my username when I subscribe",
+    );
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps short notification controls guarded from confetti and navigation", async () => {
+    hoisted.state = {
+      ...hoisted.createState(),
+      postHeight: "short",
+    } as SubGoalState;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_input, init?: RequestInit) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "notification-settings",
+              authenticated: true,
+              enabled: init?.method === "POST",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(
+      container.querySelector('[data-notification-layout="short"]'),
+    ).not.toBeNull();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Enable"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+    expect(hoisted.navigateTo).not.toHaveBeenCalled();
+
+    const returnButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Return"),
+    );
+    await act(async () => returnButton?.click());
     expect(container.textContent).toContain(
       "Show my username when I subscribe",
     );

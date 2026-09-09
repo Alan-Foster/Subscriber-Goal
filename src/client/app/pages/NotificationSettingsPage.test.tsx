@@ -4,6 +4,8 @@ import type {
   CtaOnlyState,
   SubscriberGoalState,
 } from "../../../shared/types/api";
+import { getNotificationMessages } from "../../../shared/notificationI18n";
+import { subGoalLanguages } from "../../../shared/subGoalPostI18n";
 import { NotificationSettingsPage } from "./NotificationSettingsPage";
 
 const state: SubscriberGoalState = {
@@ -54,7 +56,7 @@ describe("NotificationSettingsPage", () => {
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 
-  it("renders the short horizontal layout", () => {
+  it("renders the standardized responsive short layout", () => {
     const html = renderToStaticMarkup(
       <NotificationSettingsPage
         state={{ ...state, postHeight: "short" }}
@@ -63,14 +65,17 @@ describe("NotificationSettingsPage", () => {
       />,
     );
     expect(html).toContain('data-notification-layout="short"');
-    expect(html).toContain("Disabled");
-    expect(html).toContain("Enable Notifications");
+    expect(html).toContain('data-notification-preference-row="true"');
+    expect(html).toContain('data-notification-bell-state="disabled"');
+    expect(html).toContain('aria-label="Notifications: Disabled"');
+    expect(html).toContain(">Enable</span>");
     expect(html).toContain("bg-green-700");
     expect(html).toContain(">Return</button>");
+    expect(html).toContain("text-base");
     expect(html).toContain("flex-col");
     expect(html).toContain("sm:flex-row");
     expect(html).toContain("px-4");
-    expect(html).not.toContain("max-w-32");
+    expect(html).not.toContain("r/ExampleSub");
   });
 
   it("renders a compact CTA layout without a subreddit icon", () => {
@@ -94,7 +99,10 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain('aria-label="Return to previous page"');
     expect(html).toContain('data-notification-bell-state="enabled"');
     expect(html).toContain('aria-label="Notifications: Enabled"');
-    expect(html).toContain(">Disable</button>");
+    expect(html).toContain(">Disable</span>");
+    expect(html).toContain("text-base");
+    expect(html).toContain('data-notification-stable-slot="state"');
+    expect(html).toContain('data-notification-stable-slot="action"');
     expect(html).not.toContain("Return to Previous Page");
   });
 
@@ -133,6 +141,10 @@ describe("NotificationSettingsPage", () => {
       />,
     );
     expect(loadingHtml).toContain('aria-label="Notifications: …"');
+    expect(loadingHtml).toContain(">Enabled</span>");
+    expect(loadingHtml).toContain(">Disabled</span>");
+    expect(loadingHtml).toContain(">Enable</span>");
+    expect(loadingHtml).toContain(">Disable</span>");
 
     const signedOutHtml = renderToStaticMarkup(
       <NotificationSettingsPage
@@ -170,5 +182,27 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain('aria-label="Notifications: Disabled"');
     expect(html).toContain("Notification settings could not be updated.");
     expect(html).toContain("text-red-500");
+  });
+
+  it("intrinsically reserves state and action space in every language", () => {
+    for (const language of subGoalLanguages) {
+      const messages = getNotificationMessages(language);
+      const html = renderToStaticMarkup(
+        <NotificationSettingsPage
+          state={{ ...state, postHeight: "short", language }}
+          {...props}
+          loading
+          submitting
+          enabled={false}
+        />,
+      );
+
+      expect(html).toContain('data-notification-stable-slot="state"');
+      expect(html).toContain('data-notification-stable-slot="action"');
+      expect(html).toContain(messages.enabled);
+      expect(html).toContain(messages.disabled);
+      expect(html).toContain(messages.enableShort);
+      expect(html).toContain(messages.disableShort);
+    }
   });
 });

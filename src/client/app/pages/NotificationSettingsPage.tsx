@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { ReactNode } from "react";
 import type { SubGoalState } from "../../../shared/types/api";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
@@ -15,6 +16,115 @@ type NotificationSettingsPageProps = {
   onToggle: (enabled: boolean) => void;
   onReturn: () => void;
   onVisitPromoSub: () => void;
+};
+
+type StableLocalizedSlotProps = {
+  current: string;
+  alternatives: readonly [string, string];
+  kind: "state" | "action";
+};
+
+const StableLocalizedSlot = ({
+  current,
+  alternatives,
+  kind,
+}: StableLocalizedSlotProps) => (
+  <span
+    className="inline-grid shrink-0 text-center"
+    data-notification-stable-slot={kind}
+  >
+    {alternatives.map((alternative) => (
+      <span
+        key={alternative}
+        aria-hidden="true"
+        className="invisible col-start-1 row-start-1 whitespace-nowrap"
+      >
+        {alternative}
+      </span>
+    ))}
+    <span className="col-start-1 row-start-1 whitespace-nowrap">{current}</span>
+  </span>
+);
+
+type NotificationPreferenceRowProps = {
+  label: string;
+  enabledText: string;
+  disabledText: string;
+  enableText: string;
+  disableText: string;
+  enabled: boolean;
+  loading: boolean;
+  submitting: boolean;
+  authenticated: boolean;
+  error: string | null;
+  stackOnNarrow?: boolean;
+  returnButton?: ReactNode;
+  onToggle: (enabled: boolean) => void;
+};
+
+const NotificationPreferenceRow = ({
+  label,
+  enabledText,
+  disabledText,
+  enableText,
+  disableText,
+  enabled,
+  loading,
+  submitting,
+  authenticated,
+  error,
+  stackOnNarrow = false,
+  returnButton,
+  onToggle,
+}: NotificationPreferenceRowProps) => {
+  const busy = loading || submitting;
+  const statusText = loading ? "…" : enabled ? enabledText : disabledText;
+  const actionText = submitting ? "…" : enabled ? disableText : enableText;
+  const actionAriaLabel = enabled ? disableText : enableText;
+
+  return (
+    <div
+      className={`flex max-w-full items-center justify-center gap-2 sm:gap-3 ${stackOnNarrow ? "flex-col sm:flex-row" : "flex-row"}`}
+      data-notification-preference-row="true"
+    >
+      <div
+        className={`flex min-w-0 max-w-full items-center justify-center gap-1.5 text-base font-semibold ${error ? "text-red-500" : enabled ? "text-green-500" : "text-[color:var(--sg-text-secondary)]"}`}
+        aria-label={`${label}: ${statusText}`}
+        aria-live="polite"
+        role="status"
+      >
+        <span className="shrink-0">
+          <NotificationBellIcon enabled={enabled} />
+        </span>
+        <span className="min-w-0 truncate">{label}:</span>
+        <StableLocalizedSlot
+          current={statusText}
+          alternatives={[enabledText, disabledText]}
+          kind="state"
+        />
+      </div>
+      <div className="flex shrink-0 items-center justify-center gap-2 sm:gap-3">
+        <button
+          type="button"
+          disabled={busy || !authenticated}
+          aria-label={actionAriaLabel}
+          className={`${
+            enabled
+              ? "bg-red-600 text-white hover:bg-red-700"
+              : "bg-green-700 text-white hover:bg-green-800"
+          } inline-grid cursor-pointer rounded-full px-3 py-2 text-base font-semibold shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:px-4`}
+          onClick={() => onToggle(!enabled)}
+        >
+          <StableLocalizedSlot
+            current={actionText}
+            alternatives={[enableText, disableText]}
+            kind="action"
+          />
+        </button>
+        {returnButton}
+      </div>
+    </div>
+  );
 };
 
 export const NotificationSettingsPage = ({
@@ -42,15 +152,7 @@ export const NotificationSettingsPage = ({
       : enabled
         ? messages.enabled
         : messages.disabled;
-  const preferenceStatusText = loading
-    ? "…"
-    : enabled
-      ? messages.enabled
-      : messages.disabled;
   const toggleLabel = enabled ? messages.disableButton : messages.enableButton;
-  const compactToggleLabel = enabled
-    ? messages.disableShort
-    : messages.enableShort;
 
   const handleReturn = () => {
     if (returnActivatedRef.current) return;
@@ -61,7 +163,7 @@ export const NotificationSettingsPage = ({
     }, 250);
   };
 
-  const toggleButton = (
+  const regularToggleButton = (
     <button
       type="button"
       disabled={busy || !authenticated}
@@ -70,10 +172,10 @@ export const NotificationSettingsPage = ({
         enabled
           ? "bg-red-600 text-white hover:bg-red-700"
           : "bg-green-700 text-white hover:bg-green-800"
-      } cursor-pointer whitespace-nowrap rounded-full font-semibold shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed disabled:opacity-50 ${compact ? "min-w-20 px-3 py-1.5 text-xs" : "px-5 py-2.5 text-sm"}`}
+      } cursor-pointer whitespace-nowrap rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed disabled:opacity-50`}
       onClick={() => onToggle(!enabled)}
     >
-      {submitting ? "…" : compact ? compactToggleLabel : toggleLabel}
+      {submitting ? "…" : toggleLabel}
     </button>
   );
 
@@ -108,28 +210,26 @@ export const NotificationSettingsPage = ({
       error ?? (!authenticated && !loading ? statusText : null);
     return (
       <div
-        className="relative flex h-full w-full items-center justify-center px-12 py-3 text-center"
+        className="relative flex h-full w-full items-center justify-center px-9 py-3 text-center"
         data-notification-layout="compact"
       >
         {backButton}
-        <div className="flex w-full min-w-0 items-center justify-center gap-2">
-          <div
-            className={`flex min-w-0 flex-1 items-center justify-end gap-1.5 text-xs font-semibold ${error ? "text-red-500" : enabled ? "text-green-500" : "text-[color:var(--sg-text-secondary)]"}`}
-            aria-label={`${messages.label}: ${preferenceStatusText}`}
-          >
-            <span className="shrink-0">
-              <NotificationBellIcon enabled={enabled} />
-            </span>
-            <span className="min-w-0 truncate">{messages.label}:</span>{" "}
-            <span className="shrink-0 whitespace-nowrap">
-              {preferenceStatusText}
-            </span>
-          </div>
-          {toggleButton}
-        </div>
+        <NotificationPreferenceRow
+          label={messages.label}
+          enabledText={messages.enabled}
+          disabledText={messages.disabled}
+          enableText={messages.enableShort}
+          disableText={messages.disableShort}
+          enabled={enabled}
+          loading={loading}
+          submitting={submitting}
+          authenticated={authenticated}
+          error={error}
+          onToggle={onToggle}
+        />
         {compactNotice ? (
           <div
-            className={`absolute bottom-1 left-12 right-12 truncate text-[9px] ${error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
+            className={`absolute bottom-1 left-9 right-9 truncate text-[9px] ${error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
             aria-live="polite"
             title={compactNotice}
           >
@@ -143,7 +243,7 @@ export const NotificationSettingsPage = ({
   const returnButton = (
     <button
       type="button"
-      className="cursor-pointer whitespace-nowrap rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-5 py-2.5 text-sm font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]"
+      className={`cursor-pointer whitespace-nowrap rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-5 font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] ${short ? "py-2 text-base" : "py-2.5 text-sm"}`}
       onClick={handleReturn}
     >
       {short ? (
@@ -160,9 +260,11 @@ export const NotificationSettingsPage = ({
   );
 
   if (short) {
+    const shortNotice =
+      error ?? (!authenticated && !loading ? messages.loginRequired : null);
     return (
       <div
-        className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 pb-5 pt-10 text-center sm:flex-row sm:gap-8 sm:px-16 sm:py-6"
+        className="relative flex h-full w-full items-center justify-center px-4 pb-6 pt-10 text-center sm:px-16 sm:py-6"
         data-notification-layout="short"
       >
         {backButton}
@@ -171,21 +273,30 @@ export const NotificationSettingsPage = ({
           promoSubreddit={state.appSettings.promoSubreddit}
           language={state.language}
         />
-        <div className="min-w-0 text-base font-bold text-[color:var(--sg-text-secondary)] sm:flex-1 sm:text-xl">
-          <span className="sm:whitespace-nowrap">
-            r/{subredditName}:{" "}
-            <span className={enabled ? "text-green-500" : ""}>
-              {statusText}
-            </span>
-          </span>
-          {error ? (
-            <div className="mt-1 text-xs font-normal text-red-500">{error}</div>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center justify-center gap-2 sm:gap-3">
-          {toggleButton}
-          {returnButton}
-        </div>
+        <NotificationPreferenceRow
+          label={messages.label}
+          enabledText={messages.enabled}
+          disabledText={messages.disabled}
+          enableText={messages.enableShort}
+          disableText={messages.disableShort}
+          enabled={enabled}
+          loading={loading}
+          submitting={submitting}
+          authenticated={authenticated}
+          error={error}
+          stackOnNarrow
+          returnButton={returnButton}
+          onToggle={onToggle}
+        />
+        {shortNotice ? (
+          <div
+            className={`absolute bottom-2 left-4 right-4 truncate text-xs ${error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
+            aria-live="polite"
+            title={shortNotice}
+          >
+            {shortNotice}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -215,7 +326,7 @@ export const NotificationSettingsPage = ({
         </div>
       ) : null}
       <div className="flex items-center justify-center gap-2 sm:gap-3">
-        {toggleButton}
+        {regularToggleButton}
         {returnButton}
       </div>
     </div>
