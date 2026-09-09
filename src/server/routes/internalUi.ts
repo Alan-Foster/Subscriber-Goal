@@ -23,9 +23,9 @@ import {
   subGoalPostHeights,
 } from "../../shared/subGoalPostHeight";
 import {
-  defaultSubGoalLanguage,
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
+  resolveSubGoalLanguage,
   subGoalLanguages,
   subGoalPostMessages,
 } from "../../shared/subGoalPostI18n";
@@ -638,6 +638,7 @@ async function buildCreateGoalSetupForm(): Promise<
   NonNullable<UiResponse["showForm"]>
 > {
   const subreddit = await reddit.getCurrentSubreddit();
+  const defaultLanguage = resolveSubGoalLanguage(subreddit.language);
   const savedDisplayName = await getSavedSubredditDisplayName(redis);
   return {
     name: formNames.createGoalSetup,
@@ -652,7 +653,7 @@ async function buildCreateGoalSetupForm(): Promise<
           name: "language",
           label: "Language",
           type: "select",
-          defaultValue: [defaultSubGoalLanguage],
+          defaultValue: [defaultLanguage],
           options: subGoalLanguages.map((language) => ({
             label: subGoalPostMessages[language].languageLabel,
             value: language,

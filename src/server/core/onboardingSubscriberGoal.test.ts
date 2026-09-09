@@ -464,6 +464,75 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
   });
 
+  it("uses the subreddit language for an automatically created onboarding goal", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 50,
+      type: "public",
+      isNsfw: false,
+      language: "es",
+    });
+
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          title: "¡Bienvenido a r/ExampleSub!",
+          language: "es",
+          afterSubscribeAction: expect.objectContaining({
+            type: "link",
+            buttonText: "Crear una publicación",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("falls back to English when the subreddit language is unsupported", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 50,
+      type: "public",
+      isNsfw: false,
+      language: "ja",
+    });
+
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          title: "Welcome to r/ExampleSub!",
+          language: "en",
+          afterSubscribeAction: expect.objectContaining({
+            buttonText: "Create a New Post",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("defaults restricted onboarding posts to the Blue Top Post CTA", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -540,6 +609,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: onboardingTinySubscriberThreshold + 1,
       isNsfw: false,
+      language: "es",
     });
 
     await processDueOnboardingSubscriberGoal({
@@ -553,7 +623,7 @@ describe("onboarding subscriber goal", () => {
       expect.objectContaining({
         options: expect.objectContaining({
           colorTheme: "red",
-          language: "en",
+          language: "es",
           postHeight: "tiny",
           autoCreateNextGoal: false,
           crosspost: true,

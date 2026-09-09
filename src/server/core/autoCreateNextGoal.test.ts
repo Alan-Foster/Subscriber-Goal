@@ -161,6 +161,44 @@ describe('processDueAutoCreateNextGoals', () => {
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
   });
 
+  it('inherits the source goal language instead of re-detecting the subreddit language', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 5,
+      recentSubscriber: '',
+      completedTime: 1_000,
+      subredditDisplayName: 'ExampleSub',
+      colorTheme: 'purple',
+      postHeight: 'short',
+      autoCreateNextGoal: true,
+      language: 'es',
+      afterSubscribeAction: { type: 'disabled' },
+      afterSubscribePreset: null
+    });
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: 't5_example',
+      name: 'examplesub',
+      numberOfSubscribers: 12,
+      isNsfw: false,
+      language: 'de'
+    });
+
+    await processDueAutoCreateNextGoals({
+      reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+      redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+      appSettings: baseSettings
+    });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          title: '¡Bienvenido a r/ExampleSub!',
+          language: 'es'
+        })
+      })
+    );
+  });
+
   it('disables crossposting for NSFW subreddits', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({

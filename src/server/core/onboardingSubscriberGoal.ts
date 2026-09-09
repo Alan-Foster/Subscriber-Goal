@@ -2,7 +2,10 @@ import {
   createDefaultAfterSubscribeAction,
   getDefaultAfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
-import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
+import {
+  getSubGoalPostMessages,
+  resolveSubGoalLanguage,
+} from "../../shared/subGoalPostI18n";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   ctaOnlyPostKind,
@@ -249,7 +252,8 @@ export async function processDueOnboardingSubscriberGoal({
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
     const useTinyPost =
       subreddit.numberOfSubscribers > onboardingTinySubscriberThreshold;
-    const messages = getSubGoalPostMessages("en");
+    const language = resolveSubGoalLanguage(subreddit.language);
+    const messages = getSubGoalPostMessages(language);
     const afterSubscribePreset = getDefaultAfterSubscribePreset(subreddit.type);
     const { post, stickyResult } = await createSubscriberGoal({
       reddit,
@@ -265,9 +269,9 @@ export async function processDueOnboardingSubscriberGoal({
         colorTheme: "red",
         postHeight: useTinyPost ? "tiny" : "regular",
         autoCreateNextGoal: !useTinyPost,
-        language: "en",
+        language,
         afterSubscribeAction: createDefaultAfterSubscribeAction({
-          language: "en",
+          language,
           subredditName: subreddit.name,
           subredditType: subreddit.type,
         }),

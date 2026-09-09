@@ -644,6 +644,58 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.redis.del).toHaveBeenCalledWith("create_goal_draft:t2_mod");
   });
 
+  it("pre-selects a supported subreddit language in the setup form", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      isNsfw: false,
+      language: "es",
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.menu.createGoal)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+      name: string;
+      defaultValue?: unknown;
+    }>;
+    expect(fields.find((field) => field.name === "language")).toMatchObject({
+      defaultValue: ["es"],
+    });
+  });
+
+  it("falls back to English for an unsupported subreddit language", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      isNsfw: false,
+      language: "ja",
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.menu.createGoal)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+      name: string;
+      defaultValue?: unknown;
+    }>;
+    expect(fields.find((field) => field.name === "language")).toMatchObject({
+      defaultValue: ["en"],
+    });
+  });
+
   it("stores setup choices and opens the Regular/Short details form", async () => {
     const routes = createRouteHarness();
     const json = vi.fn();
