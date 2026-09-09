@@ -10,9 +10,9 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 
-![An example of Subscriber Goal Posts](https://i.redd.it/kl0uzo2yslyg1.jpeg)
+![An example of the Subscriber Goal Success Page](https://i.redd.it/7d65rf601foh1.jpeg)
 
-
+![An example of the Unsubscribed vs Subscribed page views](https://i.redd.it/xhll0f151foh1.jpeg)
 
 ## Features
 
@@ -22,15 +22,16 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - **Goal Achieved Page**: Once reached, the post shows the date and subscriber milestone!
 - **User Data Removal**: Remove a user from the database if they request their data hidden
 
-## Benefits
+![The subreddit r/MotivationalPics saw its average daily subscribers increase by nearly 100%](https://i.redd.it/scygcx731foh1.jpeg)
 
-- Higher subscription rates of new users, great for new subreddits!
-- Both large and small subreddits can celebrate major user milestones
-- Teach new users to subscribe and remind them to join the community
+## New CTA (Call To Action) Mini-Posts and 28 Supported Languages!
+
+- **Compressed CTA Buttons**: Perfect for large subreddits that want simple, elegant pinned tools
+
+![An example of CTA Posts](https://i.redd.it/4tkh6pj43foh1.jpeg)
 
 
 
-![The subreddit r/MotivationalPics saw its average daily subscribers increase by 100%](https://i.redd.it/nlch4724d4af1.jpeg)
 
 
 
@@ -51,7 +52,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals.
+- 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals. Improved ReadMe Images.
 - 1.8.3 - Fixed error-catching for failed JSON RPC Error on subscribe with retry system. More robust console error logging.
 - 1.8.1 - Default non-sub button is now "Create a New Post". Added a CTA button option with no subscriber feature.
 - 1.7.2 - Hotfix for "Most Upvoted Today" buttons not supporting crossposts and self-referencing SubGoals.
