@@ -13,6 +13,10 @@ export type NotificationMessages = {
   updateError: string;
   enabledToast: string;
   disabledToast: string;
+  enableShort: string;
+  disableShort: string;
+  returnShort: string;
+  backAriaLabel: string;
 };
 
 type MessageTuple = readonly [
@@ -425,10 +429,44 @@ const values: Record<SubGoalLanguage, MessageTuple> = {
   ],
 };
 
+type CompactMessageTuple = readonly [string, string, string, string];
+
+const compactValues: Record<SubGoalLanguage, CompactMessageTuple> = {
+  id: ["Aktifkan", "Nonaktifkan", "Kembali", "Kembali"],
+  bs: ["Uključi", "Isključi", "Nazad", "Nazad"],
+  ca: ["Activa", "Desactiva", "Torna", "Torna"],
+  da: ["Aktivér", "Deaktivér", "Tilbage", "Tilbage"],
+  de: ["Aktivieren", "Deaktivieren", "Zurück", "Zurück"],
+  en: ["Enable", "Disable", "Return", "Return to previous page"],
+  es: ["Activar", "Desactivar", "Volver", "Volver a la página anterior"],
+  et: ["Luba", "Keela", "Tagasi", "Tagasi"],
+  fr: ["Activer", "Désactiver", "Retour", "Revenir à la page précédente"],
+  hr: ["Uključi", "Isključi", "Natrag", "Natrag"],
+  is: ["Virkja", "Slökkva", "Til baka", "Til baka"],
+  it: ["Attiva", "Disattiva", "Indietro", "Torna alla pagina precedente"],
+  lv: ["Ieslēgt", "Izslēgt", "Atpakaļ", "Atpakaļ"],
+  lt: ["Įjungti", "Išjungti", "Grįžti", "Grįžti"],
+  hu: ["Engedélyezés", "Letiltás", "Vissza", "Vissza"],
+  nl: ["Inschakelen", "Uitschakelen", "Terug", "Terug naar de vorige pagina"],
+  nb: ["Aktiver", "Deaktiver", "Tilbake", "Tilbake"],
+  pl: ["Włącz", "Wyłącz", "Wróć", "Wróć do poprzedniej strony"],
+  pt: ["Ativar", "Desativar", "Voltar", "Voltar à página anterior"],
+  ro: ["Activează", "Dezactivează", "Înapoi", "Înapoi"],
+  sq: ["Aktivizo", "Çaktivizo", "Kthehu", "Kthehu"],
+  sk: ["Zapnúť", "Vypnúť", "Späť", "Späť"],
+  sl: ["Omogoči", "Onemogoči", "Nazaj", "Nazaj"],
+  fi: ["Ota käyttöön", "Poista käytöstä", "Takaisin", "Takaisin"],
+  sv: ["Aktivera", "Inaktivera", "Tillbaka", "Tillbaka"],
+  tl: ["I-enable", "I-disable", "Bumalik", "Bumalik"],
+  tr: ["Etkinleştir", "Devre dışı bırak", "Geri", "Önceki sayfaya dön"],
+  yo: ["Mú ṣiṣẹ́", "Dáwọ́", "Padà", "Padà"],
+};
+
 export const getNotificationMessages = (
   language: SubGoalLanguage | undefined,
 ): NotificationMessages => {
   const value = values[language ?? "en"];
+  const compact = compactValues[language ?? "en"];
   return {
     label: value[0],
     title: value[1],
@@ -442,5 +480,9 @@ export const getNotificationMessages = (
     updateError: value[9],
     enabledToast: value[10],
     disabledToast: value[11],
+    enableShort: compact[0],
+    disableShort: compact[1],
+    returnShort: compact[2],
+    backAriaLabel: compact[3],
   };
 };

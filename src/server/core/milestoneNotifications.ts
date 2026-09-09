@@ -1,5 +1,5 @@
 import { notifications } from "@devvit/notifications";
-import { scheduler } from "@devvit/web/server";
+import { redis, scheduler } from "@devvit/web/server";
 import type { MilestoneNotificationJob } from "../../shared/types/api";
 import type { LinkId } from "../types";
 import { isLinkId } from "../types";
@@ -10,6 +10,11 @@ export const MILESTONE_NOTIFICATION_DELIVERY_ENABLED = false;
 export const milestoneNotificationBatchSize = 200;
 export const milestoneNotificationBatchDelayMs = 1_500;
 export const milestoneNotificationJobName = "milestone-notification-job";
+export const milestoneNotificationDailyLimit = 25_000;
+export const milestoneNotificationDailyBudgetKeyPrefix =
+  "milestone_notification_daily_budget_v1";
+export const milestoneNotificationDailyBudgetExpirationSeconds =
+  3 * 24 * 60 * 60;
 
 export const milestoneNotificationTitle = "Subscriber milestone reached!";
 export const milestoneNotificationBody =
@@ -21,6 +26,7 @@ type NotificationClient = Pick<
 >;
 
 type SchedulerClient = Pick<typeof scheduler, "runJob">;
+type DailyBudgetClient = Pick<typeof redis.global, "incrBy" | "expire">;
 
 export type MilestoneNotificationCampaignData = {
   postId: LinkId;
@@ -52,7 +58,11 @@ export const isMilestoneNotificationJob = (
     typeof job.completedTime === "number" &&
     Number.isFinite(job.completedTime) &&
     job.completedTime > 0 &&
-    typeof job.cursor === "string"
+    typeof job.cursor === "string" &&
+    typeof job.attemptedRecipients === "number" &&
+    Number.isSafeInteger(job.attemptedRecipients) &&
+    job.attemptedRecipients >= 0 &&
+    job.attemptedRecipients <= milestoneNotificationDailyLimit
   );
 };
 
@@ -78,7 +88,10 @@ export const renderMilestoneNotificationCopy = (input: {
 };
 
 export async function maybeScheduleMilestoneNotification(
-  input: Omit<MilestoneNotificationJob, "campaign" | "cursor">,
+  input: Omit<
+    MilestoneNotificationJob,
+    "campaign" | "cursor" | "attemptedRecipients"
+  >,
   options: {
     deliveryEnabled?: boolean;
     schedulerClient?: SchedulerClient;
@@ -103,6 +116,7 @@ export async function maybeScheduleMilestoneNotification(
       postId: input.postId,
       completedTime: input.completedTime,
       cursor: "",
+      attemptedRecipients: 0,
     } satisfies MilestoneNotificationJob,
     runAt: new Date(),
   });
@@ -116,6 +130,7 @@ export async function processMilestoneNotificationBatch(
     deliveryEnabled?: boolean;
     notificationClient?: NotificationClient;
     schedulerClient?: SchedulerClient;
+    dailyBudgetClient?: DailyBudgetClient;
     now?: () => number;
   } = {},
 ): Promise<MilestoneNotificationBatchResult> {
@@ -140,18 +155,64 @@ export async function processMilestoneNotificationBatch(
   }
 
   const notificationClient = options.notificationClient ?? notifications;
+  const now = (options.now ?? Date.now)();
+  const remainingCampaignCapacity = Math.max(
+    0,
+    milestoneNotificationDailyLimit - job.attemptedRecipients,
+  );
+  if (remainingCampaignCapacity === 0) {
+    logDiagnostic("warn", "milestone_notification_daily_limit_reached", {
+      workflow: "milestone_notification",
+      phase: "budget",
+      postId: job.postId,
+      attemptedRecipients: job.attemptedRecipients,
+    });
+    return {
+      status: "processed",
+      done: true,
+      cursor: job.cursor,
+      recipients: 0,
+      successCount: 0,
+      failureCount: 0,
+    };
+  }
   const page = await notificationClient.listOptedInUsers({
-    limit: milestoneNotificationBatchSize,
+    limit: Math.min(milestoneNotificationBatchSize, remainingCampaignCapacity),
     ...(job.cursor ? { after: job.cursor } : {}),
   });
   const copy = renderMilestoneNotificationCopy(campaign);
-  const recipients = page.userIds
+  const eligibleRecipients = page.userIds
     .filter((userId): userId is `t2_${string}` => /^t2_[\w]+$/.test(userId))
     .map((userId) => ({
       userId,
       link: campaign.postId,
       data: copy.data,
     }));
+
+  let recipients = eligibleRecipients;
+  if (eligibleRecipients.length > 0) {
+    const budgetClient = options.dailyBudgetClient ?? redis.global;
+    const utcDate = new Date(now).toISOString().slice(0, 10);
+    const budgetKey = `${milestoneNotificationDailyBudgetKeyPrefix}:${utcDate}`;
+    const reservedTotal = await budgetClient.incrBy(
+      budgetKey,
+      eligibleRecipients.length,
+    );
+    await budgetClient.expire(
+      budgetKey,
+      milestoneNotificationDailyBudgetExpirationSeconds,
+    );
+    const reservedBefore = reservedTotal - eligibleRecipients.length;
+    const available = Math.max(
+      0,
+      milestoneNotificationDailyLimit - reservedBefore,
+    );
+    recipients = eligibleRecipients.slice(0, available);
+    const unusedReservation = eligibleRecipients.length - recipients.length;
+    if (unusedReservation > 0) {
+      await budgetClient.incrBy(budgetKey, -unusedReservation);
+    }
+  }
 
   let successCount = 0;
   let failureCount = 0;
@@ -165,15 +226,21 @@ export async function processMilestoneNotificationBatch(
     failureCount = result.failureCount;
   }
 
+  const attemptedRecipients = job.attemptedRecipients + recipients.length;
   const cursor = page.next ?? "";
-  const done = cursor.length === 0;
+  const done =
+    cursor.length === 0 ||
+    attemptedRecipients >= milestoneNotificationDailyLimit ||
+    recipients.length < eligibleRecipients.length;
   if (!done) {
     await (options.schedulerClient ?? scheduler).runJob({
       name: milestoneNotificationJobName,
-      data: { ...job, cursor } satisfies MilestoneNotificationJob,
-      runAt: new Date(
-        (options.now ?? Date.now)() + milestoneNotificationBatchDelayMs,
-      ),
+      data: {
+        ...job,
+        cursor,
+        attemptedRecipients,
+      } satisfies MilestoneNotificationJob,
+      runAt: new Date(now + milestoneNotificationBatchDelayMs),
     });
   }
   logDiagnostic("info", "milestone_notification_batch_processed", {
@@ -184,6 +251,7 @@ export async function processMilestoneNotificationBatch(
     successCount,
     failureCount,
     hasNextCursor: !done,
+    attemptedRecipients,
   });
   return {
     status: "processed",

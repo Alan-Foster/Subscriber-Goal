@@ -100,7 +100,49 @@ describe("App", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("opens notification settings and returns without triggering confetti", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            type: "notification-settings",
+            authenticated: true,
+            enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("Notification Settings");
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    const returnButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Return"),
+    );
+    await act(async () => returnButton?.click());
+    expect(container.textContent).toContain(
+      "Show my username when I subscribe",
+    );
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("renders the prohibited message instead of post content", () => {

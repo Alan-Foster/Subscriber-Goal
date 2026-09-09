@@ -56,6 +56,9 @@ export const postAfterSubscribeColorThemeSuffix =
   "_after_subscribe_color_theme";
 export const postAfterSubscribePresetSuffix = "_after_subscribe_preset";
 export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
+export const completionTransitionLockKeyPrefix =
+  "subscriber_goal_completion_transition_lock_v1";
+export const completionTransitionLockTtlMs = 30_000;
 export const autoCreateNextGoalRetryAttemptsKey =
   "auto_create_next_goal_retry_attempts_v1";
 export const autoCreateNextGoalRetryDelayMs = [
@@ -624,6 +627,11 @@ export async function checkCompletionStatus(
   reddit: RedditClient,
   redis: RedisClient,
   postId: string,
+  options: {
+    now?: () => number;
+    wait?: (delayMs: number) => Promise<void>;
+    scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
+  } = {},
 ): Promise<number> {
   const subGoalData = await getSubGoalData(redis, postId);
   if (subGoalData.completedTime) {
@@ -632,21 +640,59 @@ export async function checkCompletionStatus(
 
   const currentSubscribers = (await reddit.getCurrentSubreddit())
     .numberOfSubscribers;
-  if (currentSubscribers >= subGoalData.goal) {
-    subGoalData.completedTime = Date.now();
-    await setSubGoalData(redis, postId, subGoalData);
-    if (subGoalData.autoCreateNextGoal) {
-      await scheduleAutoCreateNextGoal(
-        redis,
-        postId,
-        subGoalData.completedTime,
-      );
+  if (currentSubscribers < subGoalData.goal) {
+    return 0;
+  }
+
+  const now = options.now ?? Date.now;
+  const wait =
+    options.wait ??
+    ((delayMs: number) =>
+      new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs)));
+  const lockKey = `${completionTransitionLockKeyPrefix}:${postId}`;
+  const lockToken = `${now()}:${Math.random().toString(36).slice(2)}`;
+  let acquired = false;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await redis.set(lockKey, lockToken, {
+      nx: true,
+      expiration: new Date(now() + completionTransitionLockTtlMs),
+    });
+    acquired = (await redis.get(lockKey)) === lockToken;
+    if (acquired) break;
+
+    const completedByAnotherRequest = await getSubGoalData(redis, postId);
+    if (completedByAnotherRequest.completedTime) {
+      return completedByAnotherRequest.completedTime;
     }
+    await wait(25 * (attempt + 1));
+  }
+
+  if (!acquired) {
+    const latest = await getSubGoalData(redis, postId);
+    logDiagnostic("warn", "completion_transition_lock_unavailable", {
+      workflow: "sub_goal_completion",
+      phase: "lock",
+      postId,
+    });
+    return latest.completedTime;
+  }
+
+  try {
+    const lockedSubGoalData = await getSubGoalData(redis, postId);
+    if (lockedSubGoalData.completedTime) {
+      return lockedSubGoalData.completedTime;
+    }
+
+    lockedSubGoalData.completedTime = now();
+    await setSubGoalData(redis, postId, lockedSubGoalData);
     if (isLinkId(postId)) {
       try {
-        await maybeScheduleMilestoneNotification({
+        await (
+          options.scheduleMilestoneNotification ??
+          maybeScheduleMilestoneNotification
+        )({
           postId,
-          completedTime: subGoalData.completedTime,
+          completedTime: lockedSubGoalData.completedTime,
         });
       } catch (error) {
         logDiagnostic(
@@ -661,9 +707,32 @@ export async function checkCompletionStatus(
         );
       }
     }
-    return subGoalData.completedTime;
+    if (lockedSubGoalData.autoCreateNextGoal) {
+      try {
+        await scheduleAutoCreateNextGoal(
+          redis,
+          postId,
+          lockedSubGoalData.completedTime,
+        );
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "auto_create_next_goal_schedule_failed",
+          {
+            workflow: "auto_create_next_goal",
+            phase: "schedule",
+            postId,
+          },
+          error,
+        );
+      }
+    }
+    return lockedSubGoalData.completedTime;
+  } finally {
+    if ((await redis.get(lockKey)) === lockToken) {
+      await redis.del(lockKey);
+    }
   }
-  return 0;
 }
 
 export async function registerNewSubGoalPost(

@@ -149,7 +149,47 @@ describe("SubscribeOnlyApp", () => {
       container.remove();
     }
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("opens compact settings and returns with the back arrow", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            type: "notification-settings",
+            authenticated: true,
+            enabled: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const container = await renderApp();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("Notifications");
+    expect(container.textContent).toContain("Enable");
+    expect(container.textContent).not.toContain("Return to Previous Page");
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Return to previous page"]',
+        )
+        ?.click();
+    });
+    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(hoisted.navigateTo).not.toHaveBeenCalled();
+    expect(container.querySelector(".confetti-piece")).toBeNull();
   });
 
   it("renders the persisted disabled subscribed button immediately", () => {

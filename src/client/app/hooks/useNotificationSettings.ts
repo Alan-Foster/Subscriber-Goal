@@ -27,6 +27,7 @@ export const useNotificationSettings = (active: boolean) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
+  const submittingRef = useRef(false);
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
@@ -51,32 +52,31 @@ export const useNotificationSettings = (active: boolean) => {
     void load();
   }, [active, load]);
 
-  const update = useCallback(
-    async (enabled: boolean) => {
-      if (submitting) return null;
-      setSubmitting(true);
-      setError(null);
-      const body: NotificationSettingsRequest = { enabled };
-      const result = await requestSubscribeJson<NotificationSettingsResponse>(
-        apiRoutes.notificationSettings,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        isNotificationSettingsResponse,
-        { timeoutMs: 10_000 },
-      );
-      setSubmitting(false);
-      if (result.error || !result.data) {
-        setError(result.error ?? "Notification settings could not be updated.");
-        return null;
-      }
-      setSettings(result.data);
-      return result.data;
-    },
-    [submitting],
-  );
+  const update = useCallback(async (enabled: boolean) => {
+    if (submittingRef.current) return null;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(null);
+    const body: NotificationSettingsRequest = { enabled };
+    const result = await requestSubscribeJson<NotificationSettingsResponse>(
+      apiRoutes.notificationSettings,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      isNotificationSettingsResponse,
+      { timeoutMs: 10_000 },
+    );
+    submittingRef.current = false;
+    setSubmitting(false);
+    if (result.error || !result.data) {
+      setError(result.error ?? "Notification settings could not be updated.");
+      return null;
+    }
+    setSettings(result.data);
+    return result.data;
+  }, []);
 
   return {
     settings,

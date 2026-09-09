@@ -8,11 +8,13 @@ const hoisted = vi.hoisted(() => ({
   runJob: vi.fn(),
   listOptedInUsers: vi.fn(),
   enqueue: vi.fn(),
+  incrBy: vi.fn(),
+  expire: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
   reddit: { getCurrentSubreddit: hoisted.getCurrentSubreddit },
-  redis: {},
+  redis: { incrBy: hoisted.incrBy, expire: hoisted.expire },
   scheduler: { runJob: hoisted.runJob },
 }));
 
@@ -58,6 +60,7 @@ describe("milestone notification scheduler route", () => {
             postId: "t3_goal",
             completedTime: 1_789_000_000_000,
             cursor: "",
+            attemptedRecipients: 0,
           },
         },
       } as Request,
@@ -73,6 +76,8 @@ describe("milestone notification scheduler route", () => {
     expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.listOptedInUsers).not.toHaveBeenCalled();
     expect(hoisted.enqueue).not.toHaveBeenCalled();
+    expect(hoisted.incrBy).not.toHaveBeenCalled();
+    expect(hoisted.expire).not.toHaveBeenCalled();
     expect(hoisted.runJob).not.toHaveBeenCalled();
   });
 });

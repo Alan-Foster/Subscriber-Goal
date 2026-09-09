@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
+import { NotificationBellIcon } from "./NotificationBellIcon";
 
 type TopButtonsProps = {
   onVisitPromoSubPressed: () => void;
@@ -49,19 +50,7 @@ export const TopButtons = ({
               }, 250);
             }}
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 20 20"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M10 1.75a5.25 5.25 0 0 0-5.25 5.25v2.23c0 .78-.25 1.54-.72 2.16L2.7 13.17a1 1 0 0 0 .8 1.6h13a1 1 0 0 0 .8-1.6l-1.33-1.78a3.6 3.6 0 0 1-.72-2.16V7A5.25 5.25 0 0 0 10 1.75Zm0 16.5a2.51 2.51 0 0 0 2.38-1.75H7.62A2.51 2.51 0 0 0 10 18.25Z"
-                fill="currentColor"
-              />
-            </svg>
+            <NotificationBellIcon />
             <span
               className={
                 revealTextOnInteraction

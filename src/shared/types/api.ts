@@ -126,6 +126,7 @@ export type MilestoneNotificationJob = {
   postId: `t3_${string}`;
   completedTime: number;
   cursor: string;
+  attemptedRecipients: number;
 };
 
 export type RealtimeMessage = {

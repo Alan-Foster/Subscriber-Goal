@@ -44,7 +44,25 @@ type ZEntry = { member: string; score: number };
 class InMemoryRedis {
   private hashes = new Map<string, Map<string, string>>();
   private sortedSets = new Map<string, Map<string, number>>();
+  private strings = new Map<string, string>();
   hGetAllCalls = 0;
+
+  async set(
+    key: string,
+    value: string,
+    options?: { nx?: boolean },
+  ): Promise<void> {
+    if (options?.nx && this.strings.has(key)) return;
+    this.strings.set(key, value);
+  }
+
+  async get(key: string): Promise<string | undefined> {
+    return this.strings.get(key);
+  }
+
+  async del(key: string): Promise<void> {
+    this.strings.delete(key);
+  }
 
   async hSet(key: string, fields: Record<string, string>): Promise<void> {
     const current = this.hashes.get(key) ?? new Map<string, string>();
@@ -785,6 +803,73 @@ describe("subGoalData subreddit display name", () => {
     );
 
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+  });
+
+  it("allows only one concurrent completion caller to start the campaign", async () => {
+    const redis = new InMemoryRedis();
+    const reddit = {
+      getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+    };
+    const scheduleMilestoneNotification = vi
+      .fn()
+      .mockResolvedValue("suppressed");
+    await setSubGoalData(
+      redis as unknown as Parameters<typeof setSubGoalData>[0],
+      "t3_concurrent",
+      {
+        goal: 10,
+        recentSubscriber: "",
+        completedTime: 0,
+        subredditDisplayName: "subscriber_goal_dev",
+        colorTheme: "red",
+        postHeight: "regular",
+        autoCreateNextGoal: false,
+        language: "en",
+      },
+    );
+
+    const completions = await Promise.all([
+      checkCompletionStatus(reddit as never, redis as never, "t3_concurrent", {
+        scheduleMilestoneNotification,
+      }),
+      checkCompletionStatus(reddit as never, redis as never, "t3_concurrent", {
+        scheduleMilestoneNotification,
+      }),
+    ]);
+
+    expect(completions[0]).toBeGreaterThan(0);
+    expect(completions[1]).toBe(completions[0]);
+    expect(scheduleMilestoneNotification).toHaveBeenCalledOnce();
+  });
+
+  it("prepares the campaign before isolating an auto-next failure", async () => {
+    const redis = new InMemoryRedis();
+    redis.zAdd = vi.fn().mockRejectedValue(new Error("queue unavailable"));
+    const scheduleMilestoneNotification = vi
+      .fn()
+      .mockResolvedValue("suppressed");
+    await setSubGoalData(redis as never, "t3_auto_failure", {
+      goal: 10,
+      recentSubscriber: "",
+      completedTime: 0,
+      subredditDisplayName: "subscriber_goal_dev",
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+
+    await expect(
+      checkCompletionStatus(
+        {
+          getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+        } as never,
+        redis as never,
+        "t3_auto_failure",
+        { scheduleMilestoneNotification },
+      ),
+    ).resolves.toBeGreaterThan(0);
+    expect(scheduleMilestoneNotification).toHaveBeenCalledOnce();
   });
 
   it("clears indexed recent subscriber fields without scanning all goal records", async () => {
