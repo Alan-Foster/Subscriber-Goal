@@ -42,6 +42,11 @@ export const NotificationSettingsPage = ({
       : enabled
         ? messages.enabled
         : messages.disabled;
+  const preferenceStatusText = loading
+    ? "…"
+    : enabled
+      ? messages.enabled
+      : messages.disabled;
   const toggleLabel = enabled ? messages.disableButton : messages.enableButton;
   const compactToggleLabel = enabled
     ? messages.disableShort
@@ -72,6 +77,32 @@ export const NotificationSettingsPage = ({
     </button>
   );
 
+  const backButton = (
+    <button
+      type="button"
+      aria-label={messages.backAriaLabel}
+      className="absolute left-3 top-3 z-20 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] sm:left-4 sm:top-4"
+      onClick={handleReturn}
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 20 20"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <path
+          d="M11.75 4.25 6 10l5.75 5.75M6.5 10h8"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+
   if (compact) {
     const compactNotice =
       error ?? (!authenticated && !loading ? statusText : null);
@@ -80,35 +111,19 @@ export const NotificationSettingsPage = ({
         className="relative flex h-full w-full items-center justify-center px-12 py-3 text-center"
         data-notification-layout="compact"
       >
-        <button
-          type="button"
-          aria-label={messages.backAriaLabel}
-          className="absolute left-3 top-3 z-20 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]"
-          onClick={handleReturn}
-        >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 20 20"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
-            <path
-              d="M11.75 4.25 6 10l5.75 5.75M6.5 10h8"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <div className="flex min-w-0 items-center justify-center gap-2">
+        {backButton}
+        <div className="flex w-full min-w-0 items-center justify-center gap-2">
           <div
-            className={`flex min-w-0 items-center gap-1.5 text-xs font-semibold ${error ? "text-red-500" : enabled ? "text-green-500" : "text-[color:var(--sg-text-secondary)]"}`}
+            className={`flex min-w-0 flex-1 items-center justify-end gap-1.5 text-xs font-semibold ${error ? "text-red-500" : enabled ? "text-green-500" : "text-[color:var(--sg-text-secondary)]"}`}
+            aria-label={`${messages.label}: ${preferenceStatusText}`}
           >
-            <NotificationBellIcon enabled={enabled} />
-            <span className="max-w-24 truncate">{messages.label}</span>
+            <span className="shrink-0">
+              <NotificationBellIcon enabled={enabled} />
+            </span>
+            <span className="min-w-0 truncate">{messages.label}:</span>{" "}
+            <span className="shrink-0 whitespace-nowrap">
+              {preferenceStatusText}
+            </span>
           </div>
           {toggleButton}
         </div>
@@ -147,16 +162,17 @@ export const NotificationSettingsPage = ({
   if (short) {
     return (
       <div
-        className="relative flex h-full w-full items-center justify-center gap-3 px-12 py-6 text-center sm:gap-8 sm:px-16"
+        className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 pb-5 pt-10 text-center sm:flex-row sm:gap-8 sm:px-16 sm:py-6"
         data-notification-layout="short"
       >
+        {backButton}
         <TopButtons
           onVisitPromoSubPressed={onVisitPromoSub}
           promoSubreddit={state.appSettings.promoSubreddit}
           language={state.language}
         />
-        <div className="min-w-0 flex-1 text-base font-bold text-[color:var(--sg-text-secondary)] sm:text-xl">
-          <span className="whitespace-nowrap">
+        <div className="min-w-0 text-base font-bold text-[color:var(--sg-text-secondary)] sm:flex-1 sm:text-xl">
+          <span className="sm:whitespace-nowrap">
             r/{subredditName}:{" "}
             <span className={enabled ? "text-green-500" : ""}>
               {statusText}
@@ -176,9 +192,10 @@ export const NotificationSettingsPage = ({
 
   return (
     <div
-      className="relative flex h-full w-full flex-col items-center justify-center gap-3 px-5 py-6 text-center sm:gap-4 sm:px-8"
+      className="relative flex h-full w-full flex-col items-center justify-center gap-3 px-4 pb-6 pt-10 text-center sm:gap-4 sm:px-16"
       data-notification-layout="regular"
     >
+      {backButton}
       <TopButtons
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}

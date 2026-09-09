@@ -175,7 +175,7 @@ describe("SubscribeOnlyApp", () => {
         ?.click();
       await Promise.resolve();
     });
-    expect(container.textContent).toContain("Notifications");
+    expect(container.textContent).toContain("Notifications: Disabled");
     expect(container.textContent).toContain("Enable");
     expect(container.textContent).not.toContain("Return to Previous Page");
     expect(container.querySelector(".confetti-piece")).toBeNull();

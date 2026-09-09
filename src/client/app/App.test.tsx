@@ -141,6 +141,24 @@ describe("App", () => {
     );
     expect(container.querySelector(".confetti-piece")).toBeNull();
 
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Notifications"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Return to previous page"]',
+        )
+        ?.click();
+    });
+    expect(container.textContent).toContain(
+      "Show my username when I subscribe",
+    );
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+
     await act(async () => root.unmount());
     container.remove();
   });

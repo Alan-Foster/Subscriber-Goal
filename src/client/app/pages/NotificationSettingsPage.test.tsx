@@ -49,9 +49,9 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("Enabled");
     expect(html).toContain("Disable Notifications");
     expect(html).toContain("Return to Previous Page");
+    expect(html).toContain('aria-label="Return to previous page"');
     expect(html).toContain("bg-red-600");
     expect(html).not.toContain('alt="Subreddit icon"');
-    expect(html).not.toContain("absolute left-4 top-4");
   });
 
   it("renders the short horizontal layout", () => {
@@ -67,6 +67,9 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("Enable Notifications");
     expect(html).toContain("bg-green-700");
     expect(html).toContain(">Return</button>");
+    expect(html).toContain("flex-col");
+    expect(html).toContain("sm:flex-row");
+    expect(html).toContain("px-4");
     expect(html).not.toContain("max-w-32");
   });
 
@@ -90,7 +93,7 @@ describe("NotificationSettingsPage", () => {
     expect(html).not.toContain('alt="Subreddit icon"');
     expect(html).toContain('aria-label="Return to previous page"');
     expect(html).toContain('data-notification-bell-state="enabled"');
-    expect(html).toContain("Notifications");
+    expect(html).toContain('aria-label="Notifications: Enabled"');
     expect(html).toContain(">Disable</button>");
     expect(html).not.toContain("Return to Previous Page");
   });
@@ -106,5 +109,66 @@ describe("NotificationSettingsPage", () => {
     );
     expect(html).toContain("Please log in to manage notifications.");
     expect(html).toContain("disabled");
+  });
+
+  it("keeps compact state visible during loading and signed-out states", () => {
+    const compactState: CtaOnlyState = {
+      colorTheme: "blue",
+      postHeight: "cta",
+      promoSubreddit: "SubGoal",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 900,
+        growth: { count: 2, period: "today" },
+      },
+    };
+    const loadingHtml = renderToStaticMarkup(
+      <NotificationSettingsPage
+        state={compactState}
+        {...props}
+        loading
+        enabled={false}
+      />,
+    );
+    expect(loadingHtml).toContain('aria-label="Notifications: …"');
+
+    const signedOutHtml = renderToStaticMarkup(
+      <NotificationSettingsPage
+        state={compactState}
+        {...props}
+        authenticated={false}
+        enabled={false}
+      />,
+    );
+    expect(signedOutHtml).toContain('aria-label="Notifications: Disabled"');
+    expect(signedOutHtml).toContain("Please log in to manage notifications.");
+  });
+
+  it("keeps compact state visible while showing an error notice", () => {
+    const compactState: CtaOnlyState = {
+      colorTheme: "blue",
+      postHeight: "cta",
+      promoSubreddit: "SubGoal",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 900,
+        growth: { count: 2, period: "today" },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <NotificationSettingsPage
+        state={compactState}
+        {...props}
+        enabled={false}
+        error="Notification settings could not be updated."
+      />,
+    );
+    expect(html).toContain('aria-label="Notifications: Disabled"');
+    expect(html).toContain("Notification settings could not be updated.");
+    expect(html).toContain("text-red-500");
   });
 });
