@@ -8,6 +8,7 @@ import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
 import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
+import { getNotificationMessages } from "../../../shared/notificationI18n";
 
 type SubGoalPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
@@ -18,6 +19,7 @@ type SubGoalPageProps = {
   onShareUsernameChange: (value: boolean) => void;
   notice: string | null;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
+  onNotifications?: () => void;
 };
 
 export const SubGoalPage = ({
@@ -29,8 +31,10 @@ export const SubGoalPage = ({
   onShareUsernameChange,
   notice,
   onAfterSubscribeNavigate,
+  onNotifications,
 }: SubGoalPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
+  const notificationMessages = getNotificationMessages(state.language);
   const afterSubscribeAction =
     state.subscribed && state.afterSubscribeAction.type !== "disabled"
       ? state.afterSubscribeAction
@@ -94,6 +98,8 @@ export const SubGoalPage = ({
       data-sg-theme={state.colorTheme}
     >
       <TopButtons
+        onNotificationsPressed={onNotifications}
+        notificationLabel={notificationMessages.label}
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}

@@ -39,6 +39,11 @@ const hoisted = vi.hoisted(() => ({
   getCtaActivityMetric: vi.fn(),
   isClickActivityPreset: vi.fn(),
   recordCtaClick: vi.fn(),
+  notifications: {
+    isOptedIn: vi.fn(),
+    optInCurrentUser: vi.fn(),
+    optOutCurrentUser: vi.fn(),
+  },
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -46,6 +51,10 @@ vi.mock("@devvit/web/server", () => ({
   reddit: hoisted.reddit,
   redis: hoisted.redis,
   realtime: hoisted.realtime,
+}));
+
+vi.mock("@devvit/notifications", () => ({
+  notifications: hoisted.notifications,
 }));
 
 vi.mock("../settings", () => ({
@@ -146,6 +155,11 @@ describe("publicApi routes", () => {
       period: "week",
     });
     hoisted.isClickActivityPreset.mockReturnValue(false);
+    hoisted.notifications.isOptedIn.mockResolvedValue(false);
+    hoisted.notifications.optInCurrentUser.mockResolvedValue({ success: true });
+    hoisted.notifications.optOutCurrentUser.mockResolvedValue({
+      success: true,
+    });
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscriber-goal-v1",
       goal: 200,
@@ -1309,5 +1323,110 @@ describe("publicApi routes", () => {
 
     expect(status).toHaveBeenCalledWith(400);
     expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("notification settings routes", () => {
+  const createHarness = () => {
+    let getHandler: RouteHandler | undefined;
+    let postHandler: RouteHandler | undefined;
+    const router = {
+      get: (path: string, handler: RouteHandler) => {
+        if (path === apiRoutes.notificationSettings) getHandler = handler;
+      },
+      post: (path: string, handler: RouteHandler) => {
+        if (path === apiRoutes.notificationSettings) postHandler = handler;
+      },
+    } as unknown as Router;
+    registerPublicApiRoutes(router);
+    return { getHandler, postHandler };
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    hoisted.context.userId = null;
+    hoisted.notifications.isOptedIn.mockResolvedValue(false);
+    hoisted.notifications.optInCurrentUser.mockResolvedValue({ success: true });
+    hoisted.notifications.optOutCurrentUser.mockResolvedValue({
+      success: true,
+    });
+  });
+
+  it("returns a disabled signed-out state without calling Devvit", async () => {
+    const { getHandler } = createHarness();
+    const json = vi.fn();
+    await getHandler?.({} as Request, { json } as unknown as Response);
+    expect(json).toHaveBeenCalledWith({
+      type: "notification-settings",
+      authenticated: false,
+      enabled: false,
+    });
+    expect(hoisted.notifications.isOptedIn).not.toHaveBeenCalled();
+  });
+
+  it("reads the current Devvit opt-in state", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.notifications.isOptedIn.mockResolvedValue(true);
+    const { getHandler } = createHarness();
+    const json = vi.fn();
+    await getHandler?.({} as Request, { json } as unknown as Response);
+    expect(hoisted.notifications.isOptedIn).toHaveBeenCalledWith("t2_user");
+    expect(json).toHaveBeenCalledWith({
+      type: "notification-settings",
+      authenticated: true,
+      enabled: true,
+    });
+  });
+
+  it("opts in and confirms the authoritative state", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.notifications.isOptedIn
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const { postHandler } = createHarness();
+    const json = vi.fn();
+    await postHandler?.(
+      { body: { enabled: true } } as Request,
+      { json } as unknown as Response,
+    );
+    expect(hoisted.notifications.optInCurrentUser).toHaveBeenCalledOnce();
+    expect(hoisted.notifications.optOutCurrentUser).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledWith({
+      type: "notification-settings",
+      authenticated: true,
+      enabled: true,
+    });
+  });
+
+  it("does not repeat an already-satisfied mutation", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.notifications.isOptedIn.mockResolvedValue(true);
+    const { postHandler } = createHarness();
+    await postHandler?.(
+      { body: { enabled: true } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    expect(hoisted.notifications.optInCurrentUser).not.toHaveBeenCalled();
+    expect(hoisted.notifications.optOutCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects logged-out and malformed mutations", async () => {
+    const { postHandler } = createHarness();
+    const loggedOutJson = vi.fn();
+    const loggedOutStatus = vi.fn(() => ({ json: loggedOutJson }));
+    await postHandler?.(
+      { body: { enabled: true } } as Request,
+      { status: loggedOutStatus } as unknown as Response,
+    );
+    expect(loggedOutStatus).toHaveBeenCalledWith(401);
+
+    hoisted.context.userId = "t2_user";
+    const invalidJson = vi.fn();
+    const invalidStatus = vi.fn(() => ({ json: invalidJson }));
+    await postHandler?.(
+      { body: { enabled: "yes" } } as unknown as Request,
+      { status: invalidStatus } as unknown as Response,
+    );
+    expect(invalidStatus).toHaveBeenCalledWith(400);
   });
 });

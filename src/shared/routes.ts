@@ -4,6 +4,7 @@ export const apiRoutes = {
   subscribe: "/api/subscribe",
   afterSubscribeTarget: "/api/after-subscribe-target",
   ctaClick: "/api/cta-click",
+  notificationSettings: "/api/notification-settings",
 } as const;
 
 export const internalRoutes = {
@@ -15,6 +16,7 @@ export const internalRoutes = {
   },
   scheduler: {
     postsUpdaterJob: "/internal/scheduler/posts-updater-job",
+    milestoneNotificationJob: "/internal/scheduler/milestone-notification-job",
   },
   menu: {
     createGoal: "/internal/menu/create-goal",

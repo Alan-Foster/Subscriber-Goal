@@ -1,11 +1,14 @@
 import type { Router } from "express";
 import { context, reddit, redis, realtime } from "@devvit/web/server";
+import { notifications } from "@devvit/notifications";
 import type {
   ErrorResponse,
   AfterSubscribeTargetResponse,
   CtaOnlyState,
   InitResponse,
   NavigationTarget,
+  NotificationSettingsRequest,
+  NotificationSettingsResponse,
   RefreshResponse,
   RealtimeMessage,
   RecordCtaClickResponse,
@@ -210,6 +213,110 @@ const buildCtaOnlyState = async (
 };
 
 export function registerPublicApiRoutes(router: Router): void {
+  router.get(
+    apiRoutes.notificationSettings,
+    async (_req, res): Promise<void> => {
+      const userId = context.userId;
+      if (!userId) {
+        res.json({
+          type: "notification-settings",
+          authenticated: false,
+          enabled: false,
+        } satisfies NotificationSettingsResponse);
+        return;
+      }
+      try {
+        const enabled = await notifications.isOptedIn(userId);
+        res.json({
+          type: "notification-settings",
+          authenticated: true,
+          enabled,
+        } satisfies NotificationSettingsResponse);
+      } catch (error) {
+        const operationId = createOperationId("notification-settings-read");
+        logDiagnostic(
+          "error",
+          "api_request_failed",
+          {
+            operationId,
+            route: apiRoutes.notificationSettings,
+            workflow: "notification_settings",
+            phase: "read",
+            status: 503,
+          },
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: `Notification settings could not be loaded. Reference: ${operationId}`,
+        } satisfies ErrorResponse);
+      }
+    },
+  );
+
+  router.post(
+    apiRoutes.notificationSettings,
+    async (req, res): Promise<void> => {
+      const userId = context.userId;
+      if (!userId) {
+        res.status(401).json({
+          status: "error",
+          message: "Please log in to manage notifications.",
+        } satisfies ErrorResponse);
+        return;
+      }
+      const body = req.body as Partial<NotificationSettingsRequest> | undefined;
+      if (typeof body?.enabled !== "boolean") {
+        res.status(400).json({
+          status: "error",
+          message: "enabled must be a boolean.",
+        } satisfies ErrorResponse);
+        return;
+      }
+
+      try {
+        const current = await notifications.isOptedIn(userId);
+        if (current !== body.enabled) {
+          const result = body.enabled
+            ? await notifications.optInCurrentUser()
+            : await notifications.optOutCurrentUser();
+          if (!result.success) {
+            throw new Error(
+              result.message || "Notification preference was not accepted.",
+            );
+          }
+        }
+        const enabled = await notifications.isOptedIn(userId);
+        if (enabled !== body.enabled) {
+          throw new Error("Notification preference confirmation mismatched.");
+        }
+        res.json({
+          type: "notification-settings",
+          authenticated: true,
+          enabled,
+        } satisfies NotificationSettingsResponse);
+      } catch (error) {
+        const operationId = createOperationId("notification-settings-write");
+        logDiagnostic(
+          "error",
+          "api_request_failed",
+          {
+            operationId,
+            route: apiRoutes.notificationSettings,
+            workflow: "notification_settings",
+            phase: "write",
+            status: 503,
+          },
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: `Notification settings could not be updated. Reference: ${operationId}`,
+        } satisfies ErrorResponse);
+      }
+    },
+  );
+
   router.post(apiRoutes.ctaClick, async (_req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
@@ -237,7 +344,12 @@ export function registerPublicApiRoutes(router: Router): void {
       logDiagnostic(
         "error",
         "api_request_failed",
-        { route: apiRoutes.ctaClick, workflow: "cta_click", postId, status: 503 },
+        {
+          route: apiRoutes.ctaClick,
+          workflow: "cta_click",
+          postId,
+          status: 503,
+        },
         error,
       );
       res.status(503).json({
@@ -400,7 +512,13 @@ export function registerPublicApiRoutes(router: Router): void {
       logDiagnostic(
         "error",
         "api_request_failed",
-        { operationId, route: apiRoutes.init, workflow: "init", postId, status: 503 },
+        {
+          operationId,
+          route: apiRoutes.init,
+          workflow: "init",
+          postId,
+          status: 503,
+        },
         error,
       );
       res.status(503).json({
@@ -490,7 +608,13 @@ export function registerPublicApiRoutes(router: Router): void {
       logDiagnostic(
         "error",
         "api_request_failed",
-        { operationId, route: apiRoutes.refresh, workflow: "refresh", postId, status: 503 },
+        {
+          operationId,
+          route: apiRoutes.refresh,
+          workflow: "refresh",
+          postId,
+          status: 503,
+        },
         error,
       );
       res.status(503).json({
@@ -591,8 +715,11 @@ export function registerPublicApiRoutes(router: Router): void {
             newSubscriberCount,
             ...(shareUsername ? { recentSubscriber: username } : {}),
           };
-          await runSubscribeSideEffect(operationId, postId, "realtime_publish", () =>
-            realtime.send("subscriber_updates", realtimeMessage),
+          await runSubscribeSideEffect(
+            operationId,
+            postId,
+            "realtime_publish",
+            () => realtime.send("subscriber_updates", realtimeMessage),
           );
         }
 
@@ -652,7 +779,9 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         effectiveShareUsername,
       );
-      logSubscribePhase(operationId, postId, "tracking_complete", { subscriberCreated });
+      logSubscribePhase(operationId, postId, "tracking_complete", {
+        subscriberCreated,
+      });
 
       const displayedSubscriberCount = subscriberCreated
         ? newSubscriberCount
@@ -663,8 +792,11 @@ export function registerPublicApiRoutes(router: Router): void {
         subGoalData.goal &&
         newSubscriberCount >= subGoalData.goal
       ) {
-        await runSubscribeSideEffect(operationId, postId, "completion_check", () =>
-          checkCompletionStatus(reddit, redis, postId),
+        await runSubscribeSideEffect(
+          operationId,
+          postId,
+          "completion_check",
+          () => checkCompletionStatus(reddit, redis, postId),
         );
       }
 
@@ -674,8 +806,11 @@ export function registerPublicApiRoutes(router: Router): void {
           newSubscriberCount,
           ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
         };
-        await runSubscribeSideEffect(operationId, postId, "realtime_publish", () =>
-          realtime.send("subscriber_updates", realtimeMessage),
+        await runSubscribeSideEffect(
+          operationId,
+          postId,
+          "realtime_publish",
+          () => realtime.send("subscriber_updates", realtimeMessage),
         );
       }
 
@@ -702,7 +837,13 @@ export function registerPublicApiRoutes(router: Router): void {
       logDiagnostic(
         "error",
         "api_request_failed",
-        { operationId, route: apiRoutes.subscribe, workflow: "subscribe", postId, status: 503 },
+        {
+          operationId,
+          route: apiRoutes.subscribe,
+          workflow: "subscribe",
+          postId,
+          status: 503,
+        },
         error,
       );
       res.status(503).json({

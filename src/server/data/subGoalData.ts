@@ -1,4 +1,5 @@
 import type { RedditClient, RedisClient } from "../types";
+import { isLinkId } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import type { ServerAppSettings } from "../settings";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
@@ -34,6 +35,7 @@ import {
   type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import { registerSubscriberGoalPost } from "./subscriberGoalPostRegistry";
+import { maybeScheduleMilestoneNotification } from "../core/milestoneNotifications";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -639,6 +641,25 @@ export async function checkCompletionStatus(
         postId,
         subGoalData.completedTime,
       );
+    }
+    if (isLinkId(postId)) {
+      try {
+        await maybeScheduleMilestoneNotification({
+          postId,
+          completedTime: subGoalData.completedTime,
+        });
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "milestone_notification_schedule_failed",
+          {
+            workflow: "milestone_notification",
+            phase: "schedule",
+            postId,
+          },
+          error,
+        );
+      }
     }
     return subGoalData.completedTime;
   }

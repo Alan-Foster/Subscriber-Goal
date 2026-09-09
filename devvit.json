@@ -99,6 +99,9 @@
       "posts-updater-job": {
         "endpoint": "/internal/scheduler/posts-updater-job",
         "cron": "*/1 * * * *"
+      },
+      "milestone-notification-job": {
+        "endpoint": "/internal/scheduler/milestone-notification-job"
       }
     }
   },

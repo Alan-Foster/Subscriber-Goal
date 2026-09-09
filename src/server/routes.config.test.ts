@@ -14,7 +14,12 @@ describe("devvit.json route alignment", () => {
     };
     forms: Record<string, string>;
     triggers: Record<string, string>;
-    scheduler: { tasks: { "posts-updater-job": { endpoint: string } } };
+    scheduler: {
+      tasks: {
+        "posts-updater-job": { endpoint: string };
+        "milestone-notification-job": { endpoint: string };
+      };
+    };
     menu: {
       items: Array<{ endpoint: string; label: string; forUserType?: string }>;
     };
@@ -85,6 +90,9 @@ describe("devvit.json route alignment", () => {
     expect(devvitConfig.scheduler.tasks["posts-updater-job"].endpoint).toBe(
       internalRoutes.scheduler.postsUpdaterJob,
     );
+    expect(
+      devvitConfig.scheduler.tasks["milestone-notification-job"].endpoint,
+    ).toBe(internalRoutes.scheduler.milestoneNotificationJob);
   });
 
   it("includes expected menu endpoints", () => {

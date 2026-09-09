@@ -4,10 +4,12 @@ import { formatSubscriberCount } from "../../../shared/numberFormat";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { SubredditIcon } from "../components/SubredditIcon";
 import { TopButtons } from "../components/TopButtons";
+import { getNotificationMessages } from "../../../shared/notificationI18n";
 
 type CompletedPageProps = {
   state: SubscriberGoalState;
   onVisitPromoSub: () => void;
+  onNotifications?: () => void;
 };
 
 const getGregorianLocale = (locale: string): string => `${locale}-u-ca-gregory`;
@@ -15,10 +17,12 @@ const getGregorianLocale = (locale: string): string => `${locale}-u-ca-gregory`;
 export const CompletedPage = ({
   state,
   onVisitPromoSub,
+  onNotifications,
 }: CompletedPageProps) => {
   const { timezone } =
     (context as { locale?: string; timezone?: string } | undefined) ?? {};
   const messages = getSubGoalPostMessages(state.language);
+  const notificationMessages = getNotificationMessages(state.language);
   const isShort = state.postHeight === "short";
   const gregorianLocale = getGregorianLocale(messages.intlLocale);
   const completedDate = state.completedTime
@@ -43,6 +47,8 @@ export const CompletedPage = ({
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
+        onNotificationsPressed={onNotifications}
+        notificationLabel={notificationMessages.label}
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}

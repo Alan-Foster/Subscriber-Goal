@@ -26,8 +26,16 @@ import {
   goalJourneyAnalytics,
 } from "../analytics/goalJourneyAnalytics";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { NotificationSettingsPage } from "./pages/NotificationSettingsPage";
+import { useNotificationSettings } from "./hooks/useNotificationSettings";
+import { getNotificationMessages } from "../../shared/notificationI18n";
 
-type PageName = "subGoal" | "thanks" | "completed" | "tinyConfirmation";
+type PageName =
+  | "subGoal"
+  | "thanks"
+  | "completed"
+  | "tinyConfirmation"
+  | "notifications";
 
 export const App = () => {
   const {
@@ -41,6 +49,7 @@ export const App = () => {
     prohibited,
   } = useSubGoal();
   const [page, setPage] = useState<PageName>("subGoal");
+  const previousPageRef = useRef<Exclude<PageName, "notifications">>("subGoal");
   const {
     celebrationBursts,
     interactionHandlers,
@@ -51,6 +60,10 @@ export const App = () => {
   const subscribeAttemptRef = useRef(false);
   const [shareUsername, setShareUsername] = useState(true);
   const messages = getSubGoalPostMessages(state?.language);
+  const notificationMessages = getNotificationMessages(state?.language);
+  const notificationSettings = useNotificationSettings(
+    page === "notifications",
+  );
   const readyReportedRef = useRef(false);
 
   useEffect(() => {
@@ -115,6 +128,29 @@ export const App = () => {
   };
   const handleAfterSubscribeNavigate = (target: string | NavigationTarget) => {
     navigateTo(target);
+  };
+  const handleOpenNotifications = () => {
+    if (page !== "notifications") {
+      previousPageRef.current = page;
+      setPage("notifications");
+    }
+  };
+  const handleReturnFromNotifications = () => {
+    setPage(previousPageRef.current);
+  };
+  const handleToggleNotifications = (enabled: boolean) => {
+    void notificationSettings.update(enabled).then((updated) => {
+      if (!updated) {
+        showToast(notificationMessages.updateError);
+        return;
+      }
+      showToast({
+        text: enabled
+          ? notificationMessages.enabledToast
+          : notificationMessages.disabledToast,
+        appearance: "success",
+      });
+    });
   };
 
   const performSubscribe = async () => {
@@ -215,7 +251,21 @@ export const App = () => {
 
   let content = null;
   if (state) {
-    if (state.postHeight === "cta") {
+    if (page === "notifications") {
+      content = (
+        <NotificationSettingsPage
+          state={state}
+          authenticated={notificationSettings.settings?.authenticated ?? false}
+          enabled={notificationSettings.settings?.enabled ?? false}
+          loading={notificationSettings.loading}
+          submitting={notificationSettings.submitting}
+          error={notificationSettings.error}
+          onToggle={handleToggleNotifications}
+          onReturn={handleReturnFromNotifications}
+          onVisitPromoSub={handleVisitPromo}
+        />
+      );
+    } else if (state.postHeight === "cta") {
       content =
         state.afterSubscribeAction.type === "disabled" ? null : (
           <div className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center">
@@ -244,11 +294,16 @@ export const App = () => {
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
+          onNotifications={handleOpenNotifications}
         />
       );
     } else if (page === "completed" && state.postHeight !== "tiny") {
       content = (
-        <CompletedPage state={state} onVisitPromoSub={handleVisitPromo} />
+        <CompletedPage
+          state={state}
+          onVisitPromoSub={handleVisitPromo}
+          onNotifications={handleOpenNotifications}
+        />
       );
     } else {
       content = (
@@ -261,6 +316,7 @@ export const App = () => {
           onShareUsernameChange={setShareUsername}
           notice={notice}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
+          onNotifications={handleOpenNotifications}
         />
       );
     }
@@ -277,11 +333,13 @@ export const App = () => {
 
   let frameColorTheme = state?.colorTheme;
   if (
+    page !== "notifications" &&
     state?.postHeight === "cta" &&
     state.afterSubscribeAction.type !== "disabled"
   ) {
     frameColorTheme = state.afterSubscribeAction.colorTheme;
   } else if (
+    page !== "notifications" &&
     state?.postHeight !== "cta" &&
     state?.subscribed === true &&
     state.afterSubscribeAction.type !== "disabled" &&
@@ -336,6 +394,9 @@ export const App = () => {
             promoSubreddit={state.promoSubreddit}
             language={state.language}
             analyticsContext={getGoalJourneyContext(state)}
+            onNotificationsPressed={
+              page === "notifications" ? undefined : handleOpenNotifications
+            }
           />
         ) : null}
       </div>

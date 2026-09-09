@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@devvit/analytics": "0.14.3",
+    "@devvit/notifications": "0.14.3",
     "@devvit/start": "0.14.3",
     "@devvit/web": "0.14.3",
     "clsx": "2.1.1",

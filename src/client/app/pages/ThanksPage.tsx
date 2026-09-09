@@ -8,12 +8,14 @@ import { SubscriptionButton } from "../components/SubscriptionButton";
 import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
+import { getNotificationMessages } from "../../../shared/notificationI18n";
 
 type ThanksPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
+  onNotifications?: () => void;
 };
 
 export const ThanksPage = ({
@@ -21,8 +23,10 @@ export const ThanksPage = ({
   onReturn,
   onVisitPromoSub,
   onAfterSubscribeNavigate,
+  onNotifications,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
+  const notificationMessages = getNotificationMessages(state.language);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
     if (state.afterSubscribeAction.type !== "disabled") {
@@ -57,6 +61,8 @@ export const ThanksPage = ({
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
+        onNotificationsPressed={onNotifications}
+        notificationLabel={notificationMessages.label}
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}

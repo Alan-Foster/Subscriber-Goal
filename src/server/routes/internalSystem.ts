@@ -4,8 +4,14 @@ import { onAppChanged } from "../triggers/appChanged";
 import { onModAction, type ModActionEvent } from "../triggers/modAction";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
 import { recordCommunityPostCreated } from "../data/ctaActivity";
-import { redis } from "@devvit/web/server";
+import { reddit, redis } from "@devvit/web/server";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { getSubGoalData } from "../data/subGoalData";
+import {
+  MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
+  isMilestoneNotificationJob,
+  processMilestoneNotificationBatch,
+} from "../core/milestoneNotifications";
 
 export function registerInternalSystemRoutes(router: Router): void {
   router.post(
@@ -15,7 +21,15 @@ export function registerInternalSystemRoutes(router: Router): void {
         await onAppChanged({ lifecycleSource: "install" });
         res.json({ status: "ok" });
       } catch (error) {
-        logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onAppInstall, workflow: "app_install" }, error);
+        logDiagnostic(
+          "error",
+          "internal_trigger_failed",
+          {
+            route: internalRoutes.triggers.onAppInstall,
+            workflow: "app_install",
+          },
+          error,
+        );
         res
           .status(503)
           .json({ status: "error", message: "Failed to run install trigger" });
@@ -30,7 +44,15 @@ export function registerInternalSystemRoutes(router: Router): void {
         await onAppChanged({ lifecycleSource: "upgrade" });
         res.json({ status: "ok" });
       } catch (error) {
-        logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onAppUpgrade, workflow: "app_upgrade" }, error);
+        logDiagnostic(
+          "error",
+          "internal_trigger_failed",
+          {
+            route: internalRoutes.triggers.onAppUpgrade,
+            workflow: "app_upgrade",
+          },
+          error,
+        );
         res
           .status(503)
           .json({ status: "error", message: "Failed to run upgrade trigger" });
@@ -46,7 +68,15 @@ export function registerInternalSystemRoutes(router: Router): void {
         await onModAction(modAction);
         res.json({ status: "ok" });
       } catch (error) {
-        logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onModAction, workflow: "mod_action" }, error);
+        logDiagnostic(
+          "error",
+          "internal_trigger_failed",
+          {
+            route: internalRoutes.triggers.onModAction,
+            workflow: "mod_action",
+          },
+          error,
+        );
         res
           .status(503)
           .json({ status: "error", message: "Failed to handle mod action" });
@@ -69,7 +99,15 @@ export function registerInternalSystemRoutes(router: Router): void {
         await recordCommunityPostCreated(redis, post.id, post.createdAt);
         res.json({ status: "ok" });
       } catch (error) {
-        logDiagnostic("error", "internal_trigger_failed", { route: internalRoutes.triggers.onPostCreate, workflow: "post_create" }, error);
+        logDiagnostic(
+          "error",
+          "internal_trigger_failed",
+          {
+            route: internalRoutes.triggers.onPostCreate,
+            workflow: "post_create",
+          },
+          error,
+        );
         res.status(503).json({
           status: "error",
           message: "Failed to record post creation",
@@ -85,10 +123,85 @@ export function registerInternalSystemRoutes(router: Router): void {
         await onPostsUpdaterJob();
         res.json({ status: "ok" });
       } catch (error) {
-        logDiagnostic("error", "scheduler_route_failed", { route: internalRoutes.scheduler.postsUpdaterJob, workflow: "posts_updater" }, error);
+        logDiagnostic(
+          "error",
+          "scheduler_route_failed",
+          {
+            route: internalRoutes.scheduler.postsUpdaterJob,
+            workflow: "posts_updater",
+          },
+          error,
+        );
         res
           .status(503)
           .json({ status: "error", message: "Failed to run scheduler job" });
+      }
+    },
+  );
+
+  router.post(
+    internalRoutes.scheduler.milestoneNotificationJob,
+    async (req, res): Promise<void> => {
+      const payload = req.body?.data ?? req.body;
+      if (!isMilestoneNotificationJob(payload)) {
+        res.status(400).json({
+          status: "error",
+          message: "Invalid milestone notification job payload.",
+        });
+        return;
+      }
+      try {
+        if (!MILESTONE_NOTIFICATION_DELIVERY_ENABLED) {
+          const result = await processMilestoneNotificationBatch(
+            payload,
+            {
+              postId: payload.postId,
+              completedTime: payload.completedTime,
+              subredditName: "suppressed",
+              goal: 1,
+            },
+            { deliveryEnabled: false },
+          );
+          res.json(result);
+          return;
+        }
+
+        const [subGoalData, subreddit] = await Promise.all([
+          getSubGoalData(redis, payload.postId),
+          reddit.getCurrentSubreddit(),
+        ]);
+        if (
+          !subGoalData.completedTime ||
+          subGoalData.completedTime !== payload.completedTime ||
+          subGoalData.goal <= 0
+        ) {
+          res.status(409).json({
+            status: "error",
+            message: "Milestone campaign no longer matches goal state.",
+          });
+          return;
+        }
+        const result = await processMilestoneNotificationBatch(payload, {
+          postId: payload.postId,
+          completedTime: payload.completedTime,
+          subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
+          goal: subGoalData.goal,
+        });
+        res.json(result);
+      } catch (error) {
+        logDiagnostic(
+          "error",
+          "scheduler_route_failed",
+          {
+            route: internalRoutes.scheduler.milestoneNotificationJob,
+            workflow: "milestone_notification",
+          },
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: "Failed to process milestone notification batch",
+        });
       }
     },
   );

@@ -111,6 +111,23 @@ export type RecordCtaClickResponse = {
   status: "ok";
 };
 
+export type NotificationSettingsRequest = {
+  enabled: boolean;
+};
+
+export type NotificationSettingsResponse = {
+  type: "notification-settings";
+  authenticated: boolean;
+  enabled: boolean;
+};
+
+export type MilestoneNotificationJob = {
+  campaign: "milestone-completed";
+  postId: `t3_${string}`;
+  completedTime: number;
+  cursor: string;
+};
+
 export type RealtimeMessage = {
   type: "sub";
   newSubscriberCount: number;

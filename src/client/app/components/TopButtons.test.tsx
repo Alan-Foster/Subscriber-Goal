@@ -33,4 +33,34 @@ describe("TopButtons", () => {
 
     expect(html).toContain("Ver otras metas de suscriptores en r/SubGoal");
   });
+
+  it("renders a 20px left notification control", () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        onNotificationsPressed={vi.fn()}
+        notificationLabel="Notifications"
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+      />,
+    );
+    expect(html).toContain("absolute left-4 top-4");
+    expect(html).toContain('aria-label="Notifications"');
+    expect(html).toContain('width="20"');
+    expect(html).toContain('height="20"');
+  });
+
+  it("reveals compact notification text toward the center", () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        revealTextOnInteraction
+        onNotificationsPressed={vi.fn()}
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+      />,
+    );
+    expect(html).toContain("absolute left-full");
+    expect(html).toContain("group-hover:opacity-100");
+  });
 });
