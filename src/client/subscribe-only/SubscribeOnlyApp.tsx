@@ -100,6 +100,11 @@ export const SubscribeOnlyApp = () => {
         onClickCapture={(event) => {
           interactionHandlers.onClickCapture(event);
           goalJourneyAnalytics.committedInteraction();
+          if (!isCelebrationInteractiveTarget(event.target)) {
+            goalJourneyAnalytics.celebrationTriggered(
+              getGoalJourneyContext(state),
+            );
+          }
         }}
       >
         <div className="sg-goal-ui flex h-full w-full items-center justify-center px-4 py-3 text-center">
@@ -122,6 +127,13 @@ export const SubscribeOnlyApp = () => {
             analyticsContext={getGoalJourneyContext(state)}
           />
         </div>
+        {celebrationBursts.map((burst) => (
+          <ConfettiBurst
+            key={burst.id}
+            pieceCount={burst.pieceCount}
+            reducedMotion={prefersReducedMotion}
+          />
+        ))}
       </div>
     );
   }

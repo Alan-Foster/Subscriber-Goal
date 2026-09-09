@@ -211,6 +211,70 @@ describe("SubscribeOnlyApp", () => {
     expect(hoisted.subscribe).not.toHaveBeenCalled();
   });
 
+  it("shows light confetti for CTA-only background input", async () => {
+    useWideViewportWithoutReducedMotion();
+    hoisted.state = createCtaState();
+    const container = await renderApp();
+
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+
+    expect(
+      container
+        .querySelector('[data-celebration-effect="confetti"]')
+        ?.getAttribute("data-confetti-piece-count"),
+    ).toBe("28");
+    expect(container.querySelectorAll(".confetti-piece")).toHaveLength(28);
+  });
+
+  it("does not show light confetti for CTA-only controls", async () => {
+    useWideViewportWithoutReducedMotion();
+    hoisted.state = createCtaState();
+    const container = await renderApp();
+    const button = getActionButton(container);
+
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      button?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, detail: 0 }),
+      );
+    });
+
+    expect(
+      container.querySelector('[data-celebration-effect="confetti"]'),
+    ).toBeNull();
+  });
+
+  it("shows an accent flash for CTA-only background input with reduced motion", async () => {
+    window.matchMedia = vi.fn(
+      (query: string) =>
+        ({
+          matches:
+            query === "(min-width: 640px)" ||
+            query === "(prefers-reduced-motion: reduce)",
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+    hoisted.state = createCtaState();
+    const container = await renderApp();
+
+    await act(async () => {
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+
+    expect(
+      container.querySelectorAll('[data-celebration-effect="flash"]'),
+    ).toHaveLength(1);
+    expect(container.querySelector(".confetti-piece")).toBeNull();
+  });
+
   it("shows light confetti for Tiny background input", async () => {
     useWideViewportWithoutReducedMotion();
     const container = await renderApp();
