@@ -442,9 +442,8 @@ describe("onboarding subscriber goal", () => {
           autoCreateNextGoal: true,
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
-            type: "link",
-            buttonText: "Create a New Post",
-            url: "https://www.reddit.com/r/ExampleSub/submit/",
+            type: "top-post-day",
+            buttonText: "View the Top Post Today",
             colorTheme: "blue",
           }),
         }),
@@ -491,8 +490,8 @@ describe("onboarding subscriber goal", () => {
           title: "¡Bienvenido a r/ExampleSub!",
           language: "es",
           afterSubscribeAction: expect.objectContaining({
-            type: "link",
-            buttonText: "Crear una publicación",
+            type: "top-post-day",
+            buttonText: "Ver la publicación destacada de hoy",
           }),
         }),
       }),
@@ -526,7 +525,8 @@ describe("onboarding subscriber goal", () => {
           title: "Welcome to r/ExampleSub!",
           language: "en",
           afterSubscribeAction: expect.objectContaining({
-            buttonText: "Create a New Post",
+            type: "top-post-day",
+            buttonText: "View the Top Post Today",
           }),
         }),
       }),
@@ -628,7 +628,8 @@ describe("onboarding subscriber goal", () => {
           autoCreateNextGoal: false,
           crosspost: true,
           afterSubscribeAction: expect.objectContaining({
-            type: "link",
+            type: "top-post-day",
+            buttonText: "Ver la publicación destacada de hoy",
             colorTheme: "blue",
           }),
         }),

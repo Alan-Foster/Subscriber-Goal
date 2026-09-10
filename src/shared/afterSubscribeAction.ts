@@ -30,9 +30,9 @@ export type AfterSubscribePreset = (typeof afterSubscribePresetTypes)[number];
 export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "blue";
 
 export function getDefaultAfterSubscribePreset(
-  subredditType: unknown,
+  _subredditType: unknown,
 ): AfterSubscribePreset {
-  return subredditType === "restricted" ? "top-post-day" : "create-post";
+  return "top-post-day";
 }
 
 export type AfterSubscribeAction =
@@ -78,21 +78,11 @@ export function createTopPostFallbackAction({
 
 export function createDefaultAfterSubscribeAction({
   language,
-  subredditName,
-  subredditType,
 }: {
   language: SubGoalLanguage;
   subredditName: string;
   subredditType: unknown;
 }): AfterSubscribeAction {
-  if (getDefaultAfterSubscribePreset(subredditType) === "create-post") {
-    return {
-      type: "link",
-      buttonText: getAfterSubscribePresetMessages(language).createNewPost,
-      url: `https://www.reddit.com/r/${subredditName}/submit/`,
-      colorTheme: defaultAfterSubscribeColorTheme,
-    };
-  }
   return createTopPostFallbackAction({
     language,
     colorTheme: defaultAfterSubscribeColorTheme,

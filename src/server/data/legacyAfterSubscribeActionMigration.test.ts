@@ -73,11 +73,11 @@ const asRedis = (redis: TestRedis) =>
   >[0];
 const publicSubreddit = { name: "SubGoal", type: "public" };
 
-describe("legacy after-subscription action migration v2", () => {
-  it("re-queues a completed v1 installation and initializes v2 once", async () => {
+describe("legacy after-subscription action migration v3", () => {
+  it("re-queues a completed v2 installation and initializes v3 once", async () => {
     const redis = new TestRedis();
-    await redis.hSet("legacy_after_subscribe_action_migration_v1_state", {
-      version: "legacy_after_subscribe_action_v1",
+    await redis.hSet("legacy_after_subscribe_action_migration_v2_state", {
+      version: "legacy_after_subscribe_action_v2",
       status: "complete",
     });
 
@@ -100,7 +100,7 @@ describe("legacy after-subscription action migration v2", () => {
     ).resolves.toBe(legacyAfterSubscribeActionMigrationVersion);
   });
 
-  it("converts public actionless and canonical untagged defaults", async () => {
+  it("converts actionless and canonical Create Post defaults to Top Post", async () => {
     const redis = new TestRedis();
     await redis.hSet(subscriberGoalsKey, {
       t3_actionless_goal: "250",
@@ -108,10 +108,13 @@ describe("legacy after-subscription action migration v2", () => {
       t3_actionless_color_theme: "pink",
       t3_actionless_recent_subscriber: "ExistingUser",
       t3_canonical_goal: "500",
-      [`t3_canonical${postAfterSubscribeActionSuffix}`]: "top-post-day",
+      [`t3_canonical${postAfterSubscribeActionSuffix}`]: "link",
       [`t3_canonical${postAfterSubscribeButtonTextSuffix}`]:
-        "View the Top Post Today",
-      [`t3_canonical${postAfterSubscribeColorThemeSuffix}`]: "red",
+        "Create a New Post",
+      [`t3_canonical${postAfterSubscribeUrlSuffix}`]:
+        "https://www.reddit.com/r/SubGoal/submit/",
+      [`t3_canonical${postAfterSubscribeColorThemeSuffix}`]: "blue",
+      [`t3_canonical${postAfterSubscribePresetSuffix}`]: "create-post",
     });
     await initializeLegacyAfterSubscribeActionMigration(
       asRedis(redis),
@@ -127,7 +130,7 @@ describe("legacy after-subscription action migration v2", () => {
     expect(summary).toMatchObject({
       scanned: 2,
       convertedActionless: 1,
-      convertedCanonicalDefaults: 1,
+      convertedCanonicalCreatePostDefaults: 1,
       failed: 0,
     });
     await expect(
@@ -148,19 +151,19 @@ describe("legacy after-subscription action migration v2", () => {
         ]),
       ),
     ).resolves.toEqual([
-      "link",
-      "https://www.reddit.com/r/SubGoal/submit/",
-      "create-post",
-      "link",
-      "https://www.reddit.com/r/SubGoal/submit/",
-      "create-post",
+      "top-post-day",
+      "",
+      "top-post-day",
+      "top-post-day",
+      "",
+      "top-post-day",
     ]);
     await expect(
       redis.hGet(
         subscriberGoalsKey,
         `t3_actionless${postAfterSubscribeButtonTextSuffix}`,
       ),
-    ).resolves.toBe("Crear una publicación");
+    ).resolves.toBe("Ver la publicación destacada de hoy");
     await expect(
       redis.hGet(subscriberGoalsKey, "t3_actionless_recent_subscriber"),
     ).resolves.toBe("ExistingUser");
@@ -183,6 +186,14 @@ describe("legacy after-subscription action migration v2", () => {
       [`t3_link${postAfterSubscribeActionSuffix}`]: "link",
       [`t3_link${postAfterSubscribeButtonTextSuffix}`]: "Visit our website",
       [`t3_link${postAfterSubscribeUrlSuffix}`]: "https://example.com/",
+      t3_custom_create_goal: "100",
+      [`t3_custom_create${postAfterSubscribeActionSuffix}`]: "link",
+      [`t3_custom_create${postAfterSubscribeButtonTextSuffix}`]:
+        "Create a New Post",
+      [`t3_custom_create${postAfterSubscribeUrlSuffix}`]:
+        "https://www.reddit.com/r/SubGoal/submit/",
+      [`t3_custom_create${postAfterSubscribeColorThemeSuffix}`]: "pink",
+      [`t3_custom_create${postAfterSubscribePresetSuffix}`]: "create-post",
       t3_partial_goal: "100",
       [`t3_partial${postAfterSubscribeButtonTextSuffix}`]: "Keep this choice",
       t3_tiny_post_kind: "subscribe-only-v1",
@@ -194,6 +205,7 @@ describe("legacy after-subscription action migration v2", () => {
       "t3_tagged",
       "t3_disabled",
       "t3_link",
+      "t3_custom_create",
       "t3_partial",
       "t3_tiny",
       "t3_cta",
@@ -211,11 +223,12 @@ describe("legacy after-subscription action migration v2", () => {
     );
 
     expect(summary).toMatchObject({
-      scanned: 8,
+      scanned: 9,
       preservedExplicit: 5,
+      alreadyTopPostDefaults: 1,
       ineligible: 3,
       convertedActionless: 0,
-      convertedCanonicalDefaults: 0,
+      convertedCanonicalCreatePostDefaults: 0,
     });
     await expect(
       redis.hGet(
@@ -223,9 +236,15 @@ describe("legacy after-subscription action migration v2", () => {
         `t3_custom${postAfterSubscribeButtonTextSuffix}`,
       ),
     ).resolves.toBe("Our daily favorite");
+    await expect(
+      redis.hGet(
+        subscriberGoalsKey,
+        `t3_custom_create${postAfterSubscribeActionSuffix}`,
+      ),
+    ).resolves.toBe("link");
   });
 
-  it("retains restricted Top Post defaults and repairs actionless records to that default", async () => {
+  it("retains Top Post defaults and repairs actionless records to that default", async () => {
     const redis = new TestRedis();
     await redis.hSet(subscriberGoalsKey, {
       t3_actionless_goal: "100",
@@ -248,8 +267,8 @@ describe("legacy after-subscription action migration v2", () => {
 
     expect(summary).toMatchObject({
       convertedActionless: 1,
-      restrictedDefaults: 1,
-      convertedCanonicalDefaults: 0,
+      alreadyTopPostDefaults: 1,
+      convertedCanonicalCreatePostDefaults: 0,
     });
     await expect(
       Promise.all([

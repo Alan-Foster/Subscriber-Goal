@@ -1,7 +1,4 @@
-import {
-  createDefaultAfterSubscribeAction,
-  getDefaultAfterSubscribePreset,
-} from "../../shared/afterSubscribeAction";
+import { createDefaultAfterSubscribeAction } from "../../shared/afterSubscribeAction";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { subscriberGoalPostKind } from "../../shared/postKind";
 import { getAfterSubscribePresetMessages } from "../../shared/subGoalPostI18n";
@@ -17,16 +14,16 @@ import {
   subscriberGoalsKey,
 } from "./subGoalData";
 
-// Keep the v1 keys intact. A separate v2 marker deliberately re-queues
-// installations where the original migration has already completed.
+// Keep the prior migration keys intact. A separate v3 marker deliberately
+// re-queues installations where the v2 migration has already completed.
 export const legacyAfterSubscribeActionMigrationStateKey =
-  "legacy_after_subscribe_action_migration_v2_state";
+  "legacy_after_subscribe_action_migration_v3_state";
 export const legacyAfterSubscribeActionMigrationQueueKey =
-  "legacy_after_subscribe_action_migration_v2_queue";
+  "legacy_after_subscribe_action_migration_v3_queue";
 export const legacyAfterSubscribeActionMigrationVersion =
-  "legacy_after_subscribe_action_v2";
+  "legacy_after_subscribe_action_v3";
 export const legacyAfterSubscribeActionMigrationLockKeyPrefix =
-  "legacy_after_subscribe_action_migration_v2_lock";
+  "legacy_after_subscribe_action_migration_v3_lock";
 
 export type LegacyAfterSubscribeActionMigrationSubreddit = {
   name: string;
@@ -35,10 +32,10 @@ export type LegacyAfterSubscribeActionMigrationSubreddit = {
 
 export type LegacyAfterSubscribeActionMigrationSummary = {
   scanned: number;
-  convertedCanonicalDefaults: number;
+  convertedCanonicalCreatePostDefaults: number;
   convertedActionless: number;
   preservedExplicit: number;
-  restrictedDefaults: number;
+  alreadyTopPostDefaults: number;
   ineligible: number;
   raced: number;
   failed: number;
@@ -57,10 +54,10 @@ const getRawActionFields = (postId: string): string[] => [
 
 const emptySummary = (): LegacyAfterSubscribeActionMigrationSummary => ({
   scanned: 0,
-  convertedCanonicalDefaults: 0,
+  convertedCanonicalCreatePostDefaults: 0,
   convertedActionless: 0,
   preservedExplicit: 0,
-  restrictedDefaults: 0,
+  alreadyTopPostDefaults: 0,
   ineligible: 0,
   raced: 0,
   failed: 0,
@@ -138,7 +135,8 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
         redis.hMGet(subscriberGoalsKey, getRawActionFields(postId)),
         getSubGoalData(redis, postId),
       ]);
-      const [rawActionType, rawButtonText, rawUrl, , rawPreset] = rawFields;
+      const [rawActionType, rawButtonText, rawUrl, rawColorTheme, rawPreset] =
+        rawFields;
       const actionType = rawActionType?.trim() ?? "";
       const preset = rawPreset?.trim() ?? "";
       const hasAnyActionMetadata = rawFields.some(
@@ -151,15 +149,19 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
         continue;
       }
 
-      const isRestricted = subreddit.type === "restricted";
-      const canonicalTopPostLabel = getAfterSubscribePresetMessages(
-        data.language,
-      ).viewTopPostToday;
-      const isCanonicalUntaggedTopPost =
+      const presetMessages = getAfterSubscribePresetMessages(data.language);
+      const isCanonicalTopPostDefault =
         actionType === "top-post-day" &&
-        preset.length === 0 &&
-        (rawButtonText ?? "") === canonicalTopPostLabel &&
+        (preset.length === 0 || preset === "top-post-day") &&
+        (rawButtonText ?? "") === presetMessages.viewTopPostToday &&
         (rawUrl?.trim() ?? "").length === 0;
+      const isCanonicalCreatePostDefault =
+        actionType === "link" &&
+        preset === "create-post" &&
+        (rawButtonText ?? "") === presetMessages.createNewPost &&
+        (rawUrl?.trim() ?? "") ===
+          `https://www.reddit.com/r/${subreddit.name}/submit/` &&
+        rawColorTheme?.trim() === "blue";
 
       const stillEligible = async (): Promise<boolean> => {
         const latest = await redis.hMGet(
@@ -184,12 +186,10 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
           postId,
           action,
           data.colorTheme,
-          getDefaultAfterSubscribePreset(subreddit.type),
+          "top-post-day",
         );
         summary.convertedActionless += 1;
-      } else if (isRestricted && isCanonicalUntaggedTopPost) {
-        summary.restrictedDefaults += 1;
-      } else if (!isRestricted && isCanonicalUntaggedTopPost) {
+      } else if (isCanonicalCreatePostDefault) {
         if (!(await stillEligible())) {
           summary.raced += 1;
           continue;
@@ -204,9 +204,11 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
           postId,
           action,
           data.colorTheme,
-          "create-post",
+          "top-post-day",
         );
-        summary.convertedCanonicalDefaults += 1;
+        summary.convertedCanonicalCreatePostDefaults += 1;
+      } else if (isCanonicalTopPostDefault) {
+        summary.alreadyTopPostDefaults += 1;
       } else {
         summary.preservedExplicit += 1;
       }
@@ -255,7 +257,7 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
   });
   if (summary.scanned > 0) {
     console.info(
-      `[legacyAfterSubscribeActionMigration] batch: scanned=${summary.scanned} convertedCanonicalDefaults=${summary.convertedCanonicalDefaults} convertedActionless=${summary.convertedActionless} preservedExplicit=${summary.preservedExplicit} restrictedDefaults=${summary.restrictedDefaults} ineligible=${summary.ineligible} raced=${summary.raced} failed=${summary.failed} remaining=${remainingEntries.length}`,
+      `[legacyAfterSubscribeActionMigration] batch: scanned=${summary.scanned} convertedCanonicalCreatePostDefaults=${summary.convertedCanonicalCreatePostDefaults} convertedActionless=${summary.convertedActionless} preservedExplicit=${summary.preservedExplicit} alreadyTopPostDefaults=${summary.alreadyTopPostDefaults} ineligible=${summary.ineligible} raced=${summary.raced} failed=${summary.failed} remaining=${remainingEntries.length}`,
     );
   }
   return summary;

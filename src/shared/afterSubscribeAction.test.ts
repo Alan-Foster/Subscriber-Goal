@@ -29,8 +29,8 @@ describe("after-subscribe defaults", () => {
   });
 
   it.each([
-    ["public", "create-post"],
-    ["private", "create-post"],
+    ["public", "top-post-day"],
+    ["private", "top-post-day"],
     ["restricted", "top-post-day"],
   ] as const)(
     "selects the default preset for a %s subreddit",
@@ -39,34 +39,22 @@ describe("after-subscribe defaults", () => {
     },
   );
 
-  it("builds the small-subreddit create-post action in blue", () => {
-    expect(
-      createDefaultAfterSubscribeAction({
-        language: "en",
-        subredditName: "ExampleSub",
-        subredditType: "public",
-      }),
-    ).toEqual({
-      type: "link",
-      buttonText: "Create a New Post",
-      url: "https://www.reddit.com/r/ExampleSub/submit/",
-      colorTheme: defaultAfterSubscribeColorTheme,
-    });
-  });
-
-  it("builds the restricted-subreddit top-post action in blue", () => {
-    expect(
-      createDefaultAfterSubscribeAction({
-        language: "en",
-        subredditName: "ExampleSub",
-        subredditType: "restricted",
-      }),
-    ).toEqual({
-      type: "top-post-day",
-      buttonText: "View the Top Post Today",
-      colorTheme: defaultAfterSubscribeColorTheme,
-    });
-  });
+  it.each(["public", "private", "restricted"])(
+    "builds the %s-subreddit top-post action in blue",
+    (subredditType) => {
+      expect(
+        createDefaultAfterSubscribeAction({
+          language: "en",
+          subredditName: "ExampleSub",
+          subredditType,
+        }),
+      ).toEqual({
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: defaultAfterSubscribeColorTheme,
+      });
+    },
+  );
 });
 
 describe("resolveAfterSubscribeAction", () => {

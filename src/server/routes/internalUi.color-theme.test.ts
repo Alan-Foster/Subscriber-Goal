@@ -180,13 +180,14 @@ function seedCreateGoalDraft(
           kind: "subscribe-only",
           postTitle: options.postTitle ?? "Welcome!",
           colorTheme: options.colorTheme ?? "red",
-          afterSubscribePreset: options.afterSubscribePreset ?? "web-link",
+          afterSubscribePreset: options.afterSubscribePreset ?? "top-post-day",
         }
       : postHeight === "cta"
         ? {
             kind: "cta-only",
             postTitle: options.postTitle ?? "Welcome!",
-            afterSubscribePreset: options.afterSubscribePreset ?? "create-post",
+            afterSubscribePreset:
+              options.afterSubscribePreset ?? "top-post-day",
           }
         : {
             kind: "subscriber-goal",
@@ -194,7 +195,8 @@ function seedCreateGoalDraft(
             subscriberGoal: options.subscriberGoal ?? 200,
             colorTheme: options.colorTheme ?? "red",
             crosspost: options.crosspost ?? false,
-            afterSubscribePreset: options.afterSubscribePreset ?? "web-link",
+            afterSubscribePreset:
+              options.afterSubscribePreset ?? "top-post-day",
             autoCreateNextGoal: options.autoCreateNextGoal ?? true,
           };
   hoisted.redisValues.set(
@@ -768,7 +770,7 @@ describe("internalUi color theme create goal routes", () => {
         (field) => field.name === "afterSubscribePreset",
       ),
     ).toMatchObject({
-      defaultValue: ["create-post"],
+      defaultValue: ["top-post-day"],
       options: [
         { label: "Link to the Top Post Today", value: "top-post-day" },
         {
@@ -846,7 +848,7 @@ describe("internalUi color theme create goal routes", () => {
       response.showForm.form.fields.find(
         (field) => field.name === "afterSubscribePreset",
       ),
-    ).toMatchObject({ defaultValue: ["create-post"] });
+    ).toMatchObject({ defaultValue: ["top-post-day"] });
   });
 
   it("opens a CTA-only details form with title and action type only", async () => {
@@ -879,7 +881,7 @@ describe("internalUi color theme create goal routes", () => {
       response.showForm.form.fields.find(
         (field) => field.name === "afterSubscribePreset",
       ),
-    ).toMatchObject({ defaultValue: ["create-post"] });
+    ).toMatchObject({ defaultValue: ["top-post-day"] });
   });
 
   it("defaults every post type to Top Post in restricted subreddits", async () => {
@@ -920,12 +922,12 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it.each([
-    ["regular", 9_999, "create-post"],
-    ["short", 9_999, "create-post"],
-    ["tiny", 9_999, "create-post"],
-    ["regular", 10_000, "create-post"],
-    ["short", 10_000, "create-post"],
-    ["tiny", 10_000, "create-post"],
+    ["regular", 9_999, "top-post-day"],
+    ["short", 9_999, "top-post-day"],
+    ["tiny", 9_999, "top-post-day"],
+    ["regular", 10_000, "top-post-day"],
+    ["short", 10_000, "top-post-day"],
+    ["tiny", 10_000, "top-post-day"],
   ] as const)(
     "defaults %s posts at %i subscribers to %s",
     async (postHeight, numberOfSubscribers, expectedPreset) => {
@@ -1035,7 +1037,7 @@ describe("internalUi color theme create goal routes", () => {
         subscriberGoal: 250,
         colorTheme: "pink",
         crosspost: true,
-        afterSubscribePreset: "create-post",
+        afterSubscribePreset: "top-post-day",
         autoCreateNextGoal: false,
       },
     });
@@ -1080,7 +1082,7 @@ describe("internalUi color theme create goal routes", () => {
         kind: "subscribe-only",
         postTitle: "Subscribe Here",
         colorTheme: "pink",
-        afterSubscribePreset: "create-post",
+        afterSubscribePreset: "top-post-day",
       },
     });
   });
@@ -1379,12 +1381,11 @@ describe("internalUi color theme create goal routes", () => {
       undefined,
       "short",
       {
-        type: "link",
-        buttonText: "Crear una publicación",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        type: "top-post-day",
+        buttonText: "Ver la publicación destacada de hoy",
         colorTheme: "blue",
       },
-      "create-post",
+      "top-post-day",
     );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
@@ -1517,7 +1518,7 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("falls back to Create Post and warns when CTA data is invalid", async () => {
+  it("falls back to Top Post and warns when CTA data is invalid", async () => {
     seedCreateGoalDraft("tiny", "en", {
       colorTheme: "blue",
       afterSubscribePreset: "web-link",
@@ -1544,12 +1545,11 @@ describe("internalUi color theme create goal routes", () => {
       "blue",
       "en",
       {
-        type: "link",
-        buttonText: "Create a New Post",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
         colorTheme: "blue",
       },
-      "create-post",
+      "top-post-day",
     );
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1564,7 +1564,7 @@ describe("internalUi color theme create goal routes", () => {
     ["discord", {}],
     ["wiki", {}],
   ] as const)(
-    "falls back to Create Post when the %s preset has no URL",
+    "falls back to Top Post when the %s preset has no URL",
     async (afterSubscribePreset, body) => {
       seedCreateGoalDraft("tiny", "en", {
         colorTheme: "red",
@@ -1585,12 +1585,11 @@ describe("internalUi color theme create goal routes", () => {
         "red",
         "en",
         {
-          type: "link",
-          buttonText: "Create a New Post",
-          url: "https://www.reddit.com/r/ExampleSub/submit/",
+          type: "top-post-day",
+          buttonText: "View the Top Post Today",
           colorTheme: "blue",
         },
-        "create-post",
+        "top-post-day",
       );
     },
   );
@@ -1699,12 +1698,11 @@ describe("internalUi color theme create goal routes", () => {
       "red",
       "en",
       {
-        type: "link",
-        buttonText: "Create a New Post",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
         colorTheme: "blue",
       },
-      "create-post",
+      "top-post-day",
     );
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
@@ -1998,12 +1996,11 @@ describe("internalUi color theme create goal routes", () => {
       "This post uses runAs and Custom Header",
       "regular",
       {
-        type: "link",
-        buttonText: "Create a New Post",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
         colorTheme: "blue",
       },
-      "create-post",
+      "top-post-day",
     );
   });
 
@@ -2119,12 +2116,11 @@ describe("internalUi color theme create goal routes", () => {
       "Custom Header",
       "regular",
       {
-        type: "link",
-        buttonText: "Create a New Post",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
         colorTheme: "blue",
       },
-      "create-post",
+      "top-post-day",
     );
   });
 
