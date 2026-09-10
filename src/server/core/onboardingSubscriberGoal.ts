@@ -45,6 +45,8 @@ import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandida
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v2_state";
+export const onboardingSubscriberGoalLockKey =
+  "onboarding_subscriber_goal_v2_lock";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
 export const onboardingSubscriberGoalDelayMs = (23 * 60 + 59) * 60 * 1000;
 export const onboardingTinySubscriberThreshold = 1_000_000;
@@ -52,6 +54,7 @@ export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
+export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
 
 type OnboardingStatus = "pending" | "processing" | "complete";
 
@@ -173,21 +176,11 @@ export async function processDueOnboardingSubscriberGoal({
 }): Promise<OnboardingSubscriberGoalSummary> {
   const base = emptySummary();
   let inspected = base;
-  let state = parseOnboardingState(
+  const state = parseOnboardingState(
     await redis.hGetAll(onboardingSubscriberGoalStateKey),
   );
   if (!state) {
-    await initializeOnboardingSubscriberGoal(redis, { nowMs });
-    state = parseOnboardingState(
-      await redis.hGetAll(onboardingSubscriberGoalStateKey),
-    );
-  }
-  if (!state) {
-    logDiagnostic("error", "onboarding_goal_failed", {
-      workflow: "onboarding_subscriber_goal",
-      phase: "state_initialization",
-    });
-    return { status: "failed", ...base, errorMessage: "state_unavailable" };
+    return { status: "complete", ...base };
   }
   if (state.status === "complete") {
     return {
@@ -203,12 +196,32 @@ export async function processDueOnboardingSubscriberGoal({
     return { status: "not_due", ...base };
   }
 
+  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+  await redis.set(onboardingSubscriberGoalLockKey, lockToken, {
+    nx: true,
+    expiration: new Date(nowMs + onboardingSubscriberGoalLockTtlMs),
+  });
+  if ((await redis.get(onboardingSubscriberGoalLockKey)) !== lockToken) {
+    return { status: "not_due", ...base };
+  }
+
+  let activeState = state;
   try {
+    const reloaded = parseOnboardingState(
+      await redis.hGetAll(onboardingSubscriberGoalStateKey),
+    );
+    if (!reloaded || reloaded.status === "complete") {
+      return { status: "complete", ...base };
+    }
+    if (nowMs < reloaded.nextRunAt) {
+      return { status: "not_due", ...base };
+    }
+    activeState = reloaded;
     console.info(
-      `[onboardingSubscriberGoal] starting check: source=${state.lifecycleSource} nextRunAt=${state.nextRunAt} status=${state.status}`,
+      `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} status=${reloaded.status}`,
     );
     await saveOnboardingState(redis, {
-      ...state,
+      ...reloaded,
       status: "processing",
       startedAt: nowMs,
     });
@@ -227,7 +240,7 @@ export async function processDueOnboardingSubscriberGoal({
     };
     if (existing.postId) {
       await saveOnboardingState(redis, {
-        ...state,
+        ...reloaded,
         status: "complete",
         completedAt: nowMs,
         postId: existing.postId,
@@ -241,7 +254,7 @@ export async function processDueOnboardingSubscriberGoal({
         status: "existing",
         postId: existing.postId,
         existingSource: existing.source!,
-        lifecycleSource: state.lifecycleSource,
+        lifecycleSource: reloaded.lifecycleSource,
         ...inspected,
       };
     }
@@ -292,13 +305,17 @@ export async function processDueOnboardingSubscriberGoal({
         logDiagnostic(
           "warn",
           "onboarding_goal_notification_failed",
-          { workflow: "onboarding_subscriber_goal", phase: "sticky_notification", postId: post.id },
+          {
+            workflow: "onboarding_subscriber_goal",
+            phase: "sticky_notification",
+            postId: post.id,
+          },
           notificationError,
         );
       }
     }
     await saveOnboardingState(redis, {
-      ...state,
+      ...reloaded,
       status: "complete",
       completedAt: nowMs,
       postId: post.id,
@@ -310,7 +327,7 @@ export async function processDueOnboardingSubscriberGoal({
     return {
       status: "created",
       postId: post.id,
-      lifecycleSource: state.lifecycleSource,
+      lifecycleSource: activeState.lifecycleSource,
       ...inspected,
     };
   } catch (error) {
@@ -318,7 +335,7 @@ export async function processDueOnboardingSubscriberGoal({
     const errorMessage = String(error);
     try {
       await saveOnboardingState(redis, {
-        ...state,
+        ...activeState,
         status: "complete",
         completedAt: nowMs,
         resultStatus: "failed",
@@ -328,7 +345,10 @@ export async function processDueOnboardingSubscriberGoal({
       logDiagnostic(
         "error",
         "onboarding_goal_failed",
-        { workflow: "onboarding_subscriber_goal", phase: "failure_persistence" },
+        {
+          workflow: "onboarding_subscriber_goal",
+          phase: "failure_persistence",
+        },
         stateError,
       );
     }
@@ -341,9 +361,13 @@ export async function processDueOnboardingSubscriberGoal({
     return {
       status: "failed",
       errorMessage,
-      lifecycleSource: state.lifecycleSource,
+      lifecycleSource: activeState.lifecycleSource,
       ...inspected,
     };
+  } finally {
+    if ((await redis.get(onboardingSubscriberGoalLockKey)) === lockToken) {
+      await redis.del(onboardingSubscriberGoalLockKey);
+    }
   }
 }
 

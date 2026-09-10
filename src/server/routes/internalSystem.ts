@@ -16,9 +16,13 @@ import {
 export function registerInternalSystemRoutes(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppInstall,
-    async (_req, res): Promise<void> => {
+    async (req, res): Promise<void> => {
       try {
-        await onAppChanged({ lifecycleSource: "install" });
+        const installerUsername = getInstallerUsername(req.body);
+        await onAppChanged({
+          lifecycleSource: "install",
+          ...(installerUsername ? { installerUsername } : {}),
+        });
         res.json({ status: "ok" });
       } catch (error) {
         logDiagnostic(
@@ -39,9 +43,13 @@ export function registerInternalSystemRoutes(router: Router): void {
 
   router.post(
     internalRoutes.triggers.onAppUpgrade,
-    async (_req, res): Promise<void> => {
+    async (req, res): Promise<void> => {
       try {
-        await onAppChanged({ lifecycleSource: "upgrade" });
+        const installerUsername = getInstallerUsername(req.body);
+        await onAppChanged({
+          lifecycleSource: "upgrade",
+          ...(installerUsername ? { installerUsername } : {}),
+        });
         res.json({ status: "ok" });
       } catch (error) {
         logDiagnostic(
@@ -205,4 +213,30 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
+
+function getInstallerUsername(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const record = body as Record<string, unknown>;
+  const candidates = [
+    record,
+    record.event,
+    record.data,
+    record.appInstall,
+    record.appUpgrade,
+  ];
+  for (const candidate of candidates) {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      !("installer" in candidate)
+    ) {
+      continue;
+    }
+    const installer = candidate.installer;
+    if (installer && typeof installer === "object" && "name" in installer) {
+      return typeof installer.name === "string" ? installer.name : undefined;
+    }
+  }
+  return undefined;
 }

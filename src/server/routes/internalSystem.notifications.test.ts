@@ -10,6 +10,7 @@ const hoisted = vi.hoisted(() => ({
   enqueue: vi.fn(),
   incrBy: vi.fn(),
   expire: vi.fn(),
+  onAppChanged: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -28,7 +29,9 @@ vi.mock("@devvit/notifications", () => ({
 vi.mock("../data/subGoalData", () => ({
   getSubGoalData: hoisted.getSubGoalData,
 }));
-vi.mock("../triggers/appChanged", () => ({ onAppChanged: vi.fn() }));
+vi.mock("../triggers/appChanged", () => ({
+  onAppChanged: hoisted.onAppChanged,
+}));
 vi.mock("../triggers/modAction", () => ({ onModAction: vi.fn() }));
 vi.mock("../triggers/scheduler", () => ({ onPostsUpdaterJob: vi.fn() }));
 vi.mock("../data/ctaActivity", () => ({ recordCommunityPostCreated: vi.fn() }));
@@ -80,4 +83,36 @@ describe("milestone notification scheduler route", () => {
     expect(hoisted.expire).not.toHaveBeenCalled();
     expect(hoisted.runJob).not.toHaveBeenCalled();
   });
+});
+
+describe("app lifecycle routes", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it.each([
+    [internalRoutes.triggers.onAppInstall, "install"],
+    [internalRoutes.triggers.onAppUpgrade, "upgrade"],
+  ] as const)(
+    "passes installer identity from %s",
+    async (path, lifecycleSource) => {
+      let handler: Handler | undefined;
+      const router = {
+        post: (candidatePath: string, candidate: Handler) => {
+          if (candidatePath === path) handler = candidate;
+        },
+      } as unknown as Router;
+      registerInternalSystemRoutes(router);
+      const json = vi.fn();
+
+      await handler?.(
+        { body: { installer: { name: "InstallingMod" } } } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(hoisted.onAppChanged).toHaveBeenCalledWith({
+        lifecycleSource,
+        installerUsername: "InstallingMod",
+      });
+      expect(json).toHaveBeenCalledWith({ status: "ok" });
+    },
+  );
 });

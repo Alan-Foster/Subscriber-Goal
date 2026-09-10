@@ -8,6 +8,7 @@ import type { ServerAppSettings } from '../settings';
 const hoisted = vi.hoisted(() => ({
   mockContext: {} as {
     subredditName?: string;
+    subredditId?: string;
   },
   mockReddit: {
     getCurrentSubreddit: vi.fn(),
@@ -21,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   redisState: {
     redisMock: undefined as unknown,
   },
+  checkAppAccountHealth: vi.fn(),
 }));
 
 const mockContext = hoisted.mockContext;
@@ -192,6 +194,11 @@ vi.mock('../utils/redditUtils', () => ({
     hoisted.safeGetWikiPageRevisionsMock(...args),
 }));
 
+vi.mock('../core/appAccountHealth', () => ({
+  subscriberGoalAppUsername: 'subscriber-goal',
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
+}));
+
 import { onModAction, processCrosspostDispatchQueue } from './modAction';
 
 const baseSettings: ServerAppSettings = {
@@ -213,6 +220,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     redisMock = new InMemoryRedis();
     hoisted.redisState.redisMock = redisMock;
     mockContext.subredditName = undefined;
+    mockContext.subredditId = undefined;
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
@@ -223,6 +231,39 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     });
     safeGetWikiPageRevisionsMock.mockReset();
     loggedEvents.length = 0;
+    hoisted.checkAppAccountHealth.mockReset();
+    hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: false });
+  });
+
+  it.each(['removemoderator', 'setpermissions'])(
+    'checks app-account health after %s targets the app',
+    async (action) => {
+      mockContext.subredditName = 'ExampleSub';
+      mockContext.subredditId = 't5_example';
+
+      await onModAction({
+        action,
+        targetUser: { name: 'subscriber-goal' },
+      });
+
+      expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith({
+        reddit: expect.anything(),
+        redis: expect.anything(),
+        subredditName: 'ExampleSub',
+        subredditId: 't5_example',
+      });
+    },
+  );
+
+  it('ignores moderator permission changes for other accounts', async () => {
+    mockContext.subredditName = 'ExampleSub';
+
+    await onModAction({
+      action: 'removemoderator',
+      targetUser: { name: 'another-mod' },
+    });
+
+    expect(hoisted.checkAppAccountHealth).not.toHaveBeenCalled();
   });
 
   it('skips ingestion when running outside authority subreddit', async () => {

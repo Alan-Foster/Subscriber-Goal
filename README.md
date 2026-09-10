@@ -38,12 +38,11 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 ## Install Instructions
 
 1. To install the app, click "Add to Community" and select the community to install.
-2. Decide if you would like to announce your new goal in the [r/SubGoal](https://www.reddit.com/r/SubGoal) community
-3. Navigate to your subreddit and access the Settings Menu (...)
-4. Select "Create a New Sub Goal". The app will recommend a value for your goal to achieve next.
-5. Click "Okay". Post generation may take 5-10 seconds, and you will be automatically redirected.
-6. If you had less than 4 pinned posts, the new Subscriber Goal will be pinned automatically.
-7. Once the goal is reached, the post will convert to a Success Page, showing the date and milestone.
+2. Navigate to your subreddit and access the Settings Menu (...)
+3. Select "Create a New Sub Goal". The app will guide you and recommend a value for your goal to achieve next.
+4. Click "Okay". Post generation may take 5-10 seconds, and you will be automatically redirected.
+5. If you had less than 4 pinned posts, the new Subscriber Goal post will be pinned automatically.
+6. Once the goal is reached, the post will convert to a Success Page, showing the date and milestone.
 
 
 
@@ -52,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.9.1 - Fixed CTA Confetti not firing. Interface setup for SubGoal Milestone Alerts. App tests for mod permissions before post. Devvit 0.14.3
+- 1.9.1 - Several bug fixes. Fixed CTA Confetti not firing. Interface setup for SubGoal Milestone Alerts. Devvit 0.14.3
 - 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals. Improved ReadMe Images.
 - 1.8.3 - Fixed error-catching for failed JSON RPC Error on subscribe with retry system. More robust console error logging.
 - 1.8.1 - Default non-sub button is now "Create a New Post". Added a CTA button option with no subscriber feature.

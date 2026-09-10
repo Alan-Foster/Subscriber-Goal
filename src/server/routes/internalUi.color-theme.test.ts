@@ -54,6 +54,7 @@ const hoisted = vi.hoisted(() => ({
   untrackPost: vi.fn(),
   deletePost: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -118,6 +119,10 @@ vi.mock("../data/subscriberGoalCandidates", () => ({
 
 vi.mock("../core/subscriberGoalPostFlair", () => ({
   ensureSubscriberGoalPostFlair: hoisted.ensureSubscriberGoalPostFlair,
+}));
+
+vi.mock("../core/appAccountHealth", () => ({
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
 vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
@@ -235,6 +240,25 @@ describe("internalUi color theme create goal routes", () => {
       getModPermissionsForSubreddit: hoisted.getModPermissionsForSubreddit,
     });
     hoisted.getModPermissionsForSubreddit.mockResolvedValue(["all"]);
+    hoisted.checkAppAccountHealth.mockImplementation(async () => {
+      try {
+        const appUser = await hoisted.reddit.getAppUser();
+        const permissions =
+          await appUser.getModPermissionsForSubreddit("ExampleSub");
+        return {
+          healthy: permissions.includes("all") || permissions.includes("posts"),
+          appUsername: appUser.username,
+          permissions,
+          notification: "not_needed",
+        };
+      } catch {
+        return {
+          healthy: false,
+          permissions: [],
+          notification: "failed",
+        };
+      }
+    });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
     hoisted.deletePost.mockResolvedValue(undefined);
@@ -1456,7 +1480,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions and try again.",
+        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
     });
   });
 

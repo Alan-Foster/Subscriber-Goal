@@ -24,6 +24,8 @@ export const legacyAfterSubscribeActionMigrationVersion =
   "legacy_after_subscribe_action_v3";
 export const legacyAfterSubscribeActionMigrationLockKeyPrefix =
   "legacy_after_subscribe_action_migration_v3_lock";
+export const legacyAfterSubscribeActionMigrationTerminalKey =
+  "legacy_after_subscribe_action_migration_v3_terminal";
 
 export type LegacyAfterSubscribeActionMigrationSubreddit = {
   name: string;
@@ -38,6 +40,7 @@ export type LegacyAfterSubscribeActionMigrationSummary = {
   alreadyTopPostDefaults: number;
   ineligible: number;
   raced: number;
+  terminal: number;
   failed: number;
 };
 
@@ -60,6 +63,7 @@ const emptySummary = (): LegacyAfterSubscribeActionMigrationSummary => ({
   alreadyTopPostDefaults: 0,
   ineligible: 0,
   raced: 0,
+  terminal: 0,
   failed: 0,
 });
 
@@ -116,7 +120,18 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
     let removeFromQueue = false;
     try {
       if (!isLinkId(postId)) {
-        throw new Error("invalid post id");
+        await redis.hSet(legacyAfterSubscribeActionMigrationTerminalKey, {
+          [postId]: "invalid_post_id",
+        });
+        logDiagnostic("warn", "migration_record_terminal", {
+          workflow: "legacy_after_subscribe_action_migration",
+          phase: "record_validation",
+          postId,
+          category: "invalid_post_id",
+        });
+        summary.terminal += 1;
+        removeFromQueue = true;
+        continue;
       }
 
       lockKey = `${legacyAfterSubscribeActionMigrationLockKeyPrefix}:${postId}`;
@@ -257,7 +272,7 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
   });
   if (summary.scanned > 0) {
     console.info(
-      `[legacyAfterSubscribeActionMigration] batch: scanned=${summary.scanned} convertedCanonicalCreatePostDefaults=${summary.convertedCanonicalCreatePostDefaults} convertedActionless=${summary.convertedActionless} preservedExplicit=${summary.preservedExplicit} alreadyTopPostDefaults=${summary.alreadyTopPostDefaults} ineligible=${summary.ineligible} raced=${summary.raced} failed=${summary.failed} remaining=${remainingEntries.length}`,
+      `[legacyAfterSubscribeActionMigration] batch: scanned=${summary.scanned} convertedCanonicalCreatePostDefaults=${summary.convertedCanonicalCreatePostDefaults} convertedActionless=${summary.convertedActionless} preservedExplicit=${summary.preservedExplicit} alreadyTopPostDefaults=${summary.alreadyTopPostDefaults} ineligible=${summary.ineligible} raced=${summary.raced} terminal=${summary.terminal} failed=${summary.failed} remaining=${remainingEntries.length}`,
     );
   }
   return summary;

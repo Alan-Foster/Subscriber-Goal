@@ -38,6 +38,7 @@ import {
 } from "../utils/subredditBlacklist";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { ensureSubscriberGoalPostFlair } from "./subscriberGoalPostFlair";
+import { checkAppAccountHealth } from "./appAccountHealth";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -76,7 +77,7 @@ export class SubscriberGoalModeratorPermissionError extends Error {
       ? `u/${appUsername}`
       : "the Subscriber Goal app account";
     super(
-      `${appAccount} must be a moderator of r/${subredditName} with Manage Posts permission. Restore the app account's moderator permissions and try again.`,
+      `${appAccount} must be a moderator of r/${subredditName} with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.`,
     );
     this.name = "SubscriberGoalModeratorPermissionError";
   }
@@ -128,12 +129,15 @@ export async function createSubscriberGoal({
     throw new Error("CTA-only posts require an actionable CTA.");
   }
 
-  const { appUsername, permissions } = await getAppModeratorPermissions(
+  const health = await checkAppAccountHealth({
     reddit,
-    subreddit.name,
-  );
+    redis,
+    subredditName: subreddit.name,
+    subredditId: subreddit.id,
+  });
+  const { appUsername, permissions } = health;
   const hasAllPermissions = permissions.includes("all");
-  if (!hasAllPermissions && !permissions.includes("posts")) {
+  if (!health.healthy) {
     logDiagnostic("warn", "subscriber_goal_permission_preflight_failed", {
       workflow: "create_subscriber_goal",
       phase: "permission_preflight",
@@ -303,41 +307,6 @@ export async function createSubscriberGoal({
   }
 
   return { post, crosspostDispatchResult, stickyResult, flairResult };
-}
-
-async function getAppModeratorPermissions(
-  reddit: RedditClient,
-  subredditName: string,
-) {
-  let appUsername: string | undefined;
-  try {
-    const appUser = await reddit.getAppUser();
-    appUsername = appUser?.username;
-    if (!appUser) {
-      throw new Error("The app account could not be resolved.");
-    }
-    return {
-      appUsername,
-      permissions: await appUser.getModPermissionsForSubreddit(subredditName),
-    };
-  } catch (error) {
-    logDiagnostic(
-      "warn",
-      "subscriber_goal_permission_preflight_failed",
-      {
-        workflow: "create_subscriber_goal",
-        phase: "permission_preflight",
-        category: "permission_lookup_failed",
-        subredditName,
-        username: appUsername,
-      },
-      error,
-    );
-    throw new SubscriberGoalModeratorPermissionError(
-      appUsername,
-      subredditName,
-    );
-  }
 }
 
 async function prepareSubscriberGoalFlair({

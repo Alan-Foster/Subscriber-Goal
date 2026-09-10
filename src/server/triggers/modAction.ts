@@ -31,9 +31,16 @@ import { safeGetWikiPageRevisions } from '../utils/redditUtils';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 import { isLinkId, type LinkId, type RedisClient } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
+import {
+  checkAppAccountHealth,
+  subscriberGoalAppUsername,
+} from '../core/appAccountHealth';
 
 export type ModActionEvent = {
   action?: string;
+  targetUser?: {
+    name?: string;
+  };
   targetPost?: {
     id: string;
     authorId?: string;
@@ -1893,9 +1900,24 @@ export async function processCrosspostDispatchQueue(
 
 export async function onModAction(event: ModActionEvent): Promise<void> {
   const appSettings = getAppSettings();
-  const subredditName =
-    context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
+  const currentSubreddit = context.subredditName
+    ? undefined
+    : await reddit.getCurrentSubreddit();
+  const subredditName = context.subredditName ?? currentSubreddit!.name;
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);
+
+  if (
+    (event.action === 'removemoderator' ||
+      event.action === 'setpermissions') &&
+    event.targetUser?.name?.toLowerCase() === subscriberGoalAppUsername
+  ) {
+    await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName,
+      subredditId: context.subredditId ?? currentSubreddit?.id,
+    });
+  }
 
   if (
     toNormalizedSubredditName(subredditName) === authoritySubreddit

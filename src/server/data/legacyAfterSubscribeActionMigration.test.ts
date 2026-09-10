@@ -12,6 +12,7 @@ import {
   initializeLegacyAfterSubscribeActionMigration,
   legacyAfterSubscribeActionMigrationQueueKey,
   legacyAfterSubscribeActionMigrationStateKey,
+  legacyAfterSubscribeActionMigrationTerminalKey,
   legacyAfterSubscribeActionMigrationVersion,
   processLegacyAfterSubscribeActionMigrationBatch,
 } from "./legacyAfterSubscribeActionMigration";
@@ -347,7 +348,7 @@ describe("legacy after-subscription action migration v3", () => {
     ).resolves.toBe("disabled");
   });
 
-  it("keeps malformed ids queued for retry", async () => {
+  it("moves malformed ids to terminal storage", async () => {
     const redis = new TestRedis();
     await initializeLegacyAfterSubscribeActionMigration(
       asRedis(redis),
@@ -360,10 +361,13 @@ describe("legacy after-subscription action migration v3", () => {
       publicSubreddit,
     );
 
-    expect(summary.failed).toBe(1);
+    expect(summary).toMatchObject({ failed: 0, terminal: 1 });
     await expect(
       redis.zRange(legacyAfterSubscribeActionMigrationQueueKey, 0, -1),
-    ).resolves.toEqual([{ member: "invalid-id", score: 0 }]);
+    ).resolves.toEqual([]);
+    await expect(
+      redis.hGet(legacyAfterSubscribeActionMigrationTerminalKey, "invalid-id"),
+    ).resolves.toBe("invalid_post_id");
   });
 
   it("processes at most 25 records per batch and reports remaining work", async () => {

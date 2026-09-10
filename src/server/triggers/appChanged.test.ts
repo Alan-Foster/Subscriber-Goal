@@ -22,6 +22,8 @@ const hoisted = vi.hoisted(() => ({
   backfillSubscriberGoalPostFlair: vi.fn(),
   reconcileSubscriberGoalStickies: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
+  rememberAppInstaller: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -91,6 +93,11 @@ vi.mock("../data/ctaActivity", () => ({
     hoisted.ensureCommunityPostActivityBackfill,
 }));
 
+vi.mock("../core/appAccountHealth", () => ({
+  rememberAppInstaller: hoisted.rememberAppInstaller,
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
+}));
+
 import { onAppChanged } from "./appChanged";
 
 describe("onAppChanged", () => {
@@ -119,7 +126,11 @@ describe("onAppChanged", () => {
     hoisted.backfillSubscriberGoalPostFlair.mockReset();
     hoisted.reconcileSubscriberGoalStickies.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockReset();
+    hoisted.rememberAppInstaller.mockReset();
+    hoisted.checkAppAccountHealth.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockResolvedValue(undefined);
+    hoisted.rememberAppInstaller.mockResolvedValue(undefined);
+    hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: true });
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -185,14 +196,8 @@ describe("onAppChanged", () => {
     expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
       expect.anything(),
     );
-    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
-      expect.anything(),
-      { lifecycleSource: "unknown" },
-    );
-    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
-      expect.anything(),
-      { lifecycleSource: "unknown" },
-    );
+    expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
     expect(
       hoisted.initializeRecentSubscriberIndexMigration,
     ).toHaveBeenCalledWith(expect.anything());
@@ -208,34 +213,50 @@ describe("onAppChanged", () => {
     });
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
-    ).toHaveBeenCalledWith(expect.anything(), {
-      name: "SubGoal",
-      type: "public",
-    });
+    ).not.toHaveBeenCalled();
   });
 
-  it.each(["install", "upgrade"] as const)(
-    "passes the %s lifecycle source to onboarding initialization",
-    async (lifecycleSource) => {
-      hoisted.context.subredditName = "SubGoal";
+  it("initializes onboarding only for installations", async () => {
+    hoisted.context.subredditName = "SubGoal";
 
-      await onAppChanged({ lifecycleSource });
+    await onAppChanged({
+      lifecycleSource: "install",
+      installerUsername: "InstallingMod",
+    });
 
-      expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
-        expect.anything(),
-        { lifecycleSource },
-      );
-      expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
-        expect.anything(),
-        { lifecycleSource },
-      );
-      expect(hoisted.ensureSubscriberGoalPostFlair).toHaveBeenCalledWith(
-        expect.anything(),
-        "SubGoal",
-      );
-      expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
-    },
-  );
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "install" },
+    );
+    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "install" },
+    );
+    expect(hoisted.rememberAppInstaller).toHaveBeenCalledWith(
+      expect.anything(),
+      "InstallingMod",
+    );
+    expect(hoisted.ensureSubscriberGoalPostFlair).toHaveBeenCalledWith(
+      expect.anything(),
+      "SubGoal",
+    );
+    expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
+  });
+
+  it("preserves onboarding state during upgrades", async () => {
+    hoisted.context.subredditName = "SubGoal";
+
+    await onAppChanged({ lifecycleSource: "upgrade" });
+
+    expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenCalled();
+    expect(
+      hoisted.processLegacyAfterSubscribeActionMigrationBatch,
+    ).not.toHaveBeenCalled();
+  });
 
   it("migrates registered candidates and falls back to tracked posts when discovery fails", async () => {
     hoisted.context.subredditName = "SubGoal";
@@ -279,6 +300,24 @@ describe("onAppChanged", () => {
 
     expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
     expect(hoisted.initializePostKindMigration).toHaveBeenCalled();
+  });
+
+  it("continues independent initialization after an early phase fails", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.ensureSavedSubredditDisplayName.mockRejectedValue(
+      new Error("redis temporarily unavailable"),
+    );
+
+    await expect(
+      onAppChanged({ lifecycleSource: "install" }),
+    ).resolves.toBeUndefined();
+
+    expect(hoisted.clearLegacySubscriberErasureTombstones).toHaveBeenCalled();
+    expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalled();
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalled();
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenCalled();
   });
 
   it("falls back safely when subreddit fetch fails", async () => {

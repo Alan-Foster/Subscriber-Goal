@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   clearSubscriberGoalStickies: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   ensureSubscriberGoalPostFlair: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
 }));
@@ -60,6 +61,10 @@ vi.mock("../data/subscriberGoalCandidates", () => ({
 
 vi.mock("./subscriberGoalPostFlair", () => ({
   ensureSubscriberGoalPostFlair: hoisted.ensureSubscriberGoalPostFlair,
+}));
+
+vi.mock("./appAccountHealth", () => ({
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
 vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
@@ -127,6 +132,25 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
       getModPermissionsForSubreddit: hoisted.getModPermissionsForSubreddit,
+    });
+    hoisted.checkAppAccountHealth.mockImplementation(async () => {
+      try {
+        const appUser = await hoisted.reddit.getAppUser();
+        const permissions =
+          await appUser.getModPermissionsForSubreddit("ExampleSub");
+        return {
+          healthy: permissions.includes("all") || permissions.includes("posts"),
+          appUsername: appUser.username,
+          permissions,
+          notification: "not_needed",
+        };
+      } catch {
+        return {
+          healthy: false,
+          permissions: [],
+          notification: "failed",
+        };
+      }
     });
     hoisted.getModPermissionsForSubreddit.mockResolvedValue(["all"]);
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
@@ -213,7 +237,7 @@ describe("createSubscriberGoal sticky handling", () => {
     await expect(createGoal()).rejects.toMatchObject({
       name: "SubscriberGoalModeratorPermissionError",
       message:
-        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions and try again.",
+        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
     });
 
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
