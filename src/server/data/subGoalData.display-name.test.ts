@@ -378,7 +378,7 @@ describe("subGoalData subreddit display name", () => {
     },
   );
 
-  it("activates actionless legacy goals but preserves explicit disabled actions", async () => {
+  it("temporarily disables actionless legacy goals and preserves malformed-action fallback", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(subscriberGoalsKey, {
       t3_legacy_goal: "100",
@@ -397,11 +397,7 @@ describe("subGoalData subreddit display name", () => {
         "t3_legacy",
       ),
     ).resolves.toMatchObject({
-      afterSubscribeAction: {
-        type: "top-post-day",
-        buttonText: "View the Top Post Today",
-        colorTheme: "red",
-      },
+      afterSubscribeAction: { type: "disabled" },
     });
     await expect(
       getSubGoalData(

@@ -351,7 +351,7 @@ export async function getSubGoalData(
       : resolvedColorTheme,
   });
   const afterSubscribeAction = isActionlessLegacySubscriberGoal
-    ? legacyFallbackAction
+    ? defaultAfterSubscribeAction
     : resolveAfterSubscribeAction({
         type: afterSubscribeActionType,
         buttonText: afterSubscribeButtonText,
@@ -437,6 +437,7 @@ export async function setAfterSubscribeActionForPost(
   postId: string,
   action: AfterSubscribeAction,
   fallbackColorTheme: SubGoalColorTheme,
+  preset?: AfterSubscribePreset | null,
 ): Promise<void> {
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postAfterSubscribeActionSuffix}`]: action.type,
@@ -446,6 +447,8 @@ export async function setAfterSubscribeActionForPost(
       action.type === "link" ? action.url : "",
     [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
       action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]:
+      preset ?? resolveAfterSubscribePreset(undefined, action) ?? "",
   });
 }
 
@@ -454,6 +457,7 @@ export async function setAfterSubscribeActionForPostIfMissing(
   postId: string,
   action: AfterSubscribeAction,
   fallbackColorTheme: SubGoalColorTheme,
+  preset?: AfterSubscribePreset | null,
 ): Promise<boolean> {
   const created = await redis.hSetNX(
     subscriberGoalsKey,
@@ -470,6 +474,8 @@ export async function setAfterSubscribeActionForPostIfMissing(
       action.type === "link" ? action.url : "",
     [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
       action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]:
+      preset ?? resolveAfterSubscribePreset(undefined, action) ?? "",
   });
   return true;
 }

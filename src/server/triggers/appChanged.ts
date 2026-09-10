@@ -7,7 +7,10 @@ import {
 } from "../data/subscriberStats";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
 import { initializePostKindMigration } from "../data/postKindMigration";
-import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAfterSubscribeActionMigration";
+import {
+  initializeLegacyAfterSubscribeActionMigration,
+  processLegacyAfterSubscribeActionMigrationBatch,
+} from "../data/legacyAfterSubscribeActionMigration";
 import { initializeOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
 import { scheduleOnboardingReminder } from "../core/onboardingReminder";
 import {
@@ -31,11 +34,14 @@ export async function onAppChanged({
     return;
   }
 
+  let currentSubreddit:
+    | Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>
+    | undefined;
   let subredditName = context.subredditName;
   if (!subredditName) {
     try {
-      const subreddit = await reddit.getCurrentSubreddit();
-      subredditName = subreddit.name;
+      currentSubreddit = await reddit.getCurrentSubreddit();
+      subredditName = currentSubreddit.name;
     } catch (error) {
       logDiagnostic(
         "warn",
@@ -68,9 +74,10 @@ export async function onAppChanged({
     context.subredditId
       ? { id: context.subredditId, name: subredditName }
       : undefined;
-  if (!lifecycleSubreddit) {
+  if (!currentSubreddit) {
     try {
-      lifecycleSubreddit = await reddit.getCurrentSubreddit();
+      currentSubreddit = await reddit.getCurrentSubreddit();
+      lifecycleSubreddit ??= currentSubreddit;
     } catch (error) {
       logDiagnostic(
         "warn",
@@ -142,7 +149,31 @@ export async function onAppChanged({
 
   const trackedPosts = await getTrackedPosts(redis);
   await initializePostKindMigration(redis, trackedPosts);
-  await initializeLegacyAfterSubscribeActionMigration(redis, trackedPosts);
+  const migrationCandidates = candidatePostIds ?? trackedPosts;
+  try {
+    const migrationSubreddit = {
+      name: subredditName,
+      type: currentSubreddit?.type,
+    };
+    await initializeLegacyAfterSubscribeActionMigration(
+      redis,
+      migrationCandidates,
+      migrationSubreddit,
+    );
+    if (currentSubreddit) {
+      await processLegacyAfterSubscribeActionMigrationBatch(
+        redis,
+        migrationSubreddit,
+      );
+    }
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "app_changed_phase_failed",
+      { workflow: "app_changed", phase: "after_subscribe_action_migration" },
+      error,
+    );
+  }
   if (!trackedPosts.length) {
     return;
   }

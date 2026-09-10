@@ -108,7 +108,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     logDiagnostic("error", "scheduler_task_failed", { workflow: "post_kind_migration" }, error);
   }
   try {
-    await processLegacyAfterSubscribeActionMigrationBatch(redis);
+    if (subreddit) {
+      await processLegacyAfterSubscribeActionMigrationBatch(redis, {
+        name: subreddit.name,
+        type: subreddit.type,
+      });
+    }
   } catch (error) {
     logDiagnostic("error", "scheduler_task_failed", { workflow: "after_subscribe_action_migration" }, error);
   }

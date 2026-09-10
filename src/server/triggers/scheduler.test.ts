@@ -230,6 +230,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: "CorporateGifts",
+      type: "public",
       numberOfSubscribers: 10,
     });
     hoisted.observeDailySubscriberCount.mockResolvedValue({
@@ -251,7 +252,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     );
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
-    ).toHaveBeenCalledWith(expect.anything());
+    ).toHaveBeenCalledWith(expect.anything(), {
+      name: "CorporateGifts",
+      type: "public",
+    });
     expect(
       hoisted.processRecentSubscriberIndexMigrationBatch,
     ).toHaveBeenCalled();

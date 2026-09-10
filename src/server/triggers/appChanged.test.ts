@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   queueUpdates: vi.fn(),
   initializePostKindMigration: vi.fn(),
   initializeLegacyAfterSubscribeActionMigration: vi.fn(),
+  processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   ensureSubscriberGoalPostFlair: vi.fn(),
   backfillSubscriberGoalPostFlair: vi.fn(),
@@ -68,6 +69,8 @@ vi.mock("../data/postKindMigration", () => ({
 vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   initializeLegacyAfterSubscribeActionMigration:
     hoisted.initializeLegacyAfterSubscribeActionMigration,
+  processLegacyAfterSubscribeActionMigrationBatch:
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch,
 }));
 
 vi.mock("../data/subscriberGoalCandidates", () => ({
@@ -98,6 +101,7 @@ describe("onAppChanged", () => {
     hoisted.getCurrentSubreddit.mockResolvedValue({
       id: "t5_subgoal",
       name: "SubGoal",
+      type: "public",
     });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
@@ -109,6 +113,7 @@ describe("onAppChanged", () => {
     hoisted.queueUpdates.mockReset();
     hoisted.initializePostKindMigration.mockReset();
     hoisted.initializeLegacyAfterSubscribeActionMigration.mockReset();
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
     hoisted.getSubscriberGoalCandidatePostIds.mockReset();
     hoisted.ensureSubscriberGoalPostFlair.mockReset();
     hoisted.backfillSubscriberGoalPostFlair.mockReset();
@@ -126,6 +131,9 @@ describe("onAppChanged", () => {
     hoisted.initializePostKindMigration.mockResolvedValue(undefined);
     hoisted.initializeLegacyAfterSubscribeActionMigration.mockResolvedValue(
       undefined,
+    );
+    hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockResolvedValue(
+      {},
     );
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({ id: "flair_1" });
@@ -161,6 +169,7 @@ describe("onAppChanged", () => {
     hoisted.getCurrentSubreddit.mockResolvedValue({
       id: "t5_subgoal",
       name: "SubGoal",
+      type: "public",
     });
 
     await expect(onAppChanged()).resolves.toBeUndefined();
@@ -193,7 +202,16 @@ describe("onAppChanged", () => {
     );
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenCalledWith(expect.anything(), []);
+    ).toHaveBeenCalledWith(expect.anything(), [], {
+      name: "SubGoal",
+      type: "public",
+    });
+    expect(
+      hoisted.processLegacyAfterSubscribeActionMigrationBatch,
+    ).toHaveBeenCalledWith(expect.anything(), {
+      name: "SubGoal",
+      type: "public",
+    });
   });
 
   it.each(["install", "upgrade"] as const)(
@@ -218,6 +236,36 @@ describe("onAppChanged", () => {
       expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
     },
   );
+
+  it("migrates registered candidates and falls back to tracked posts when discovery fails", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValueOnce([
+      "t3_registered",
+    ]);
+    hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked"]);
+
+    await onAppChanged({ lifecycleSource: "upgrade" });
+
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenLastCalledWith(expect.anything(), ["t3_registered"], {
+      name: "SubGoal",
+      type: "public",
+    });
+
+    hoisted.initializeLegacyAfterSubscribeActionMigration.mockClear();
+    hoisted.getSubscriberGoalCandidatePostIds.mockRejectedValueOnce(
+      new Error("registry unavailable"),
+    );
+    await onAppChanged({ lifecycleSource: "upgrade" });
+
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenLastCalledWith(expect.anything(), ["t3_tracked"], {
+      name: "SubGoal",
+      type: "public",
+    });
+  });
 
   it("keeps lifecycle initialization running when flair repair fails", async () => {
     hoisted.context.subredditName = "SubGoal";
