@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
     },
     sendPrivateMessage: vi.fn(),
   },
+  getModPermissionsForSubreddit: vi.fn(),
   redis: {
     set: vi.fn(),
     get: vi.fn(),
@@ -229,7 +230,9 @@ describe("internalUi color theme create goal routes", () => {
     });
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
+      getModPermissionsForSubreddit: hoisted.getModPermissionsForSubreddit,
     });
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["all"]);
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
     hoisted.deletePost.mockResolvedValue(undefined);
@@ -1432,6 +1435,52 @@ describe("internalUi color theme create goal routes", () => {
     );
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ showToast: "Subscriber Goal post created!" }),
+    );
+  });
+
+  it("returns an actionable error before creating a post when the app lacks Manage Posts", async () => {
+    seedCreateGoalDraft("regular", "en");
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["flair"]);
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      res,
+    );
+
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      showToast:
+        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions and try again.",
+    });
+  });
+
+  it("creates successfully without flair and warns the moderator when only Posts is granted", async () => {
+    seedCreateGoalDraft("regular", "en");
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["posts"]);
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      res,
+    );
+
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.not.objectContaining({ flairId: expect.anything() }),
+    );
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showToast: expect.stringContaining(
+          "The post was created without Subscriber Goal flair; check the app account's Manage Flair permission.",
+        ),
+      }),
     );
   });
 

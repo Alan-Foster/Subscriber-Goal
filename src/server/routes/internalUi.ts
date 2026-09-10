@@ -30,7 +30,10 @@ import {
   subGoalPostMessages,
 } from "../../shared/subGoalPostI18n";
 import { formNames, internalRoutes } from "../../shared/routes";
-import { createSubscriberGoal } from "../core/createSubscriberGoal";
+import {
+  createSubscriberGoal,
+  SubscriberGoalModeratorPermissionError,
+} from "../core/createSubscriberGoal";
 import {
   deleteCreateGoalDraft,
   getCreateGoalDraft,
@@ -1227,7 +1230,7 @@ async function submitCreateGoalFollowUp(
       draft.details.kind === "subscriber-goal"
         ? draft.details.autoCreateNextGoal
         : false;
-    const { post, crosspostDispatchResult, stickyResult } =
+    const { post, crosspostDispatchResult, stickyResult, flairResult } =
       await createSubscriberGoal({
         reddit,
         redis,
@@ -1291,23 +1294,33 @@ async function submitCreateGoalFollowUp(
         : crosspostDispatchResult.status === "failed"
           ? `${createdPostLabel} created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
           : `${createdPostLabel} created!`;
+    const flairWarning =
+      flairResult.status === "omitted"
+        ? " The post was created without Subscriber Goal flair; check the app account's Manage Flair permission."
+        : "";
+    const configurationWarning = afterSubscribeResult.invalidConfiguration
+      ? " The button configuration was invalid, so the default action was used."
+      : "";
     res.json({
-      showToast: afterSubscribeResult.invalidConfiguration
-        ? `${baseToast} The button configuration was invalid, so the default action was used.`
-        : baseToast,
+      showToast: `${baseToast}${flairWarning}${configurationWarning}`,
       navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
     });
   } catch (error) {
     logDiagnostic(
       "error",
       "create_goal_failed",
-      { workflow: "create_goal", phase: "post_creation", postId: context.postId },
+      {
+        workflow: "create_goal",
+        phase: "post_creation",
+        postId: context.postId,
+      },
       error,
     );
     res.json({
       showToast:
         error instanceof ProhibitedSubredditError ||
-        error instanceof SubscriberGoalStickyCleanupError
+        error instanceof SubscriberGoalStickyCleanupError ||
+        error instanceof SubscriberGoalModeratorPermissionError
           ? error.message
           : "An error occurred while creating the post.",
     });

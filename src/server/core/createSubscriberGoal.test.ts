@@ -6,6 +6,7 @@ const hoisted = vi.hoisted(() => ({
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
   },
+  getModPermissionsForSubreddit: vi.fn(),
   redis: {},
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
@@ -125,7 +126,9 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
+      getModPermissionsForSubreddit: hoisted.getModPermissionsForSubreddit,
     });
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["all"]);
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
       status: "skipped",
@@ -194,10 +197,83 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(post.sticky).toHaveBeenCalledWith();
     expect(post.isStickied).toHaveBeenCalledWith();
     expect(result.post).toBe(post);
+    expect(result.flairResult).toEqual({
+      status: "applied",
+      flairId: "flair_subgoal",
+    });
     expect(result.stickyResult).toEqual({
       status: "pinned",
       verifiedStickied: true,
     });
+  });
+
+  it("fails before creation side effects when the app lacks Manage Posts permission", async () => {
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["flair"]);
+
+    await expect(createGoal()).rejects.toMatchObject({
+      name: "SubscriberGoalModeratorPermissionError",
+      message:
+        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions and try again.",
+    });
+
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.getSubscriberGoalCandidatePostIds).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
+  });
+
+  it("creates and pins without flair when the app has Posts but not Flair permission", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.getModPermissionsForSubreddit.mockResolvedValue(["posts"]);
+
+    const result = await createGoal();
+
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.not.objectContaining({ flairId: expect.anything() }),
+    );
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
+    expect(post.approve).toHaveBeenCalled();
+    expect(post.sticky).toHaveBeenCalled();
+    expect(result.flairResult).toEqual({
+      status: "omitted",
+      reason: "missing_permission",
+    });
+  });
+
+  it("creates without flair when flair preparation fails", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.ensureSubscriberGoalPostFlair.mockRejectedValue(
+      new Error("flair service unavailable"),
+    );
+
+    const result = await createGoal();
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith(
+      expect.not.objectContaining({ flairId: expect.anything() }),
+    );
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
+    expect(post.approve).toHaveBeenCalled();
+    expect(post.sticky).toHaveBeenCalled();
+    expect(result.flairResult).toEqual({
+      status: "omitted",
+      reason: "preparation_failed",
+    });
+  });
+
+  it("fails before creation side effects when app permission lookup fails", async () => {
+    hoisted.getModPermissionsForSubreddit.mockRejectedValue(
+      new Error("403 Forbidden"),
+    );
+
+    await expect(createGoal()).rejects.toBeInstanceOf(Error);
+
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
 
   it("cleans up authoritative old goals only after the replacement is registered and approved", async () => {

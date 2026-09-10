@@ -60,7 +60,27 @@ export type CreateSubscriberGoalResult = {
   post: Awaited<ReturnType<typeof createGoalPost>>;
   crosspostDispatchResult: CrosspostDispatchResult;
   stickyResult: StickyResult;
+  flairResult: SubscriberGoalFlairResult;
 };
+
+export type SubscriberGoalFlairResult =
+  | { status: "applied"; flairId: string }
+  | {
+      status: "omitted";
+      reason: "missing_permission" | "preparation_failed";
+    };
+
+export class SubscriberGoalModeratorPermissionError extends Error {
+  constructor(appUsername: string | undefined, subredditName: string) {
+    const appAccount = appUsername
+      ? `u/${appUsername}`
+      : "the Subscriber Goal app account";
+    super(
+      `${appAccount} must be a moderator of r/${subredditName} with Manage Posts permission. Restore the app account's moderator permissions and try again.`,
+    );
+    this.name = "SubscriberGoalModeratorPermissionError";
+  }
+}
 
 export type StickyResult = {
   status: "pinned" | "not_pinned";
@@ -108,10 +128,32 @@ export async function createSubscriberGoal({
     throw new Error("CTA-only posts require an actionable CTA.");
   }
 
-  const [flair, existingGoalPostIds] = await Promise.all([
-    ensureSubscriberGoalPostFlair(reddit, subreddit.name),
-    getSubscriberGoalCandidatePostIds(redis),
-  ]);
+  const { appUsername, permissions } = await getAppModeratorPermissions(
+    reddit,
+    subreddit.name,
+  );
+  const hasAllPermissions = permissions.includes("all");
+  if (!hasAllPermissions && !permissions.includes("posts")) {
+    logDiagnostic("warn", "subscriber_goal_permission_preflight_failed", {
+      workflow: "create_subscriber_goal",
+      phase: "permission_preflight",
+      category: "missing_posts_permission",
+      subredditName: subreddit.name,
+      username: appUsername,
+    });
+    throw new SubscriberGoalModeratorPermissionError(
+      appUsername,
+      subreddit.name,
+    );
+  }
+
+  const flairResult = await prepareSubscriberGoalFlair({
+    reddit,
+    subredditName: subreddit.name,
+    appUsername,
+    canManageFlair: hasAllPermissions || permissions.includes("flair"),
+  });
+  const existingGoalPostIds = await getSubscriberGoalCandidatePostIds(redis);
 
   const textFallback = isCtaOnlyPost
     ? ctaOnlyTextFallbackMaker(
@@ -140,7 +182,9 @@ export async function createSubscriberGoal({
     subredditName: subreddit.name,
     textFallback,
     postHeight: options.postHeight,
-    flairId: flair.id,
+    ...(flairResult.status === "applied"
+      ? { flairId: flairResult.flairId }
+      : {}),
     ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
   });
   await applyGoalPostFrameStyle(post, options.postHeight);
@@ -210,7 +254,11 @@ export async function createSubscriberGoal({
       logDiagnostic(
         "warn",
         "goal_backfill_failed",
-        { workflow: "create_subscriber_goal", phase: "display_name_backfill", postId: activePostId },
+        {
+          workflow: "create_subscriber_goal",
+          phase: "display_name_backfill",
+          postId: activePostId,
+        },
         backfillError,
       );
     }
@@ -236,7 +284,11 @@ export async function createSubscriberGoal({
     logDiagnostic(
       "warn",
       "sticky_operation_failed",
-      { workflow: "create_subscriber_goal", phase: "replacement_cleanup", postId: post.id },
+      {
+        workflow: "create_subscriber_goal",
+        phase: "replacement_cleanup",
+        postId: post.id,
+      },
       error,
     );
     stickyResult = {
@@ -250,7 +302,84 @@ export async function createSubscriberGoal({
     await cancelAllAutoCreateNextGoals(redis);
   }
 
-  return { post, crosspostDispatchResult, stickyResult };
+  return { post, crosspostDispatchResult, stickyResult, flairResult };
+}
+
+async function getAppModeratorPermissions(
+  reddit: RedditClient,
+  subredditName: string,
+) {
+  let appUsername: string | undefined;
+  try {
+    const appUser = await reddit.getAppUser();
+    appUsername = appUser?.username;
+    if (!appUser) {
+      throw new Error("The app account could not be resolved.");
+    }
+    return {
+      appUsername,
+      permissions: await appUser.getModPermissionsForSubreddit(subredditName),
+    };
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "subscriber_goal_permission_preflight_failed",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "permission_preflight",
+        category: "permission_lookup_failed",
+        subredditName,
+        username: appUsername,
+      },
+      error,
+    );
+    throw new SubscriberGoalModeratorPermissionError(
+      appUsername,
+      subredditName,
+    );
+  }
+}
+
+async function prepareSubscriberGoalFlair({
+  reddit,
+  subredditName,
+  appUsername,
+  canManageFlair,
+}: {
+  reddit: RedditClient;
+  subredditName: string;
+  appUsername: string | undefined;
+  canManageFlair: boolean;
+}): Promise<SubscriberGoalFlairResult> {
+  if (!canManageFlair) {
+    logDiagnostic("warn", "subscriber_goal_flair_omitted", {
+      workflow: "create_subscriber_goal",
+      phase: "flair_preparation",
+      category: "missing_flair_permission",
+      subredditName,
+      username: appUsername,
+    });
+    return { status: "omitted", reason: "missing_permission" };
+  }
+
+  try {
+    const flair = await ensureSubscriberGoalPostFlair(reddit, subredditName);
+    return { status: "applied", flairId: flair.id };
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "subscriber_goal_flair_omitted",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "flair_preparation",
+        category: "flair_preparation_failed",
+        subredditName,
+        username: appUsername,
+      },
+      error,
+    );
+    return { status: "omitted", reason: "preparation_failed" };
+  }
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -307,7 +436,13 @@ async function stickyAndVerifyPost(
       logDiagnostic(
         "warn",
         "sticky_operation_failed",
-        { workflow: "sticky", phase: "verification_refetch", postId: post.id, attempt, elapsedMs },
+        {
+          workflow: "sticky",
+          phase: "verification_refetch",
+          postId: post.id,
+          attempt,
+          elapsedMs,
+        },
         error,
       );
     }
@@ -343,7 +478,14 @@ async function stickyAndVerifyPost(
         logDiagnostic(
           "warn",
           "sticky_operation_failed",
-          { workflow: "sticky", phase: "verification", postId: post.id, attempt, elapsedMs, refetched },
+          {
+            workflow: "sticky",
+            phase: "verification",
+            postId: post.id,
+            attempt,
+            elapsedMs,
+            refetched,
+          },
           error,
         );
       }
