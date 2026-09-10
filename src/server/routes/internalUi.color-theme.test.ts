@@ -4,6 +4,7 @@ import { formNames, internalRoutes } from "../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
+  redisHashes: new Map<string, Map<string, string>>(),
   context: {
     postId: "t3_post",
     subredditName: "ExampleSub",
@@ -27,6 +28,8 @@ const hoisted = vi.hoisted(() => ({
     set: vi.fn(),
     get: vi.fn(),
     del: vi.fn(),
+    hGetAll: vi.fn(),
+    hSet: vi.fn(),
   },
   getAppSettings: vi.fn(),
   getSavedSubredditDisplayName: vi.fn(),
@@ -214,7 +217,9 @@ describe("internalUi color theme create goal routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.redisValues.clear();
-    hoisted.redis.set.mockImplementation(async (key, value) => {
+    hoisted.redisHashes.clear();
+    hoisted.redis.set.mockImplementation(async (key, value, options) => {
+      if (options?.nx && hoisted.redisValues.has(key)) return undefined;
       hoisted.redisValues.set(key, value);
       return "OK";
     });
@@ -223,7 +228,18 @@ describe("internalUi color theme create goal routes", () => {
     );
     hoisted.redis.del.mockImplementation(async (key) => {
       const existed = hoisted.redisValues.delete(key);
+      hoisted.redisHashes.delete(key);
       return existed ? 1 : 0;
+    });
+    hoisted.redis.hGetAll.mockImplementation(async (key) =>
+      Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
+    );
+    hoisted.redis.hSet.mockImplementation(async (key, fields) => {
+      const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
+      Object.entries(fields as Record<string, string>).forEach(([field, value]) =>
+        hash.set(field, value),
+      );
+      hoisted.redisHashes.set(key, hash);
     });
     hoisted.context.subredditName = "ExampleSub";
     hoisted.context.postId = "t3_post";
@@ -246,6 +262,10 @@ describe("internalUi color theme create goal routes", () => {
         const permissions =
           await appUser.getModPermissionsForSubreddit("ExampleSub");
         return {
+          status:
+            permissions.includes("all") || permissions.includes("posts")
+              ? "healthy"
+              : "unhealthy",
           healthy: permissions.includes("all") || permissions.includes("posts"),
           appUsername: appUser.username,
           permissions,
@@ -253,6 +273,7 @@ describe("internalUi color theme create goal routes", () => {
         };
       } catch {
         return {
+          status: "unknown",
           healthy: false,
           permissions: [],
           notification: "failed",

@@ -5,9 +5,13 @@ export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
 export const appAccountHealthNotificationLockKey =
   "app_account_health_v1_notification_lock";
+export const appAccountHealthRetryStateKey = "app_account_health_v1_retry_state";
 export const subscriberGoalAppUsername = "subscriber-goal";
 
+export type AppAccountHealthStatus = "healthy" | "unhealthy" | "unknown";
+
 export type AppAccountHealthResult = {
+  status: AppAccountHealthStatus;
   healthy: boolean;
   appUsername?: string;
   permissions: string[];
@@ -59,14 +63,23 @@ export async function checkAppAccountHealth({
 }): Promise<AppAccountHealthResult> {
   let appUsername: string | undefined;
   let permissions: string[] = [];
-  let lookupFailed = false;
   try {
     const appUser = await reddit.getAppUser();
     appUsername = appUser?.username;
     if (!appUser) throw new Error("The app account could not be resolved.");
     permissions = await appUser.getModPermissionsForSubreddit(subredditName);
   } catch (error) {
-    lookupFailed = true;
+    const previousRetry = await redis.hGetAll(appAccountHealthRetryStateKey);
+    const attempts = (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+    const retryDelayMs = Math.min(60 * 60 * 1000, 60_000 * 2 ** (attempts - 1));
+    await redis.hSet(appAccountHealthRetryStateKey, {
+      status: "pending",
+      attempts: String(attempts),
+      nextRunAt: String(nowMs + retryDelayMs),
+      subredditName,
+      subredditId: subredditId ?? "",
+      lastError: error instanceof Error ? error.message : String(error),
+    });
     logDiagnostic(
       "warn",
       "app_account_health_check_failed",
@@ -77,12 +90,18 @@ export async function checkAppAccountHealth({
       },
       error,
     );
+    return {
+      status: "unknown",
+      healthy: false,
+      ...(appUsername ? { appUsername } : {}),
+      permissions,
+      notification: "not_needed",
+    };
   }
 
-  const healthy =
-    !lookupFailed &&
-    (permissions.includes("all") || permissions.includes("posts"));
-  const fingerprint = lookupFailed ? "lookup_failed" : "missing_posts";
+  await redis.del(appAccountHealthRetryStateKey);
+  const healthy = permissions.includes("all") || permissions.includes("posts");
+  const fingerprint = "missing_posts";
 
   if (healthy) {
     await redis.hSet(appAccountHealthStateKey, {
@@ -91,9 +110,11 @@ export async function checkAppAccountHealth({
       appUsername: appUsername ?? "",
       permissions: permissions.join(","),
       incidentFingerprint: "",
+      incidentToken: "",
       notification: "not_needed",
     });
     return {
+      status: "healthy",
       healthy: true,
       ...(appUsername ? { appUsername } : {}),
       permissions,
@@ -117,6 +138,7 @@ export async function checkAppAccountHealth({
       notificationLockToken
     ) {
       return {
+        status: "unhealthy",
         healthy: false,
         ...(appUsername ? { appUsername } : {}),
         permissions,
@@ -135,6 +157,17 @@ export async function checkAppAccountHealth({
     if (duplicateIncident && notify) {
       notification = "deduplicated";
     } else if (notify) {
+      const incidentToken = notificationLockToken ?? String(nowMs);
+      await redis.hSet(appAccountHealthStateKey, {
+        status: "unhealthy",
+        checkedAt: String(nowMs),
+        appUsername: appUsername ?? "",
+        permissions: permissions.join(","),
+        incidentFingerprint: fingerprint,
+        incidentToken,
+        incidentStartedAt: String(nowMs),
+        notification: "notifying",
+      });
       const message = buildAppAccountRecoveryMessage(subredditName);
       if (subredditId) {
         try {
@@ -179,7 +212,12 @@ export async function checkAppAccountHealth({
       }
     }
 
-    await redis.hSet(appAccountHealthStateKey, {
+    const current = await redis.hGetAll(appAccountHealthStateKey);
+    const mayFinalize =
+      duplicateIncident ||
+      !notify ||
+      current.incidentToken === notificationLockToken;
+    if (mayFinalize) await redis.hSet(appAccountHealthStateKey, {
       status: "unhealthy",
       checkedAt: String(nowMs),
       appUsername: appUsername ?? "",
@@ -197,6 +235,7 @@ export async function checkAppAccountHealth({
       notification,
     });
     return {
+      status: "unhealthy",
       healthy: false,
       ...(appUsername ? { appUsername } : {}),
       permissions,
@@ -211,4 +250,31 @@ export async function checkAppAccountHealth({
       await redis.del(appAccountHealthNotificationLockKey);
     }
   }
+}
+
+export async function processDueAppAccountHealthCheck({
+  reddit,
+  redis,
+  nowMs = Date.now(),
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  nowMs?: number;
+}): Promise<AppAccountHealthResult | undefined> {
+  const retry = await redis.hGetAll(appAccountHealthRetryStateKey);
+  if (
+    retry.status !== "pending" ||
+    !retry.subredditName ||
+    !Number.isFinite(Number(retry.nextRunAt)) ||
+    nowMs < Number(retry.nextRunAt)
+  ) {
+    return undefined;
+  }
+  return checkAppAccountHealth({
+    reddit,
+    redis,
+    subredditName: retry.subredditName,
+    ...(retry.subredditId ? { subredditId: retry.subredditId } : {}),
+    nowMs,
+  });
 }

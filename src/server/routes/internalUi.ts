@@ -71,6 +71,18 @@ import {
   type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 
+function stableDraftFingerprint(value: unknown): string {
+  const input = JSON.stringify(value);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
+}
+
 export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.menu.createGoal,
@@ -1258,6 +1270,12 @@ async function submitCreateGoalFollowUp(
           afterSubscribeAction: afterSubscribeResult.action,
           afterSubscribePreset: persistedAfterSubscribePreset,
           cancelPendingAutoCreateGoals: true,
+          operationId: `manual:${subreddit.id}:${userId}:${stableDraftFingerprint({
+            draft,
+            afterSubscribeAction: afterSubscribeResult.action,
+            submitAsUser: developerCommands.submitAsUser,
+            headerText: developerCommands.headerText,
+          })}`,
           submitAsUser: developerCommands.submitAsUser,
           ...(developerCommands.headerText
             ? { headerText: developerCommands.headerText }

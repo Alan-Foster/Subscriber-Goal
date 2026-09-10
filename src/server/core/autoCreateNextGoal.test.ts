@@ -28,7 +28,26 @@ const hoisted = vi.hoisted(() => ({
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn()
   },
-  redis: {}
+  redisValues: new Map<string, string>(),
+  redisHashes: new Map<string, Map<string, string>>(),
+  redis: {
+    set: vi.fn(async (key: string, value: string, options?: { nx?: boolean }) => {
+      if (options?.nx && hoisted.redisValues.has(key)) return;
+      hoisted.redisValues.set(key, value);
+    }),
+    get: vi.fn(async (key: string) => hoisted.redisValues.get(key)),
+    del: vi.fn(async (key: string) => {
+      hoisted.redisValues.delete(key);
+    }),
+    hGet: vi.fn(async (key: string, field: string) =>
+      hoisted.redisHashes.get(key)?.get(field)
+    ),
+    hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+      const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
+      Object.entries(fields).forEach(([field, value]) => hash.set(field, value));
+      hoisted.redisHashes.set(key, hash);
+    })
+  }
 }));
 
 vi.mock('../data/subGoalData', () => ({
@@ -53,6 +72,8 @@ vi.mock('../utils/stickyFailureNotifications', () => ({
 describe('processDueAutoCreateNextGoals', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    hoisted.redisValues.clear();
+    hoisted.redisHashes.clear();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
     hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
       failureCount: 1,
@@ -155,7 +176,8 @@ describe('processDueAutoCreateNextGoals', () => {
           colorTheme: 'pink'
         },
         afterSubscribePreset: 'discord',
-        cancelPendingAutoCreateGoals: false
+        cancelPendingAutoCreateGoals: false,
+        operationId: 'auto-next:t3_source'
       }
     });
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
@@ -432,5 +454,44 @@ describe('processDueAutoCreateNextGoals', () => {
       expect.stringContaining('"event":"auto_create_goal_degraded"')
     );
     warnSpy.mockRestore();
+  });
+
+  it('allows only one overlapping successor creation', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    let finishCreation!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    hoisted.createSubscriberGoal.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          markStarted();
+          finishCreation = () =>
+            resolve({
+              post: { id: 't3_next', title: 'Next goal' },
+              crosspostDispatchResult: { status: 'skipped' },
+              stickyResult: { status: 'pinned' },
+              flairResult: { status: 'omitted', reason: 'missing_permission' }
+            });
+        })
+    );
+
+    const first = processDueAutoCreateNextGoals({
+      reddit: hoisted.reddit as never,
+      redis: hoisted.redis as never,
+      appSettings: baseSettings
+    });
+    await started;
+    const second = await processDueAutoCreateNextGoals({
+      reddit: hoisted.reddit as never,
+      redis: hoisted.redis as never,
+      appSettings: baseSettings
+    });
+    finishCreation();
+    await first;
+
+    expect(second).toMatchObject({ created: 0, skipped: 1 });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
   });
 });

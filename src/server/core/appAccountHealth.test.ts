@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appAccountHealthStateKey,
+  appAccountHealthRetryStateKey,
   appAccountInstallerKey,
   checkAppAccountHealth,
   rememberAppInstaller,
@@ -23,6 +24,7 @@ class TestRedis {
   }
   async del(key: string): Promise<void> {
     this.values.delete(key);
+    this.hashes.delete(key);
   }
   async hGetAll(key: string): Promise<Record<string, string>> {
     return Object.fromEntries(this.hashes.get(key) ?? []);
@@ -72,6 +74,7 @@ describe("app account health", () => {
 
   it("accepts Posts without requiring Flair and records healthy state", async () => {
     await expect(check()).resolves.toMatchObject({
+      status: "healthy",
       healthy: true,
       permissions: ["posts"],
       notification: "not_needed",
@@ -87,6 +90,7 @@ describe("app account health", () => {
     permissions = [];
 
     await expect(check()).resolves.toMatchObject({
+      status: "unhealthy",
       healthy: false,
       notification: "modmail",
     });
@@ -144,12 +148,21 @@ describe("app account health", () => {
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
-  it("records lookup failures as unhealthy without throwing", async () => {
+  it("records lookup failures as unknown without changing incident state or notifying", async () => {
     reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
 
     await expect(check()).resolves.toMatchObject({
+      status: "unknown",
       healthy: false,
       permissions: [],
+      notification: "not_needed",
     });
+    expect(await redis.hGetAll(appAccountHealthStateKey)).toEqual({});
+    expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      subredditName: "ExampleSub",
+    });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 });

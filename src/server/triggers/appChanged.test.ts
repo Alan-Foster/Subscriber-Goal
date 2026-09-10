@@ -24,6 +24,7 @@ const hoisted = vi.hoisted(() => ({
   ensureCommunityPostActivityBackfill: vi.fn(),
   rememberAppInstaller: vi.fn(),
   checkAppAccountHealth: vi.fn(),
+  scheduleAppRepair: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -98,6 +99,10 @@ vi.mock("../core/appAccountHealth", () => ({
   checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
+vi.mock("../core/appRepair", () => ({
+  scheduleAppRepair: hoisted.scheduleAppRepair,
+}));
+
 import { onAppChanged } from "./appChanged";
 
 describe("onAppChanged", () => {
@@ -128,9 +133,11 @@ describe("onAppChanged", () => {
     hoisted.ensureCommunityPostActivityBackfill.mockReset();
     hoisted.rememberAppInstaller.mockReset();
     hoisted.checkAppAccountHealth.mockReset();
+    hoisted.scheduleAppRepair.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockResolvedValue(undefined);
     hoisted.rememberAppInstaller.mockResolvedValue(undefined);
     hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: true });
+    hoisted.scheduleAppRepair.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -185,7 +192,7 @@ describe("onAppChanged", () => {
 
     await expect(onAppChanged()).resolves.toBeUndefined();
 
-    expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.ensureSavedSubredditDisplayName).toHaveBeenCalledWith(
       expect.anything(),
       "SubGoal",
@@ -201,16 +208,9 @@ describe("onAppChanged", () => {
     expect(
       hoisted.initializeRecentSubscriberIndexMigration,
     ).toHaveBeenCalledWith(expect.anything());
-    expect(hoisted.initializePostKindMigration).toHaveBeenCalledWith(
-      expect.anything(),
-      [],
-    );
-    expect(
-      hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenCalledWith(expect.anything(), [], {
-      name: "SubGoal",
-      type: "public",
-    });
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
+    expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
+    expect(hoisted.initializeLegacyAfterSubscribeActionMigration).not.toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
@@ -236,11 +236,9 @@ describe("onAppChanged", () => {
       expect.anything(),
       "InstallingMod",
     );
-    expect(hoisted.ensureSubscriberGoalPostFlair).toHaveBeenCalledWith(
-      expect.anything(),
-      "SubGoal",
-    );
-    expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
+    expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+    expect(hoisted.reconcileSubscriberGoalStickies).not.toHaveBeenCalled();
   });
 
   it("preserves onboarding state during upgrades", async () => {
@@ -250,15 +248,13 @@ describe("onAppChanged", () => {
 
     expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
-    expect(
-      hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenCalled();
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
   });
 
-  it("migrates registered candidates and falls back to tracked posts when discovery fails", async () => {
+  it("defers discovery and migrations to the scheduler repair job", async () => {
     hoisted.context.subredditName = "SubGoal";
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValueOnce([
       "t3_registered",
@@ -267,28 +263,12 @@ describe("onAppChanged", () => {
 
     await onAppChanged({ lifecycleSource: "upgrade" });
 
-    expect(
-      hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenLastCalledWith(expect.anything(), ["t3_registered"], {
-      name: "SubGoal",
-      type: "public",
-    });
-
-    hoisted.initializeLegacyAfterSubscribeActionMigration.mockClear();
-    hoisted.getSubscriberGoalCandidatePostIds.mockRejectedValueOnce(
-      new Error("registry unavailable"),
-    );
-    await onAppChanged({ lifecycleSource: "upgrade" });
-
-    expect(
-      hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenLastCalledWith(expect.anything(), ["t3_tracked"], {
-      name: "SubGoal",
-      type: "public",
-    });
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.getSubscriberGoalCandidatePostIds).not.toHaveBeenCalled();
+    expect(hoisted.getTrackedPosts).not.toHaveBeenCalled();
   });
 
-  it("keeps lifecycle initialization running when flair repair fails", async () => {
+  it("does not perform Reddit repair work synchronously", async () => {
     hoisted.context.subredditName = "SubGoal";
     hoisted.ensureSubscriberGoalPostFlair.mockRejectedValue(
       new Error("flair permission denied"),
@@ -298,8 +278,9 @@ describe("onAppChanged", () => {
       onAppChanged({ lifecycleSource: "upgrade" }),
     ).resolves.toBeUndefined();
 
-    expect(hoisted.reconcileSubscriberGoalStickies).toHaveBeenCalled();
-    expect(hoisted.initializePostKindMigration).toHaveBeenCalled();
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
+    expect(hoisted.reconcileSubscriberGoalStickies).not.toHaveBeenCalled();
+    expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
   });
 
   it("continues independent initialization after an early phase fails", async () => {
@@ -317,14 +298,24 @@ describe("onAppChanged", () => {
     expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalled();
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,
-    ).toHaveBeenCalled();
+    ).not.toHaveBeenCalled();
   });
 
-  it("falls back safely when subreddit fetch fails", async () => {
+  it("throws when the durable repair marker cannot be written", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.scheduleAppRepair.mockRejectedValue(new Error("redis unavailable"));
+
+    await expect(onAppChanged({ lifecycleSource: "upgrade" })).rejects.toThrow(
+      "redis unavailable",
+    );
+    expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
+  });
+
+  it("requests a lifecycle retry when subreddit resolution fails", async () => {
     hoisted.context.subredditId = "t5_abc";
     hoisted.getCurrentSubreddit.mockRejectedValue(new Error("no context"));
 
-    await expect(onAppChanged()).resolves.toBeUndefined();
+    await expect(onAppChanged()).rejects.toThrow("no context");
 
     expect(hoisted.getCurrentSubreddit).toHaveBeenCalledTimes(1);
     expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();

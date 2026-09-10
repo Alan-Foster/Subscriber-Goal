@@ -107,6 +107,13 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
   size = batchSize,
 ): Promise<LegacyAfterSubscribeActionMigrationSummary> {
   const summary = emptySummary();
+  const stateVersion = await redis.hGet(
+    legacyAfterSubscribeActionMigrationStateKey,
+    "version",
+  );
+  if (stateVersion !== legacyAfterSubscribeActionMigrationVersion) {
+    return summary;
+  }
   const pending = await redis.zRange(
     legacyAfterSubscribeActionMigrationQueueKey,
     0,

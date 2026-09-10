@@ -54,6 +54,7 @@ type CreateSubscriberGoalOptions = {
   headerText?: string;
   afterSubscribeAction?: AfterSubscribeAction;
   afterSubscribePreset?: AfterSubscribePreset;
+  operationId?: string;
   stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
@@ -83,6 +84,15 @@ export class SubscriberGoalModeratorPermissionError extends Error {
   }
 }
 
+export class SubscriberGoalCreationInProgressError extends Error {
+  constructor() {
+    super(
+      "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
+    );
+    this.name = "SubscriberGoalCreationInProgressError";
+  }
+}
+
 export type StickyResult = {
   status: "pinned" | "not_pinned";
   errorMessage?: string;
@@ -108,6 +118,125 @@ export async function createSubscriberGoal({
   appSettings: ServerAppSettings;
   options: CreateSubscriberGoalOptions;
 }): Promise<CreateSubscriberGoalResult> {
+  const operationId = options.operationId?.trim();
+  if (!operationId) {
+    return createSubscriberGoalInternal({ reddit, redis, appSettings, options });
+  }
+
+  const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+  const lockKey = `${operationKey}:lock`;
+  const recoverComplete = async (
+    raw: Record<string, string>,
+  ): Promise<CreateSubscriberGoalResult | undefined> => {
+    const postId = raw.postId ?? "";
+    if (
+      raw.status !== "complete" ||
+      !isLinkId(postId) ||
+      !raw.crosspostDispatchResult ||
+      !raw.stickyResult ||
+      !raw.flairResult
+    ) {
+      return undefined;
+    }
+    try {
+      const post = (await reddit.getPostById(postId)) as unknown as Awaited<
+        ReturnType<typeof createGoalPost>
+      >;
+      return {
+        post,
+        crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
+        stickyResult: JSON.parse(raw.stickyResult),
+        flairResult: JSON.parse(raw.flairResult),
+      } as CreateSubscriberGoalResult;
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "goal_creation_recovery_failed",
+        {
+          workflow: "create_subscriber_goal",
+          phase: "completed_operation",
+          postId,
+        },
+        error,
+      );
+      return undefined;
+    }
+  };
+
+  const existing = await redis.hGetAll(operationKey);
+  const completed = await recoverComplete(existing);
+  if (completed) return completed;
+
+  const nowMs = Date.now();
+  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+  await redis.set(lockKey, lockToken, {
+    nx: true,
+    expiration: new Date(nowMs + 15 * 60 * 1000),
+  });
+  if ((await redis.get(lockKey)) !== lockToken) {
+    throw new SubscriberGoalCreationInProgressError();
+  }
+
+  try {
+    const reloaded = await redis.hGetAll(operationKey);
+    const recoveredComplete = await recoverComplete(reloaded);
+    if (recoveredComplete) return recoveredComplete;
+    await redis.hSet(operationKey, {
+      status: reloaded.status || "pending",
+      startedAt: reloaded.startedAt || String(nowMs),
+      updatedAt: String(nowMs),
+    });
+    const submittedPostId = reloaded.postId ?? "";
+    const recoveredPost = isLinkId(submittedPostId)
+      ? ((await reddit.getPostById(submittedPostId)) as unknown as Awaited<
+          ReturnType<typeof createGoalPost>
+        >)
+      : undefined;
+    const result = await createSubscriberGoalInternal(
+      { reddit, redis, appSettings, options },
+      {
+        ...(recoveredPost ? { recoveredPost } : {}),
+        onPostSubmitted: async (postId) => {
+          await redis.hSet(operationKey, {
+            status: "post_submitted",
+            postId,
+            updatedAt: String(Date.now()),
+          });
+        },
+      },
+    );
+    await redis.hSet(operationKey, {
+      status: "complete",
+      postId: result.post.id,
+      completedAt: String(Date.now()),
+      updatedAt: String(Date.now()),
+      crosspostDispatchResult: JSON.stringify(result.crosspostDispatchResult),
+      stickyResult: JSON.stringify(result.stickyResult),
+      flairResult: JSON.stringify(result.flairResult),
+    });
+    return result;
+  } finally {
+    if ((await redis.get(lockKey)) === lockToken) await redis.del(lockKey);
+  }
+}
+
+async function createSubscriberGoalInternal(
+  {
+    reddit,
+    redis,
+    appSettings,
+    options,
+  }: {
+    reddit: RedditClient;
+    redis: RedisClient;
+    appSettings: ServerAppSettings;
+    options: CreateSubscriberGoalOptions;
+  },
+  recovery?: {
+    recoveredPost?: Awaited<ReturnType<typeof createGoalPost>>;
+    onPostSubmitted: (postId: string) => Promise<void>;
+  },
+): Promise<CreateSubscriberGoalResult> {
   const subreddit = await reddit.getCurrentSubreddit();
   if (await isSubredditBlacklisted(reddit, subreddit.name)) {
     throw new ProhibitedSubredditError();
@@ -137,6 +266,11 @@ export async function createSubscriberGoal({
   });
   const { appUsername, permissions } = health;
   const hasAllPermissions = permissions.includes("all");
+  if (health.status === "unknown") {
+    throw new Error(
+      `Reddit could not verify Subscriber Goal's moderator permissions in r/${subreddit.name}. Please try again shortly.`,
+    );
+  }
   if (!health.healthy) {
     logDiagnostic("warn", "subscriber_goal_permission_preflight_failed", {
       workflow: "create_subscriber_goal",
@@ -181,16 +315,19 @@ export async function createSubscriberGoal({
           language: options.language,
         });
 
-  const post = await createGoalPost({
-    title: options.title,
-    subredditName: subreddit.name,
-    textFallback,
-    postHeight: options.postHeight,
-    ...(flairResult.status === "applied"
-      ? { flairId: flairResult.flairId }
-      : {}),
-    ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
-  });
+  const post =
+    recovery?.recoveredPost ??
+    (await createGoalPost({
+      title: options.title,
+      subredditName: subreddit.name,
+      textFallback,
+      postHeight: options.postHeight,
+      ...(flairResult.status === "applied"
+        ? { flairId: flairResult.flairId }
+        : {}),
+      ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
+    }));
+  if (!recovery?.recoveredPost) await recovery?.onPostSubmitted(post.id);
   await applyGoalPostFrameStyle(post, options.postHeight);
 
   await setSavedSubredditDisplayName(redis, options.subredditDisplayName);

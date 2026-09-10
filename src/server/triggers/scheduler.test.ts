@@ -63,6 +63,8 @@ const hoisted = vi.hoisted(() => ({
   removeSubscriberGoalPost: vi.fn(),
   observeDailySubscriberCount: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
+  processDueAppAccountHealthCheck: vi.fn(),
+  processDueAppRepair: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -151,6 +153,14 @@ vi.mock("../core/onboardingReminder", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
 }));
 
+vi.mock("../core/appAccountHealth", () => ({
+  processDueAppAccountHealthCheck: hoisted.processDueAppAccountHealthCheck,
+}));
+
+vi.mock("../core/appRepair", () => ({
+  processDueAppRepair: hoisted.processDueAppRepair,
+}));
+
 vi.mock("../core/post", () => ({
   applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
 }));
@@ -184,6 +194,8 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.removeSubscriberGoalPost.mockReset();
     hoisted.observeDailySubscriberCount.mockReset();
+    hoisted.processDueAppAccountHealthCheck.mockReset();
+    hoisted.processDueAppRepair.mockReset();
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(
       emptyCrosspostSummary,
@@ -236,6 +248,8 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.observeDailySubscriberCount.mockResolvedValue({
       growth: { count: 1, period: "week" },
     });
+    hoisted.processDueAppAccountHealthCheck.mockResolvedValue(undefined);
+    hoisted.processDueAppRepair.mockResolvedValue("not_due");
   });
 
   it("skips crosspost ingestion and pending-depth lookup outside authority installs", async () => {

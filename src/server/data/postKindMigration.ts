@@ -18,6 +18,7 @@ import {
 export const postKindMigrationStateKey = "post_kind_migration_v1_state";
 export const postKindMigrationQueueKey = "post_kind_migration_v1_queue";
 export const postKindMigrationVersion = "post_kind_v1";
+export const postKindMigrationTerminalKey = "post_kind_migration_v1_terminal";
 
 export type PostKindMigrationSummary = {
   scanned: number;
@@ -72,6 +73,10 @@ export async function processPostKindMigrationBatch(
   batchSize = 10,
 ): Promise<PostKindMigrationSummary> {
   const summary = emptySummary();
+  const stateVersion = await redis.hGet(postKindMigrationStateKey, "version");
+  if (stateVersion !== postKindMigrationVersion) {
+    return summary;
+  }
   const pending = await redis.zRange(
     postKindMigrationQueueKey,
     0,
@@ -82,7 +87,17 @@ export async function processPostKindMigrationBatch(
     summary.scanned += 1;
     try {
       if (!isLinkId(postId)) {
-        throw new Error("invalid post id");
+        await redis.hSet(postKindMigrationTerminalKey, {
+          [postId]: "invalid_post_id",
+        });
+        await redis.zRem(postKindMigrationQueueKey, [postId]);
+        logDiagnostic("warn", "migration_record_terminal", {
+          workflow: "post_kind_migration",
+          phase: "record_validation",
+          postId,
+          category: "invalid_post_id",
+        });
+        continue;
       }
       const rawHeight = await redis.hGet(
         subscriberGoalsKey,

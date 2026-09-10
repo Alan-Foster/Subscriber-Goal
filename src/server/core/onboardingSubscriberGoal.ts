@@ -59,6 +59,8 @@ export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
 type OnboardingStatus = "pending" | "processing" | "complete";
 
 type OnboardingResultStatus = "created" | "existing" | "failed";
+const onboardingRetryBaseMs = 5 * 60 * 1000;
+const onboardingRetryMaxMs = 60 * 60 * 1000;
 
 export type OnboardingLifecycleSource = "install" | "upgrade" | "unknown";
 export type OnboardingExistingSource =
@@ -93,6 +95,7 @@ export type OnboardingSubscriberGoalState = {
   existingSource?: OnboardingExistingSource;
   resultStatus?: OnboardingResultStatus;
   errorMessage?: string;
+  attempts?: number;
 };
 
 export type OnboardingSubscriberGoalSummary = {
@@ -147,6 +150,10 @@ export async function initializeOnboardingSubscriberGoal(
     nowMs?: number;
   },
 ): Promise<void> {
+  const existing = parseOnboardingState(
+    await redis.hGetAll(onboardingSubscriberGoalStateKey),
+  );
+  if (existing) return;
   const state: OnboardingSubscriberGoalState = {
     version: onboardingSubscriberGoalVersion,
     status: "pending",
@@ -180,7 +187,7 @@ export async function processDueOnboardingSubscriberGoal({
     await redis.hGetAll(onboardingSubscriberGoalStateKey),
   );
   if (!state) {
-    return { status: "complete", ...base };
+    return { status: "not_due", ...base };
   }
   if (state.status === "complete") {
     return {
@@ -289,6 +296,7 @@ export async function processDueOnboardingSubscriberGoal({
           subredditType: subreddit.type,
         }),
         afterSubscribePreset,
+        operationId: `onboarding:${reloaded.armedAt}`,
       },
     });
     if (stickyResult.status === "not_pinned") {
@@ -334,10 +342,16 @@ export async function processDueOnboardingSubscriberGoal({
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
     try {
+      const attempts = (activeState.attempts ?? 0) + 1;
+      const retryDelayMs = Math.min(
+        onboardingRetryMaxMs,
+        onboardingRetryBaseMs * 2 ** (attempts - 1),
+      );
       await saveOnboardingState(redis, {
         ...activeState,
-        status: "complete",
-        completedAt: nowMs,
+        status: "pending",
+        nextRunAt: nowMs + retryDelayMs,
+        attempts,
         resultStatus: "failed",
         errorMessage,
       });
@@ -676,6 +690,8 @@ function parseOnboardingState(
   if (completedAt !== undefined) state.completedAt = completedAt;
   if (raw.postId) state.postId = raw.postId;
   if (raw.errorMessage) state.errorMessage = raw.errorMessage;
+  const attempts = parseStateNumber(raw.attempts);
+  if (attempts !== undefined) state.attempts = attempts;
   if (
     raw.resultStatus === "created" ||
     raw.resultStatus === "existing" ||
@@ -716,6 +732,7 @@ function serializeOnboardingState(
     existingSource: state.existingSource ?? "",
     resultStatus: state.resultStatus ?? "",
     errorMessage: state.errorMessage ?? "",
+    attempts: String(state.attempts ?? 0),
   };
 }
 

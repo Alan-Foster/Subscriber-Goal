@@ -7,7 +7,27 @@ const hoisted = vi.hoisted(() => ({
     getPostById: vi.fn(),
   },
   getModPermissionsForSubreddit: vi.fn(),
-  redis: {},
+  redisValues: new Map<string, string>(),
+  redisHashes: new Map<string, Map<string, string>>(),
+  redis: {
+    set: vi.fn(async (key: string, value: string, options?: { nx?: boolean }) => {
+      if (options?.nx && hoisted.redisValues.has(key)) return;
+      hoisted.redisValues.set(key, value);
+    }),
+    get: vi.fn(async (key: string) => hoisted.redisValues.get(key)),
+    del: vi.fn(async (key: string) => {
+      hoisted.redisValues.delete(key);
+      hoisted.redisHashes.delete(key);
+    }),
+    hGetAll: vi.fn(async (key: string) =>
+      Object.fromEntries(hoisted.redisHashes.get(key) ?? [])
+    ),
+    hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+      const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
+      Object.entries(fields).forEach(([field, value]) => hash.set(field, value));
+      hoisted.redisHashes.set(key, hash);
+    }),
+  },
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
   registerNewSubscribeOnlyPost: vi.fn(),
@@ -122,6 +142,8 @@ const noRetryStickyVerification = {
 describe("createSubscriberGoal sticky handling", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    hoisted.redisValues.clear();
+    hoisted.redisHashes.clear();
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -139,6 +161,10 @@ describe("createSubscriberGoal sticky handling", () => {
         const permissions =
           await appUser.getModPermissionsForSubreddit("ExampleSub");
         return {
+          status:
+            permissions.includes("all") || permissions.includes("posts")
+              ? "healthy"
+              : "unhealthy",
           healthy: permissions.includes("all") || permissions.includes("posts"),
           appUsername: appUser.username,
           permissions,
@@ -146,6 +172,7 @@ describe("createSubscriberGoal sticky handling", () => {
         };
       } catch {
         return {
+          status: "unknown",
           healthy: false,
           permissions: [],
           notification: "failed",
@@ -293,11 +320,30 @@ describe("createSubscriberGoal sticky handling", () => {
       new Error("403 Forbidden"),
     );
 
-    await expect(createGoal()).rejects.toBeInstanceOf(Error);
+    await expect(createGoal()).rejects.toThrow("Please try again shortly");
 
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("recovers a submitted post instead of creating a duplicate after persistence fails", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.registerNewSubGoalPost
+      .mockRejectedValueOnce(new Error("redis unavailable"))
+      .mockResolvedValueOnce({ status: "skipped" });
+
+    await expect(createGoal({ operationId: "manual:test" })).rejects.toThrow(
+      "redis unavailable",
+    );
+    await expect(createGoal({ operationId: "manual:test" })).resolves.toMatchObject({
+      post: { id: "t3_newpost" },
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getPostById).toHaveBeenCalledWith("t3_newpost");
   });
 
   it("cleans up authoritative old goals only after the replacement is registered and approved", async () => {

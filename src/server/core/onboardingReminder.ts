@@ -15,6 +15,8 @@ export const onboardingReminderDelayMs = 60 * 1000;
 
 type OnboardingReminderStatus = "pending" | "processing" | "complete";
 type OnboardingReminderResult = "sent" | "existing" | "failed";
+const onboardingReminderRetryBaseMs = 5 * 60 * 1000;
+const onboardingReminderRetryMaxMs = 60 * 60 * 1000;
 
 export type OnboardingReminderState = {
   version: typeof onboardingReminderVersion;
@@ -28,6 +30,7 @@ export type OnboardingReminderState = {
   existingSource?: OnboardingExistingSource;
   result?: OnboardingReminderResult;
   errorMessage?: string;
+  attempts?: number;
 };
 
 export type OnboardingReminderSummary = OnboardingDetectionDiagnostics & {
@@ -63,11 +66,11 @@ export function buildOnboardingReminderMessage(
       `Welcome to Subscriber Goal for r/${subredditName}!\n\n` +
       "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.\n\n" +
       "If you have questions, please send a DM to u/Alan-Foster.\n\n" +
-      "If a Subscriber Goal is not created within 23 hours and 59 minutes of this installation or update, Subscriber Goal will automatically create one using the default settings for your subreddit.",
+      "If a Subscriber Goal is not created within 23 hours and 59 minutes of this installation, Subscriber Goal will automatically create one using the default settings for your subreddit.",
   };
 }
 
-/** Arms a single reminder for the current install or upgrade lifecycle event. */
+/** Arms a single reminder for the current installation. */
 export async function scheduleOnboardingReminder(
   redis: RedisClient,
   {
@@ -78,6 +81,10 @@ export async function scheduleOnboardingReminder(
     nowMs?: number;
   },
 ): Promise<void> {
+  const existing = parseOnboardingReminderState(
+    await redis.hGetAll(onboardingReminderStateKey),
+  );
+  if (existing) return;
   const state: OnboardingReminderState = {
     version: onboardingReminderVersion,
     status: "pending",
@@ -199,10 +206,16 @@ export async function processDueOnboardingReminder({
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
     try {
+      const attempts = (state.attempts ?? 0) + 1;
+      const retryDelayMs = Math.min(
+        onboardingReminderRetryMaxMs,
+        onboardingReminderRetryBaseMs * 2 ** (attempts - 1),
+      );
       await saveOnboardingReminderState(redis, {
         ...state,
-        status: "complete",
-        completedAt: nowMs,
+        status: "pending",
+        nextRunAt: nowMs + retryDelayMs,
+        attempts,
         result: "failed",
         errorMessage,
       });
@@ -277,6 +290,9 @@ function parseOnboardingReminderState(
       : {}),
     ...(isResult(raw.result) ? { result: raw.result } : {}),
     ...(raw.errorMessage ? { errorMessage: raw.errorMessage } : {}),
+    ...(raw.attempts && Number.isFinite(Number(raw.attempts))
+      ? { attempts: Number(raw.attempts) }
+      : {}),
   };
 }
 
@@ -314,6 +330,7 @@ function serializeOnboardingReminderState(
     existingSource: state.existingSource ?? "",
     result: state.result ?? "",
     errorMessage: state.errorMessage ?? "",
+    attempts: String(state.attempts ?? 0),
   };
 }
 

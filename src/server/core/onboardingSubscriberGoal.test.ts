@@ -168,7 +168,7 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("re-arms 23 hours and 59 minutes after each install or upgrade lifecycle event", async () => {
+  it("does not re-arm an existing onboarding lifecycle state", async () => {
     expect(onboardingSubscriberGoalDelayMs).toBe((23 * 60 + 59) * 60 * 1000);
 
     await initializeOnboardingSubscriberGoal(redis as never, {
@@ -191,8 +191,8 @@ describe("onboarding subscriber goal", () => {
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "pending",
-      lifecycleSource: "upgrade",
-      nextRunAt: String(nowMs + 100 + onboardingSubscriberGoalDelayMs),
+      lifecycleSource: "install",
+      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
     });
 
     await expect(
@@ -657,7 +657,7 @@ describe("onboarding subscriber goal", () => {
     expect(options).not.toHaveProperty("goal");
   });
 
-  it("records a terminal failure without retrying", async () => {
+  it("schedules a bounded retry after a transient failure", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -683,8 +683,7 @@ describe("onboarding subscriber goal", () => {
         nowMs: nowMs + onboardingSubscriberGoalDelayMs + 60_000,
       }),
     ).resolves.toMatchObject({
-      status: "complete",
-      errorMessage: "Error: redis unavailable",
+      status: "not_due",
     });
   });
 
@@ -750,7 +749,7 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs,
       }),
-    ).resolves.toMatchObject({ status: "complete" });
+    ).resolves.toMatchObject({ status: "not_due" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
@@ -767,7 +766,7 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs,
       }),
-    ).resolves.toMatchObject({ status: "complete" });
+    ).resolves.toMatchObject({ status: "not_due" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toEqual({});

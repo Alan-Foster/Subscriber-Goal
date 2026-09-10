@@ -86,6 +86,7 @@ describe("onboarding reminder", () => {
     );
     expect(message.bodyMarkdown).toContain("u/Alan-Foster");
     expect(message.bodyMarkdown).toContain("23 hours and 59 minutes");
+    expect(message.bodyMarkdown).not.toContain("or update");
   });
 
   it("waits one minute, then sends one modmail when no goal exists", async () => {
@@ -176,7 +177,7 @@ describe("onboarding reminder", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("records a terminal failure when modmail cannot be sent", async () => {
+  it("schedules a retry when modmail cannot be sent", async () => {
     await scheduleOnboardingReminder(redis as never, { nowMs });
     reddit.modMail.createModNotification.mockRejectedValue(
       new Error("modmail unavailable"),
@@ -195,8 +196,9 @@ describe("onboarding reminder", () => {
     await expect(
       redis.hGetAll(onboardingReminderStateKey),
     ).resolves.toMatchObject({
-      status: "complete",
+      status: "pending",
       result: "failed",
+      attempts: "1",
     });
   });
 });

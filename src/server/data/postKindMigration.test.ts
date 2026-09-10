@@ -9,6 +9,7 @@ import {
   initializePostKindMigration,
   postKindMigrationQueueKey,
   postKindMigrationStateKey,
+  postKindMigrationTerminalKey,
   processPostKindMigrationBatch,
 } from "./postKindMigration";
 
@@ -52,6 +53,31 @@ const asRedis = (redis: TestRedis) =>
   redis as unknown as Parameters<typeof initializePostKindMigration>[0];
 
 describe("post kind compatibility migration", () => {
+  it("does not complete or inspect a migration that was never initialized", async () => {
+    const redis = new TestRedis();
+    const reddit = { getPostById: vi.fn() };
+
+    await expect(
+      processPostKindMigrationBatch(reddit as never, asRedis(redis)),
+    ).resolves.toMatchObject({ scanned: 0, failed: 0 });
+    expect(await redis.hGetAll(postKindMigrationStateKey)).toEqual({});
+    expect(reddit.getPostById).not.toHaveBeenCalled();
+  });
+
+  it("moves malformed candidate ids to terminal state", async () => {
+    const redis = new TestRedis();
+    const reddit = { getPostById: vi.fn() };
+    await initializePostKindMigration(asRedis(redis), ["bad-id"]);
+
+    await expect(
+      processPostKindMigrationBatch(reddit as never, asRedis(redis)),
+    ).resolves.toMatchObject({ scanned: 1, failed: 0 });
+    expect(await redis.hGet(postKindMigrationTerminalKey, "bad-id")).toBe(
+      "invalid_post_id",
+    );
+    expect(await redis.zRange(postKindMigrationQueueKey, 0, -1)).toEqual([]);
+  });
+
   it("repairs a legacy positive goal misclassified as Tiny without replacing it", async () => {
     const redis = new TestRedis();
     await redis.hSet(subscriberGoalsKey, {

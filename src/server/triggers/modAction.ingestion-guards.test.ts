@@ -195,6 +195,7 @@ vi.mock('../utils/redditUtils', () => ({
 }));
 
 vi.mock('../core/appAccountHealth', () => ({
+  appAccountHealthStateKey: 'app_account_health_v1_state',
   subscriberGoalAppUsername: 'subscriber-goal',
   checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
@@ -235,7 +236,14 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: false });
   });
 
-  it.each(['removemoderator', 'setpermissions'])(
+  it.each([
+    'removemoderator',
+    'uninvitemoderator',
+    'setpermissions',
+    'addmoderator',
+    'invitemoderator',
+    'acceptmoderatorinvite',
+  ])(
     'checks app-account health after %s targets the app',
     async (action) => {
       mockContext.subredditName = 'ExampleSub';

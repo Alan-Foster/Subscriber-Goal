@@ -32,6 +32,7 @@ import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 import { isLinkId, type LinkId, type RedisClient } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
 import {
+  appAccountHealthStateKey,
   checkAppAccountHealth,
   subscriberGoalAppUsername,
 } from '../core/appAccountHealth';
@@ -1906,16 +1907,36 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   const subredditName = context.subredditName ?? currentSubreddit!.name;
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);
 
+  const moderatorHealthActions = new Set([
+    'removemoderator',
+    'uninvitemoderator',
+    'setpermissions',
+    'addmoderator',
+    'invitemoderator',
+    'acceptmoderatorinvite'
+  ]);
+  const targetUsername = event.targetUser?.name
+    ?.trim()
+    .replace(/^u\//i, '')
+    .toLowerCase();
+  const isModeratorHealthAction = moderatorHealthActions.has(event.action ?? '');
+  const storedAppUsername = isModeratorHealthAction
+    ? (await redis.hGet(appAccountHealthStateKey, 'appUsername'))
+        ?.trim()
+        .toLowerCase()
+    : undefined;
   if (
-    (event.action === 'removemoderator' ||
-      event.action === 'setpermissions') &&
-    event.targetUser?.name?.toLowerCase() === subscriberGoalAppUsername
+    isModeratorHealthAction &&
+    targetUsername === (storedAppUsername || subscriberGoalAppUsername)
   ) {
+    const healthSubreddit =
+      currentSubreddit ??
+      (!context.subredditId ? await reddit.getCurrentSubreddit() : undefined);
     await checkAppAccountHealth({
       reddit,
       redis,
       subredditName,
-      subredditId: context.subredditId ?? currentSubreddit?.id,
+      subredditId: context.subredditId ?? healthSubreddit?.id,
     });
   }
 

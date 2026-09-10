@@ -34,6 +34,8 @@ import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
+import { processDueAppRepair } from "../core/appRepair";
 
 async function cleanupInactivePost(
   postId: string,
@@ -66,6 +68,21 @@ export async function onPostsUpdaterJob(): Promise<void> {
     } catch (error) {
       logDiagnostic("error", "scheduler_task_failed", { workflow: "community_post_activity_backfill" }, error);
     }
+  }
+  try {
+    await processDueAppAccountHealthCheck({ reddit, redis });
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "app_account_health" },
+      error,
+    );
+  }
+  try {
+    await processDueAppRepair({ reddit, redis });
+  } catch (error) {
+    logDiagnostic("error", "scheduler_task_failed", { workflow: "app_repair" }, error);
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
   if (

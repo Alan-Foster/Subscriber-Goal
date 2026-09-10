@@ -30,6 +30,10 @@ export type AutoCreateNextGoalSummary = {
   exhausted: number;
 };
 
+export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
+export const autoCreateNextGoalSuccessorsKey = "auto_create_next_goal_v1_successors";
+const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
+
 export async function processDueAutoCreateNextGoals({
   reddit,
   redis,
@@ -52,6 +56,9 @@ export async function processDueAutoCreateNextGoals({
   };
 
   for (const sourcePostId of duePostIds) {
+    const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
+    const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+    let acquired = false;
     try {
       if (!isLinkId(sourcePostId)) {
         summary.skipped += 1;
@@ -59,6 +66,26 @@ export async function processDueAutoCreateNextGoals({
         console.info(
           `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=invalid_post_id`,
         );
+        continue;
+      }
+
+      await redis.set(lockKey, lockToken, {
+        nx: true,
+        expiration: new Date(nowMs + autoCreateNextGoalLockTtlMs),
+      });
+      acquired = (await redis.get(lockKey)) === lockToken;
+      if (!acquired) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const existingSuccessor = await redis.hGet(
+        autoCreateNextGoalSuccessorsKey,
+        sourcePostId,
+      );
+      if (existingSuccessor && isLinkId(existingSuccessor)) {
+        summary.skipped += 1;
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
         continue;
       }
 
@@ -127,6 +154,7 @@ export async function processDueAutoCreateNextGoals({
             ? { afterSubscribePreset: sourceGoalData.afterSubscribePreset }
             : {}),
           cancelPendingAutoCreateGoals: false,
+          operationId: `auto-next:${sourcePostId}`,
         },
       });
       if (stickyResult.status === "not_pinned") {
@@ -144,6 +172,9 @@ export async function processDueAutoCreateNextGoals({
           errorMessage: stickyResult.errorMessage,
         });
       }
+      await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+        [sourcePostId]: post.id,
+      });
       try {
         await cancelAllAutoCreateNextGoals(redis);
       } catch (cancelError) {
@@ -196,6 +227,10 @@ export async function processDueAutoCreateNextGoals({
           { workflow: "auto_create_next_goal", phase: "terminal", postId: sourcePostId, failureCount: retry.failureCount },
           error,
         );
+      }
+    } finally {
+      if (acquired && (await redis.get(lockKey)) === lockToken) {
+        await redis.del(lockKey);
       }
     }
   }
