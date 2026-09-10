@@ -33,6 +33,10 @@ vi.mock("../hooks/useSubGoal", () => ({
   }),
 }));
 
+vi.mock("../app/notificationFeatureFlags", () => ({
+  NOTIFICATION_SETTINGS_ENTRY_ENABLED: true,
+}));
+
 import { tinySubscriptionConfirmationDurationMs } from "../app/components/TinySubscriptionConfirmation";
 import { tinySubscriptionConfirmationPhaseDurationMs } from "../app/components/TinySubscriptionConfirmation";
 import { tinyViewTransitionDurationMs } from "../app/components/TinyViewTransition";

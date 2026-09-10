@@ -42,6 +42,7 @@ describe("TopButtons", () => {
         onVisitPromoSubPressed={vi.fn()}
         promoSubreddit="SubGoal"
         language="en"
+        notificationsEntryEnabled
       />,
     );
     expect(html).toContain("absolute left-4 top-4");
@@ -58,9 +59,37 @@ describe("TopButtons", () => {
         onVisitPromoSubPressed={vi.fn()}
         promoSubreddit="SubGoal"
         language="en"
+        notificationsEntryEnabled
       />,
     );
     expect(html).toContain("absolute left-full");
     expect(html).toContain("group-hover:opacity-100");
   });
+
+  it.each([
+    ["regular", false],
+    ["short", false],
+    ["tiny", true],
+    ["cta", true],
+  ])(
+    "hides the notification entry on %s posts by default",
+    (_size, compact) => {
+      const html = renderToStaticMarkup(
+        <TopButtons
+          revealTextOnInteraction={compact}
+          onNotificationsPressed={vi.fn()}
+          notificationLabel="Notifications"
+          onVisitPromoSubPressed={vi.fn()}
+          promoSubreddit="SubGoal"
+          language="en"
+        />,
+      );
+
+      expect(html).not.toContain('aria-label="Notifications"');
+      expect(html).not.toContain("data-notification-bell-state");
+      expect(html).not.toContain("absolute left-4 top-4");
+      expect(html).not.toContain(">Notifications<");
+      expect(html.match(/<button/g)).toHaveLength(1);
+    },
+  );
 });

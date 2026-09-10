@@ -74,6 +74,10 @@ vi.mock("../hooks/useSubGoal", () => ({
   }),
 }));
 
+vi.mock("./notificationFeatureFlags", () => ({
+  NOTIFICATION_SETTINGS_ENTRY_ENABLED: true,
+}));
+
 import { App } from "./App";
 
 describe("App", () => {

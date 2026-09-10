@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { NotificationBellIcon } from "./NotificationBellIcon";
+import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../notificationFeatureFlags";
 
 type TopButtonsProps = {
   onVisitPromoSubPressed: () => void;
@@ -10,6 +11,7 @@ type TopButtonsProps = {
   promoSubreddit: string;
   language: SubGoalLanguage;
   revealTextOnInteraction?: boolean;
+  notificationsEntryEnabled?: boolean;
 };
 
 let hasAnimatedOnce = false;
@@ -21,6 +23,7 @@ export const TopButtons = ({
   promoSubreddit,
   language,
   revealTextOnInteraction = false,
+  notificationsEntryEnabled = NOTIFICATION_SETTINGS_ENTRY_ENABLED,
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
   const messages = getSubGoalPostMessages(language);
@@ -33,7 +36,7 @@ export const TopButtons = ({
 
   return (
     <>
-      {onNotificationsPressed ? (
+      {notificationsEntryEnabled && onNotificationsPressed ? (
         <div className="absolute left-4 top-4 z-20">
           <button
             type="button"
