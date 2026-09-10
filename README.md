@@ -51,7 +51,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 
 ## Changelog
-- 1.9.1 - Various bugfixes. Fixed CTA Confetti not firing; added interface setup for SubGoal Milestone Alerts. Devvit 0.14.3
+- 2.0.1 - Various fixes and data hardening. Fixed CTA Confetti not firing. Added interface setup for SubGoal Milestone Alerts. Devvit 0.14.3
 - 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals. Improved ReadMe Images.
 - 1.8.3 - Fixed error-catching for failed JSON RPC Error on subscribe with retry system. More robust console error logging.
 - 1.8.1 - Default non-sub button is now "Create a New Post". Added a CTA button option with no subscriber feature.
