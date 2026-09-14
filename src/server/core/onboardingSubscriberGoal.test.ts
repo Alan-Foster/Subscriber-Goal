@@ -30,12 +30,17 @@ vi.mock("../utils/stickyFailureNotifications", () => ({
 import {
   findExistingSubscriberGoal,
   initializeOnboardingSubscriberGoal,
+  onboardingMinimumSubscriberCount,
   onboardingSubscriberGoalDelayMs,
+  onboardingUpgradeBaseDelayMs,
+  onboardingUpgradeStaggerMaxMinutes,
+  onboardingUpgradeStaggerMinMinutes,
   onboardingTinySubscriberThreshold,
   onboardingRecentPostPageSize,
   onboardingRecentPostScanLimit,
   onboardingSubscriberGoalStateKey,
   processDueOnboardingSubscriberGoal,
+  selectOnboardingUpgradeStaggerMinutes,
 } from "./onboardingSubscriberGoal";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
 
@@ -200,10 +205,60 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + 100 + onboardingSubscriberGoalDelayMs - 1,
+        nowMs: nowMs + onboardingSubscriberGoalDelayMs - 1,
       }),
     ).resolves.toMatchObject({ status: "not_due" });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("selects inclusive upgrade stagger boundaries", () => {
+    expect(selectOnboardingUpgradeStaggerMinutes(0)).toBe(
+      onboardingUpgradeStaggerMinMinutes,
+    );
+    expect(selectOnboardingUpgradeStaggerMinutes(1)).toBe(
+      onboardingUpgradeStaggerMaxMinutes,
+    );
+  });
+
+  it("persists one upgrade stagger without redrawing it", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const first = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    const staggerMinutes = Number(first.staggerMinutes);
+
+    expect(staggerMinutes).toBeGreaterThanOrEqual(
+      onboardingUpgradeStaggerMinMinutes,
+    );
+    expect(staggerMinutes).toBeLessThanOrEqual(
+      onboardingUpgradeStaggerMaxMinutes,
+    );
+    expect(Number(first.nextRunAt)).toBe(
+      nowMs + onboardingUpgradeBaseDelayMs + staggerMinutes * 60 * 1000,
+    );
+
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 60_000,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toEqual(first);
+  });
+
+  it("keeps the existing install schedule without a stagger", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
+      staggerMinutes: "",
+    });
   });
 
   it("trusts an existing moderator-authored tracked goal before suppressing creation", async () => {
@@ -220,12 +275,13 @@ describe("onboarding subscriber goal", () => {
       createdAt: new Date(nowMs),
     });
 
+    const upgradeState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
     await expect(
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: Number(upgradeState.nextRunAt),
       }),
     ).resolves.toMatchObject({
       status: "existing",
@@ -272,6 +328,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "upgrade",
       nowMs,
     });
+    const upgradeState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
     reddit = createReddit();
     await redis.hSet("subscriber_goals", { t3_legacy_goal: "100" });
     reddit.getNewPosts.mockReturnValue({
@@ -280,7 +337,7 @@ describe("onboarding subscriber goal", () => {
           id: "t3_legacy",
           authorName: "subscriber-goal",
           subredditId: "t5_example",
-          createdAt: new Date(nowMs + onboardingSubscriberGoalDelayMs - 10_000),
+          createdAt: new Date(Number(upgradeState.nextRunAt) - 10_000),
         },
       ]),
     });
@@ -289,7 +346,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: Number(upgradeState.nextRunAt),
       }),
     ).resolves.toMatchObject({
       status: "existing",
@@ -480,6 +537,43 @@ describe("onboarding subscriber goal", () => {
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
   });
+
+  it.each([0, 3, onboardingMinimumSubscriberCount - 1])(
+    "does not automatically create an onboarding goal at %i subscribers",
+    async (numberOfSubscribers) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers,
+        type: "public",
+        isNsfw: false,
+      });
+
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        }),
+      ).resolves.toMatchObject({
+        status: "ineligible",
+        eligibilitySubscriberCount: numberOfSubscribers,
+      });
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      await expect(
+        redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).resolves.toMatchObject({
+        status: "complete",
+        resultStatus: "ineligible",
+        eligibilitySubscriberCount: String(numberOfSubscribers),
+      });
+    },
+  );
 
   it("uses the subreddit language for an automatically created onboarding goal", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {

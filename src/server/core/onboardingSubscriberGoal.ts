@@ -44,11 +44,16 @@ import { createSubscriberGoal } from "./createSubscriberGoal";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 
 export const onboardingSubscriberGoalStateKey =
-  "onboarding_subscriber_goal_v2_state";
+  "onboarding_subscriber_goal_v3_state";
 export const onboardingSubscriberGoalLockKey =
-  "onboarding_subscriber_goal_v2_lock";
-export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v2";
+  "onboarding_subscriber_goal_v3_lock";
+export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v3";
 export const onboardingSubscriberGoalDelayMs = (23 * 60 + 59) * 60 * 1000;
+export const onboardingUpgradeBaseDelayMs = 24 * 60 * 60 * 1000;
+export const onboardingUpgradeStaggerMinMinutes = 1;
+export const onboardingUpgradeStaggerMaxMinutes = 1_000;
+export const onboardingUpgradeWaveEnabled = true;
+export const onboardingMinimumSubscriberCount = 50;
 export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
@@ -58,7 +63,7 @@ export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
 
 type OnboardingStatus = "pending" | "processing" | "complete";
 
-type OnboardingResultStatus = "created" | "existing" | "failed";
+type OnboardingResultStatus = "created" | "existing" | "ineligible" | "failed";
 const onboardingRetryBaseMs = 5 * 60 * 1000;
 const onboardingRetryMaxMs = 60 * 60 * 1000;
 
@@ -89,6 +94,8 @@ export type OnboardingSubscriberGoalState = {
   nextRunAt: number;
   armedAt: number;
   lifecycleSource: OnboardingLifecycleSource;
+  staggerMinutes?: number;
+  eligibilitySubscriberCount?: number;
   startedAt?: number;
   completedAt?: number;
   postId?: string;
@@ -99,7 +106,13 @@ export type OnboardingSubscriberGoalState = {
 };
 
 export type OnboardingSubscriberGoalSummary = {
-  status: "not_due" | "created" | "existing" | "failed" | "complete";
+  status:
+    | "not_due"
+    | "created"
+    | "existing"
+    | "ineligible"
+    | "failed"
+    | "complete";
   registeredInspected: number;
   trackedInspected: number;
   queuedInspected: number;
@@ -112,6 +125,8 @@ export type OnboardingSubscriberGoalSummary = {
   postId?: string;
   existingSource?: OnboardingExistingSource;
   lifecycleSource?: OnboardingLifecycleSource;
+  staggerMinutes?: number;
+  eligibilitySubscriberCount?: number;
   errorMessage?: string;
 };
 
@@ -154,19 +169,65 @@ export async function initializeOnboardingSubscriberGoal(
     await redis.hGetAll(onboardingSubscriberGoalStateKey),
   );
   if (existing) return;
+  const staggerMinutes =
+    lifecycleSource === "upgrade"
+      ? selectOnboardingUpgradeStaggerMinutes()
+      : undefined;
+  const nextRunAt =
+    lifecycleSource === "upgrade"
+      ? nowMs +
+        onboardingUpgradeBaseDelayMs +
+        (staggerMinutes ?? onboardingUpgradeStaggerMinMinutes) * 60 * 1000
+      : nowMs + onboardingSubscriberGoalDelayMs;
   const state: OnboardingSubscriberGoalState = {
     version: onboardingSubscriberGoalVersion,
     status: "pending",
     armedAt: nowMs,
-    nextRunAt: nowMs + onboardingSubscriberGoalDelayMs,
+    nextRunAt,
     lifecycleSource,
+    ...(staggerMinutes !== undefined ? { staggerMinutes } : {}),
   };
   await redis.hSet(
     onboardingSubscriberGoalStateKey,
     serializeOnboardingState(state),
   );
   console.info(
-    `[onboardingSubscriberGoal] initialized: status=${state.status} nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} version=${state.version}`,
+    `[onboardingSubscriberGoal] initialized: status=${state.status} nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} staggerMinutes=${state.staggerMinutes ?? "none"} version=${state.version}`,
+  );
+}
+
+export function selectOnboardingUpgradeStaggerMinutes(
+  randomValue = Math.random(),
+): number {
+  const normalized = Math.min(Math.max(randomValue, 0), 1 - Number.EPSILON);
+  return (
+    Math.floor(
+      normalized *
+        (onboardingUpgradeStaggerMaxMinutes -
+          onboardingUpgradeStaggerMinMinutes +
+          1),
+    ) + onboardingUpgradeStaggerMinMinutes
+  );
+}
+
+export async function markOnboardingSubscriberGoalIneligible(
+  redis: RedisClient,
+  subscriberCount: number,
+  nowMs = Date.now(),
+): Promise<void> {
+  const state = parseOnboardingState(
+    await redis.hGetAll(onboardingSubscriberGoalStateKey),
+  );
+  if (!state || state.status === "complete") return;
+  await saveOnboardingState(redis, {
+    ...state,
+    status: "complete",
+    completedAt: nowMs,
+    resultStatus: "ineligible",
+    eligibilitySubscriberCount: subscriberCount,
+  });
+  console.info(
+    `[onboardingSubscriberGoal] complete: status=ineligible subscriberCount=${subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} source=${state.lifecycleSource} staggerMinutes=${state.staggerMinutes ?? "none"}`,
   );
 }
 
@@ -197,6 +258,12 @@ export async function processDueOnboardingSubscriberGoal({
       lifecycleSource: state.lifecycleSource,
       ...(state.existingSource ? { existingSource: state.existingSource } : {}),
       ...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
+      ...(state.staggerMinutes !== undefined
+        ? { staggerMinutes: state.staggerMinutes }
+        : {}),
+      ...(state.eligibilitySubscriberCount !== undefined
+        ? { eligibilitySubscriberCount: state.eligibilitySubscriberCount }
+        : {}),
     };
   }
   if (nowMs < state.nextRunAt) {
@@ -225,7 +292,7 @@ export async function processDueOnboardingSubscriberGoal({
     }
     activeState = reloaded;
     console.info(
-      `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} status=${reloaded.status}`,
+      `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} staggerMinutes=${reloaded.staggerMinutes ?? "none"} status=${reloaded.status}`,
     );
     await saveOnboardingState(redis, {
       ...reloaded,
@@ -255,7 +322,7 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus: "existing",
       });
       console.info(
-        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} ${formatDetectionDiagnostics(inspected)}`,
+        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} source=${reloaded.lifecycleSource} staggerMinutes=${reloaded.staggerMinutes ?? "none"} ${formatDetectionDiagnostics(inspected)}`,
       );
       return {
         status: "existing",
@@ -267,6 +334,22 @@ export async function processDueOnboardingSubscriberGoal({
     }
 
     const subreddit = await reddit.getCurrentSubreddit();
+    if (subreddit.numberOfSubscribers < onboardingMinimumSubscriberCount) {
+      await markOnboardingSubscriberGoalIneligible(
+        redis,
+        subreddit.numberOfSubscribers,
+        nowMs,
+      );
+      return {
+        status: "ineligible",
+        lifecycleSource: reloaded.lifecycleSource,
+        ...(reloaded.staggerMinutes !== undefined
+          ? { staggerMinutes: reloaded.staggerMinutes }
+          : {}),
+        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
+        ...inspected,
+      };
+    }
     const crosspost =
       (subreddit as { isNsfw?: boolean }).isNsfw !== true &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
@@ -296,7 +379,7 @@ export async function processDueOnboardingSubscriberGoal({
           subredditType: subreddit.type,
         }),
         afterSubscribePreset,
-        operationId: `onboarding:${reloaded.armedAt}`,
+        operationId: `onboarding:${reloaded.version}:${reloaded.armedAt}`,
       },
     });
     if (stickyResult.status === "not_pinned") {
@@ -330,7 +413,7 @@ export async function processDueOnboardingSubscriberGoal({
       resultStatus: "created",
     });
     console.info(
-      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} ${formatDetectionDiagnostics(inspected)}`,
+      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} source=${reloaded.lifecycleSource} staggerMinutes=${reloaded.staggerMinutes ?? "none"} ${formatDetectionDiagnostics(inspected)}`,
     );
     return {
       status: "created",
@@ -355,6 +438,19 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus: "failed",
         errorMessage,
       });
+      logDiagnostic(
+        "warn",
+        "onboarding_goal_retry_scheduled",
+        {
+          workflow: "onboarding_subscriber_goal",
+          phase: "retry",
+          lifecycleSource: activeState.lifecycleSource,
+          staggerMinutes: activeState.staggerMinutes,
+          attempts,
+          nextRunAt: nowMs + retryDelayMs,
+        },
+        error,
+      );
     } catch (stateError) {
       logDiagnostic(
         "error",
@@ -369,7 +465,12 @@ export async function processDueOnboardingSubscriberGoal({
     logDiagnostic(
       "error",
       "onboarding_goal_failed",
-      { workflow: "onboarding_subscriber_goal", phase: "execution" },
+      {
+        workflow: "onboarding_subscriber_goal",
+        phase: "execution",
+        lifecycleSource: activeState.lifecycleSource,
+        staggerMinutes: activeState.staggerMinutes,
+      },
       error,
     );
     return {
@@ -684,6 +785,16 @@ function parseOnboardingState(
         ? lifecycleSource
         : "unknown",
   };
+  const staggerMinutes = raw.staggerMinutes
+    ? parseStateNumber(raw.staggerMinutes)
+    : undefined;
+  if (staggerMinutes !== undefined) state.staggerMinutes = staggerMinutes;
+  const eligibilitySubscriberCount = raw.eligibilitySubscriberCount
+    ? parseStateNumber(raw.eligibilitySubscriberCount)
+    : undefined;
+  if (eligibilitySubscriberCount !== undefined) {
+    state.eligibilitySubscriberCount = eligibilitySubscriberCount;
+  }
   const startedAt = parseStateNumber(raw.startedAt);
   const completedAt = parseStateNumber(raw.completedAt);
   if (startedAt !== undefined) state.startedAt = startedAt;
@@ -695,6 +806,7 @@ function parseOnboardingState(
   if (
     raw.resultStatus === "created" ||
     raw.resultStatus === "existing" ||
+    raw.resultStatus === "ineligible" ||
     raw.resultStatus === "failed"
   ) {
     state.resultStatus = raw.resultStatus;
@@ -726,6 +838,8 @@ function serializeOnboardingState(
     nextRunAt: String(state.nextRunAt),
     armedAt: String(state.armedAt),
     lifecycleSource: state.lifecycleSource,
+    staggerMinutes: String(state.staggerMinutes ?? ""),
+    eligibilitySubscriberCount: String(state.eligibilitySubscriberCount ?? ""),
     startedAt: String(state.startedAt ?? 0),
     completedAt: String(state.completedAt ?? 0),
     postId: state.postId ?? "",

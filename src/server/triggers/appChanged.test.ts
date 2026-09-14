@@ -54,6 +54,7 @@ vi.mock("../data/subGoalData", () => ({
 vi.mock("../core/onboardingSubscriberGoal", () => ({
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
+  onboardingUpgradeWaveEnabled: true,
 }));
 
 vi.mock("../core/onboardingReminder", () => ({
@@ -210,13 +211,15 @@ describe("onAppChanged", () => {
     ).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
-    expect(hoisted.initializeLegacyAfterSubscribeActionMigration).not.toHaveBeenCalled();
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).not.toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
   });
 
-  it("initializes onboarding only for installations", async () => {
+  it("initializes onboarding for installations", async () => {
     hoisted.context.subredditName = "SubGoal";
 
     await onAppChanged({
@@ -241,13 +244,19 @@ describe("onAppChanged", () => {
     expect(hoisted.reconcileSubscriberGoalStickies).not.toHaveBeenCalled();
   });
 
-  it("preserves onboarding state during upgrades", async () => {
+  it("initializes release-scoped onboarding during upgrades", async () => {
     hoisted.context.subredditName = "SubGoal";
 
     await onAppChanged({ lifecycleSource: "upgrade" });
 
-    expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "upgrade" },
+    );
+    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+      expect.anything(),
+      { lifecycleSource: "upgrade" },
+    );
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,

@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   findExistingSubscriberGoal: vi.fn(),
+  markOnboardingSubscriberGoalIneligible: vi.fn(),
 }));
 
 vi.mock("./onboardingSubscriberGoal", () => ({
   findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
   getDetectionDiagnosticsFromError: () => undefined,
+  markOnboardingSubscriberGoalIneligible:
+    hoisted.markOnboardingSubscriberGoalIneligible,
+  onboardingMinimumSubscriberCount: 50,
 }));
 
 import {
@@ -57,6 +61,7 @@ function createReddit() {
     getCurrentSubreddit: vi.fn().mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
+      numberOfSubscribers: 91,
     }),
     modMail: { createModNotification: vi.fn().mockResolvedValue(undefined) },
   };
@@ -70,11 +75,74 @@ describe("onboarding reminder", () => {
     redis = new InMemoryRedis();
     reddit = createReddit();
     hoisted.findExistingSubscriberGoal.mockReset();
+    hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
+    hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
     hoisted.findExistingSubscriberGoal.mockResolvedValue({
       trackedInspected: 0,
       pinnedInspected: 0,
       recentInspected: 0,
     });
+  });
+
+  it("builds an accurate staggered upgrade warning", () => {
+    const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
+
+    expect(message.bodyMarkdown).toContain("no earlier than 24 hours");
+    expect(message.bodyMarkdown).toContain("following 1,000 minutes");
+    expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
+  });
+
+  it.each([0, 3, 49])(
+    "sends no warning and cancels automatic creation at %i subscribers",
+    async (numberOfSubscribers) => {
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers,
+      });
+      await scheduleOnboardingReminder(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      });
+
+      await expect(
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + onboardingReminderDelayMs,
+        }),
+      ).resolves.toMatchObject({
+        status: "ineligible",
+        eligibilitySubscriberCount: numberOfSubscribers,
+      });
+      expect(
+        hoisted.markOnboardingSubscriberGoalIneligible,
+      ).toHaveBeenCalledWith(
+        expect.anything(),
+        numberOfSubscribers,
+        nowMs + onboardingReminderDelayMs,
+      );
+      expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a community with exactly 50 subscribers eligible", async () => {
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 50,
+    });
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
   it("builds the requested moderator-facing introduction", () => {

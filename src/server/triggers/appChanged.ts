@@ -5,7 +5,10 @@ import {
   clearLegacySubscriberErasureTombstones,
   initializeSubscriberStatsMigration,
 } from "../data/subscriberStats";
-import { initializeOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
+import {
+  initializeOnboardingSubscriberGoal,
+  onboardingUpgradeWaveEnabled,
+} from "../core/onboardingSubscriberGoal";
 import { scheduleOnboardingReminder } from "../core/onboardingReminder";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
@@ -68,7 +71,10 @@ export async function onAppChanged({
   await runPhase("subscriber_stats_migration", () =>
     initializeSubscriberStatsMigration(redis),
   );
-  if (lifecycleSource === "install") {
+  if (
+    lifecycleSource === "install" ||
+    (lifecycleSource === "upgrade" && onboardingUpgradeWaveEnabled)
+  ) {
     await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
     await scheduleOnboardingReminder(redis, { lifecycleSource });
   }
