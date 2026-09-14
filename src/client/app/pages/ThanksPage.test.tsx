@@ -80,7 +80,7 @@ describe("ThanksPage", () => {
     expect(html).toContain("sg-subscribe-attention");
   });
 
-  it("shows a themed goal notification prompt on the left", () => {
+  it("shows a large themed notification action in the button row", () => {
     const html = renderToStaticMarkup(
       <ThanksPage
         state={{ ...baseState, goal: 10_000 }}
@@ -89,25 +89,26 @@ describe("ThanksPage", () => {
       />,
     );
 
-    expect(html).toContain('data-goal-notification-state="available"');
+    expect(html).toContain('data-goal-notification-action="true"');
     expect(html).toContain('data-sg-theme="red"');
     expect(html).toContain("Get Notified at 10k");
     expect(html).toContain("sg-subscribe-attention");
-    expect(html).toContain("absolute left-4 top-4");
+    expect(html).not.toContain("You’ll be notified");
   });
 
-  it("replaces the prompt with a stable confirmation when enabled", () => {
+  it("disables the notification action while submitting", () => {
     const html = renderToStaticMarkup(
       <ThanksPage
         state={baseState}
         {...commonProps}
-        notificationEnabled
+        notificationSubmitting
         onNotificationOptIn={vi.fn()}
       />,
     );
 
-    expect(html).toContain('data-goal-notification-state="confirmed"');
-    expect(html).toContain("You’ll be notified at 10");
+    expect(html).toContain('data-goal-notification-action="true"');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-busy="true"');
     expect(html).not.toContain("sg-subscribe-attention");
   });
 
@@ -120,7 +121,7 @@ describe("ThanksPage", () => {
       />,
     );
 
-    expect(html).not.toContain("data-goal-notification-state");
+    expect(html).not.toContain("data-goal-notification-action");
     expect(html).not.toContain("Get Notified");
   });
 
@@ -140,11 +141,11 @@ describe("ThanksPage", () => {
     expect(html).not.toContain("subscribers in the community");
     expect(html).not.toContain("Return to Previous Page");
     expect(html).not.toContain("Get Notified");
-    expect(html).not.toContain("data-goal-notification-state");
+    expect(html).not.toContain("data-goal-notification-action");
     expect(html).toContain("px-4 py-3");
   });
 
-  it("shows a valid CTA beside the full-size Return button", () => {
+  it("replaces the full-size after-subscribe CTA with notification opt-in", () => {
     const html = renderToStaticMarkup(
       <ThanksPage
         state={{
@@ -157,12 +158,14 @@ describe("ThanksPage", () => {
           },
         }}
         {...commonProps}
+        onNotificationOptIn={vi.fn()}
       />,
     );
 
-    expect(html).toContain("Join the Discord");
+    expect(html).not.toContain("Join the Discord");
+    expect(html).toContain("Get Notified at 10");
     expect(html).toContain("Return to Previous Page");
-    expect(html).toContain('data-sg-theme="pink"');
+    expect(html).toContain('data-sg-theme="red"');
     expect(html).toContain("sg-subscribe-attention");
   });
 

@@ -9,18 +9,16 @@ import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
-import { GoalNotificationPrompt } from "../components/GoalNotificationPrompt";
+import { GoalNotificationButton } from "../components/GoalNotificationButton";
 
 type ThanksPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
-  notificationEnabled?: boolean;
-  notificationLoading?: boolean;
   notificationSubmitting?: boolean;
   notificationError?: string | null;
-  onNotificationOptIn?: () => void;
+  onNotificationOptIn?: () => Promise<boolean>;
 };
 
 export const ThanksPage = ({
@@ -28,8 +26,6 @@ export const ThanksPage = ({
   onReturn,
   onVisitPromoSub,
   onAfterSubscribeNavigate,
-  notificationEnabled = false,
-  notificationLoading = false,
   notificationSubmitting = false,
   notificationError = null,
   onNotificationOptIn,
@@ -74,22 +70,6 @@ export const ThanksPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {state.goal !== null && onNotificationOptIn ? (
-        <GoalNotificationPrompt
-          colorTheme={state.colorTheme}
-          enabled={notificationEnabled}
-          loading={notificationLoading}
-          submitting={notificationSubmitting}
-          error={notificationError}
-          prompt={notificationMessages.goalPrompt({
-            goalText: formatSubscriberCount(state.goal),
-          })}
-          confirmation={notificationMessages.goalConfirmation({
-            goalText: formatSubscriberCount(state.goal),
-          })}
-          onOptIn={onNotificationOptIn}
-        />
-      ) : null}
       {isShort ? null : <SubredditIcon iconUrl={state.subreddit.icon} />}
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
@@ -99,13 +79,15 @@ export const ThanksPage = ({
         })}
       </div>
       <div className="flex items-center justify-center gap-3">
-        {state.subscribed && state.afterSubscribeAction.type !== "disabled" ? (
-          <AfterSubscribeButton
-            action={state.afterSubscribeAction}
-            analyticsContext={getGoalJourneyContext(state)}
-            language={state.language}
-            onNavigate={onAfterSubscribeNavigate}
-            trackClicks={state.trackCtaClicks === true}
+        {state.goal !== null && onNotificationOptIn ? (
+          <GoalNotificationButton
+            colorTheme={state.colorTheme}
+            label={notificationMessages.goalPrompt({
+              goalText: formatSubscriberCount(state.goal),
+            })}
+            submitting={notificationSubmitting}
+            error={notificationError}
+            onOptIn={onNotificationOptIn}
           />
         ) : null}
         <button

@@ -231,7 +231,8 @@ describe("App", () => {
     container.remove();
   });
 
-  it("opts in from the Thanks page and confirms the goal notification", async () => {
+  it("opts in explicitly, confirms briefly, then returns to the goal", async () => {
+    vi.useFakeTimers();
     const subscribedState = {
       ...hoisted.createState(),
       subscribed: true,
@@ -250,21 +251,6 @@ describe("App", () => {
       error: null,
       status: 200,
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              type: "notification-settings",
-              authenticated: true,
-              enabled: false,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
-        ),
-      ),
-    );
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -276,16 +262,16 @@ describe("App", () => {
     await act(async () => {
       subscribeButton?.click();
       await Promise.resolve();
-      await Promise.resolve();
     });
 
-    const prompt = container.querySelector<HTMLButtonElement>(
-      '[data-goal-notification-state="available"] button',
+    const notificationButton = container.querySelector<HTMLButtonElement>(
+      '[data-goal-notification-action="true"] button',
     );
-    expect(prompt?.textContent).toContain("Get Notified at 1000");
+    expect(notificationButton?.textContent).toContain("Get Notified at 1000");
+    expect(hoisted.requestSubscribeJson).not.toHaveBeenCalled();
     await act(async () => {
-      prompt?.click();
-      prompt?.click();
+      notificationButton?.click();
+      notificationButton?.click();
       await Promise.resolve();
     });
 
@@ -293,14 +279,101 @@ describe("App", () => {
     expect(
       JSON.parse(String(hoisted.requestSubscribeJson.mock.calls[0]?.[1]?.body)),
     ).toEqual({ enabled: true });
-    expect(container.textContent).toContain("You’ll be notified at 1000");
     expect(
-      container.querySelector('[data-goal-notification-state="confirmed"]'),
+      container.querySelector('[data-notification-confirmation="true"]'),
     ).not.toBeNull();
-    expect(hoisted.showToast).toHaveBeenCalledWith({
+    expect(container.textContent).toContain("Thanks for Subscribing!");
+    expect(container.textContent).toContain("Notifications Enabled!");
+    expect(container.textContent).toContain(
+      "You’ll be notified when the goal is met.",
+    );
+    expect(hoisted.showToast).not.toHaveBeenCalledWith({
       text: "Notifications enabled.",
       appearance: "success",
     });
+
+    await act(async () => vi.advanceTimersByTime(1749));
+    expect(
+      container.querySelector('[data-notification-confirmation="true"]'),
+    ).not.toBeNull();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(
+      container.querySelector('[data-notification-confirmation="true"]'),
+    ).toBeNull();
+    expect(container.textContent).toContain(
+      "Show my username when I subscribe",
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("cleans up the notification confirmation timer when unmounted", async () => {
+    vi.useFakeTimers();
+    hoisted.subscribe.mockResolvedValue({
+      state: { ...hoisted.createState(), subscribed: true },
+      error: null,
+    });
+    hoisted.requestSubscribeJson.mockResolvedValue({
+      data: {
+        type: "notification-settings",
+        authenticated: true,
+        enabled: true,
+      },
+      error: null,
+      status: 200,
+    });
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(window, "clearTimeout");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => subscribeButton?.click());
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-goal-notification-action="true"] button',
+        )
+        ?.click();
+      await Promise.resolve();
+    });
+    const confirmationTimerId = setTimeoutSpy.mock.results.at(-1)?.value;
+    clearTimeoutSpy.mockClear();
+
+    await act(async () => root.unmount());
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(confirmationTimerId);
+    container.remove();
+  });
+
+  it("returns from Thanks without changing notification settings", async () => {
+    hoisted.subscribe.mockResolvedValue({
+      state: { ...hoisted.createState(), subscribed: true },
+      error: null,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => subscribeButton?.click());
+    const returnButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Return to Previous Page"),
+    );
+    await act(async () => returnButton?.click());
+
+    expect(hoisted.requestSubscribeJson).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(
+      "Show my username when I subscribe",
+    );
 
     await act(async () => root.unmount());
     container.remove();
@@ -316,21 +389,6 @@ describe("App", () => {
       error: "Notification settings could not be updated.",
       status: 503,
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(() =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              type: "notification-settings",
-              authenticated: true,
-              enabled: false,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          ),
-        ),
-      ),
-    );
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -342,23 +400,22 @@ describe("App", () => {
     await act(async () => {
       subscribeButton?.click();
       await Promise.resolve();
-      await Promise.resolve();
     });
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>(
-          '[data-goal-notification-state="available"] button',
+          '[data-goal-notification-action="true"] button',
         )
         ?.click();
       await Promise.resolve();
     });
 
     expect(
-      container.querySelector('[data-goal-notification-state="available"]'),
+      container.querySelector('[data-goal-notification-action="true"]'),
     ).not.toBeNull();
     expect(
       container
-        .querySelector('[data-goal-notification-state="available"] button')
+        .querySelector('[data-goal-notification-action="true"] button')
         ?.getAttribute("aria-invalid"),
     ).toBe("true");
     expect(hoisted.showToast).toHaveBeenCalledWith(

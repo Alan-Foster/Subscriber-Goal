@@ -1,5 +1,5 @@
 import { navigateTo, showToast } from "@devvit/web/client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
 import { useSubGoal } from "../hooks/useSubGoal";
@@ -29,12 +29,14 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { NotificationSettingsPage } from "./pages/NotificationSettingsPage";
 import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
+import { NotificationConfirmationPage } from "./pages/NotificationConfirmationPage";
 
 type PageName =
   | "subGoal"
   | "thanks"
   | "completed"
   | "tinyConfirmation"
+  | "notificationConfirmation"
   | "notifications";
 
 export const App = () => {
@@ -62,7 +64,7 @@ export const App = () => {
   const messages = getSubGoalPostMessages(state?.language);
   const notificationMessages = getNotificationMessages(state?.language);
   const notificationSettings = useNotificationSettings(
-    page === "notifications" || page === "thanks",
+    page === "notifications",
   );
   const readyReportedRef = useRef(false);
 
@@ -138,24 +140,34 @@ export const App = () => {
   const handleReturnFromNotifications = () => {
     setPage(previousPageRef.current);
   };
-  const updateNotifications = async (enabled: boolean) => {
+  const updateNotifications = async (
+    enabled: boolean,
+    showSuccessToast = true,
+  ): Promise<boolean> => {
     const updated = await notificationSettings.update(enabled);
     if (!updated) {
       showToast(notificationMessages.updateError);
-      return;
+      return false;
     }
-    showToast({
-      text: enabled
-        ? notificationMessages.enabledToast
-        : notificationMessages.disabledToast,
-      appearance: "success",
-    });
+    if (showSuccessToast) {
+      showToast({
+        text: enabled
+          ? notificationMessages.enabledToast
+          : notificationMessages.disabledToast,
+        appearance: "success",
+      });
+    }
+    return true;
   };
   const handleToggleNotifications = (enabled: boolean) => {
     void updateNotifications(enabled);
   };
-  const handleNotificationOptIn = () => {
-    void updateNotifications(true);
+  const handleNotificationOptIn = async (): Promise<boolean> => {
+    const updated = await updateNotifications(true, false);
+    if (updated) {
+      setPage("notificationConfirmation");
+    }
+    return updated;
   };
 
   const performSubscribe = async () => {
@@ -234,7 +246,7 @@ export const App = () => {
     });
   };
 
-  const handleReturnToSubGoal = () => {
+  const handleReturnToSubGoal = useCallback(() => {
     if (!state || state.postHeight === "tiny" || state.postHeight === "cta") {
       return;
     }
@@ -248,11 +260,23 @@ export const App = () => {
     const username = effectiveShareUsername
       ? (state.user?.username ?? null)
       : null;
-    const message = messages.subscriberNotice({ username });
+    const message = getSubGoalPostMessages(state.language).subscriberNotice({
+      username,
+    });
     returnNoticeTimeoutRef.current = window.setTimeout(() => {
       showNotice(message);
     }, 80);
-  };
+  }, [shareUsername, showNotice, state]);
+
+  useEffect(() => {
+    if (page !== "notificationConfirmation") {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      handleReturnToSubGoal();
+    }, tinySubscriptionConfirmationPhaseDurationMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [handleReturnToSubGoal, page]);
 
   let content = null;
   if (state) {
@@ -299,11 +323,19 @@ export const App = () => {
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
-          notificationEnabled={notificationSettings.settings?.enabled ?? false}
-          notificationLoading={notificationSettings.loading}
           notificationSubmitting={notificationSettings.submitting}
           notificationError={notificationSettings.error}
           onNotificationOptIn={handleNotificationOptIn}
+        />
+      );
+    } else if (
+      page === "notificationConfirmation" &&
+      state.postHeight !== "tiny"
+    ) {
+      content = (
+        <NotificationConfirmationPage
+          state={state}
+          onVisitPromoSub={handleVisitPromo}
         />
       );
     } else if (page === "completed" && state.postHeight !== "tiny") {
@@ -353,7 +385,9 @@ export const App = () => {
     state?.subscribed === true &&
     state.afterSubscribeAction.type !== "disabled" &&
     page !== "completed" &&
-    page !== "tinyConfirmation"
+    page !== "tinyConfirmation" &&
+    page !== "thanks" &&
+    page !== "notificationConfirmation"
   ) {
     frameColorTheme = state.afterSubscribeAction.colorTheme;
   }
