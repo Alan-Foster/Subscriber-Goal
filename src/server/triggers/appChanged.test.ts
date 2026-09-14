@@ -104,9 +104,14 @@ vi.mock("../core/appRepair", () => ({
   scheduleAppRepair: hoisted.scheduleAppRepair,
 }));
 
-import { onAppChanged } from "./appChanged";
+import { onAppChanged, shouldInitializeReleaseOnboarding } from "./appChanged";
 
 describe("onAppChanged", () => {
+  it("uses the release flag only for new upgrade-wave initialization", () => {
+    expect(shouldInitializeReleaseOnboarding("upgrade", true)).toBe(true);
+    expect(shouldInitializeReleaseOnboarding("upgrade", false)).toBe(false);
+    expect(shouldInitializeReleaseOnboarding("install", false)).toBe(true);
+  });
   beforeEach(() => {
     hoisted.context.subredditName = undefined;
     hoisted.context.subredditId = undefined;

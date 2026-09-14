@@ -29,10 +29,9 @@ vi.mock("../utils/stickyFailureNotifications", () => ({
 
 import {
   findExistingSubscriberGoal,
-  initializeOnboardingSubscriberGoal,
+  initializeOnboardingSubscriberGoal as initializeRawOnboardingSubscriberGoal,
   onboardingMinimumSubscriberCount,
   onboardingSubscriberGoalDelayMs,
-  onboardingUpgradeBaseDelayMs,
   onboardingUpgradeStaggerMaxMinutes,
   onboardingUpgradeStaggerMinMinutes,
   onboardingTinySubscriberThreshold,
@@ -40,8 +39,14 @@ import {
   onboardingRecentPostScanLimit,
   onboardingSubscriberGoalStateKey,
   processDueOnboardingSubscriberGoal,
+  scheduleOnboardingSubscriberGoalAfterWarning,
   selectOnboardingUpgradeStaggerMinutes,
 } from "./onboardingSubscriberGoal";
+import {
+  onboardingReminderStateKey,
+  processDueOnboardingReminder,
+  scheduleOnboardingReminder,
+} from "./onboardingReminder";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
 
 class InMemoryRedis {
@@ -130,6 +135,18 @@ const settings: ServerAppSettings = {
   crosspostPendingBatchSize: 25,
 };
 
+async function initializeOnboardingSubscriberGoal(
+  redis: never,
+  options: { lifecycleSource: "install" | "upgrade"; nowMs: number },
+): Promise<void> {
+  await initializeRawOnboardingSubscriberGoal(redis, options);
+  const raw = await (redis as unknown as InMemoryRedis).hGetAll(
+    onboardingSubscriberGoalStateKey,
+  );
+  const sentAt = options.nowMs - Number(raw.creationStaggerMinutes) * 60 * 1000;
+  await scheduleOnboardingSubscriberGoalAfterWarning(redis, sentAt);
+}
+
 const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
 
 function createReddit() {
@@ -148,6 +165,7 @@ function createReddit() {
     getNewPosts: vi
       .fn()
       .mockReturnValue({ all: vi.fn().mockResolvedValue([]) }),
+    modMail: { createModNotification: vi.fn().mockResolvedValue(undefined) },
   };
 }
 
@@ -174,30 +192,30 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingSubscriberGoalDelayMs).toBe((23 * 60 + 59) * 60 * 1000);
+    expect(onboardingSubscriberGoalDelayMs).toBe(24 * 60 * 60 * 1000);
 
-    await initializeOnboardingSubscriberGoal(redis as never, {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "pending",
+      status: "awaiting_warning",
       lifecycleSource: "install",
-      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
+      nextRunAt: "",
     });
 
-    await initializeOnboardingSubscriberGoal(redis as never, {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs: nowMs + 100,
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "pending",
+      status: "awaiting_warning",
       lifecycleSource: "install",
-      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
+      nextRunAt: "",
     });
 
     await expect(
@@ -221,12 +239,12 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("persists one upgrade stagger without redrawing it", async () => {
-    await initializeOnboardingSubscriberGoal(redis as never, {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs,
     });
     const first = await redis.hGetAll(onboardingSubscriberGoalStateKey);
-    const staggerMinutes = Number(first.staggerMinutes);
+    const staggerMinutes = Number(first.creationStaggerMinutes);
 
     expect(staggerMinutes).toBeGreaterThanOrEqual(
       onboardingUpgradeStaggerMinMinutes,
@@ -234,11 +252,10 @@ describe("onboarding subscriber goal", () => {
     expect(staggerMinutes).toBeLessThanOrEqual(
       onboardingUpgradeStaggerMaxMinutes,
     );
-    expect(Number(first.nextRunAt)).toBe(
-      nowMs + onboardingUpgradeBaseDelayMs + staggerMinutes * 60 * 1000,
-    );
+    expect(first.status).toBe("awaiting_warning");
+    expect(first.nextRunAt).toBe("");
 
-    await initializeOnboardingSubscriberGoal(redis as never, {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs: nowMs + 60_000,
     });
@@ -247,8 +264,8 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toEqual(first);
   });
 
-  it("keeps the existing install schedule without a stagger", async () => {
-    await initializeOnboardingSubscriberGoal(redis as never, {
+  it("keeps installs non-runnable until the warning succeeds", async () => {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
     });
@@ -256,8 +273,8 @@ describe("onboarding subscriber goal", () => {
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      nextRunAt: String(nowMs + onboardingSubscriberGoalDelayMs),
-      staggerMinutes: "",
+      status: "awaiting_warning",
+      nextRunAt: "",
     });
   });
 
@@ -516,6 +533,7 @@ describe("onboarding subscriber goal", () => {
           postHeight: "regular",
           autoCreateNextGoal: true,
           crosspost: true,
+          operationId: `onboarding:onboarding_subscriber_goal_v4:${nowMs}`,
           afterSubscribeAction: expect.objectContaining({
             type: "top-post-day",
             buttonText: "View the Top Post Today",
@@ -864,5 +882,279 @@ describe("onboarding subscriber goal", () => {
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toEqual({});
+  });
+
+  it("arms creation from the actual successful modmail time", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({ status: "awaiting_warning", nextRunAt: "" });
+
+    const sentAt = nowMs + 60_000;
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: sentAt,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      reminderSentAt: String(sentAt),
+      nextRunAt: String(sentAt + 24 * 60 * 60 * 1000 + 60_000),
+    });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+  });
+
+  it("repairs a sent reminder without sending duplicate modmail", async () => {
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    const sentAt = nowMs + 5 * 60_000;
+    await redis.hSet(onboardingReminderStateKey, {
+      version: "onboarding_reminder_v3",
+      status: "complete",
+      armedAt: String(nowMs),
+      nextRunAt: String(sentAt),
+      lifecycleSource: "upgrade",
+      reminderStaggerMinutes: "5",
+      sentAt: String(sentAt),
+      completedAt: String(sentAt),
+      result: "sent",
+    });
+
+    await processDueOnboardingReminder({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: sentAt + 60_000,
+    });
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      nextRunAt: String(
+        sentAt +
+          24 * 60 * 60 * 1000 +
+          Number(goal.creationStaggerMinutes) * 60_000,
+      ),
+    });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("never arms creation while modmail is failing", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    reddit.modMail.createModNotification.mockRejectedValue(
+      new Error("modmail unavailable"),
+    );
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + 60_000,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({ status: "awaiting_warning", nextRunAt: "" });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("skips a community that drops below 50 after its warning", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const sentAt = nowMs + 60_000;
+    await processDueOnboardingReminder({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: sentAt,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 49,
+      type: "public",
+      isNsfw: false,
+    });
+    const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(goal.nextRunAt),
+      }),
+    ).resolves.toMatchObject({
+      status: "ineligible",
+      eligibilitySubscriberCount: 49,
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["onboarding_subscriber_goal_v3_state", "onboarding_subscriber_goal_v3"],
+    ["onboarding_subscriber_goal_v2_state", "onboarding_subscriber_goal_v2"],
+  ] as const)(
+    "lazily migrates pending %s work and preserves its operation identity",
+    async (legacyKey, legacyVersion) => {
+      await redis.hSet(legacyKey, {
+        version: legacyVersion,
+        status: "processing",
+        armedAt: String(nowMs),
+        nextRunAt: String(nowMs - 1),
+        lifecycleSource: "upgrade",
+        attempts: "3",
+      });
+
+      await processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs,
+      });
+      const migrated = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      expect(migrated).toMatchObject({
+        status: "awaiting_warning",
+        migratedFromVersion: legacyVersion,
+        legacyAttempts: "3",
+        nextRunAt: "",
+      });
+      expect(migrated.operationId).toBe(
+        legacyVersion.endsWith("v3")
+          ? `onboarding:onboarding_subscriber_goal_v3:${nowMs}`
+          : `onboarding:${nowMs}`,
+      );
+    },
+  );
+
+  it("migrates legacy v1 JSON work", async () => {
+    await redis.set(
+      "onboarding_subscriber_goal_v1",
+      JSON.stringify({
+        status: "pending",
+        armedAt: nowMs,
+        lifecycleSource: "upgrade",
+        attempts: 2,
+      }),
+    );
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      nowMs: nowMs + 1,
+      migrationOnly: true,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "awaiting_warning",
+      migratedFromVersion: "onboarding_subscriber_goal_v1",
+      legacyAttempts: "2",
+    });
+  });
+
+  it.each(["onboarding_reminder_v1", "onboarding_reminder_v2"])(
+    "migrates pending reminder-only %s work",
+    async (legacyVersion) => {
+      await redis.hSet(`${legacyVersion}_state`, {
+        version: legacyVersion,
+        status: "pending",
+        armedAt: String(nowMs),
+        nextRunAt: String(nowMs),
+        lifecycleSource: "upgrade",
+      });
+      await initializeRawOnboardingSubscriberGoal(redis as never, {
+        nowMs,
+        migrationOnly: true,
+      });
+      await expect(
+        redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).resolves.toMatchObject({
+        migratedFromVersion: legacyVersion,
+        status: "awaiting_warning",
+      });
+    },
+  );
+
+  it("keeps offsets stable under concurrent NX initialization", async () => {
+    await Promise.all([
+      initializeRawOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      }),
+      initializeRawOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs: nowMs + 1,
+      }),
+    ]);
+    const first = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 2,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toEqual(first);
+  });
+
+  it("does not lazily rearm completed legacy work", async () => {
+    await redis.hSet("onboarding_subscriber_goal_v3_state", {
+      version: "onboarding_subscriber_goal_v3",
+      status: "complete",
+      armedAt: String(nowMs),
+      nextRunAt: String(nowMs),
+    });
+    await redis.hSet("onboarding_reminder_v2_state", {
+      version: "onboarding_reminder_v2",
+      status: "pending",
+      armedAt: String(nowMs),
+      nextRunAt: String(nowMs),
+      lifecycleSource: "upgrade",
+    });
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      nowMs,
+      migrationOnly: true,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toEqual({});
+
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 1,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "awaiting_warning",
+      migratedFromVersion: "",
+    });
   });
 });

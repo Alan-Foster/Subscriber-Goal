@@ -44,11 +44,13 @@ import { createSubscriberGoal } from "./createSubscriberGoal";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 
 export const onboardingSubscriberGoalStateKey =
-  "onboarding_subscriber_goal_v3_state";
+  "onboarding_subscriber_goal_v4_state";
 export const onboardingSubscriberGoalLockKey =
-  "onboarding_subscriber_goal_v3_lock";
-export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v3";
-export const onboardingSubscriberGoalDelayMs = (23 * 60 + 59) * 60 * 1000;
+  "onboarding_subscriber_goal_v4_lock";
+export const onboardingSubscriberGoalInitializationLockKey =
+  "onboarding_subscriber_goal_v4_init_lock";
+export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v4";
+export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingUpgradeBaseDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingUpgradeStaggerMinMinutes = 1;
 export const onboardingUpgradeStaggerMaxMinutes = 1_000;
@@ -60,8 +62,13 @@ export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
 export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
+export const onboardingSubscriberGoalInitializationLockTtlMs = 60 * 1000;
 
-type OnboardingStatus = "pending" | "processing" | "complete";
+type OnboardingStatus =
+  | "awaiting_warning"
+  | "pending"
+  | "processing"
+  | "complete";
 
 type OnboardingResultStatus = "created" | "existing" | "ineligible" | "failed";
 const onboardingRetryBaseMs = 5 * 60 * 1000;
@@ -91,10 +98,14 @@ export type OnboardingDetectionDiagnostics = {
 export type OnboardingSubscriberGoalState = {
   version: typeof onboardingSubscriberGoalVersion;
   status: OnboardingStatus;
-  nextRunAt: number;
+  nextRunAt?: number;
   armedAt: number;
   lifecycleSource: OnboardingLifecycleSource;
-  staggerMinutes?: number;
+  creationStaggerMinutes: number;
+  reminderSentAt?: number;
+  operationId: string;
+  migratedFromVersion?: string;
+  legacyAttempts?: number;
   eligibilitySubscriberCount?: number;
   startedAt?: number;
   completedAt?: number;
@@ -125,7 +136,7 @@ export type OnboardingSubscriberGoalSummary = {
   postId?: string;
   existingSource?: OnboardingExistingSource;
   lifecycleSource?: OnboardingLifecycleSource;
-  staggerMinutes?: number;
+  creationStaggerMinutes?: number;
   eligibilitySubscriberCount?: number;
   errorMessage?: string;
 };
@@ -160,40 +171,60 @@ export async function initializeOnboardingSubscriberGoal(
   {
     lifecycleSource = "unknown",
     nowMs = Date.now(),
+    migrationOnly = false,
   }: {
     lifecycleSource?: OnboardingLifecycleSource;
     nowMs?: number;
+    migrationOnly?: boolean;
   },
 ): Promise<void> {
-  const existing = parseOnboardingState(
-    await redis.hGetAll(onboardingSubscriberGoalStateKey),
-  );
-  if (existing) return;
-  const staggerMinutes =
-    lifecycleSource === "upgrade"
-      ? selectOnboardingUpgradeStaggerMinutes()
-      : undefined;
-  const nextRunAt =
-    lifecycleSource === "upgrade"
-      ? nowMs +
-        onboardingUpgradeBaseDelayMs +
-        (staggerMinutes ?? onboardingUpgradeStaggerMinMinutes) * 60 * 1000
-      : nowMs + onboardingSubscriberGoalDelayMs;
-  const state: OnboardingSubscriberGoalState = {
-    version: onboardingSubscriberGoalVersion,
-    status: "pending",
-    armedAt: nowMs,
-    nextRunAt,
-    lifecycleSource,
-    ...(staggerMinutes !== undefined ? { staggerMinutes } : {}),
-  };
-  await redis.hSet(
-    onboardingSubscriberGoalStateKey,
-    serializeOnboardingState(state),
-  );
-  console.info(
-    `[onboardingSubscriberGoal] initialized: status=${state.status} nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} staggerMinutes=${state.staggerMinutes ?? "none"} version=${state.version}`,
-  );
+  const lockToken = createLockToken(nowMs);
+  await redis.set(onboardingSubscriberGoalInitializationLockKey, lockToken, {
+    nx: true,
+    expiration: new Date(
+      nowMs + onboardingSubscriberGoalInitializationLockTtlMs,
+    ),
+  });
+  if (
+    (await redis.get(onboardingSubscriberGoalInitializationLockKey)) !==
+    lockToken
+  ) {
+    return;
+  }
+  try {
+    const existing = await getOnboardingSubscriberGoalState(redis);
+    if (existing) return;
+    const migration = await findPendingLegacyOnboardingWork(redis);
+    if (migrationOnly && !migration) return;
+    const creationStaggerMinutes = selectOnboardingUpgradeStaggerMinutes();
+    const armedAt = migration?.armedAt ?? nowMs;
+    const state: OnboardingSubscriberGoalState = {
+      version: onboardingSubscriberGoalVersion,
+      status: "awaiting_warning",
+      armedAt,
+      lifecycleSource: migration?.lifecycleSource ?? lifecycleSource,
+      creationStaggerMinutes,
+      operationId:
+        migration?.operationId ??
+        `onboarding:${onboardingSubscriberGoalVersion}:${armedAt}`,
+      ...(migration
+        ? {
+            migratedFromVersion: migration.version,
+            legacyAttempts: migration.attempts,
+          }
+        : {}),
+    };
+    await saveOnboardingState(redis, state);
+    console.info(
+      `[onboardingSubscriberGoal] initialized: status=${state.status} source=${state.lifecycleSource} creationStaggerMinutes=${state.creationStaggerMinutes} operationId=${state.operationId} migratedFrom=${state.migratedFromVersion ?? "none"} version=${state.version}`,
+    );
+  } finally {
+    await releaseOwnedLock(
+      redis,
+      onboardingSubscriberGoalInitializationLockKey,
+      lockToken,
+    );
+  }
 }
 
 export function selectOnboardingUpgradeStaggerMinutes(
@@ -210,24 +241,71 @@ export function selectOnboardingUpgradeStaggerMinutes(
   );
 }
 
+export async function getOnboardingSubscriberGoalState(
+  redis: RedisClient,
+): Promise<OnboardingSubscriberGoalState | undefined> {
+  return parseOnboardingState(
+    await redis.hGetAll(onboardingSubscriberGoalStateKey),
+  );
+}
+
+export async function scheduleOnboardingSubscriberGoalAfterWarning(
+  redis: RedisClient,
+  sentAt: number,
+): Promise<void> {
+  await mutateGoalTerminalOrSchedule(redis, sentAt, (state) => {
+    const {
+      startedAt: _startedAt,
+      errorMessage: _errorMessage,
+      ...rest
+    } = state;
+    return {
+      ...rest,
+      status: "pending",
+      reminderSentAt: sentAt,
+      nextRunAt:
+        sentAt +
+        onboardingUpgradeBaseDelayMs +
+        state.creationStaggerMinutes * 60 * 1000,
+    };
+  });
+}
+
+export async function markOnboardingSubscriberGoalExisting(
+  redis: RedisClient,
+  postId: string,
+  existingSource: OnboardingExistingSource,
+  nowMs = Date.now(),
+): Promise<void> {
+  await mutateGoalTerminalOrSchedule(redis, nowMs, (state) => ({
+    ...state,
+    status: "complete",
+    completedAt: nowMs,
+    postId,
+    existingSource,
+    resultStatus: "existing",
+  }));
+}
+
 export async function markOnboardingSubscriberGoalIneligible(
   redis: RedisClient,
   subscriberCount: number,
   nowMs = Date.now(),
 ): Promise<void> {
-  const state = parseOnboardingState(
-    await redis.hGetAll(onboardingSubscriberGoalStateKey),
-  );
-  if (!state || state.status === "complete") return;
-  await saveOnboardingState(redis, {
-    ...state,
-    status: "complete",
-    completedAt: nowMs,
-    resultStatus: "ineligible",
-    eligibilitySubscriberCount: subscriberCount,
+  let completedState: OnboardingSubscriberGoalState | undefined;
+  await mutateGoalTerminalOrSchedule(redis, nowMs, (state) => {
+    completedState = state;
+    return {
+      ...state,
+      status: "complete",
+      completedAt: nowMs,
+      resultStatus: "ineligible",
+      eligibilitySubscriberCount: subscriberCount,
+    };
   });
+  if (!completedState) return;
   console.info(
-    `[onboardingSubscriberGoal] complete: status=ineligible subscriberCount=${subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} source=${state.lifecycleSource} staggerMinutes=${state.staggerMinutes ?? "none"}`,
+    `[onboardingSubscriberGoal] complete: status=ineligible subscriberCount=${subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} source=${completedState.lifecycleSource} creationStaggerMinutes=${completedState.creationStaggerMinutes}`,
   );
 }
 
@@ -244,9 +322,11 @@ export async function processDueOnboardingSubscriberGoal({
 }): Promise<OnboardingSubscriberGoalSummary> {
   const base = emptySummary();
   let inspected = base;
-  const state = parseOnboardingState(
-    await redis.hGetAll(onboardingSubscriberGoalStateKey),
-  );
+  await initializeOnboardingSubscriberGoal(redis, {
+    nowMs,
+    migrationOnly: true,
+  });
+  const state = await getOnboardingSubscriberGoalState(redis);
   if (!state) {
     return { status: "not_due", ...base };
   }
@@ -258,15 +338,17 @@ export async function processDueOnboardingSubscriberGoal({
       lifecycleSource: state.lifecycleSource,
       ...(state.existingSource ? { existingSource: state.existingSource } : {}),
       ...(state.errorMessage ? { errorMessage: state.errorMessage } : {}),
-      ...(state.staggerMinutes !== undefined
-        ? { staggerMinutes: state.staggerMinutes }
-        : {}),
+      creationStaggerMinutes: state.creationStaggerMinutes,
       ...(state.eligibilitySubscriberCount !== undefined
         ? { eligibilitySubscriberCount: state.eligibilitySubscriberCount }
         : {}),
     };
   }
-  if (nowMs < state.nextRunAt) {
+  if (
+    state.status === "awaiting_warning" ||
+    state.nextRunAt === undefined ||
+    nowMs < state.nextRunAt
+  ) {
     return { status: "not_due", ...base };
   }
 
@@ -287,12 +369,16 @@ export async function processDueOnboardingSubscriberGoal({
     if (!reloaded || reloaded.status === "complete") {
       return { status: "complete", ...base };
     }
-    if (nowMs < reloaded.nextRunAt) {
+    if (
+      reloaded.status === "awaiting_warning" ||
+      reloaded.nextRunAt === undefined ||
+      nowMs < reloaded.nextRunAt
+    ) {
       return { status: "not_due", ...base };
     }
     activeState = reloaded;
     console.info(
-      `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} staggerMinutes=${reloaded.staggerMinutes ?? "none"} status=${reloaded.status}`,
+      `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} creationStaggerMinutes=${reloaded.creationStaggerMinutes} operationId=${reloaded.operationId} status=${reloaded.status}`,
     );
     await saveOnboardingState(redis, {
       ...reloaded,
@@ -322,7 +408,7 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus: "existing",
       });
       console.info(
-        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} source=${reloaded.lifecycleSource} staggerMinutes=${reloaded.staggerMinutes ?? "none"} ${formatDetectionDiagnostics(inspected)}`,
+        `[onboardingSubscriberGoal] complete: status=existing existingSource=${existing.source} postId=${existing.postId} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes} ${formatDetectionDiagnostics(inspected)}`,
       );
       return {
         status: "existing",
@@ -334,18 +420,21 @@ export async function processDueOnboardingSubscriberGoal({
     }
 
     const subreddit = await reddit.getCurrentSubreddit();
+    console.info(
+      `[onboardingSubscriberGoal] eligibility: subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} eligible=${subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes}`,
+    );
     if (subreddit.numberOfSubscribers < onboardingMinimumSubscriberCount) {
-      await markOnboardingSubscriberGoalIneligible(
-        redis,
-        subreddit.numberOfSubscribers,
-        nowMs,
-      );
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "ineligible",
+        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
+      });
       return {
         status: "ineligible",
         lifecycleSource: reloaded.lifecycleSource,
-        ...(reloaded.staggerMinutes !== undefined
-          ? { staggerMinutes: reloaded.staggerMinutes }
-          : {}),
+        creationStaggerMinutes: reloaded.creationStaggerMinutes,
         eligibilitySubscriberCount: subreddit.numberOfSubscribers,
         ...inspected,
       };
@@ -379,7 +468,7 @@ export async function processDueOnboardingSubscriberGoal({
           subredditType: subreddit.type,
         }),
         afterSubscribePreset,
-        operationId: `onboarding:${reloaded.version}:${reloaded.armedAt}`,
+        operationId: reloaded.operationId,
       },
     });
     if (stickyResult.status === "not_pinned") {
@@ -413,7 +502,7 @@ export async function processDueOnboardingSubscriberGoal({
       resultStatus: "created",
     });
     console.info(
-      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} source=${reloaded.lifecycleSource} staggerMinutes=${reloaded.staggerMinutes ?? "none"} ${formatDetectionDiagnostics(inspected)}`,
+      `[onboardingSubscriberGoal] complete: status=created postId=${post.id} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes} ${formatDetectionDiagnostics(inspected)}`,
     );
     return {
       status: "created",
@@ -445,7 +534,7 @@ export async function processDueOnboardingSubscriberGoal({
           workflow: "onboarding_subscriber_goal",
           phase: "retry",
           lifecycleSource: activeState.lifecycleSource,
-          staggerMinutes: activeState.staggerMinutes,
+          creationStaggerMinutes: activeState.creationStaggerMinutes,
           attempts,
           nextRunAt: nowMs + retryDelayMs,
         },
@@ -469,7 +558,7 @@ export async function processDueOnboardingSubscriberGoal({
         workflow: "onboarding_subscriber_goal",
         phase: "execution",
         lifecycleSource: activeState.lifecycleSource,
-        staggerMinutes: activeState.staggerMinutes,
+        creationStaggerMinutes: activeState.creationStaggerMinutes,
       },
       error,
     );
@@ -763,32 +852,45 @@ function parseOnboardingState(
 ): OnboardingSubscriberGoalState | undefined {
   const status = raw.status;
   const lifecycleSource = raw.lifecycleSource;
-  const nextRunAt = parseStateNumber(raw.nextRunAt);
+  const nextRunAt = raw.nextRunAt ? parseStateNumber(raw.nextRunAt) : undefined;
   const armedAt = parseStateNumber(raw.armedAt);
+  const creationStaggerMinutes = parseStateNumber(raw.creationStaggerMinutes);
   if (
     raw.version !== onboardingSubscriberGoalVersion ||
-    (status !== "pending" &&
+    (status !== "awaiting_warning" &&
+      status !== "pending" &&
       status !== "processing" &&
       status !== "complete") ||
-    nextRunAt === undefined ||
-    armedAt === undefined
+    armedAt === undefined ||
+    creationStaggerMinutes === undefined ||
+    !Number.isInteger(creationStaggerMinutes) ||
+    creationStaggerMinutes < onboardingUpgradeStaggerMinMinutes ||
+    creationStaggerMinutes > onboardingUpgradeStaggerMaxMinutes ||
+    !raw.operationId ||
+    ((status === "pending" || status === "processing") &&
+      nextRunAt === undefined)
   ) {
     return undefined;
   }
   const state: OnboardingSubscriberGoalState = {
     version: onboardingSubscriberGoalVersion,
     status,
-    nextRunAt,
     armedAt,
+    creationStaggerMinutes,
+    operationId: raw.operationId,
     lifecycleSource:
       lifecycleSource === "install" || lifecycleSource === "upgrade"
         ? lifecycleSource
         : "unknown",
   };
-  const staggerMinutes = raw.staggerMinutes
-    ? parseStateNumber(raw.staggerMinutes)
-    : undefined;
-  if (staggerMinutes !== undefined) state.staggerMinutes = staggerMinutes;
+  if (nextRunAt !== undefined) state.nextRunAt = nextRunAt;
+  const reminderSentAt = parseStateNumber(raw.reminderSentAt);
+  if (reminderSentAt !== undefined) state.reminderSentAt = reminderSentAt;
+  if (raw.migratedFromVersion) {
+    state.migratedFromVersion = raw.migratedFromVersion;
+  }
+  const legacyAttempts = parseStateNumber(raw.legacyAttempts);
+  if (legacyAttempts !== undefined) state.legacyAttempts = legacyAttempts;
   const eligibilitySubscriberCount = raw.eligibilitySubscriberCount
     ? parseStateNumber(raw.eligibilitySubscriberCount)
     : undefined;
@@ -825,6 +927,7 @@ function parseOnboardingState(
 }
 
 function parseStateNumber(value: string | undefined): number | undefined {
+  if (value === undefined || value === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -835,10 +938,14 @@ function serializeOnboardingState(
   return {
     version: state.version,
     status: state.status,
-    nextRunAt: String(state.nextRunAt),
+    nextRunAt: String(state.nextRunAt ?? ""),
     armedAt: String(state.armedAt),
     lifecycleSource: state.lifecycleSource,
-    staggerMinutes: String(state.staggerMinutes ?? ""),
+    creationStaggerMinutes: String(state.creationStaggerMinutes),
+    reminderSentAt: String(state.reminderSentAt ?? ""),
+    operationId: state.operationId,
+    migratedFromVersion: state.migratedFromVersion ?? "",
+    legacyAttempts: String(state.legacyAttempts ?? ""),
     eligibilitySubscriberCount: String(state.eligibilitySubscriberCount ?? ""),
     startedAt: String(state.startedAt ?? 0),
     completedAt: String(state.completedAt ?? 0),
@@ -858,4 +965,141 @@ async function saveOnboardingState(
     onboardingSubscriberGoalStateKey,
     serializeOnboardingState(state),
   );
+}
+
+type LegacyMigration = {
+  version: string;
+  armedAt: number;
+  lifecycleSource: OnboardingLifecycleSource;
+  attempts: number;
+  operationId?: string;
+};
+
+async function findPendingLegacyOnboardingWork(
+  redis: RedisClient,
+): Promise<LegacyMigration | undefined> {
+  let hasTerminalLegacyGoal = false;
+  for (const candidate of [
+    {
+      key: "onboarding_subscriber_goal_v3_state",
+      version: "onboarding_subscriber_goal_v3",
+      operationId: (armedAt: number) =>
+        `onboarding:onboarding_subscriber_goal_v3:${armedAt}`,
+    },
+    {
+      key: "onboarding_subscriber_goal_v2_state",
+      version: "onboarding_subscriber_goal_v2",
+      operationId: (armedAt: number) => `onboarding:${armedAt}`,
+    },
+  ]) {
+    const raw = await redis.hGetAll(candidate.key);
+    if (raw.status === "complete") hasTerminalLegacyGoal = true;
+    if (raw.status !== "pending" && raw.status !== "processing") continue;
+    const armedAt = parseStateNumber(raw.armedAt);
+    if (armedAt === undefined) continue;
+    return {
+      version: candidate.version,
+      armedAt,
+      lifecycleSource: parseLifecycleSource(raw.lifecycleSource),
+      attempts: parseStateNumber(raw.attempts) ?? 0,
+      operationId: candidate.operationId(armedAt),
+    };
+  }
+
+  const legacyV1 = await redis.get("onboarding_subscriber_goal_v1");
+  if (legacyV1) {
+    try {
+      const raw = JSON.parse(legacyV1) as Record<string, unknown>;
+      if (raw.status === "pending" || raw.status === "processing") {
+        const armedAt = Number(raw.armedAt);
+        if (Number.isFinite(armedAt)) {
+          return {
+            version: "onboarding_subscriber_goal_v1",
+            armedAt,
+            lifecycleSource: parseLifecycleSource(raw.lifecycleSource),
+            attempts: Number.isFinite(Number(raw.attempts))
+              ? Number(raw.attempts)
+              : 0,
+            operationId: `onboarding:onboarding_subscriber_goal_v1:${armedAt}`,
+          };
+        }
+      }
+      if (
+        raw.status === "created" ||
+        raw.status === "existing" ||
+        raw.status === "failed"
+      ) {
+        hasTerminalLegacyGoal = true;
+      }
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "onboarding_legacy_state_invalid",
+        {
+          workflow: "onboarding_subscriber_goal",
+          phase: "legacy_v1_parse",
+        },
+        error,
+      );
+    }
+  }
+
+  if (hasTerminalLegacyGoal) return undefined;
+
+  for (const candidate of [
+    ["onboarding_reminder_v2_state", "onboarding_reminder_v2"],
+    ["onboarding_reminder_v1_state", "onboarding_reminder_v1"],
+  ] as const) {
+    const raw = await redis.hGetAll(candidate[0]);
+    if (raw.status !== "pending" && raw.status !== "processing") continue;
+    const armedAt = parseStateNumber(raw.armedAt);
+    if (armedAt === undefined) continue;
+    return {
+      version: candidate[1],
+      armedAt,
+      lifecycleSource: parseLifecycleSource(raw.lifecycleSource),
+      attempts: parseStateNumber(raw.attempts) ?? 0,
+    };
+  }
+  return undefined;
+}
+
+function parseLifecycleSource(value: unknown): OnboardingLifecycleSource {
+  return value === "install" || value === "upgrade" ? value : "unknown";
+}
+
+async function mutateGoalTerminalOrSchedule(
+  redis: RedisClient,
+  nowMs: number,
+  mutate: (
+    state: OnboardingSubscriberGoalState,
+  ) => OnboardingSubscriberGoalState,
+): Promise<void> {
+  const lockToken = createLockToken(nowMs);
+  await redis.set(onboardingSubscriberGoalLockKey, lockToken, {
+    nx: true,
+    expiration: new Date(nowMs + onboardingSubscriberGoalLockTtlMs),
+  });
+  if ((await redis.get(onboardingSubscriberGoalLockKey)) !== lockToken) {
+    throw new Error("Onboarding goal state is currently locked");
+  }
+  try {
+    const state = await getOnboardingSubscriberGoalState(redis);
+    if (!state || state.status === "complete") return;
+    await saveOnboardingState(redis, mutate(state));
+  } finally {
+    await releaseOwnedLock(redis, onboardingSubscriberGoalLockKey, lockToken);
+  }
+}
+
+function createLockToken(nowMs: number): string {
+  return `${nowMs}:${Math.random().toString(36).slice(2)}`;
+}
+
+async function releaseOwnedLock(
+  redis: RedisClient,
+  key: string,
+  token: string,
+): Promise<void> {
+  if ((await redis.get(key)) === token) await redis.del(key);
 }

@@ -2,18 +2,27 @@ import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   findExistingSubscriberGoal,
+  getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError,
+  initializeOnboardingSubscriberGoal,
+  markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalIneligible,
   onboardingMinimumSubscriberCount,
+  scheduleOnboardingSubscriberGoalAfterWarning,
   type OnboardingDetectionDiagnostics,
   type OnboardingExistingSource,
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
 
-export const onboardingReminderStateKey = "onboarding_reminder_v2_state";
-export const onboardingReminderLockKey = "onboarding_reminder_v2_lock";
-export const onboardingReminderVersion = "onboarding_reminder_v2";
-export const onboardingReminderDelayMs = 60 * 1000;
+export const onboardingReminderStateKey = "onboarding_reminder_v3_state";
+export const onboardingReminderLockKey = "onboarding_reminder_v3_lock";
+export const onboardingReminderInitializationLockKey =
+  "onboarding_reminder_v3_init_lock";
+export const onboardingReminderVersion = "onboarding_reminder_v3";
+export const onboardingReminderStaggerMinMinutes = 1;
+export const onboardingReminderStaggerMaxMinutes = 300;
+export const onboardingReminderDelayMs =
+  onboardingReminderStaggerMinMinutes * 60 * 1000;
 
 type OnboardingReminderStatus = "pending" | "processing" | "complete";
 type OnboardingReminderResult = "sent" | "existing" | "ineligible" | "failed";
@@ -26,6 +35,10 @@ export type OnboardingReminderState = {
   nextRunAt: number;
   armedAt: number;
   lifecycleSource: OnboardingLifecycleSource;
+  reminderStaggerMinutes: number;
+  sentAt?: number;
+  migratedFromVersion?: string;
+  legacyAttempts?: number;
   eligibilitySubscriberCount?: number;
   startedAt?: number;
   completedAt?: number;
@@ -73,8 +86,8 @@ export function buildOnboardingReminderMessage(
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
   const automaticCreationNotice = isUpgrade
-    ? "If a Subscriber Goal does not already exist, Subscriber Goal will automatically create one no earlier than 24 hours after this upgrade. To stagger this release safely, creation may occur during the following 1,000 minutes."
-    : "If a Subscriber Goal is not created within 23 hours and 59 minutes of this installation, Subscriber Goal will automatically create one using the default settings for your subreddit.";
+    ? "If a Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. To stagger this release safely, the automatic creation attempt may occur during the following 1,000 minutes."
+    : "If a Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. The automatic creation attempt may occur during the following 1,000 minutes.";
   return {
     subject: isUpgrade
       ? `Subscriber Goal automatic goal update for r/${subredditName}`
@@ -95,25 +108,65 @@ export async function scheduleOnboardingReminder(
   {
     lifecycleSource = "unknown",
     nowMs = Date.now(),
+    migrationOnly = false,
   }: {
     lifecycleSource?: OnboardingLifecycleSource;
     nowMs?: number;
+    migrationOnly?: boolean;
   },
 ): Promise<void> {
-  const existing = parseOnboardingReminderState(
-    await redis.hGetAll(onboardingReminderStateKey),
-  );
-  if (existing) return;
-  const state: OnboardingReminderState = {
-    version: onboardingReminderVersion,
-    status: "pending",
-    armedAt: nowMs,
-    nextRunAt: nowMs + onboardingReminderDelayMs,
-    lifecycleSource,
-  };
-  await saveOnboardingReminderState(redis, state);
-  console.info(
-    `[onboardingReminder] initialized: status=pending nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} version=${state.version}`,
+  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+  await redis.set(onboardingReminderInitializationLockKey, lockToken, {
+    nx: true,
+    expiration: new Date(nowMs + 60 * 1000),
+  });
+  if ((await redis.get(onboardingReminderInitializationLockKey)) !== lockToken)
+    return;
+  try {
+    const existing = parseOnboardingReminderState(
+      await redis.hGetAll(onboardingReminderStateKey),
+    );
+    if (existing) return;
+    const goalState = await getOnboardingSubscriberGoalState(redis);
+    if (migrationOnly && goalState?.status !== "awaiting_warning") return;
+    const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
+    const state: OnboardingReminderState = {
+      version: onboardingReminderVersion,
+      status: "pending",
+      armedAt: goalState?.armedAt ?? nowMs,
+      nextRunAt: nowMs + reminderStaggerMinutes * 60 * 1000,
+      lifecycleSource: goalState?.lifecycleSource ?? lifecycleSource,
+      reminderStaggerMinutes,
+      ...(goalState?.migratedFromVersion
+        ? {
+            migratedFromVersion: goalState.migratedFromVersion,
+            legacyAttempts: goalState.legacyAttempts,
+          }
+        : {}),
+    };
+    await saveOnboardingReminderState(redis, state);
+    console.info(
+      `[onboardingReminder] initialized: status=pending nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} reminderStaggerMinutes=${state.reminderStaggerMinutes} migratedFrom=${state.migratedFromVersion ?? "none"} version=${state.version}`,
+    );
+  } finally {
+    if (
+      (await redis.get(onboardingReminderInitializationLockKey)) === lockToken
+    )
+      await redis.del(onboardingReminderInitializationLockKey);
+  }
+}
+
+export function selectOnboardingReminderStaggerMinutes(
+  randomValue = Math.random(),
+): number {
+  const normalized = Math.min(Math.max(randomValue, 0), 1 - Number.EPSILON);
+  return (
+    Math.floor(
+      normalized *
+        (onboardingReminderStaggerMaxMinutes -
+          onboardingReminderStaggerMinMinutes +
+          1),
+    ) + onboardingReminderStaggerMinMinutes
   );
 }
 
@@ -127,12 +180,21 @@ export async function processDueOnboardingReminder({
   nowMs?: number;
 }): Promise<OnboardingReminderSummary> {
   const base = emptySummary();
+  await initializeOnboardingSubscriberGoal(redis, {
+    nowMs,
+    migrationOnly: true,
+  });
+  await scheduleOnboardingReminder(redis, { nowMs, migrationOnly: true });
   const state = parseOnboardingReminderState(
     await redis.hGetAll(onboardingReminderStateKey),
   );
-  if (!state || state.status === "complete" || nowMs < state.nextRunAt) {
+  if (state?.status === "complete") {
+    await reconcileCompletedReminder(redis, state, nowMs);
+    return { status: "complete", ...base };
+  }
+  if (!state || nowMs < state.nextRunAt) {
     return {
-      status: state?.status === "complete" ? "complete" : "not_due",
+      status: "not_due",
       ...base,
     };
   }
@@ -156,6 +218,9 @@ export async function processDueOnboardingReminder({
       reloaded.status === "complete" ||
       nowMs < reloaded.nextRunAt
     ) {
+      if (reloaded?.status === "complete") {
+        await reconcileCompletedReminder(redis, reloaded, nowMs);
+      }
       return {
         status: reloaded?.status === "complete" ? "complete" : "not_due",
         ...base,
@@ -172,12 +237,10 @@ export async function processDueOnboardingReminder({
     });
 
     const subreddit = await reddit.getCurrentSubreddit();
+    console.info(
+      `[onboardingReminder] eligibility: subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} eligible=${subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource} reminderStaggerMinutes=${reloaded.reminderStaggerMinutes}`,
+    );
     if (subreddit.numberOfSubscribers < onboardingMinimumSubscriberCount) {
-      await markOnboardingSubscriberGoalIneligible(
-        redis,
-        subreddit.numberOfSubscribers,
-        nowMs,
-      );
       await saveOnboardingReminderState(redis, {
         ...reloaded,
         status: "complete",
@@ -185,6 +248,11 @@ export async function processDueOnboardingReminder({
         result: "ineligible",
         eligibilitySubscriberCount: subreddit.numberOfSubscribers,
       });
+      await markOnboardingSubscriberGoalIneligible(
+        redis,
+        subreddit.numberOfSubscribers,
+        nowMs,
+      );
       console.info(
         `[onboardingReminder] complete: status=ineligible subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource}`,
       );
@@ -217,6 +285,12 @@ export async function processDueOnboardingReminder({
         postId: existing.postId,
         existingSource,
       });
+      await markOnboardingSubscriberGoalExisting(
+        redis,
+        existing.postId,
+        existingSource,
+        nowMs,
+      );
       console.info(
         `[onboardingReminder] complete: status=existing existingSource=${existingSource} postId=${existing.postId} ${formatReminderDiagnostics(inspected)}`,
       );
@@ -242,7 +316,18 @@ export async function processDueOnboardingReminder({
       status: "complete",
       completedAt: nowMs,
       result: "sent",
+      sentAt: nowMs,
     });
+    try {
+      await scheduleOnboardingSubscriberGoalAfterWarning(redis, nowMs);
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "onboarding_goal_warning_reconciliation_failed",
+        { workflow: "onboarding_reminder", phase: "goal_schedule" },
+        error,
+      );
+    }
     console.info(
       `[onboardingReminder] complete: status=sent subscriberCount=${subreddit.numberOfSubscribers} source=${reloaded.lifecycleSource} ${formatReminderDiagnostics(inspected)}`,
     );
@@ -251,19 +336,38 @@ export async function processDueOnboardingReminder({
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
     try {
-      const attempts = (state.attempts ?? 0) + 1;
+      const latest = parseOnboardingReminderState(
+        await redis.hGetAll(onboardingReminderStateKey),
+      );
+      if (latest?.status === "complete") {
+        return { status: "complete", ...inspected };
+      }
+      const attempts = (latest?.attempts ?? state.attempts ?? 0) + 1;
       const retryDelayMs = Math.min(
         onboardingReminderRetryMaxMs,
         onboardingReminderRetryBaseMs * 2 ** (attempts - 1),
       );
       await saveOnboardingReminderState(redis, {
-        ...state,
+        ...(latest ?? state),
         status: "pending",
         nextRunAt: nowMs + retryDelayMs,
         attempts,
         result: "failed",
         errorMessage,
       });
+      logDiagnostic(
+        "warn",
+        "onboarding_reminder_retry_scheduled",
+        {
+          workflow: "onboarding_reminder",
+          phase: "retry",
+          lifecycleSource: (latest ?? state).lifecycleSource,
+          reminderStaggerMinutes: (latest ?? state).reminderStaggerMinutes,
+          attempts,
+          nextRunAt: nowMs + retryDelayMs,
+        },
+        error,
+      );
     } catch (stateError) {
       logDiagnostic(
         "error",
@@ -301,16 +405,50 @@ function formatReminderDiagnostics(
   return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
+async function reconcileCompletedReminder(
+  redis: RedisClient,
+  state: OnboardingReminderState,
+  nowMs: number,
+): Promise<void> {
+  if (state.result === "sent" && state.sentAt !== undefined) {
+    await scheduleOnboardingSubscriberGoalAfterWarning(redis, state.sentAt);
+  } else if (
+    state.result === "existing" &&
+    state.postId &&
+    state.existingSource
+  ) {
+    await markOnboardingSubscriberGoalExisting(
+      redis,
+      state.postId,
+      state.existingSource,
+      state.completedAt ?? nowMs,
+    );
+  } else if (
+    state.result === "ineligible" &&
+    state.eligibilitySubscriberCount !== undefined
+  ) {
+    await markOnboardingSubscriberGoalIneligible(
+      redis,
+      state.eligibilitySubscriberCount,
+      state.completedAt ?? nowMs,
+    );
+  }
+}
+
 function parseOnboardingReminderState(
   raw: Record<string, string>,
 ): OnboardingReminderState | undefined {
   const nextRunAt = Number(raw.nextRunAt);
   const armedAt = Number(raw.armedAt);
+  const reminderStaggerMinutes = Number(raw.reminderStaggerMinutes);
   if (
     raw.version !== onboardingReminderVersion ||
     !["pending", "processing", "complete"].includes(raw.status ?? "") ||
     !Number.isFinite(nextRunAt) ||
-    !Number.isFinite(armedAt)
+    !Number.isFinite(armedAt) ||
+    !Number.isInteger(reminderStaggerMinutes) ||
+    reminderStaggerMinutes < onboardingReminderStaggerMinMinutes ||
+    reminderStaggerMinutes > onboardingReminderStaggerMaxMinutes
   ) {
     return undefined;
   }
@@ -323,6 +461,16 @@ function parseOnboardingReminderState(
       raw.lifecycleSource === "install" || raw.lifecycleSource === "upgrade"
         ? raw.lifecycleSource
         : "unknown",
+    reminderStaggerMinutes,
+    ...(raw.sentAt && Number.isFinite(Number(raw.sentAt))
+      ? { sentAt: Number(raw.sentAt) }
+      : {}),
+    ...(raw.migratedFromVersion
+      ? { migratedFromVersion: raw.migratedFromVersion }
+      : {}),
+    ...(raw.legacyAttempts && Number.isFinite(Number(raw.legacyAttempts))
+      ? { legacyAttempts: Number(raw.legacyAttempts) }
+      : {}),
     ...(raw.startedAt && Number.isFinite(Number(raw.startedAt))
       ? { startedAt: Number(raw.startedAt) }
       : {}),
@@ -378,6 +526,10 @@ function serializeOnboardingReminderState(
     nextRunAt: String(state.nextRunAt),
     armedAt: String(state.armedAt),
     lifecycleSource: state.lifecycleSource,
+    reminderStaggerMinutes: String(state.reminderStaggerMinutes),
+    sentAt: String(state.sentAt ?? ""),
+    migratedFromVersion: state.migratedFromVersion ?? "",
+    legacyAttempts: String(state.legacyAttempts ?? ""),
     eligibilitySubscriberCount: String(state.eligibilitySubscriberCount ?? ""),
     startedAt: String(state.startedAt ?? 0),
     completedAt: String(state.completedAt ?? 0),

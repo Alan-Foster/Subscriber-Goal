@@ -71,14 +71,21 @@ export async function onAppChanged({
   await runPhase("subscriber_stats_migration", () =>
     initializeSubscriberStatsMigration(redis),
   );
-  if (
-    lifecycleSource === "install" ||
-    (lifecycleSource === "upgrade" && onboardingUpgradeWaveEnabled)
-  ) {
+  if (shouldInitializeReleaseOnboarding(lifecycleSource)) {
     await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
     await scheduleOnboardingReminder(redis, { lifecycleSource });
   }
   await runPhase("recent_subscriber_index_migration", () =>
     initializeRecentSubscriberIndexMigration(redis),
+  );
+}
+
+export function shouldInitializeReleaseOnboarding(
+  lifecycleSource: "install" | "upgrade" | "unknown",
+  upgradeWaveEnabled = onboardingUpgradeWaveEnabled,
+): boolean {
+  return (
+    lifecycleSource === "install" ||
+    (lifecycleSource === "upgrade" && upgradeWaveEnabled)
   );
 }

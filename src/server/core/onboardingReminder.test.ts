@@ -2,24 +2,38 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   findExistingSubscriberGoal: vi.fn(),
+  getOnboardingSubscriberGoalState: vi.fn(),
+  initializeOnboardingSubscriberGoal: vi.fn(),
+  markOnboardingSubscriberGoalExisting: vi.fn(),
   markOnboardingSubscriberGoalIneligible: vi.fn(),
+  scheduleOnboardingSubscriberGoalAfterWarning: vi.fn(),
 }));
 
 vi.mock("./onboardingSubscriberGoal", () => ({
   findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
+  getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError: () => undefined,
+  initializeOnboardingSubscriberGoal:
+    hoisted.initializeOnboardingSubscriberGoal,
+  markOnboardingSubscriberGoalExisting:
+    hoisted.markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
   onboardingMinimumSubscriberCount: 50,
+  scheduleOnboardingSubscriberGoalAfterWarning:
+    hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
 }));
 
 import {
   buildOnboardingReminderMessage,
   onboardingReminderDelayMs,
   onboardingReminderLockKey,
+  onboardingReminderStaggerMaxMinutes,
+  onboardingReminderStaggerMinMinutes,
   onboardingReminderStateKey,
   processDueOnboardingReminder,
   scheduleOnboardingReminder,
+  selectOnboardingReminderStaggerMinutes,
 } from "./onboardingReminder";
 
 class InMemoryRedis {
@@ -74,6 +88,17 @@ describe("onboarding reminder", () => {
   beforeEach(() => {
     redis = new InMemoryRedis();
     reddit = createReddit();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    hoisted.getOnboardingSubscriberGoalState.mockReset();
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue(undefined);
+    hoisted.initializeOnboardingSubscriberGoal.mockReset();
+    hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalExisting.mockReset();
+    hoisted.markOnboardingSubscriberGoalExisting.mockResolvedValue(undefined);
+    hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockReset();
+    hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockResolvedValue(
+      undefined,
+    );
     hoisted.findExistingSubscriberGoal.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
@@ -87,9 +112,41 @@ describe("onboarding reminder", () => {
   it("builds an accurate staggered upgrade warning", () => {
     const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
 
-    expect(message.bodyMarkdown).toContain("no earlier than 24 hours");
+    expect(message.bodyMarkdown).toContain(
+      "24-hour countdown begins when this message is sent",
+    );
     expect(message.bodyMarkdown).toContain("following 1,000 minutes");
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
+  });
+
+  it("selects inclusive reminder stagger boundaries", () => {
+    expect(selectOnboardingReminderStaggerMinutes(0)).toBe(
+      onboardingReminderStaggerMinMinutes,
+    );
+    expect(selectOnboardingReminderStaggerMinutes(1)).toBe(
+      onboardingReminderStaggerMaxMinutes,
+    );
+  });
+
+  it("keeps one reminder offset under concurrent NX initialization", async () => {
+    await Promise.all([
+      scheduleOnboardingReminder(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      }),
+      scheduleOnboardingReminder(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs: nowMs + 1,
+      }),
+    ]);
+    const first = await redis.hGetAll(onboardingReminderStateKey);
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs: nowMs + 2,
+    });
+    await expect(redis.hGetAll(onboardingReminderStateKey)).resolves.toEqual(
+      first,
+    );
   });
 
   it.each([0, 3, 49])(
@@ -153,7 +210,9 @@ describe("onboarding reminder", () => {
       "https://developers.reddit.com/apps/subscriber-goal",
     );
     expect(message.bodyMarkdown).toContain("u/Alan-Foster");
-    expect(message.bodyMarkdown).toContain("23 hours and 59 minutes");
+    expect(message.bodyMarkdown).toContain(
+      "24-hour countdown begins when this message is sent",
+    );
     expect(message.bodyMarkdown).not.toContain("or update");
   });
 
