@@ -309,7 +309,6 @@ export const SubscribeOnlyApp = () => {
               onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
                 navigateTo(target)
               }
-              onNotifications={openNotifications}
             />
           ) : (
             <SubGoalPage

@@ -47,12 +47,14 @@ describe("NotificationSettingsPage", () => {
     );
     expect(html).toContain('data-notification-layout="regular"');
     expect(html).toContain("Notification Settings");
+    expect(html).toContain("Goal completion alerts");
     expect(html).toContain("r/ExampleSub");
     expect(html).toContain("Enabled");
-    expect(html).toContain("Disable Notifications");
+    expect(html).toContain('role="switch"');
+    expect(html).toContain('checked=""');
     expect(html).toContain("Return to Previous Page");
     expect(html).toContain('aria-label="Return to previous page"');
-    expect(html).toContain("bg-red-600");
+    expect(html).not.toContain("Disable Notifications");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 
@@ -68,8 +70,8 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain('data-notification-preference-row="true"');
     expect(html).toContain('data-notification-bell-state="disabled"');
     expect(html).toContain('aria-label="Notifications: Disabled"');
-    expect(html).toContain(">Enable</span>");
-    expect(html).toContain("bg-green-700");
+    expect(html).toContain('role="switch"');
+    expect(html).not.toContain('checked=""');
     expect(html).toContain(">Return</button>");
     expect(html).toContain("text-base");
     expect(html).toContain("flex-col");
@@ -99,10 +101,10 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain('aria-label="Return to previous page"');
     expect(html).toContain('data-notification-bell-state="enabled"');
     expect(html).toContain('aria-label="Notifications: Enabled"');
-    expect(html).toContain(">Disable</span>");
+    expect(html).toContain('role="switch"');
+    expect(html).toContain('checked=""');
     expect(html).toContain("text-base");
     expect(html).toContain('data-notification-stable-slot="state"');
-    expect(html).toContain('data-notification-stable-slot="action"');
     expect(html).not.toContain("Return to Previous Page");
   });
 
@@ -143,8 +145,9 @@ describe("NotificationSettingsPage", () => {
     expect(loadingHtml).toContain('aria-label="Notifications: …"');
     expect(loadingHtml).toContain(">Enabled</span>");
     expect(loadingHtml).toContain(">Disabled</span>");
-    expect(loadingHtml).toContain(">Enable</span>");
-    expect(loadingHtml).toContain(">Disable</span>");
+    expect(loadingHtml).toContain('role="switch"');
+    expect(loadingHtml).toContain('disabled=""');
+    expect(loadingHtml).toContain('aria-busy="true"');
 
     const signedOutHtml = renderToStaticMarkup(
       <NotificationSettingsPage
@@ -184,7 +187,7 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("text-red-500");
   });
 
-  it("intrinsically reserves state and action space in every language", () => {
+  it("intrinsically reserves state space in every language", () => {
     for (const language of subGoalLanguages) {
       const messages = getNotificationMessages(language);
       const html = renderToStaticMarkup(
@@ -198,11 +201,9 @@ describe("NotificationSettingsPage", () => {
       );
 
       expect(html).toContain('data-notification-stable-slot="state"');
-      expect(html).toContain('data-notification-stable-slot="action"');
+      expect(html).toContain('role="switch"');
       expect(html).toContain(messages.enabled);
       expect(html).toContain(messages.disabled);
-      expect(html).toContain(messages.enableShort);
-      expect(html).toContain(messages.disableShort);
     }
   });
 });

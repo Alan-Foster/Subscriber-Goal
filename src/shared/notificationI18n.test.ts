@@ -8,7 +8,10 @@ describe("notification messages", () => {
     (language) => {
       const messages = getNotificationMessages(language);
       for (const value of Object.values(messages)) {
-        expect(value.trim().length).toBeGreaterThan(0);
+        const rendered =
+          typeof value === "function" ? value({ goalText: "1000" }) : value;
+        expect(rendered.trim().length).toBeGreaterThan(0);
+        expect(rendered).not.toContain("{{goalText}}");
       }
     },
   );

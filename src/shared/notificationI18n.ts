@@ -2,21 +2,20 @@ import type { SubGoalLanguage } from "./subGoalPostI18n";
 
 export type NotificationMessages = {
   label: string;
+  alertsLabel: string;
   title: string;
   description: string;
   enabled: string;
   disabled: string;
-  enableButton: string;
-  disableButton: string;
   loginRequired: string;
   loadError: string;
   updateError: string;
   enabledToast: string;
   disabledToast: string;
-  enableShort: string;
-  disableShort: string;
   returnShort: string;
   backAriaLabel: string;
+  goalPrompt: (params: { goalText: string }) => string;
+  goalConfirmation: (params: { goalText: string }) => string;
 };
 
 type MessageTuple = readonly [
@@ -462,27 +461,173 @@ const compactValues: Record<SubGoalLanguage, CompactMessageTuple> = {
   yo: ["Mú ṣiṣẹ́", "Dáwọ́", "Padà", "Padà"],
 };
 
+type GoalMessageTuple = readonly [string, string, string];
+
+const goalValues: Record<SubGoalLanguage, GoalMessageTuple> = {
+  id: [
+    "Notifikasi penyelesaian target",
+    "Dapatkan Notifikasi saat {{goalText}}",
+    "Anda akan diberi tahu saat {{goalText}}",
+  ],
+  bs: [
+    "Obavijesti o ostvarenju cilja",
+    "Primajte obavijest na {{goalText}}",
+    "Bit ćete obaviješteni na {{goalText}}",
+  ],
+  ca: [
+    "Alertes de consecució de l'objectiu",
+    "Rep una notificació en arribar a {{goalText}}",
+    "Rebràs una notificació en arribar a {{goalText}}",
+  ],
+  da: [
+    "Notifikationer om fuldførte mål",
+    "Få besked ved {{goalText}}",
+    "Du får besked ved {{goalText}}",
+  ],
+  de: [
+    "Benachrichtigungen bei Zielerreichung",
+    "Bei {{goalText}} benachrichtigen",
+    "Du wirst bei {{goalText}} benachrichtigt",
+  ],
+  en: [
+    "Goal completion alerts",
+    "Get Notified at {{goalText}}",
+    "You’ll be notified at {{goalText}}",
+  ],
+  es: [
+    "Alertas de objetivo completado",
+    "Recibir notificación al llegar a {{goalText}}",
+    "Recibirás una notificación al llegar a {{goalText}}",
+  ],
+  et: [
+    "Eesmärgi täitumise teavitused",
+    "Saa teavitus {{goalText}} juures",
+    "Sind teavitatakse {{goalText}} juures",
+  ],
+  fr: [
+    "Alertes d'objectif atteint",
+    "Être notifié à {{goalText}}",
+    "Vous serez notifié à {{goalText}}",
+  ],
+  hr: [
+    "Obavijesti o ostvarenju cilja",
+    "Primite obavijest na {{goalText}}",
+    "Bit ćete obaviješteni na {{goalText}}",
+  ],
+  is: [
+    "Tilkynningar þegar markmiði er náð",
+    "Fá tilkynningu við {{goalText}}",
+    "Þú færð tilkynningu við {{goalText}}",
+  ],
+  it: [
+    "Avvisi di completamento obiettivo",
+    "Ricevi una notifica a {{goalText}}",
+    "Riceverai una notifica a {{goalText}}",
+  ],
+  lv: [
+    "Mērķa sasniegšanas paziņojumi",
+    "Saņemt paziņojumu pie {{goalText}}",
+    "Jūs saņemsiet paziņojumu pie {{goalText}}",
+  ],
+  lt: [
+    "Tikslo pasiekimo pranešimai",
+    "Gauti pranešimą ties {{goalText}}",
+    "Gausite pranešimą ties {{goalText}}",
+  ],
+  hu: [
+    "Célteljesítési értesítések",
+    "Értesítés {{goalText}} elérésekor",
+    "Értesítést kapsz {{goalText}} elérésekor",
+  ],
+  nl: [
+    "Meldingen bij behaald doel",
+    "Melding ontvangen bij {{goalText}}",
+    "Je ontvangt een melding bij {{goalText}}",
+  ],
+  nb: [
+    "Varsler når målet er nådd",
+    "Få varsel ved {{goalText}}",
+    "Du blir varslet ved {{goalText}}",
+  ],
+  pl: [
+    "Alerty o osiągnięciu celu",
+    "Powiadom przy {{goalText}}",
+    "Otrzymasz powiadomienie przy {{goalText}}",
+  ],
+  pt: [
+    "Alertas de conclusão da meta",
+    "Receber notificação ao chegar a {{goalText}}",
+    "Você será notificado ao chegar a {{goalText}}",
+  ],
+  ro: [
+    "Alerte de atingere a obiectivului",
+    "Primește notificare la {{goalText}}",
+    "Vei fi notificat la {{goalText}}",
+  ],
+  sq: [
+    "Njoftime për arritjen e objektivit",
+    "Merr njoftim në {{goalText}}",
+    "Do të njoftohesh në {{goalText}}",
+  ],
+  sk: [
+    "Upozornenia na dosiahnutie cieľa",
+    "Upozorniť pri {{goalText}}",
+    "Dostanete upozornenie pri {{goalText}}",
+  ],
+  sl: [
+    "Obvestila o doseženem cilju",
+    "Prejmi obvestilo pri {{goalText}}",
+    "Obveščeni boste pri {{goalText}}",
+  ],
+  fi: [
+    "Tavoitteen täyttymisilmoitukset",
+    "Saa ilmoitus kohdassa {{goalText}}",
+    "Saat ilmoituksen kohdassa {{goalText}}",
+  ],
+  sv: [
+    "Aviseringar när målet nås",
+    "Få avisering vid {{goalText}}",
+    "Du aviseras vid {{goalText}}",
+  ],
+  tl: [
+    "Mga alerto sa pagkumpleto ng goal",
+    "Ma-notify sa {{goalText}}",
+    "Aabisuhan ka sa {{goalText}}",
+  ],
+  tr: [
+    "Hedef tamamlama bildirimleri",
+    "{{goalText}} olduğunda bildirim al",
+    "{{goalText}} olduğunda bildirim alacaksınız",
+  ],
+  yo: [
+    "Àwọn ìkìlọ̀ ìparí àfojúsùn",
+    "Gba ìfitónilétí ní {{goalText}}",
+    "A ó fi tó ọ létí ní {{goalText}}",
+  ],
+};
+
 export const getNotificationMessages = (
   language: SubGoalLanguage | undefined,
 ): NotificationMessages => {
   const value = values[language ?? "en"];
   const compact = compactValues[language ?? "en"];
+  const goal = goalValues[language ?? "en"];
   return {
     label: value[0],
+    alertsLabel: goal[0],
     title: value[1],
     description: value[2],
     enabled: value[3],
     disabled: value[4],
-    enableButton: value[5],
-    disableButton: value[6],
     loginRequired: value[7],
     loadError: value[8],
     updateError: value[9],
     enabledToast: value[10],
     disabledToast: value[11],
-    enableShort: compact[0],
-    disableShort: compact[1],
     returnShort: compact[2],
     backAriaLabel: compact[3],
+    goalPrompt: ({ goalText }) => goal[1].replace("{{goalText}}", goalText),
+    goalConfirmation: ({ goalText }) =>
+      goal[2].replace("{{goalText}}", goalText),
   };
 };

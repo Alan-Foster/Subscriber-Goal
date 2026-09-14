@@ -66,6 +66,7 @@ describe("ThanksPage", () => {
       <ThanksPage
         state={{ ...baseState, postHeight: "short" }}
         {...commonProps}
+        onNotificationOptIn={vi.fn()}
       />,
     );
 
@@ -75,11 +76,61 @@ describe("ThanksPage", () => {
     expect(html).toContain("text-2xl font-bold");
     expect(html).toContain("text-lg font-semibold");
     expect(html).toContain("Thanks for Subscribing!");
+    expect(html).toContain("Get Notified at 10");
+    expect(html).toContain("sg-subscribe-attention");
+  });
+
+  it("shows a themed goal notification prompt on the left", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, goal: 10_000 }}
+        {...commonProps}
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('data-goal-notification-state="available"');
+    expect(html).toContain('data-sg-theme="red"');
+    expect(html).toContain("Get Notified at 10k");
+    expect(html).toContain("sg-subscribe-attention");
+    expect(html).toContain("absolute left-4 top-4");
+  });
+
+  it("replaces the prompt with a stable confirmation when enabled", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={baseState}
+        {...commonProps}
+        notificationEnabled
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('data-goal-notification-state="confirmed"');
+    expect(html).toContain("You’ll be notified at 10");
+    expect(html).not.toContain("sg-subscribe-attention");
+  });
+
+  it("hides the goal prompt when no goal is available", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, goal: null }}
+        {...commonProps}
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).not.toContain("data-goal-notification-state");
+    expect(html).not.toContain("Get Notified");
   });
 
   it("renders only the localized tiny subscription confirmation", () => {
     const html = renderToStaticMarkup(
-      <ThanksPage state={tinyState} {...commonProps} />,
+      <ThanksPage
+        state={tinyState}
+        {...commonProps}
+        onNotificationOptIn={vi.fn()}
+      />,
     );
 
     expect(html).toContain("Subscribed to r/ExampleSub");
@@ -88,6 +139,8 @@ describe("ThanksPage", () => {
     expect(html).not.toContain("Thanks for Subscribing!");
     expect(html).not.toContain("subscribers in the community");
     expect(html).not.toContain("Return to Previous Page");
+    expect(html).not.toContain("Get Notified");
+    expect(html).not.toContain("data-goal-notification-state");
     expect(html).toContain("px-4 py-3");
   });
 

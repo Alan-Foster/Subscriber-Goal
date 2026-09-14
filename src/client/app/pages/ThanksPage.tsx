@@ -9,13 +9,18 @@ import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
+import { GoalNotificationPrompt } from "../components/GoalNotificationPrompt";
 
 type ThanksPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
-  onNotifications?: () => void;
+  notificationEnabled?: boolean;
+  notificationLoading?: boolean;
+  notificationSubmitting?: boolean;
+  notificationError?: string | null;
+  onNotificationOptIn?: () => void;
 };
 
 export const ThanksPage = ({
@@ -23,7 +28,11 @@ export const ThanksPage = ({
   onReturn,
   onVisitPromoSub,
   onAfterSubscribeNavigate,
-  onNotifications,
+  notificationEnabled = false,
+  notificationLoading = false,
+  notificationSubmitting = false,
+  notificationError = null,
+  onNotificationOptIn,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
   const notificationMessages = getNotificationMessages(state.language);
@@ -61,12 +70,26 @@ export const ThanksPage = ({
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
-        onNotificationsPressed={onNotifications}
-        notificationLabel={notificationMessages.label}
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
+      {state.goal !== null && onNotificationOptIn ? (
+        <GoalNotificationPrompt
+          colorTheme={state.colorTheme}
+          enabled={notificationEnabled}
+          loading={notificationLoading}
+          submitting={notificationSubmitting}
+          error={notificationError}
+          prompt={notificationMessages.goalPrompt({
+            goalText: formatSubscriberCount(state.goal),
+          })}
+          confirmation={notificationMessages.goalConfirmation({
+            goalText: formatSubscriberCount(state.goal),
+          })}
+          onOptIn={onNotificationOptIn}
+        />
+      ) : null}
       {isShort ? null : <SubredditIcon iconUrl={state.subreddit.icon} />}
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">

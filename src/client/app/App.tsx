@@ -62,7 +62,7 @@ export const App = () => {
   const messages = getSubGoalPostMessages(state?.language);
   const notificationMessages = getNotificationMessages(state?.language);
   const notificationSettings = useNotificationSettings(
-    page === "notifications",
+    page === "notifications" || page === "thanks",
   );
   const readyReportedRef = useRef(false);
 
@@ -138,19 +138,24 @@ export const App = () => {
   const handleReturnFromNotifications = () => {
     setPage(previousPageRef.current);
   };
-  const handleToggleNotifications = (enabled: boolean) => {
-    void notificationSettings.update(enabled).then((updated) => {
-      if (!updated) {
-        showToast(notificationMessages.updateError);
-        return;
-      }
-      showToast({
-        text: enabled
-          ? notificationMessages.enabledToast
-          : notificationMessages.disabledToast,
-        appearance: "success",
-      });
+  const updateNotifications = async (enabled: boolean) => {
+    const updated = await notificationSettings.update(enabled);
+    if (!updated) {
+      showToast(notificationMessages.updateError);
+      return;
+    }
+    showToast({
+      text: enabled
+        ? notificationMessages.enabledToast
+        : notificationMessages.disabledToast,
+      appearance: "success",
     });
+  };
+  const handleToggleNotifications = (enabled: boolean) => {
+    void updateNotifications(enabled);
+  };
+  const handleNotificationOptIn = () => {
+    void updateNotifications(true);
   };
 
   const performSubscribe = async () => {
@@ -294,7 +299,11 @@ export const App = () => {
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
-          onNotifications={handleOpenNotifications}
+          notificationEnabled={notificationSettings.settings?.enabled ?? false}
+          notificationLoading={notificationSettings.loading}
+          notificationSubmitting={notificationSettings.submitting}
+          notificationError={notificationSettings.error}
+          onNotificationOptIn={handleNotificationOptIn}
         />
       );
     } else if (page === "completed" && state.postHeight !== "tiny") {

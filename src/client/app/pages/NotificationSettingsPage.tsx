@@ -4,6 +4,7 @@ import type { SubGoalState } from "../../../shared/types/api";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { NotificationBellIcon } from "../components/NotificationBellIcon";
+import { NotificationSwitch } from "../components/NotificationSwitch";
 import { TopButtons } from "../components/TopButtons";
 
 type NotificationSettingsPageProps = {
@@ -21,17 +22,15 @@ type NotificationSettingsPageProps = {
 type StableLocalizedSlotProps = {
   current: string;
   alternatives: readonly [string, string];
-  kind: "state" | "action";
 };
 
 const StableLocalizedSlot = ({
   current,
   alternatives,
-  kind,
 }: StableLocalizedSlotProps) => (
   <span
     className="inline-grid shrink-0 text-center"
-    data-notification-stable-slot={kind}
+    data-notification-stable-slot="state"
   >
     {alternatives.map((alternative) => (
       <span
@@ -50,8 +49,6 @@ type NotificationPreferenceRowProps = {
   label: string;
   enabledText: string;
   disabledText: string;
-  enableText: string;
-  disableText: string;
   enabled: boolean;
   loading: boolean;
   submitting: boolean;
@@ -66,8 +63,6 @@ const NotificationPreferenceRow = ({
   label,
   enabledText,
   disabledText,
-  enableText,
-  disableText,
   enabled,
   loading,
   submitting,
@@ -79,8 +74,6 @@ const NotificationPreferenceRow = ({
 }: NotificationPreferenceRowProps) => {
   const busy = loading || submitting;
   const statusText = loading ? "…" : enabled ? enabledText : disabledText;
-  const actionText = submitting ? "…" : enabled ? disableText : enableText;
-  const actionAriaLabel = enabled ? disableText : enableText;
 
   return (
     <div
@@ -100,27 +93,16 @@ const NotificationPreferenceRow = ({
         <StableLocalizedSlot
           current={statusText}
           alternatives={[enabledText, disabledText]}
-          kind="state"
         />
       </div>
       <div className="flex shrink-0 items-center justify-center gap-2 sm:gap-3">
-        <button
-          type="button"
+        <NotificationSwitch
+          checked={enabled}
           disabled={busy || !authenticated}
-          aria-label={actionAriaLabel}
-          className={`${
-            enabled
-              ? "bg-red-600 text-white hover:bg-red-700"
-              : "bg-green-700 text-white hover:bg-green-800"
-          } inline-grid cursor-pointer rounded-full px-3 py-2 text-base font-semibold shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed disabled:opacity-50 sm:px-4`}
-          onClick={() => onToggle(!enabled)}
-        >
-          <StableLocalizedSlot
-            current={actionText}
-            alternatives={[enableText, disableText]}
-            kind="action"
-          />
-        </button>
+          label={`${label}: ${statusText}`}
+          busy={busy}
+          onCheckedChange={onToggle}
+        />
         {returnButton}
       </div>
     </div>
@@ -152,7 +134,6 @@ export const NotificationSettingsPage = ({
       : enabled
         ? messages.enabled
         : messages.disabled;
-  const toggleLabel = enabled ? messages.disableButton : messages.enableButton;
 
   const handleReturn = () => {
     if (returnActivatedRef.current) return;
@@ -162,22 +143,6 @@ export const NotificationSettingsPage = ({
       returnActivatedRef.current = false;
     }, 250);
   };
-
-  const regularToggleButton = (
-    <button
-      type="button"
-      disabled={busy || !authenticated}
-      aria-label={toggleLabel}
-      className={`${
-        enabled
-          ? "bg-red-600 text-white hover:bg-red-700"
-          : "bg-green-700 text-white hover:bg-green-800"
-      } cursor-pointer whitespace-nowrap rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed disabled:opacity-50`}
-      onClick={() => onToggle(!enabled)}
-    >
-      {submitting ? "…" : toggleLabel}
-    </button>
-  );
 
   const backButton = (
     <button
@@ -218,8 +183,6 @@ export const NotificationSettingsPage = ({
           label={messages.label}
           enabledText={messages.enabled}
           disabledText={messages.disabled}
-          enableText={messages.enableShort}
-          disableText={messages.disableShort}
           enabled={enabled}
           loading={loading}
           submitting={submitting}
@@ -277,8 +240,6 @@ export const NotificationSettingsPage = ({
           label={messages.label}
           enabledText={messages.enabled}
           disabledText={messages.disabled}
-          enableText={messages.enableShort}
-          disableText={messages.disableShort}
           enabled={enabled}
           loading={loading}
           submitting={submitting}
@@ -316,19 +277,44 @@ export const NotificationSettingsPage = ({
       <div className="max-w-xl text-sm text-[color:var(--sg-text-muted)] sm:text-base">
         {messages.description}
       </div>
-      <div className="text-base font-semibold text-[color:var(--sg-text-secondary)] sm:text-lg">
-        r/{subredditName}:{" "}
-        <span className={enabled ? "text-green-500" : ""}>{statusText}</span>
+      <div className="flex w-full max-w-xl items-center justify-between gap-4 rounded-2xl border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-3 shadow-sm sm:px-5">
+        <div
+          className="flex min-w-0 items-center gap-3 text-left"
+          aria-live="polite"
+          role="status"
+        >
+          <span
+            className={
+              enabled
+                ? "text-green-500"
+                : "text-[color:var(--sg-text-secondary)]"
+            }
+          >
+            <NotificationBellIcon enabled={enabled} size={24} />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-[color:var(--sg-text-primary)] sm:text-base">
+              {messages.alertsLabel}
+            </span>
+            <span className="block truncate text-xs text-[color:var(--sg-text-muted)] sm:text-sm">
+              r/{subredditName}: {statusText}
+            </span>
+          </span>
+        </div>
+        <NotificationSwitch
+          checked={enabled}
+          disabled={busy || !authenticated}
+          label={`${messages.alertsLabel}: ${statusText}`}
+          busy={busy}
+          onCheckedChange={onToggle}
+        />
       </div>
       {error ? (
         <div className="text-xs text-red-500" aria-live="polite">
           {error}
         </div>
       ) : null}
-      <div className="flex items-center justify-center gap-2 sm:gap-3">
-        {regularToggleButton}
-        {returnButton}
-      </div>
+      {returnButton}
     </div>
   );
 };

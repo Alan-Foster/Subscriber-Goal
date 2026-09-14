@@ -211,7 +211,7 @@ describe("App", () => {
 
     await act(async () => {
       container
-        .querySelector<HTMLButtonElement>('button[aria-label="Enable"]')
+        .querySelector<HTMLInputElement>('input[role="switch"]')
         ?.click();
       await Promise.resolve();
     });
@@ -226,6 +226,144 @@ describe("App", () => {
       "Show my username when I subscribe",
     );
     expect(container.querySelector(".confetti-piece")).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("opts in from the Thanks page and confirms the goal notification", async () => {
+    const subscribedState = {
+      ...hoisted.createState(),
+      subscribed: true,
+      subreddit: { ...hoisted.createState().subreddit, subscribers: 124 },
+    } as SubGoalState;
+    hoisted.subscribe.mockResolvedValue({
+      state: subscribedState,
+      error: null,
+    });
+    hoisted.requestSubscribeJson.mockResolvedValue({
+      data: {
+        type: "notification-settings",
+        authenticated: true,
+        enabled: true,
+      },
+      error: null,
+      status: 200,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "notification-settings",
+              authenticated: true,
+              enabled: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => {
+      subscribeButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const prompt = container.querySelector<HTMLButtonElement>(
+      '[data-goal-notification-state="available"] button',
+    );
+    expect(prompt?.textContent).toContain("Get Notified at 1000");
+    await act(async () => {
+      prompt?.click();
+      prompt?.click();
+      await Promise.resolve();
+    });
+
+    expect(hoisted.requestSubscribeJson).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(String(hoisted.requestSubscribeJson.mock.calls[0]?.[1]?.body)),
+    ).toEqual({ enabled: true });
+    expect(container.textContent).toContain("You’ll be notified at 1000");
+    expect(
+      container.querySelector('[data-goal-notification-state="confirmed"]'),
+    ).not.toBeNull();
+    expect(hoisted.showToast).toHaveBeenCalledWith({
+      text: "Notifications enabled.",
+      appearance: "success",
+    });
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps the Thanks-page prompt available when opt-in fails", async () => {
+    hoisted.subscribe.mockResolvedValue({
+      state: { ...hoisted.createState(), subscribed: true },
+      error: null,
+    });
+    hoisted.requestSubscribeJson.mockResolvedValue({
+      data: null,
+      error: "Notification settings could not be updated.",
+      status: 503,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "notification-settings",
+              authenticated: true,
+              enabled: false,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => {
+      subscribeButton?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-goal-notification-state="available"] button',
+        )
+        ?.click();
+      await Promise.resolve();
+    });
+
+    expect(
+      container.querySelector('[data-goal-notification-state="available"]'),
+    ).not.toBeNull();
+    expect(
+      container
+        .querySelector('[data-goal-notification-state="available"] button')
+        ?.getAttribute("aria-invalid"),
+    ).toBe("true");
+    expect(hoisted.showToast).toHaveBeenCalledWith(
+      "Notification settings could not be updated.",
+    );
 
     await act(async () => root.unmount());
     container.remove();

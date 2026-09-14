@@ -72,7 +72,7 @@ describe("TopButtons", () => {
     ["tiny", true],
     ["cta", true],
   ])(
-    "hides the notification entry on %s posts by default",
+    "shows the notification entry on %s posts by default",
     (_size, compact) => {
       const html = renderToStaticMarkup(
         <TopButtons
@@ -85,11 +85,26 @@ describe("TopButtons", () => {
         />,
       );
 
-      expect(html).not.toContain('aria-label="Notifications"');
-      expect(html).not.toContain("data-notification-bell-state");
-      expect(html).not.toContain("absolute left-4 top-4");
-      expect(html).not.toContain(">Notifications<");
-      expect(html.match(/<button/g)).toHaveLength(1);
+      expect(html).toContain('aria-label="Notifications"');
+      expect(html).toContain("data-notification-bell-state");
+      expect(html).toContain("absolute left-4 top-4");
+      expect(html).toContain(">Notifications<");
+      expect(html.match(/<button/g)).toHaveLength(2);
     },
   );
+
+  it("supports explicitly hiding the notification entry", () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        onNotificationsPressed={vi.fn()}
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+        notificationsEntryEnabled={false}
+      />,
+    );
+
+    expect(html).not.toContain('aria-label="Notifications"');
+    expect(html.match(/<button/g)).toHaveLength(1);
+  });
 });
