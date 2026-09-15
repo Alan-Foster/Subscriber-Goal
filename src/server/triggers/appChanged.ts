@@ -6,10 +6,16 @@ import {
   initializeSubscriberStatsMigration,
 } from "../data/subscriberStats";
 import {
+  getOnboardingEligibility,
   initializeOnboardingSubscriberGoal,
+  markOnboardingSubscriberGoalIneligible,
+  onboardingMinimumSubscriberCount,
   onboardingUpgradeWaveEnabled,
 } from "../core/onboardingSubscriberGoal";
-import { scheduleOnboardingReminder } from "../core/onboardingReminder";
+import {
+  markOnboardingReminderIneligible,
+  scheduleOnboardingReminder,
+} from "../core/onboardingReminder";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
 import { scheduleAppRepair } from "../core/appRepair";
@@ -29,9 +35,13 @@ export async function onAppChanged({
   }
 
   let subredditName = context.subredditName;
+  let currentSubreddit:
+    | Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>
+    | undefined;
   if (!subredditName) {
     try {
-      subredditName = (await reddit.getCurrentSubreddit()).name;
+      currentSubreddit = await reddit.getCurrentSubreddit();
+      subredditName = currentSubreddit.name;
     } catch (error) {
       logDiagnostic(
         "warn",
@@ -72,8 +82,38 @@ export async function onAppChanged({
     initializeSubscriberStatsMigration(redis),
   );
   if (shouldInitializeReleaseOnboarding(lifecycleSource)) {
+    if (!currentSubreddit) {
+      try {
+        currentSubreddit = await reddit.getCurrentSubreddit();
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "app_changed_phase_failed",
+          { workflow: "app_changed", phase: "onboarding_eligibility" },
+          error,
+        );
+        throw error;
+      }
+    }
+    const eligibility = getOnboardingEligibility(currentSubreddit);
+    console.info(
+      `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
+    );
     await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
     await scheduleOnboardingReminder(redis, { lifecycleSource });
+    if (!eligibility.eligible) {
+      const nowMs = Date.now();
+      await markOnboardingReminderIneligible(
+        redis,
+        eligibility.subscriberCount,
+        nowMs,
+      );
+      await markOnboardingSubscriberGoalIneligible(
+        redis,
+        eligibility.subscriberCount,
+        nowMs,
+      );
+    }
   }
   await runPhase("recent_subscriber_index_migration", () =>
     initializeRecentSubscriberIndexMigration(redis),

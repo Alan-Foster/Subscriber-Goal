@@ -75,6 +75,15 @@ const onboardingRetryBaseMs = 5 * 60 * 1000;
 const onboardingRetryMaxMs = 60 * 60 * 1000;
 
 export type OnboardingLifecycleSource = "install" | "upgrade" | "unknown";
+export type OnboardingIneligibilityReason =
+  | "subscriber_count"
+  | "subreddit_not_public";
+export type OnboardingEligibility = {
+  eligible: boolean;
+  subscriberCount: number;
+  subredditType: string;
+  reason?: OnboardingIneligibilityReason;
+};
 export type OnboardingExistingSource =
   | "registered"
   | "tracked"
@@ -165,6 +174,35 @@ const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
   stalePruned: 0,
   failed: 0,
 });
+
+export function getOnboardingEligibility(subreddit: {
+  numberOfSubscribers: number;
+  type?: unknown;
+}): OnboardingEligibility {
+  const subredditType =
+    typeof subreddit.type === "string" ? subreddit.type : "unknown";
+  if (!(subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount)) {
+    return {
+      eligible: false,
+      subscriberCount: subreddit.numberOfSubscribers,
+      subredditType,
+      reason: "subscriber_count",
+    };
+  }
+  if (subredditType !== "public") {
+    return {
+      eligible: false,
+      subscriberCount: subreddit.numberOfSubscribers,
+      subredditType,
+      reason: "subreddit_not_public",
+    };
+  }
+  return {
+    eligible: true,
+    subscriberCount: subreddit.numberOfSubscribers,
+    subredditType,
+  };
+}
 
 export async function initializeOnboardingSubscriberGoal(
   redis: RedisClient,
@@ -386,6 +424,28 @@ export async function processDueOnboardingSubscriberGoal({
       startedAt: nowMs,
     });
 
+    const subreddit = await reddit.getCurrentSubreddit();
+    const eligibility = getOnboardingEligibility(subreddit);
+    console.info(
+      `[onboardingSubscriberGoal] eligibility: subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes}`,
+    );
+    if (!eligibility.eligible) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "ineligible",
+        eligibilitySubscriberCount: eligibility.subscriberCount,
+      });
+      return {
+        status: "ineligible",
+        lifecycleSource: reloaded.lifecycleSource,
+        creationStaggerMinutes: reloaded.creationStaggerMinutes,
+        eligibilitySubscriberCount: eligibility.subscriberCount,
+        ...inspected,
+      };
+    }
+
     const existing = await findExistingSubscriberGoal(reddit, redis, nowMs);
     inspected = {
       registeredInspected: existing.registeredInspected,
@@ -419,26 +479,6 @@ export async function processDueOnboardingSubscriberGoal({
       };
     }
 
-    const subreddit = await reddit.getCurrentSubreddit();
-    console.info(
-      `[onboardingSubscriberGoal] eligibility: subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} eligible=${subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes}`,
-    );
-    if (subreddit.numberOfSubscribers < onboardingMinimumSubscriberCount) {
-      await saveOnboardingState(redis, {
-        ...reloaded,
-        status: "complete",
-        completedAt: nowMs,
-        resultStatus: "ineligible",
-        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
-      });
-      return {
-        status: "ineligible",
-        lifecycleSource: reloaded.lifecycleSource,
-        creationStaggerMinutes: reloaded.creationStaggerMinutes,
-        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
-        ...inspected,
-      };
-    }
     const crosspost =
       (subreddit as { isNsfw?: boolean }).isNsfw !== true &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();

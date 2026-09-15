@@ -155,6 +155,7 @@ function createReddit() {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 91,
+      type: "public",
       isNsfw: false,
     }),
     getAppUser: vi.fn().mockResolvedValue({ username: "subscriber-goal" }),
@@ -663,38 +664,37 @@ describe("onboarding subscriber goal", () => {
     );
   });
 
-  it("defaults restricted onboarding posts to the Blue Top Post CTA", async () => {
-    await initializeOnboardingSubscriberGoal(redis as never, {
-      lifecycleSource: "install",
-      nowMs,
-    });
-    reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 50,
-      type: "restricted",
-      isNsfw: false,
-    });
+  it.each(["restricted", "private", undefined])(
+    "does not create an onboarding goal for a %s subreddit",
+    async (type) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 50,
+        type,
+        isNsfw: false,
+      });
 
-    await processDueOnboardingSubscriberGoal({
-      reddit: reddit as never,
-      redis: redis as never,
-      appSettings: settings,
-      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
-    });
-
-    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.objectContaining({
-          afterSubscribeAction: {
-            type: "top-post-day",
-            buttonText: "View the Top Post Today",
-            colorTheme: "blue",
-          },
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: nowMs + onboardingSubscriberGoalDelayMs,
         }),
-      }),
-    );
-  });
+      ).resolves.toMatchObject({
+        status: "ineligible",
+        eligibilitySubscriberCount: 50,
+      });
+
+      expect(reddit.getAppUser).not.toHaveBeenCalled();
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([999_999, onboardingTinySubscriberThreshold])(
     "keeps the regular onboarding goal at %i subscribers",
@@ -707,6 +707,7 @@ describe("onboarding subscriber goal", () => {
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers,
+        type: "public",
         isNsfw: false,
       });
 
@@ -738,6 +739,7 @@ describe("onboarding subscriber goal", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: onboardingTinySubscriberThreshold + 1,
+      type: "public",
       isNsfw: false,
       language: "es",
     });
@@ -998,6 +1000,7 @@ describe("onboarding subscriber goal", () => {
       redis: redis as never,
       nowMs: sentAt,
     });
+    reddit.getAppUser.mockClear();
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -1018,6 +1021,47 @@ describe("onboarding subscriber goal", () => {
       status: "ineligible",
       eligibilitySubscriberCount: 49,
     });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("skips a community that becomes restricted after its warning", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const sentAt = nowMs + 60_000;
+    await processDueOnboardingReminder({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: sentAt,
+    });
+    reddit.getAppUser.mockClear();
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 91,
+      type: "restricted",
+      isNsfw: false,
+    });
+    const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(goal.nextRunAt),
+      }),
+    ).resolves.toMatchObject({
+      status: "ineligible",
+      eligibilitySubscriberCount: 91,
+    });
+    expect(reddit.getAppUser).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 

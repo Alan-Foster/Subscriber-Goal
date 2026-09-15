@@ -2,6 +2,7 @@ import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   findExistingSubscriberGoal,
+  getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError,
   initializeOnboardingSubscriberGoal,
@@ -156,6 +157,24 @@ export async function scheduleOnboardingReminder(
   }
 }
 
+export async function markOnboardingReminderIneligible(
+  redis: RedisClient,
+  subscriberCount: number,
+  nowMs = Date.now(),
+): Promise<void> {
+  const state = parseOnboardingReminderState(
+    await redis.hGetAll(onboardingReminderStateKey),
+  );
+  if (!state || state.status === "complete") return;
+  await saveOnboardingReminderState(redis, {
+    ...state,
+    status: "complete",
+    completedAt: nowMs,
+    result: "ineligible",
+    eligibilitySubscriberCount: subscriberCount,
+  });
+}
+
 export function selectOnboardingReminderStaggerMinutes(
   randomValue = Math.random(),
 ): number {
@@ -237,28 +256,27 @@ export async function processDueOnboardingReminder({
     });
 
     const subreddit = await reddit.getCurrentSubreddit();
+    const eligibility = getOnboardingEligibility(subreddit);
     console.info(
-      `[onboardingReminder] eligibility: subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} eligible=${subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource} reminderStaggerMinutes=${reloaded.reminderStaggerMinutes}`,
+      `[onboardingReminder] eligibility: subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"} source=${reloaded.lifecycleSource} reminderStaggerMinutes=${reloaded.reminderStaggerMinutes}`,
     );
-    if (subreddit.numberOfSubscribers < onboardingMinimumSubscriberCount) {
-      await saveOnboardingReminderState(redis, {
-        ...reloaded,
-        status: "complete",
-        completedAt: nowMs,
-        result: "ineligible",
-        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
-      });
+    if (!eligibility.eligible) {
+      await markOnboardingReminderIneligible(
+        redis,
+        eligibility.subscriberCount,
+        nowMs,
+      );
       await markOnboardingSubscriberGoalIneligible(
         redis,
-        subreddit.numberOfSubscribers,
+        eligibility.subscriberCount,
         nowMs,
       );
       console.info(
-        `[onboardingReminder] complete: status=ineligible subscriberCount=${subreddit.numberOfSubscribers} minimumSubscriberCount=${onboardingMinimumSubscriberCount} source=${reloaded.lifecycleSource}`,
+        `[onboardingReminder] complete: status=ineligible subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} reason=${eligibility.reason} source=${reloaded.lifecycleSource}`,
       );
       return {
         status: "ineligible",
-        eligibilitySubscriberCount: subreddit.numberOfSubscribers,
+        eligibilitySubscriberCount: eligibility.subscriberCount,
         ...base,
       };
     }

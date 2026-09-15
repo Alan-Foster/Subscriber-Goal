@@ -11,6 +11,8 @@ const hoisted = vi.hoisted(() => ({
   initializeRecentSubscriberIndexMigration: vi.fn(),
   initializeSubscriberStatsMigration: vi.fn(),
   initializeOnboardingSubscriberGoal: vi.fn(),
+  markOnboardingSubscriberGoalIneligible: vi.fn(),
+  markOnboardingReminderIneligible: vi.fn(),
   scheduleOnboardingReminder: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
@@ -52,12 +54,31 @@ vi.mock("../data/subGoalData", () => ({
 }));
 
 vi.mock("../core/onboardingSubscriberGoal", () => ({
+  getOnboardingEligibility: (subreddit: {
+    numberOfSubscribers: number;
+    type?: unknown;
+  }) => ({
+    eligible:
+      subreddit.numberOfSubscribers >= 50 && subreddit.type === "public",
+    subscriberCount: subreddit.numberOfSubscribers,
+    subredditType:
+      typeof subreddit.type === "string" ? subreddit.type : "unknown",
+    ...(subreddit.numberOfSubscribers < 50
+      ? { reason: "subscriber_count" }
+      : subreddit.type !== "public"
+        ? { reason: "subreddit_not_public" }
+        : {}),
+  }),
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
+  markOnboardingSubscriberGoalIneligible:
+    hoisted.markOnboardingSubscriberGoalIneligible,
+  onboardingMinimumSubscriberCount: 50,
   onboardingUpgradeWaveEnabled: true,
 }));
 
 vi.mock("../core/onboardingReminder", () => ({
+  markOnboardingReminderIneligible: hoisted.markOnboardingReminderIneligible,
   scheduleOnboardingReminder: hoisted.scheduleOnboardingReminder,
 }));
 
@@ -120,12 +141,15 @@ describe("onAppChanged", () => {
       id: "t5_subgoal",
       name: "SubGoal",
       type: "public",
+      numberOfSubscribers: 91,
     });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
     hoisted.initializeRecentSubscriberIndexMigration.mockReset();
     hoisted.initializeSubscriberStatsMigration.mockReset();
     hoisted.initializeOnboardingSubscriberGoal.mockReset();
+    hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
+    hoisted.markOnboardingReminderIneligible.mockReset();
     hoisted.scheduleOnboardingReminder.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
@@ -148,6 +172,8 @@ describe("onAppChanged", () => {
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
     hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
+    hoisted.markOnboardingReminderIneligible.mockResolvedValue(undefined);
     hoisted.scheduleOnboardingReminder.mockResolvedValue(undefined);
     hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(
       undefined,
@@ -194,6 +220,7 @@ describe("onAppChanged", () => {
       id: "t5_subgoal",
       name: "SubGoal",
       type: "public",
+      numberOfSubscribers: 91,
     });
 
     await expect(onAppChanged()).resolves.toBeUndefined();
@@ -240,6 +267,7 @@ describe("onAppChanged", () => {
       expect.anything(),
       { lifecycleSource: "install" },
     );
+    expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.rememberAppInstaller).toHaveBeenCalledWith(
       expect.anything(),
       "InstallingMod",
@@ -262,10 +290,60 @@ describe("onAppChanged", () => {
       expect.anything(),
       { lifecycleSource: "upgrade" },
     );
+    expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["install", "restricted"],
+    ["upgrade", "private"],
+  ] as const)(
+    "marks %s onboarding terminally ineligible for a %s subreddit",
+    async (lifecycleSource, type) => {
+      hoisted.context.subredditName = "SubGoal";
+      hoisted.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_subgoal",
+        name: "SubGoal",
+        type,
+        numberOfSubscribers: 500,
+      });
+
+      await onAppChanged({ lifecycleSource });
+
+      expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
+        expect.anything(),
+        { lifecycleSource },
+      );
+      expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
+        expect.anything(),
+        { lifecycleSource },
+      );
+      expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
+        expect.anything(),
+        500,
+        expect.any(Number),
+      );
+      expect(
+        hoisted.markOnboardingSubscriberGoalIneligible,
+      ).toHaveBeenCalledWith(expect.anything(), 500, expect.any(Number));
+    },
+  );
+
+  it("does not arm install onboarding when eligibility lookup fails", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.getCurrentSubreddit.mockRejectedValue(
+      new Error("reddit unavailable"),
+    );
+
+    await expect(onAppChanged({ lifecycleSource: "install" })).rejects.toThrow(
+      "reddit unavailable",
+    );
+
+    expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
   });
 
   it("defers discovery and migrations to the scheduler repair job", async () => {

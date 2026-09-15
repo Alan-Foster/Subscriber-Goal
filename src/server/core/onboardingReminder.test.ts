@@ -11,6 +11,21 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("./onboardingSubscriberGoal", () => ({
   findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
+  getOnboardingEligibility: (subreddit: {
+    numberOfSubscribers: number;
+    type?: unknown;
+  }) => ({
+    eligible:
+      subreddit.numberOfSubscribers >= 50 && subreddit.type === "public",
+    subscriberCount: subreddit.numberOfSubscribers,
+    subredditType:
+      typeof subreddit.type === "string" ? subreddit.type : "unknown",
+    ...(subreddit.numberOfSubscribers < 50
+      ? { reason: "subscriber_count" }
+      : subreddit.type !== "public"
+        ? { reason: "subreddit_not_public" }
+        : {}),
+  }),
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError: () => undefined,
   initializeOnboardingSubscriberGoal:
@@ -76,6 +91,7 @@ function createReddit() {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 91,
+      type: "public",
     }),
     modMail: { createModNotification: vi.fn().mockResolvedValue(undefined) },
   };
@@ -156,6 +172,7 @@ describe("onboarding reminder", () => {
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers,
+        type: "public",
       });
       await scheduleOnboardingReminder(redis as never, {
         lifecycleSource: "upgrade",
@@ -189,6 +206,7 @@ describe("onboarding reminder", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 50,
+      type: "public",
     });
     await scheduleOnboardingReminder(redis as never, { nowMs });
 
@@ -201,6 +219,32 @@ describe("onboarding reminder", () => {
     ).resolves.toMatchObject({ status: "sent" });
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
+
+  it.each(["restricted", "private", undefined])(
+    "sends no warning for a %s subreddit with enough subscribers",
+    async (type) => {
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 50,
+        type,
+      });
+      await scheduleOnboardingReminder(redis as never, { nowMs });
+
+      await expect(
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + onboardingReminderDelayMs,
+        }),
+      ).resolves.toMatchObject({
+        status: "ineligible",
+        eligibilitySubscriberCount: 50,
+      });
+      expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    },
+  );
 
   it("builds the requested moderator-facing introduction", () => {
     const message = buildOnboardingReminderMessage("ExampleSub");
