@@ -211,7 +211,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
+    expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
 
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -258,12 +258,20 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("selects inclusive goal stagger boundaries", () => {
+    expect(onboardingGoalStaggerMinMinutes).toBe(1);
+    expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
     expect(selectOnboardingGoalStaggerMinutes(0)).toBe(
       onboardingGoalStaggerMinMinutes,
     );
     expect(selectOnboardingGoalStaggerMinutes(1)).toBe(
       onboardingGoalStaggerMaxMinutes,
     );
+    expect(
+      onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMinMinutes,
+    ).toBe(1_441);
+    expect(
+      onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMaxMinutes,
+    ).toBe(2_440);
   });
 
   it("schedules creation from the configured base delay and maximum stagger", async () => {

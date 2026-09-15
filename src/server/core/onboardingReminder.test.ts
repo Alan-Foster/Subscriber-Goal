@@ -181,6 +181,8 @@ describe("onboarding reminder", () => {
   });
 
   it("selects inclusive reminder stagger boundaries", () => {
+    expect(onboardingReminderStaggerMinMinutes).toBe(1);
+    expect(onboardingReminderStaggerMaxMinutes).toBe(300);
     expect(selectOnboardingReminderStaggerMinutes(0)).toBe(
       onboardingReminderStaggerMinMinutes,
     );

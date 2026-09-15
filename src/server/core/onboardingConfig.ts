@@ -8,8 +8,8 @@
 export const onboardingMinimumSubscriberCount = 40;
 
 export const onboardingReminderStaggerMinMinutes = 1;
-export const onboardingReminderStaggerMaxMinutes = 5;
+export const onboardingReminderStaggerMaxMinutes = 300;
 
-export const onboardingGoalBaseDelayMs = 5 * 60 * 1000;
+export const onboardingGoalBaseDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingGoalStaggerMinMinutes = 1;
-export const onboardingGoalStaggerMaxMinutes = 10;
+export const onboardingGoalStaggerMaxMinutes = 1_000;
