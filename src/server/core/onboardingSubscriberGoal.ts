@@ -43,6 +43,19 @@ import {
 import { createSubscriberGoal } from "./createSubscriberGoal";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import {
+  onboardingGoalBaseDelayMs,
+  onboardingGoalStaggerMaxMinutes,
+  onboardingGoalStaggerMinMinutes,
+  onboardingMinimumSubscriberCount,
+} from "./onboardingConfig";
+
+export {
+  onboardingGoalBaseDelayMs,
+  onboardingGoalStaggerMaxMinutes,
+  onboardingGoalStaggerMinMinutes,
+  onboardingMinimumSubscriberCount,
+} from "./onboardingConfig";
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v4_state";
@@ -51,14 +64,9 @@ export const onboardingSubscriberGoalLockKey =
 export const onboardingSubscriberGoalInitializationLockKey =
   "onboarding_subscriber_goal_v4_init_lock";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v4";
-export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
-export const onboardingUpgradeBaseDelayMs = 24 * 60 * 60 * 1000;
-export const onboardingUpgradeStaggerMinMinutes = 1;
-export const onboardingUpgradeStaggerMaxMinutes = 1_000;
 /** Checked at every onboarding side-effect boundary so a hotfix can pause armed work. */
 export const AUTOMATIC_ONBOARDING_ENABLED = true;
 export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
-export const onboardingMinimumSubscriberCount = 50;
 export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
@@ -264,7 +272,7 @@ export async function initializeOnboardingSubscriberGoal(
     if (Object.keys(rawState).length > 0) return;
     const migration = await findPendingLegacyOnboardingWork(redis);
     if (migrationOnly && !migration) return;
-    const creationStaggerMinutes = selectOnboardingUpgradeStaggerMinutes();
+    const creationStaggerMinutes = selectOnboardingGoalStaggerMinutes();
     const armedAt = migration?.armedAt ?? nowMs;
     const state: OnboardingSubscriberGoalState = {
       version: onboardingSubscriberGoalVersion,
@@ -287,7 +295,7 @@ export async function initializeOnboardingSubscriberGoal(
             nextRunAt:
               Math.max(
                 nowMs,
-                migration.reminderSentAt + onboardingUpgradeBaseDelayMs,
+                migration.reminderSentAt + onboardingGoalBaseDelayMs,
               ) +
               creationStaggerMinutes * 60 * 1000,
           }
@@ -313,17 +321,15 @@ export async function initializeOnboardingSubscriberGoal(
   }
 }
 
-export function selectOnboardingUpgradeStaggerMinutes(
+export function selectOnboardingGoalStaggerMinutes(
   randomValue = Math.random(),
 ): number {
   const normalized = Math.min(Math.max(randomValue, 0), 1 - Number.EPSILON);
   return (
     Math.floor(
       normalized *
-        (onboardingUpgradeStaggerMaxMinutes -
-          onboardingUpgradeStaggerMinMinutes +
-          1),
-    ) + onboardingUpgradeStaggerMinMinutes
+        (onboardingGoalStaggerMaxMinutes - onboardingGoalStaggerMinMinutes + 1),
+    ) + onboardingGoalStaggerMinMinutes
   );
 }
 
@@ -351,7 +357,7 @@ export async function scheduleOnboardingSubscriberGoalAfterWarning(
       reminderSentAt: sentAt,
       nextRunAt:
         sentAt +
-        onboardingUpgradeBaseDelayMs +
+        onboardingGoalBaseDelayMs +
         state.creationStaggerMinutes * 60 * 1000,
     };
   });
@@ -456,8 +462,7 @@ export async function processDueOnboardingSubscriberGoal({
     return { status: "paused", ...base };
   }
   if (state.pausedAt !== undefined) {
-    const resumeAt =
-      nowMs + selectOnboardingUpgradeStaggerMinutes() * 60 * 1000;
+    const resumeAt = nowMs + selectOnboardingGoalStaggerMinutes() * 60 * 1000;
     const { pausedAt: _pausedAt, ...unpausedState } = state;
     state = {
       ...unpausedState,
@@ -1082,8 +1087,7 @@ function parseOnboardingState(
     armedAt === undefined ||
     creationStaggerMinutes === undefined ||
     !Number.isInteger(creationStaggerMinutes) ||
-    creationStaggerMinutes < onboardingUpgradeStaggerMinMinutes ||
-    creationStaggerMinutes > onboardingUpgradeStaggerMaxMinutes ||
+    creationStaggerMinutes < 0 ||
     !raw.operationId ||
     ((status === "pending" || status === "processing") &&
       nextRunAt === undefined)

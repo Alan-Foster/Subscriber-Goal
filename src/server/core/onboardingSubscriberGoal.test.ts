@@ -34,18 +34,19 @@ vi.mock("./appAccountHealth", () => ({
 
 import {
   findExistingSubscriberGoal,
+  getOnboardingEligibility,
   initializeOnboardingSubscriberGoal as initializeRawOnboardingSubscriberGoal,
+  onboardingGoalBaseDelayMs,
+  onboardingGoalStaggerMaxMinutes,
+  onboardingGoalStaggerMinMinutes,
   onboardingMinimumSubscriberCount,
-  onboardingSubscriberGoalDelayMs,
-  onboardingUpgradeStaggerMaxMinutes,
-  onboardingUpgradeStaggerMinMinutes,
   onboardingTinySubscriberThreshold,
   onboardingRecentPostPageSize,
   onboardingRecentPostScanLimit,
   onboardingSubscriberGoalStateKey,
   processDueOnboardingSubscriberGoal,
   scheduleOnboardingSubscriberGoalAfterWarning,
-  selectOnboardingUpgradeStaggerMinutes,
+  selectOnboardingGoalStaggerMinutes,
 } from "./onboardingSubscriberGoal";
 import {
   onboardingReminderStateKey,
@@ -210,7 +211,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingSubscriberGoalDelayMs).toBe(24 * 60 * 60 * 1000);
+    expect(onboardingGoalBaseDelayMs).toBe(24 * 60 * 60 * 1000);
 
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -241,19 +242,48 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs - 1,
+        nowMs: nowMs + onboardingGoalBaseDelayMs - 1,
       }),
     ).resolves.toMatchObject({ status: "not_due" });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
+  it("requires at least 40 subscribers for automatic onboarding", () => {
+    expect(
+      getOnboardingEligibility({ numberOfSubscribers: 39, type: "public" }),
+    ).toMatchObject({ eligible: false, reason: "subscriber_count" });
+    expect(
+      getOnboardingEligibility({ numberOfSubscribers: 40, type: "public" }),
+    ).toMatchObject({ eligible: true });
+  });
+
   it("selects inclusive upgrade stagger boundaries", () => {
-    expect(selectOnboardingUpgradeStaggerMinutes(0)).toBe(
-      onboardingUpgradeStaggerMinMinutes,
+    expect(selectOnboardingGoalStaggerMinutes(0)).toBe(
+      onboardingGoalStaggerMinMinutes,
     );
-    expect(selectOnboardingUpgradeStaggerMinutes(1)).toBe(
-      onboardingUpgradeStaggerMaxMinutes,
+    expect(selectOnboardingGoalStaggerMinutes(1)).toBe(
+      onboardingGoalStaggerMaxMinutes,
     );
+  });
+
+  it("schedules creation from the configured base delay and maximum stagger", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    await scheduleOnboardingSubscriberGoalAfterWarning(redis as never, nowMs);
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      creationStaggerMinutes: String(onboardingGoalStaggerMaxMinutes),
+      nextRunAt: String(
+        nowMs +
+          onboardingGoalBaseDelayMs +
+          onboardingGoalStaggerMaxMinutes * 60 * 1000,
+      ),
+    });
   });
 
   it("persists one upgrade stagger without redrawing it", async () => {
@@ -265,11 +295,9 @@ describe("onboarding subscriber goal", () => {
     const staggerMinutes = Number(first.creationStaggerMinutes);
 
     expect(staggerMinutes).toBeGreaterThanOrEqual(
-      onboardingUpgradeStaggerMinMinutes,
+      onboardingGoalStaggerMinMinutes,
     );
-    expect(staggerMinutes).toBeLessThanOrEqual(
-      onboardingUpgradeStaggerMaxMinutes,
-    );
+    expect(staggerMinutes).toBeLessThanOrEqual(onboardingGoalStaggerMaxMinutes);
     expect(first.status).toBe("awaiting_warning");
     expect(first.nextRunAt).toBe("");
 
@@ -348,7 +376,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({
       status: "existing",
@@ -565,7 +593,7 @@ describe("onboarding subscriber goal", () => {
           authorName: "subscriber-goal",
           subredditId: "t5_example",
           createdAt: new Date(
-            nowMs + onboardingSubscriberGoalDelayMs - 25 * 60 * 60 * 1000 - 1,
+            nowMs + onboardingGoalBaseDelayMs - 25 * 60 * 60 * 1000 - 1,
           ),
         },
       ]),
@@ -576,7 +604,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({
       status: "created",
@@ -605,7 +633,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs + 60_000,
+        nowMs: nowMs + onboardingGoalBaseDelayMs + 60_000,
       }),
     ).resolves.toMatchObject({
       status: "complete",
@@ -634,7 +662,7 @@ describe("onboarding subscriber goal", () => {
           reddit: reddit as never,
           redis: redis as never,
           appSettings: settings,
-          nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+          nowMs: nowMs + onboardingGoalBaseDelayMs,
         }),
       ).resolves.toMatchObject({
         status: "ineligible",
@@ -659,7 +687,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 50,
+      numberOfSubscribers: 40,
       type: "public",
       isNsfw: false,
       language: "es",
@@ -669,7 +697,7 @@ describe("onboarding subscriber goal", () => {
       reddit: reddit as never,
       redis: redis as never,
       appSettings: settings,
-      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      nowMs: nowMs + onboardingGoalBaseDelayMs,
     });
 
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
@@ -694,7 +722,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 50,
+      numberOfSubscribers: 40,
       type: "public",
       isNsfw: false,
       language: "ja",
@@ -704,7 +732,7 @@ describe("onboarding subscriber goal", () => {
       reddit: reddit as never,
       redis: redis as never,
       appSettings: settings,
-      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      nowMs: nowMs + onboardingGoalBaseDelayMs,
     });
 
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
@@ -731,7 +759,7 @@ describe("onboarding subscriber goal", () => {
       reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
         name: "ExampleSub",
-        numberOfSubscribers: 50,
+        numberOfSubscribers: 40,
         type,
         isNsfw: false,
       });
@@ -741,11 +769,11 @@ describe("onboarding subscriber goal", () => {
           reddit: reddit as never,
           redis: redis as never,
           appSettings: settings,
-          nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+          nowMs: nowMs + onboardingGoalBaseDelayMs,
         }),
       ).resolves.toMatchObject({
         status: "ineligible",
-        eligibilitySubscriberCount: 50,
+        eligibilitySubscriberCount: 40,
       });
 
       expect(reddit.getAppUser).not.toHaveBeenCalled();
@@ -772,7 +800,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       });
 
       expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
@@ -805,7 +833,7 @@ describe("onboarding subscriber goal", () => {
       reddit: reddit as never,
       redis: redis as never,
       appSettings: settings,
-      nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      nowMs: nowMs + onboardingGoalBaseDelayMs,
     });
 
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
@@ -840,7 +868,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({
       status: "failed",
@@ -851,7 +879,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs + 60_000,
+        nowMs: nowMs + onboardingGoalBaseDelayMs + 60_000,
       }),
     ).resolves.toMatchObject({
       status: "not_due",
@@ -866,7 +894,7 @@ describe("onboarding subscriber goal", () => {
     });
     hoisted.getTrackedPosts.mockRejectedValue(new Error("redis unavailable"));
 
-    let runAt = nowMs + onboardingSubscriberGoalDelayMs;
+    let runAt = nowMs + onboardingGoalBaseDelayMs;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       await processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
@@ -906,7 +934,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({ status: "cancelled" });
     expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith(
@@ -938,7 +966,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({ status: "failed" });
     await expect(
@@ -956,7 +984,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "install",
       nowMs,
     });
-    const dueAt = nowMs + onboardingSubscriberGoalDelayMs;
+    const dueAt = nowMs + onboardingGoalBaseDelayMs;
 
     await expect(
       processDueOnboardingSubscriberGoal({
@@ -1003,7 +1031,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({ status: "created", postId: "t3_unpinned" });
     await expect(
@@ -1026,13 +1054,13 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ]);
 
@@ -1058,7 +1086,7 @@ describe("onboarding subscriber goal", () => {
         reddit: reddit as never,
         redis: redis as never,
         appSettings: settings,
-        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({ status: "created" });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
@@ -1205,7 +1233,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("skips a community that drops below 50 after its warning", async () => {
+  it("skips a community that drops below 40 after its warning", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
@@ -1225,7 +1253,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 49,
+      numberOfSubscribers: 39,
       type: "public",
       isNsfw: false,
     });
@@ -1240,7 +1268,7 @@ describe("onboarding subscriber goal", () => {
       }),
     ).resolves.toMatchObject({
       status: "ineligible",
-      eligibilitySubscriberCount: 49,
+      eligibilitySubscriberCount: 39,
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });

@@ -60,11 +60,11 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
     type?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 50 && subreddit.type === "public",
+      subreddit.numberOfSubscribers >= 40 && subreddit.type === "public",
     subscriberCount: subreddit.numberOfSubscribers,
     subredditType:
       typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    ...(subreddit.numberOfSubscribers < 50
+    ...(subreddit.numberOfSubscribers < 40
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -74,7 +74,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
     hoisted.initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
-  onboardingMinimumSubscriberCount: 50,
+  onboardingMinimumSubscriberCount: 40,
   onboardingUpgradeWaveEnabled: true,
 }));
 

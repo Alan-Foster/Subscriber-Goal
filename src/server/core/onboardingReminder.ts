@@ -19,14 +19,23 @@ import {
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import {
+  onboardingGoalBaseDelayMs,
+  onboardingGoalStaggerMaxMinutes,
+  onboardingReminderStaggerMaxMinutes,
+  onboardingReminderStaggerMinMinutes,
+} from "./onboardingConfig";
+
+export {
+  onboardingReminderStaggerMaxMinutes,
+  onboardingReminderStaggerMinMinutes,
+} from "./onboardingConfig";
 
 export const onboardingReminderStateKey = "onboarding_reminder_v3_state";
 export const onboardingReminderLockKey = "onboarding_reminder_v3_lock";
 export const onboardingReminderInitializationLockKey =
   "onboarding_reminder_v3_init_lock";
 export const onboardingReminderVersion = "onboarding_reminder_v3";
-export const onboardingReminderStaggerMinMinutes = 1;
-export const onboardingReminderStaggerMaxMinutes = 300;
 export const onboardingReminderDelayMs =
   onboardingReminderStaggerMinMinutes * 60 * 1000;
 
@@ -105,9 +114,9 @@ export function buildOnboardingReminderMessage(
   lifecycleSource: OnboardingLifecycleSource = "install",
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
-  const automaticCreationNotice = isUpgrade
-    ? "If a pinned Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following 1,000 minutes."
-    : "If a pinned Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following 1,000 minutes.";
+  const automaticCreationNotice =
+    `If a pinned Subscriber Goal does not already exist, the ${formatDelay(onboardingGoalBaseDelayMs)} countdown begins when this message is sent. ` +
+    `If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes.`;
   return {
     subject: isUpgrade
       ? `Subscriber Goal automatic goal update for r/${subredditName}`
@@ -120,6 +129,15 @@ export function buildOnboardingReminderMessage(
       "If you have questions, please send a DM to u/Alan-Foster.\n\n" +
       automaticCreationNotice,
   };
+}
+
+function formatDelay(delayMs: number): string {
+  const minutes = delayMs / (60 * 1000);
+  if (Number.isInteger(minutes / 60)) {
+    const hours = minutes / 60;
+    return `${hours.toLocaleString("en-US")}-hour`;
+  }
+  return `${minutes.toLocaleString("en-US")}-minute`;
 }
 
 /** Arms a single reminder for the current installation. */
@@ -608,8 +626,7 @@ function parseOnboardingReminderState(
     !Number.isFinite(nextRunAt) ||
     !Number.isFinite(armedAt) ||
     !Number.isInteger(reminderStaggerMinutes) ||
-    reminderStaggerMinutes < onboardingReminderStaggerMinMinutes ||
-    reminderStaggerMinutes > onboardingReminderStaggerMaxMinutes
+    reminderStaggerMinutes < 0
   ) {
     return undefined;
   }

@@ -19,11 +19,11 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     type?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 50 && subreddit.type === "public",
+      subreddit.numberOfSubscribers >= 40 && subreddit.type === "public",
     subscriberCount: subreddit.numberOfSubscribers,
     subredditType:
       typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    ...(subreddit.numberOfSubscribers < 50
+    ...(subreddit.numberOfSubscribers < 40
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -39,7 +39,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
     hoisted.markOnboardingSubscriberGoalCancelled,
-  onboardingMinimumSubscriberCount: 50,
+  onboardingMinimumSubscriberCount: 40,
   onboardingMaxAttempts: 3,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
@@ -61,6 +61,10 @@ import {
   scheduleOnboardingReminder,
   selectOnboardingReminderStaggerMinutes,
 } from "./onboardingReminder";
+import {
+  onboardingGoalBaseDelayMs,
+  onboardingGoalStaggerMaxMinutes,
+} from "./onboardingConfig";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
@@ -162,11 +166,17 @@ describe("onboarding reminder", () => {
 
   it("builds an accurate staggered upgrade warning", () => {
     const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
+    const baseDelayMinutes = onboardingGoalBaseDelayMs / (60 * 1000);
+    const baseDelayLabel = Number.isInteger(baseDelayMinutes / 60)
+      ? `${(baseDelayMinutes / 60).toLocaleString("en-US")}-hour`
+      : `${baseDelayMinutes.toLocaleString("en-US")}-minute`;
 
     expect(message.bodyMarkdown).toContain(
-      "24-hour countdown begins when this message is sent",
+      `${baseDelayLabel} countdown begins when this message is sent`,
     );
-    expect(message.bodyMarkdown).toContain("following 1,000 minutes");
+    expect(message.bodyMarkdown).toContain(
+      `following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes`,
+    );
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
   });
 
@@ -177,6 +187,23 @@ describe("onboarding reminder", () => {
     expect(selectOnboardingReminderStaggerMinutes(1)).toBe(
       onboardingReminderStaggerMaxMinutes,
     );
+  });
+
+  it("persists the configured maximum reminder delay", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      reminderStaggerMinutes: String(onboardingReminderStaggerMaxMinutes),
+      nextRunAt: String(
+        nowMs + onboardingReminderStaggerMaxMinutes * 60 * 1000,
+      ),
+    });
   });
 
   it("keeps one reminder offset under concurrent NX initialization", async () => {
@@ -200,7 +227,7 @@ describe("onboarding reminder", () => {
     );
   });
 
-  it.each([0, 3, 49])(
+  it.each([0, 3, 39])(
     "sends no warning and cancels automatic creation at %i subscribers",
     async (numberOfSubscribers) => {
       reddit.getCurrentSubreddit.mockResolvedValue({
@@ -236,11 +263,11 @@ describe("onboarding reminder", () => {
     },
   );
 
-  it("keeps a community with exactly 50 subscribers eligible", async () => {
+  it("keeps a community with exactly 40 subscribers eligible", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 50,
+      numberOfSubscribers: 40,
       type: "public",
     });
     await scheduleOnboardingReminder(redis as never, { nowMs });
@@ -261,7 +288,7 @@ describe("onboarding reminder", () => {
       reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
         name: "ExampleSub",
-        numberOfSubscribers: 50,
+        numberOfSubscribers: 40,
         type,
       });
       await scheduleOnboardingReminder(redis as never, { nowMs });
@@ -274,7 +301,7 @@ describe("onboarding reminder", () => {
         }),
       ).resolves.toMatchObject({
         status: "ineligible",
-        eligibilitySubscriberCount: 50,
+        eligibilitySubscriberCount: 40,
       });
       expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
@@ -290,7 +317,7 @@ describe("onboarding reminder", () => {
     );
     expect(message.bodyMarkdown).toContain("u/Alan-Foster");
     expect(message.bodyMarkdown).toContain(
-      "24-hour countdown begins when this message is sent",
+      "countdown begins when this message is sent",
     );
     expect(message.bodyMarkdown).not.toContain("or update");
   });
