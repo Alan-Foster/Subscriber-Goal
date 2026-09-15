@@ -30,6 +30,7 @@ import { NotificationSettingsPage } from "./pages/NotificationSettingsPage";
 import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NotificationConfirmationPage } from "./pages/NotificationConfirmationPage";
+import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "./notificationFeatureFlags";
 
 type PageName =
   | "subGoal"
@@ -132,6 +133,9 @@ export const App = () => {
     navigateTo(target);
   };
   const handleOpenNotifications = () => {
+    if (!NOTIFICATION_SETTINGS_ENTRY_ENABLED) {
+      return;
+    }
     if (page !== "notifications") {
       previousPageRef.current = page;
       setPage("notifications");
@@ -163,6 +167,9 @@ export const App = () => {
     void updateNotifications(enabled);
   };
   const handleNotificationOptIn = async (): Promise<boolean> => {
+    if (!NOTIFICATION_SETTINGS_ENTRY_ENABLED) {
+      return false;
+    }
     const updated = await updateNotifications(true, false);
     if (updated) {
       setPage("notificationConfirmation");
@@ -323,6 +330,7 @@ export const App = () => {
           onReturn={handleReturnToSubGoal}
           onVisitPromoSub={handleVisitPromo}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
+          notificationOptInEnabled={NOTIFICATION_SETTINGS_ENTRY_ENABLED}
           notificationSubmitting={notificationSettings.submitting}
           notificationError={notificationSettings.error}
           onNotificationOptIn={handleNotificationOptIn}
@@ -386,7 +394,7 @@ export const App = () => {
     state.afterSubscribeAction.type !== "disabled" &&
     page !== "completed" &&
     page !== "tinyConfirmation" &&
-    page !== "thanks" &&
+    (page !== "thanks" || !NOTIFICATION_SETTINGS_ENTRY_ENABLED) &&
     page !== "notificationConfirmation"
   ) {
     frameColorTheme = state.afterSubscribeAction.colorTheme;

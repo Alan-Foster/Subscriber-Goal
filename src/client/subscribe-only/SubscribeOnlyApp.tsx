@@ -27,6 +27,7 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { NotificationSettingsPage } from "../app/pages/NotificationSettingsPage";
 import { useNotificationSettings } from "../app/hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
+import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../app/notificationFeatureFlags";
 
 type TinySubscribeViewPhase =
   | "subscribe"
@@ -100,6 +101,9 @@ export const SubscribeOnlyApp = () => {
   }
 
   const openNotifications = () => {
+    if (!NOTIFICATION_SETTINGS_ENTRY_ENABLED) {
+      return;
+    }
     if (viewPhase !== "notifications") {
       previousViewPhaseRef.current = viewPhase;
       setViewPhase("notifications");
@@ -309,6 +313,7 @@ export const SubscribeOnlyApp = () => {
               onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
                 navigateTo(target)
               }
+              notificationOptInEnabled={NOTIFICATION_SETTINGS_ENTRY_ENABLED}
             />
           ) : (
             <SubGoalPage

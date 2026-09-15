@@ -49,6 +49,7 @@ describe("ThanksPage", () => {
     onReturn: vi.fn(),
     onVisitPromoSub: vi.fn(),
     onAfterSubscribeNavigate: vi.fn(),
+    notificationOptInEnabled: false,
   };
 
   it("renders Spanish thanks text", () => {
@@ -67,6 +68,7 @@ describe("ThanksPage", () => {
       <ThanksPage
         state={{ ...baseState, postHeight: "short" }}
         {...commonProps}
+        notificationOptInEnabled
         onNotificationOptIn={vi.fn()}
       />,
     );
@@ -92,6 +94,7 @@ describe("ThanksPage", () => {
       <ThanksPage
         state={{ ...baseState, goal: 10_000 }}
         {...commonProps}
+        notificationOptInEnabled
         onNotificationOptIn={vi.fn()}
       />,
     );
@@ -115,6 +118,7 @@ describe("ThanksPage", () => {
       <ThanksPage
         state={baseState}
         {...commonProps}
+        notificationOptInEnabled
         notificationSubmitting
         onNotificationOptIn={vi.fn()}
       />,
@@ -131,6 +135,7 @@ describe("ThanksPage", () => {
       <ThanksPage
         state={{ ...baseState, goal: null }}
         {...commonProps}
+        notificationOptInEnabled
         onNotificationOptIn={vi.fn()}
       />,
     );
@@ -172,6 +177,7 @@ describe("ThanksPage", () => {
           },
         }}
         {...commonProps}
+        notificationOptInEnabled
         onNotificationOptIn={vi.fn()}
       />,
     );
@@ -182,6 +188,48 @@ describe("ThanksPage", () => {
     expect(html).toContain(">Return</button>");
     expect(html).toContain('data-sg-theme="red"');
     expect(html).toContain("sg-subscribe-attention");
+  });
+
+  it.each(["regular", "short"] as const)(
+    "restores the configured CTA on the %s Thanks page when notifications are disabled",
+    (postHeight) => {
+      const html = renderToStaticMarkup(
+        <ThanksPage
+          state={{
+            ...baseState,
+            postHeight,
+            afterSubscribeAction: {
+              type: "link",
+              buttonText: "Join the Discord",
+              url: "https://discord.com/invite/example",
+              colorTheme: "pink",
+            },
+          }}
+          {...commonProps}
+          onNotificationOptIn={vi.fn()}
+        />,
+      );
+
+      expect(html).toContain("Join the Discord");
+      expect(html).toContain('data-sg-theme="pink"');
+      expect(html).toContain(">Return</button>");
+      expect(html).not.toContain("data-goal-notification-action");
+      expect(html).not.toContain("Get Notified");
+    },
+  );
+
+  it("shows only Return when notifications and the configured CTA are disabled", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={baseState}
+        {...commonProps}
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain(">Return</button>");
+    expect(html).not.toContain("data-goal-notification-action");
+    expect(html).not.toContain("data-after-subscribe-action");
   });
 
   it("replaces the Tiny confirmation with its valid CTA", () => {

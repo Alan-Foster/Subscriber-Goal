@@ -72,7 +72,7 @@ describe("TopButtons", () => {
     ["tiny", true],
     ["cta", true],
   ])(
-    "shows the notification entry on %s posts by default",
+    "shows the notification entry on %s posts when enabled",
     (_size, compact) => {
       const html = renderToStaticMarkup(
         <TopButtons
@@ -82,6 +82,7 @@ describe("TopButtons", () => {
           onVisitPromoSubPressed={vi.fn()}
           promoSubreddit="SubGoal"
           language="en"
+          notificationsEntryEnabled
         />,
       );
 
@@ -92,6 +93,20 @@ describe("TopButtons", () => {
       expect(html.match(/<button/g)).toHaveLength(2);
     },
   );
+
+  it("hides the notification entry by default", () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        onNotificationsPressed={vi.fn()}
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+      />,
+    );
+
+    expect(html).not.toContain('aria-label="Notifications"');
+    expect(html.match(/<button/g)).toHaveLength(1);
+  });
 
   it("supports explicitly hiding the notification entry", () => {
     const html = renderToStaticMarkup(

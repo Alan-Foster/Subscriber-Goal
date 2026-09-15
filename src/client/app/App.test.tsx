@@ -50,6 +50,7 @@ const hoisted = vi.hoisted(() => ({
   navigateTo: vi.fn(),
   showToast: vi.fn(),
   prohibited: false,
+  notificationSettingsEntryEnabled: true,
 }));
 
 hoisted.state = hoisted.createState() as SubGoalState;
@@ -75,7 +76,9 @@ vi.mock("../hooks/useSubGoal", () => ({
 }));
 
 vi.mock("./notificationFeatureFlags", () => ({
-  NOTIFICATION_SETTINGS_ENTRY_ENABLED: true,
+  get NOTIFICATION_SETTINGS_ENTRY_ENABLED() {
+    return hoisted.notificationSettingsEntryEnabled;
+  },
 }));
 
 import { App } from "./App";
@@ -100,6 +103,7 @@ describe("App", () => {
     vi.resetAllMocks();
     hoisted.state = hoisted.createState() as SubGoalState;
     hoisted.prohibited = false;
+    hoisted.notificationSettingsEntryEnabled = true;
     hoisted.subscribe.mockResolvedValue({ state: hoisted.state, error: null });
     hoisted.requestSubscribeJson.mockResolvedValue({
       type: "notification-settings",
@@ -376,6 +380,51 @@ describe("App", () => {
     expect(container.textContent).toContain(
       "Show my username when I subscribe",
     );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("restores the default Thanks CTA when notification UI is disabled", async () => {
+    hoisted.notificationSettingsEntryEnabled = false;
+    const subscribedState = {
+      ...hoisted.createState(),
+      subscribed: true,
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "pink",
+      },
+    } as SubGoalState;
+    hoisted.subscribe.mockImplementation(async () => {
+      hoisted.state = subscribedState;
+      return { state: subscribedState, error: null };
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    expect(
+      container.querySelector('button[aria-label="Notifications"]'),
+    ).toBeNull();
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => subscribeButton?.click());
+
+    expect(container.textContent).toContain("Join the Discord");
+    expect(container.textContent).toContain("Return");
+    expect(
+      container.querySelector('[data-goal-notification-action="true"]'),
+    ).toBeNull();
+    expect(hoisted.requestSubscribeJson).not.toHaveBeenCalled();
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("pink");
 
     await act(async () => root.unmount());
     container.remove();

@@ -16,6 +16,7 @@ type ThanksPageProps = {
   onReturn: () => void;
   onVisitPromoSub: () => void;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
+  notificationOptInEnabled: boolean;
   notificationSubmitting?: boolean;
   notificationError?: string | null;
   onNotificationOptIn?: () => Promise<boolean>;
@@ -26,6 +27,7 @@ export const ThanksPage = ({
   onReturn,
   onVisitPromoSub,
   onAfterSubscribeNavigate,
+  notificationOptInEnabled,
   notificationSubmitting = false,
   notificationError = null,
   onNotificationOptIn,
@@ -82,7 +84,9 @@ export const ThanksPage = ({
         className={`flex w-full max-w-xl justify-center gap-3 ${isShort ? "flex-row items-center" : "flex-col items-stretch min-[380px]:flex-row min-[380px]:items-center"}`}
         data-thanks-actions-layout={isShort ? "short" : "regular"}
       >
-        {state.goal !== null && onNotificationOptIn ? (
+        {notificationOptInEnabled &&
+        state.goal !== null &&
+        onNotificationOptIn ? (
           <GoalNotificationButton
             colorTheme={state.colorTheme}
             label={notificationMessages.goalPrompt({
@@ -92,6 +96,16 @@ export const ThanksPage = ({
             submitting={notificationSubmitting}
             error={notificationError}
             onOptIn={onNotificationOptIn}
+          />
+        ) : !notificationOptInEnabled &&
+          state.subscribed &&
+          state.afterSubscribeAction.type !== "disabled" ? (
+          <AfterSubscribeButton
+            action={state.afterSubscribeAction}
+            analyticsContext={getGoalJourneyContext(state)}
+            language={state.language}
+            onNavigate={onAfterSubscribeNavigate}
+            trackClicks={state.trackCtaClicks === true}
           />
         ) : null}
         <button
