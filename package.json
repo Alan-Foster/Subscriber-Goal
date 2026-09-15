@@ -19,12 +19,12 @@
     "type-check": "tsc --build"
   },
   "dependencies": {
-    "@devvit/analytics": "0.14.3",
-    "@devvit/notifications": "0.14.3",
-    "@devvit/start": "0.14.3",
-    "@devvit/web": "0.14.3",
+    "@devvit/analytics": "0.14.4",
+    "@devvit/notifications": "0.14.4",
+    "@devvit/start": "0.14.4",
+    "@devvit/web": "0.14.4",
     "clsx": "2.1.1",
-    "devvit": "0.14.3",
+    "devvit": "0.14.4",
     "express": "5.1.0",
     "intl-messageformat": "10.7.18",
     "react": "19.2.3",
