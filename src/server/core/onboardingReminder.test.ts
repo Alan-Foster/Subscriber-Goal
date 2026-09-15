@@ -411,6 +411,7 @@ describe("onboarding reminder", () => {
   });
 
   it("cancels without modmail when Manage Posts cannot be verified", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await scheduleOnboardingReminder(redis as never, { nowMs });
     hoisted.checkAppAccountHealth.mockResolvedValue({
       status: "unknown",
@@ -439,6 +440,9 @@ describe("onboarding reminder", () => {
       status: "complete",
       result: "cancelled_permission",
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"onboarding_reminder_cancelled"'),
+    );
   });
 
   it("pauses an armed reminder and re-randomizes it when re-enabled", async () => {
@@ -527,6 +531,7 @@ describe("onboarding reminder", () => {
   });
 
   it("cancels when a started modmail dispatch cannot be confirmed", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await scheduleOnboardingReminder(redis as never, { nowMs });
     reddit.modMail.createModNotification.mockRejectedValue(
       new Error("modmail unavailable"),
@@ -553,6 +558,9 @@ describe("onboarding reminder", () => {
       "delivery_unknown",
       nowMs + onboardingReminderDelayMs,
       "Error: modmail unavailable",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"onboarding_modmail_delivery_unknown"'),
     );
   });
 

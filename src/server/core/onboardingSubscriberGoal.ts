@@ -309,9 +309,16 @@ export async function initializeOnboardingSubscriberGoal(
         : {}),
     };
     await saveOnboardingState(redis, state);
-    console.info(
-      `[onboardingSubscriberGoal] initialized: status=${state.status} source=${state.lifecycleSource} creationStaggerMinutes=${state.creationStaggerMinutes} operationId=${state.operationId} migratedFrom=${state.migratedFromVersion ?? "none"} version=${state.version}`,
-    );
+    logDiagnostic("info", "onboarding_goal_initialized", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "initialize",
+      lifecycleSource: state.lifecycleSource,
+      stateStatus: state.status,
+      creationStaggerMinutes: state.creationStaggerMinutes,
+      operationId: state.operationId,
+      migratedFromVersion: state.migratedFromVersion ?? "none",
+      version: state.version,
+    });
   } finally {
     await releaseOwnedLock(
       redis,
@@ -345,13 +352,15 @@ export async function scheduleOnboardingSubscriberGoalAfterWarning(
   redis: RedisClient,
   sentAt: number,
 ): Promise<void> {
+  let scheduledState: OnboardingSubscriberGoalState | undefined;
   await mutateGoalTerminalOrSchedule(redis, sentAt, (state) => {
+    if (state.status !== "awaiting_warning") return state;
     const {
       startedAt: _startedAt,
       errorMessage: _errorMessage,
       ...rest
     } = state;
-    return {
+    scheduledState = {
       ...rest,
       status: "pending",
       reminderSentAt: sentAt,
@@ -360,7 +369,21 @@ export async function scheduleOnboardingSubscriberGoalAfterWarning(
         onboardingGoalBaseDelayMs +
         state.creationStaggerMinutes * 60 * 1000,
     };
+    return scheduledState;
   });
+  if (scheduledState) {
+    logDiagnostic("info", "onboarding_goal_scheduled", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "schedule_after_modmail",
+      lifecycleSource: scheduledState.lifecycleSource,
+      operationId: scheduledState.operationId,
+      reminderSentAt: sentAt,
+      baseDelayMs: onboardingGoalBaseDelayMs,
+      creationStaggerMinutes: scheduledState.creationStaggerMinutes,
+      nextRunAt: scheduledState.nextRunAt,
+      nextRunAtIso: new Date(scheduledState.nextRunAt!).toISOString(),
+    });
+  }
 }
 
 export async function markOnboardingSubscriberGoalExisting(
@@ -529,9 +552,17 @@ export async function processDueOnboardingSubscriberGoal({
 
     const subreddit = await reddit.getCurrentSubreddit();
     const eligibility = getOnboardingEligibility(subreddit);
-    console.info(
-      `[onboardingSubscriberGoal] eligibility: subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes}`,
-    );
+    logDiagnostic("info", "onboarding_eligibility_checked", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "eligibility",
+      lifecycleSource: reloaded.lifecycleSource,
+      operationId: reloaded.operationId,
+      subscriberCount: eligibility.subscriberCount,
+      minimumSubscriberCount: onboardingMinimumSubscriberCount,
+      subredditType: eligibility.subredditType,
+      eligible: eligibility.eligible,
+      reason: eligibility.reason ?? "none",
+    });
     if (!eligibility.eligible) {
       await saveOnboardingState(redis, {
         ...reloaded,
@@ -602,6 +633,13 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus: "cancelled_permission",
         errorMessage,
       });
+      logDiagnostic("warn", "onboarding_goal_cancelled", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "permission_check",
+        lifecycleSource: reloaded.lifecycleSource,
+        operationId: reloaded.operationId,
+        reason: "manage_posts_permission",
+      });
       return {
         status: "cancelled",
         lifecycleSource: reloaded.lifecycleSource,
@@ -628,6 +666,15 @@ export async function processDueOnboardingSubscriberGoal({
     const language = resolveSubGoalLanguage(subreddit.language);
     const messages = getSubGoalPostMessages(language);
     const afterSubscribePreset = getDefaultAfterSubscribePreset(subreddit.type);
+    logDiagnostic("info", "onboarding_goal_creation_started", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "post_creation",
+      lifecycleSource: reloaded.lifecycleSource,
+      operationId: reloaded.operationId,
+      scheduledRunAt: reloaded.nextRunAt,
+      startedAt: nowMs,
+      startedAtIso: new Date(nowMs).toISOString(),
+    });
     const { post, stickyResult } = await createSubscriberGoal({
       reddit,
       redis,
@@ -683,6 +730,16 @@ export async function processDueOnboardingSubscriberGoal({
       postId: post.id,
       resultStatus:
         stickyResult.status === "pinned" ? "created" : "created_not_pinned",
+    });
+    logDiagnostic("info", "onboarding_goal_created", {
+      workflow: "onboarding_subscriber_goal",
+      phase: "complete",
+      lifecycleSource: reloaded.lifecycleSource,
+      operationId: reloaded.operationId,
+      postId: post.id,
+      pinStatus: stickyResult.status,
+      completedAt: nowMs,
+      completedAtIso: new Date(nowMs).toISOString(),
     });
     console.info(
       `[onboardingSubscriberGoal] complete: status=created postId=${post.id} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes} ${formatDetectionDiagnostics(inspected)}`,

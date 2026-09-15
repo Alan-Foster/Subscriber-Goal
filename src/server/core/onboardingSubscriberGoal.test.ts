@@ -211,7 +211,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingGoalBaseDelayMs).toBe(24 * 60 * 60 * 1000);
+    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
 
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -257,7 +257,7 @@ describe("onboarding subscriber goal", () => {
     ).toMatchObject({ eligible: true });
   });
 
-  it("selects inclusive upgrade stagger boundaries", () => {
+  it("selects inclusive goal stagger boundaries", () => {
     expect(selectOnboardingGoalStaggerMinutes(0)).toBe(
       onboardingGoalStaggerMinMinutes,
     );
@@ -857,6 +857,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("schedules a bounded retry after a transient failure", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -884,6 +885,9 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "not_due",
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"onboarding_goal_retry_scheduled"'),
+    );
   });
 
   it("stops after three total creation-phase attempts", async () => {
@@ -918,6 +922,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("cancels automatic creation when Manage Posts cannot be verified", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -950,6 +955,9 @@ describe("onboarding subscriber goal", () => {
       resultStatus: "cancelled_permission",
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"onboarding_goal_cancelled"'),
+    );
   });
 
   it("does not retry an unknown permission result from the creation boundary", async () => {
@@ -1159,9 +1167,56 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "pending",
       reminderSentAt: String(sentAt),
-      nextRunAt: String(sentAt + 24 * 60 * 60 * 1000 + 60_000),
+      nextRunAt: String(
+        sentAt +
+          onboardingGoalBaseDelayMs +
+          onboardingGoalStaggerMinMinutes * 60_000,
+      ),
     });
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+  });
+
+  it("logs each successful onboarding transition in order", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+
+    const sentAt = nowMs + 60_000;
+    await processDueOnboardingReminder({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: sentAt,
+    });
+    const goalState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: Number(goalState.nextRunAt),
+    });
+
+    const trackedEvents = new Set([
+      "onboarding_reminder_scheduled",
+      "onboarding_modmail_dispatch_started",
+      "onboarding_modmail_sent",
+      "onboarding_goal_scheduled",
+      "onboarding_goal_creation_started",
+      "onboarding_goal_created",
+    ]);
+    const events = infoSpy.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.startsWith("[diagnostic] "))
+      .map((line) => JSON.parse(line.slice("[diagnostic] ".length)).event)
+      .filter((event: string) => trackedEvents.has(event));
+
+    expect(events).toEqual([...trackedEvents]);
   });
 
   it("repairs a sent reminder without sending duplicate modmail", async () => {
@@ -1195,7 +1250,7 @@ describe("onboarding subscriber goal", () => {
       status: "pending",
       nextRunAt: String(
         sentAt +
-          24 * 60 * 60 * 1000 +
+          onboardingGoalBaseDelayMs +
           Number(goal.creationStaggerMinutes) * 60_000,
       ),
     });

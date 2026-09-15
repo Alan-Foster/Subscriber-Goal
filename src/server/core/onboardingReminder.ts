@@ -187,9 +187,16 @@ export async function scheduleOnboardingReminder(
         : {}),
     };
     await saveOnboardingReminderState(redis, state);
-    console.info(
-      `[onboardingReminder] initialized: status=pending nextRunAt=${state.nextRunAt} source=${state.lifecycleSource} reminderStaggerMinutes=${state.reminderStaggerMinutes} migratedFrom=${state.migratedFromVersion ?? "none"} version=${state.version}`,
-    );
+    logDiagnostic("info", "onboarding_reminder_scheduled", {
+      workflow: "onboarding_reminder",
+      phase: "schedule",
+      lifecycleSource: state.lifecycleSource,
+      reminderStaggerMinutes: state.reminderStaggerMinutes,
+      nextRunAt: state.nextRunAt,
+      nextRunAtIso: new Date(state.nextRunAt).toISOString(),
+      version: state.version,
+      migratedFromVersion: state.migratedFromVersion ?? "none",
+    });
   } finally {
     if (
       (await redis.get(onboardingReminderInitializationLockKey)) === lockToken
@@ -273,6 +280,12 @@ export async function processDueOnboardingReminder({
       nowMs,
       "A previous modmail dispatch could not be confirmed.",
     );
+    logDiagnostic("warn", "onboarding_modmail_delivery_unknown", {
+      workflow: "onboarding_reminder",
+      phase: "dispatch_recovery",
+      lifecycleSource: state.lifecycleSource,
+      reason: "stale_dispatch_state",
+    });
     return { status: "cancelled", ...base };
   }
   if (state && !automationEnabled) {
@@ -344,9 +357,16 @@ export async function processDueOnboardingReminder({
 
     const subreddit = await reddit.getCurrentSubreddit();
     const eligibility = getOnboardingEligibility(subreddit);
-    console.info(
-      `[onboardingReminder] eligibility: subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"} source=${reloaded.lifecycleSource} reminderStaggerMinutes=${reloaded.reminderStaggerMinutes}`,
-    );
+    logDiagnostic("info", "onboarding_eligibility_checked", {
+      workflow: "onboarding_reminder",
+      phase: "eligibility",
+      lifecycleSource: reloaded.lifecycleSource,
+      subscriberCount: eligibility.subscriberCount,
+      minimumSubscriberCount: onboardingMinimumSubscriberCount,
+      subredditType: eligibility.subredditType,
+      eligible: eligibility.eligible,
+      reason: eligibility.reason ?? "none",
+    });
     if (!eligibility.eligible) {
       await markOnboardingReminderIneligible(
         redis,
@@ -433,6 +453,12 @@ export async function processDueOnboardingReminder({
         nowMs,
         errorMessage,
       );
+      logDiagnostic("warn", "onboarding_reminder_cancelled", {
+        workflow: "onboarding_reminder",
+        phase: "permission_check",
+        lifecycleSource: reloaded.lifecycleSource,
+        reason: "manage_posts_permission",
+      });
       return { status: "cancelled", errorMessage, ...inspected };
     }
 
@@ -456,6 +482,14 @@ export async function processDueOnboardingReminder({
       dispatchToken,
     });
     dispatchStarted = true;
+    logDiagnostic("info", "onboarding_modmail_dispatch_started", {
+      workflow: "onboarding_reminder",
+      phase: "modmail_dispatch",
+      lifecycleSource: reloaded.lifecycleSource,
+      scheduledRunAt: reloaded.nextRunAt,
+      startedAt: nowMs,
+      startedAtIso: new Date(nowMs).toISOString(),
+    });
     await reddit.modMail.createModNotification({
       subredditId: subreddit.id,
       subject: message.subject,
@@ -467,6 +501,13 @@ export async function processDueOnboardingReminder({
       completedAt: nowMs,
       result: "sent",
       sentAt: nowMs,
+    });
+    logDiagnostic("info", "onboarding_modmail_sent", {
+      workflow: "onboarding_reminder",
+      phase: "modmail_sent",
+      lifecycleSource: reloaded.lifecycleSource,
+      sentAt: nowMs,
+      sentAtIso: new Date(nowMs).toISOString(),
     });
     try {
       await scheduleOnboardingSubscriberGoalAfterWarning(redis, nowMs);
@@ -505,6 +546,17 @@ export async function processDueOnboardingReminder({
           "delivery_unknown",
           nowMs,
           errorMessage,
+        );
+        logDiagnostic(
+          "warn",
+          "onboarding_modmail_delivery_unknown",
+          {
+            workflow: "onboarding_reminder",
+            phase: "modmail_dispatch",
+            lifecycleSource: (latest ?? state).lifecycleSource,
+            reason: "dispatch_confirmation_failed",
+          },
+          error,
         );
         return { status: "cancelled", errorMessage, ...inspected };
       }
