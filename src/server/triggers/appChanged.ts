@@ -9,8 +9,8 @@ import {
   getOnboardingEligibility,
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalIneligible,
+  AUTOMATIC_ONBOARDING_ENABLED,
   onboardingMinimumSubscriberCount,
-  onboardingUpgradeWaveEnabled,
 } from "../core/onboardingSubscriberGoal";
 import {
   markOnboardingReminderIneligible,
@@ -122,10 +122,10 @@ export async function onAppChanged({
 
 export function shouldInitializeReleaseOnboarding(
   lifecycleSource: "install" | "upgrade" | "unknown",
-  upgradeWaveEnabled = onboardingUpgradeWaveEnabled,
+  automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
 ): boolean {
   return (
-    lifecycleSource === "install" ||
-    (lifecycleSource === "upgrade" && upgradeWaveEnabled)
+    automationEnabled &&
+    (lifecycleSource === "install" || lifecycleSource === "upgrade")
   );
 }

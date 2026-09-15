@@ -42,6 +42,7 @@ import {
 } from "../utils/postStatus";
 import { createSubscriberGoal } from "./createSubscriberGoal";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
+import { checkAppAccountHealth } from "./appAccountHealth";
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v4_state";
@@ -54,15 +55,19 @@ export const onboardingSubscriberGoalDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingUpgradeBaseDelayMs = 24 * 60 * 60 * 1000;
 export const onboardingUpgradeStaggerMinMinutes = 1;
 export const onboardingUpgradeStaggerMaxMinutes = 1_000;
-export const onboardingUpgradeWaveEnabled = true;
+/** Checked at every onboarding side-effect boundary so a hotfix can pause armed work. */
+export const AUTOMATIC_ONBOARDING_ENABLED = true;
+export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
 export const onboardingMinimumSubscriberCount = 50;
 export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
+export const onboardingAuthorSearchLimit = 100;
 export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
 export const onboardingSubscriberGoalInitializationLockTtlMs = 60 * 1000;
+export const onboardingMaxAttempts = 3;
 
 type OnboardingStatus =
   | "awaiting_warning"
@@ -74,7 +79,18 @@ type OnboardingResultStatus = "created" | "existing" | "ineligible" | "failed";
 const onboardingRetryBaseMs = 5 * 60 * 1000;
 const onboardingRetryMaxMs = 60 * 60 * 1000;
 
-export type OnboardingLifecycleSource = "install" | "upgrade" | "unknown";
+type ExtendedOnboardingResultStatus =
+  | OnboardingResultStatus
+  | "cancelled_permission"
+  | "delivery_unknown"
+  | "retry_exhausted"
+  | "created_not_pinned";
+
+export type OnboardingLifecycleSource =
+  | "install"
+  | "upgrade"
+  | "recovery"
+  | "unknown";
 export type OnboardingIneligibilityReason =
   | "subscriber_count"
   | "subreddit_not_public";
@@ -90,6 +106,7 @@ export type OnboardingExistingSource =
   | "queued"
   | "persisted"
   | "pinned"
+  | "search"
   | "recent";
 
 export type OnboardingDetectionDiagnostics = {
@@ -98,6 +115,7 @@ export type OnboardingDetectionDiagnostics = {
   queuedInspected: number;
   persistedInspected: number;
   pinnedInspected: number;
+  searchInspected: number;
   recentInspected: number;
   validated: number;
   stalePruned: number;
@@ -120,9 +138,10 @@ export type OnboardingSubscriberGoalState = {
   completedAt?: number;
   postId?: string;
   existingSource?: OnboardingExistingSource;
-  resultStatus?: OnboardingResultStatus;
+  resultStatus?: ExtendedOnboardingResultStatus;
   errorMessage?: string;
   attempts?: number;
+  pausedAt?: number;
 };
 
 export type OnboardingSubscriberGoalSummary = {
@@ -131,6 +150,8 @@ export type OnboardingSubscriberGoalSummary = {
     | "created"
     | "existing"
     | "ineligible"
+    | "cancelled"
+    | "paused"
     | "failed"
     | "complete";
   registeredInspected: number;
@@ -138,6 +159,7 @@ export type OnboardingSubscriberGoalSummary = {
   queuedInspected: number;
   persistedInspected: number;
   pinnedInspected: number;
+  searchInspected: number;
   recentInspected: number;
   validated: number;
   stalePruned: number;
@@ -169,6 +191,7 @@ const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
   queuedInspected: 0,
   persistedInspected: 0,
   pinnedInspected: 0,
+  searchInspected: 0,
   recentInspected: 0,
   validated: 0,
   stalePruned: 0,
@@ -210,12 +233,15 @@ export async function initializeOnboardingSubscriberGoal(
     lifecycleSource = "unknown",
     nowMs = Date.now(),
     migrationOnly = false,
+    automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
   }: {
     lifecycleSource?: OnboardingLifecycleSource;
     nowMs?: number;
     migrationOnly?: boolean;
+    automationEnabled?: boolean;
   },
 ): Promise<void> {
+  if (!automationEnabled) return;
   const lockToken = createLockToken(nowMs);
   await redis.set(onboardingSubscriberGoalInitializationLockKey, lockToken, {
     nx: true,
@@ -230,15 +256,19 @@ export async function initializeOnboardingSubscriberGoal(
     return;
   }
   try {
-    const existing = await getOnboardingSubscriberGoalState(redis);
+    const rawState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    const existing = parseOnboardingState(rawState);
     if (existing) return;
+    // A non-empty state that cannot be parsed may represent partially written
+    // legacy work. Fail closed instead of arming a second workflow over it.
+    if (Object.keys(rawState).length > 0) return;
     const migration = await findPendingLegacyOnboardingWork(redis);
     if (migrationOnly && !migration) return;
     const creationStaggerMinutes = selectOnboardingUpgradeStaggerMinutes();
     const armedAt = migration?.armedAt ?? nowMs;
     const state: OnboardingSubscriberGoalState = {
       version: onboardingSubscriberGoalVersion,
-      status: "awaiting_warning",
+      status: migration?.reminderSentAt ? "pending" : "awaiting_warning",
       armedAt,
       lifecycleSource: migration?.lifecycleSource ?? lifecycleSource,
       creationStaggerMinutes,
@@ -249,6 +279,24 @@ export async function initializeOnboardingSubscriberGoal(
         ? {
             migratedFromVersion: migration.version,
             legacyAttempts: migration.attempts,
+          }
+        : {}),
+      ...(migration?.reminderSentAt
+        ? {
+            reminderSentAt: migration.reminderSentAt,
+            nextRunAt:
+              Math.max(
+                nowMs,
+                migration.reminderSentAt + onboardingUpgradeBaseDelayMs,
+              ) +
+              creationStaggerMinutes * 60 * 1000,
+          }
+        : {}),
+      ...(migration?.deliveryUnknown
+        ? {
+            status: "complete" as const,
+            completedAt: nowMs,
+            resultStatus: "delivery_unknown" as const,
           }
         : {}),
     };
@@ -347,24 +395,42 @@ export async function markOnboardingSubscriberGoalIneligible(
   );
 }
 
+export async function markOnboardingSubscriberGoalCancelled(
+  redis: RedisClient,
+  resultStatus: "cancelled_permission" | "delivery_unknown",
+  nowMs = Date.now(),
+  errorMessage?: string,
+): Promise<void> {
+  await mutateGoalTerminalOrSchedule(redis, nowMs, (state) => ({
+    ...state,
+    status: "complete",
+    completedAt: nowMs,
+    resultStatus,
+    ...(errorMessage ? { errorMessage } : {}),
+  }));
+}
+
 export async function processDueOnboardingSubscriberGoal({
   reddit,
   redis,
   appSettings,
   nowMs = Date.now(),
+  automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   appSettings: ServerAppSettings;
   nowMs?: number;
+  automationEnabled?: boolean;
 }): Promise<OnboardingSubscriberGoalSummary> {
   const base = emptySummary();
   let inspected = base;
   await initializeOnboardingSubscriberGoal(redis, {
     nowMs,
-    migrationOnly: true,
+    lifecycleSource: "recovery",
+    automationEnabled,
   });
-  const state = await getOnboardingSubscriberGoalState(redis);
+  let state = await getOnboardingSubscriberGoalState(redis);
   if (!state) {
     return { status: "not_due", ...base };
   }
@@ -381,6 +447,29 @@ export async function processDueOnboardingSubscriberGoal({
         ? { eligibilitySubscriberCount: state.eligibilitySubscriberCount }
         : {}),
     };
+  }
+  if (!automationEnabled) {
+    await saveOnboardingState(redis, {
+      ...state,
+      pausedAt: state.pausedAt ?? nowMs,
+    });
+    return { status: "paused", ...base };
+  }
+  if (state.pausedAt !== undefined) {
+    const resumeAt =
+      nowMs + selectOnboardingUpgradeStaggerMinutes() * 60 * 1000;
+    const { pausedAt: _pausedAt, ...unpausedState } = state;
+    state = {
+      ...unpausedState,
+      ...(state.status === "pending" || state.status === "processing"
+        ? {
+            status: "pending" as const,
+            nextRunAt: Math.max(state.nextRunAt ?? 0, resumeAt),
+          }
+        : {}),
+    };
+    await saveOnboardingState(redis, state);
+    return { status: "not_due", ...base };
   }
   if (
     state.status === "awaiting_warning" ||
@@ -424,6 +513,15 @@ export async function processDueOnboardingSubscriberGoal({
       startedAt: nowMs,
     });
 
+    if (!automationEnabled) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "pending",
+        pausedAt: nowMs,
+      });
+      return { status: "paused", ...base };
+    }
+
     const subreddit = await reddit.getCurrentSubreddit();
     const eligibility = getOnboardingEligibility(subreddit);
     console.info(
@@ -453,6 +551,7 @@ export async function processDueOnboardingSubscriberGoal({
       queuedInspected: existing.queuedInspected,
       persistedInspected: existing.persistedInspected,
       pinnedInspected: existing.pinnedInspected,
+      searchInspected: existing.searchInspected,
       recentInspected: existing.recentInspected,
       validated: existing.validated,
       stalePruned: existing.stalePruned,
@@ -477,6 +576,43 @@ export async function processDueOnboardingSubscriberGoal({
         lifecycleSource: reloaded.lifecycleSource,
         ...inspected,
       };
+    }
+
+    const health = await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      notify: false,
+      scheduleUnknownRetry: false,
+      nowMs,
+    });
+    if (!health.healthy || health.status !== "healthy") {
+      const errorMessage =
+        "Subscriber Goal lacks verified Manage Posts permission.";
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "cancelled_permission",
+        errorMessage,
+      });
+      return {
+        status: "cancelled",
+        lifecycleSource: reloaded.lifecycleSource,
+        creationStaggerMinutes: reloaded.creationStaggerMinutes,
+        errorMessage,
+        ...inspected,
+      };
+    }
+
+    if (!automationEnabled) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "pending",
+        pausedAt: nowMs,
+      });
+      return { status: "paused", ...inspected };
     }
 
     const crosspost =
@@ -509,6 +645,7 @@ export async function processDueOnboardingSubscriberGoal({
         }),
         afterSubscribePreset,
         operationId: reloaded.operationId,
+        automaticPermissionCheck: true,
       },
     });
     if (stickyResult.status === "not_pinned") {
@@ -539,7 +676,8 @@ export async function processDueOnboardingSubscriberGoal({
       status: "complete",
       completedAt: nowMs,
       postId: post.id,
-      resultStatus: "created",
+      resultStatus:
+        stickyResult.status === "pinned" ? "created" : "created_not_pinned",
     });
     console.info(
       `[onboardingSubscriberGoal] complete: status=created postId=${post.id} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes} ${formatDetectionDiagnostics(inspected)}`,
@@ -555,31 +693,33 @@ export async function processDueOnboardingSubscriberGoal({
     const errorMessage = String(error);
     try {
       const attempts = (activeState.attempts ?? 0) + 1;
-      const retryDelayMs = Math.min(
-        onboardingRetryMaxMs,
-        onboardingRetryBaseMs * 2 ** (attempts - 1),
-      );
+      const terminal =
+        attempts >= onboardingMaxAttempts || isPermanentOnboardingError(error);
+      const retryDelayMs = selectOnboardingRetryDelayMs(attempts);
       await saveOnboardingState(redis, {
         ...activeState,
-        status: "pending",
-        nextRunAt: nowMs + retryDelayMs,
+        status: terminal ? "complete" : "pending",
+        ...(terminal
+          ? { completedAt: nowMs }
+          : { nextRunAt: nowMs + retryDelayMs }),
         attempts,
-        resultStatus: "failed",
+        resultStatus: terminal ? "retry_exhausted" : "failed",
         errorMessage,
       });
-      logDiagnostic(
-        "warn",
-        "onboarding_goal_retry_scheduled",
-        {
-          workflow: "onboarding_subscriber_goal",
-          phase: "retry",
-          lifecycleSource: activeState.lifecycleSource,
-          creationStaggerMinutes: activeState.creationStaggerMinutes,
-          attempts,
-          nextRunAt: nowMs + retryDelayMs,
-        },
-        error,
-      );
+      if (!terminal)
+        logDiagnostic(
+          "warn",
+          "onboarding_goal_retry_scheduled",
+          {
+            workflow: "onboarding_subscriber_goal",
+            phase: "retry",
+            lifecycleSource: activeState.lifecycleSource,
+            creationStaggerMinutes: activeState.creationStaggerMinutes,
+            attempts,
+            nextRunAt: nowMs + retryDelayMs,
+          },
+          error,
+        );
     } catch (stateError) {
       logDiagnostic(
         "error",
@@ -631,6 +771,7 @@ export async function findExistingSubscriberGoal(
     queuedInspected: 0,
     persistedInspected: 0,
     pinnedInspected: 0,
+    searchInspected: 0,
     recentInspected: 0,
     validated: 0,
     stalePruned: 0,
@@ -686,13 +827,13 @@ export async function findExistingSubscriberGoal(
           post,
           subreddit,
           appUser.username,
-          true,
         ))
       ) {
         await pruneStaleCandidate(redis, postId);
         diagnostics.stalePruned += 1;
         continue;
       }
+      if (!(await isStickied(post))) continue;
       diagnostics.validated += 1;
       await registerSubscriberGoalPost(
         redis,
@@ -732,6 +873,38 @@ export async function findExistingSubscriberGoal(
     }
   }
 
+  const searchedPosts = (await reddit
+    .searchPosts({
+      query: `author:${appUser.username}`,
+      subredditName: subreddit.name,
+      sort: "new",
+      timeframe: "all",
+      limit: onboardingAuthorSearchLimit,
+      pageSize: onboardingAuthorSearchLimit,
+    })
+    .all()) as CandidatePost[];
+  diagnostics.searchInspected = searchedPosts.length;
+  for (const post of searchedPosts) {
+    if (
+      (await isStickied(post)) &&
+      (await isSubscriberGoalCandidate(
+        redis,
+        post,
+        subreddit,
+        appUser.username,
+      ))
+    ) {
+      diagnostics.validated += 1;
+      const postId = post.id!;
+      await registerSubscriberGoalPost(
+        redis,
+        postId,
+        getCreatedAtMs(post.createdAt) ?? nowMs,
+      );
+      return { postId, source: "search", ...diagnostics };
+    }
+  }
+
   const recentPosts = (await reddit
     .getNewPosts({
       subredditName: subreddit.name,
@@ -747,7 +920,13 @@ export async function findExistingSubscriberGoal(
       continue;
     }
     if (
-      await isSubscriberGoalCandidate(redis, post, subreddit, appUser.username)
+      (await isStickied(post)) &&
+      (await isSubscriberGoalCandidate(
+        redis,
+        post,
+        subreddit,
+        appUser.username,
+      ))
     ) {
       diagnostics.validated += 1;
       const postId = post.id!;
@@ -767,11 +946,10 @@ async function isSubscriberGoalCandidate(
   post: CandidatePost,
   subreddit: { id: string; name: string },
   appUsername: string,
-  trustedIdentity = false,
 ): Promise<boolean> {
   if (
     !post.id ||
-    (!trustedIdentity && post.authorName !== appUsername) ||
+    post.authorName?.toLowerCase() !== appUsername.toLowerCase() ||
     getTerminalRemovedByCategory(post) !== undefined
   ) {
     return false;
@@ -829,7 +1007,7 @@ function incrementInspected(
 function formatDetectionDiagnostics(
   diagnostics: OnboardingDetectionDiagnostics,
 ): string {
-  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
 function attachDetectionDiagnostics(
@@ -919,7 +1097,9 @@ function parseOnboardingState(
     creationStaggerMinutes,
     operationId: raw.operationId,
     lifecycleSource:
-      lifecycleSource === "install" || lifecycleSource === "upgrade"
+      lifecycleSource === "install" ||
+      lifecycleSource === "upgrade" ||
+      lifecycleSource === "recovery"
         ? lifecycleSource
         : "unknown",
   };
@@ -945,11 +1125,17 @@ function parseOnboardingState(
   if (raw.errorMessage) state.errorMessage = raw.errorMessage;
   const attempts = parseStateNumber(raw.attempts);
   if (attempts !== undefined) state.attempts = attempts;
+  const pausedAt = parseStateNumber(raw.pausedAt);
+  if (pausedAt !== undefined) state.pausedAt = pausedAt;
   if (
     raw.resultStatus === "created" ||
     raw.resultStatus === "existing" ||
     raw.resultStatus === "ineligible" ||
-    raw.resultStatus === "failed"
+    raw.resultStatus === "failed" ||
+    raw.resultStatus === "cancelled_permission" ||
+    raw.resultStatus === "delivery_unknown" ||
+    raw.resultStatus === "retry_exhausted" ||
+    raw.resultStatus === "created_not_pinned"
   ) {
     state.resultStatus = raw.resultStatus;
   }
@@ -959,6 +1145,7 @@ function parseOnboardingState(
     raw.existingSource === "queued" ||
     raw.existingSource === "persisted" ||
     raw.existingSource === "pinned" ||
+    raw.existingSource === "search" ||
     raw.existingSource === "recent"
   ) {
     state.existingSource = raw.existingSource;
@@ -994,6 +1181,7 @@ function serializeOnboardingState(
     resultStatus: state.resultStatus ?? "",
     errorMessage: state.errorMessage ?? "",
     attempts: String(state.attempts ?? 0),
+    pausedAt: String(state.pausedAt ?? ""),
   };
 }
 
@@ -1013,6 +1201,8 @@ type LegacyMigration = {
   lifecycleSource: OnboardingLifecycleSource;
   attempts: number;
   operationId?: string;
+  reminderSentAt?: number;
+  deliveryUnknown?: boolean;
 };
 
 async function findPendingLegacyOnboardingWork(
@@ -1037,12 +1227,17 @@ async function findPendingLegacyOnboardingWork(
     if (raw.status !== "pending" && raw.status !== "processing") continue;
     const armedAt = parseStateNumber(raw.armedAt);
     if (armedAt === undefined) continue;
+    const reminder = await findLegacyReminderDisposition(redis);
     return {
       version: candidate.version,
       armedAt,
       lifecycleSource: parseLifecycleSource(raw.lifecycleSource),
       attempts: parseStateNumber(raw.attempts) ?? 0,
       operationId: candidate.operationId(armedAt),
+      ...(reminder.sentAt ? { reminderSentAt: reminder.sentAt } : {}),
+      ...(raw.status === "processing" || reminder.deliveryUnknown
+        ? { deliveryUnknown: true }
+        : {}),
     };
   }
 
@@ -1053,6 +1248,7 @@ async function findPendingLegacyOnboardingWork(
       if (raw.status === "pending" || raw.status === "processing") {
         const armedAt = Number(raw.armedAt);
         if (Number.isFinite(armedAt)) {
+          const reminder = await findLegacyReminderDisposition(redis);
           return {
             version: "onboarding_subscriber_goal_v1",
             armedAt,
@@ -1061,6 +1257,10 @@ async function findPendingLegacyOnboardingWork(
               ? Number(raw.attempts)
               : 0,
             operationId: `onboarding:onboarding_subscriber_goal_v1:${armedAt}`,
+            ...(reminder.sentAt ? { reminderSentAt: reminder.sentAt } : {}),
+            ...(raw.status === "processing" || reminder.deliveryUnknown
+              ? { deliveryUnknown: true }
+              : {}),
           };
         }
       }
@@ -1099,13 +1299,65 @@ async function findPendingLegacyOnboardingWork(
       armedAt,
       lifecycleSource: parseLifecycleSource(raw.lifecycleSource),
       attempts: parseStateNumber(raw.attempts) ?? 0,
+      ...(raw.status === "processing" ? { deliveryUnknown: true } : {}),
     };
   }
   return undefined;
 }
 
 function parseLifecycleSource(value: unknown): OnboardingLifecycleSource {
-  return value === "install" || value === "upgrade" ? value : "unknown";
+  return value === "install" || value === "upgrade" || value === "recovery"
+    ? value
+    : "unknown";
+}
+
+async function findLegacyReminderDisposition(redis: RedisClient): Promise<{
+  sentAt?: number;
+  deliveryUnknown?: boolean;
+}> {
+  for (const key of [
+    "onboarding_reminder_v2_state",
+    "onboarding_reminder_v1_state",
+  ]) {
+    const raw = await redis.hGetAll(key);
+    if (raw.status === "complete" && raw.result === "sent") {
+      const sentAt =
+        parseStateNumber(raw.sentAt) ??
+        parseStateNumber(raw.completedAt) ??
+        parseStateNumber(raw.armedAt);
+      return sentAt === undefined ? {} : { sentAt };
+    }
+    if (
+      raw.status === "processing" ||
+      (raw.status === "complete" && raw.result === "failed")
+    ) {
+      return { deliveryUnknown: true };
+    }
+  }
+  return {};
+}
+
+export function selectOnboardingRetryDelayMs(
+  attempts: number,
+  randomValue = Math.random(),
+): number {
+  const cap = Math.min(
+    onboardingRetryMaxMs,
+    onboardingRetryBaseMs * 2 ** Math.max(0, attempts - 1),
+  );
+  const normalized = Math.min(Math.max(randomValue, 0), 1 - Number.EPSILON);
+  return Math.floor(
+    onboardingRetryBaseMs + normalized * (cap - onboardingRetryBaseMs + 1),
+  );
+}
+
+function isPermanentOnboardingError(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  return (
+    name === "ProhibitedSubredditError" ||
+    name === "SubscriberGoalModeratorPermissionError" ||
+    name === "SubscriberGoalPermissionVerificationError"
+  );
 }
 
 async function mutateGoalTerminalOrSchedule(

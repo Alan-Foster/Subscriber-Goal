@@ -9,6 +9,7 @@ const hoisted = vi.hoisted(() => ({
   createSubscriberGoal: vi.fn(),
   notifyStickyFailure: vi.fn(),
   getPostUrl: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
 }));
 
 vi.mock("../data/updaterData", () => ({
@@ -25,6 +26,10 @@ vi.mock("./createSubscriberGoal", () => ({
 vi.mock("../utils/stickyFailureNotifications", () => ({
   notifyStickyFailure: hoisted.notifyStickyFailure,
   getPostUrl: hoisted.getPostUrl,
+}));
+
+vi.mock("./appAccountHealth", () => ({
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
 import {
@@ -163,6 +168,9 @@ function createReddit() {
     getHotPosts: vi
       .fn()
       .mockReturnValue({ get: vi.fn().mockResolvedValue([]) }),
+    searchPosts: vi
+      .fn()
+      .mockReturnValue({ all: vi.fn().mockResolvedValue([]) }),
     getNewPosts: vi
       .fn()
       .mockReturnValue({ all: vi.fn().mockResolvedValue([]) }),
@@ -175,9 +183,18 @@ describe("onboarding subscriber goal", () => {
   let reddit: ReturnType<typeof createReddit>;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     redis = new InMemoryRedis();
     reddit = createReddit();
     hoisted.getTrackedPosts.mockReset();
+    hoisted.checkAppAccountHealth.mockReset();
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "healthy",
+      healthy: true,
+      appUsername: "subscriber-goal",
+      permissions: ["posts"],
+      notification: "not_needed",
+    });
     hoisted.getQueuedUpdates.mockReset();
     hoisted.cancelUpdates.mockReset();
     hoisted.untrackPost.mockReset();
@@ -279,7 +296,7 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("trusts an existing moderator-authored tracked goal before suppressing creation", async () => {
+  it("rejects a moderator-authored tracked goal", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
       nowMs,
@@ -302,14 +319,12 @@ describe("onboarding subscriber goal", () => {
         nowMs: Number(upgradeState.nextRunAt),
       }),
     ).resolves.toMatchObject({
-      status: "existing",
-      postId: "t3_existing",
-      existingSource: "tracked",
+      status: "created",
+      postId: "t3_created",
       lifecycleSource: "upgrade",
     });
     expect(reddit.getPostById).toHaveBeenCalledWith("t3_existing");
-    expect(reddit.getHotPosts).not.toHaveBeenCalled();
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
   });
 
   it("recognizes a pinned Tiny post and a recent legacy app post", async () => {
@@ -355,6 +370,7 @@ describe("onboarding subscriber goal", () => {
           id: "t3_legacy",
           authorName: "subscriber-goal",
           subredditId: "t5_example",
+          stickied: true,
           createdAt: new Date(Number(upgradeState.nextRunAt) - 10_000),
         },
       ]),
@@ -412,6 +428,45 @@ describe("onboarding subscriber goal", () => {
     );
   });
 
+  it("finds a strictly validated pinned goal through author search", async () => {
+    reddit.searchPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_wrong_author",
+          authorName: "someone-else",
+          subredditId: "t5_example",
+          stickied: true,
+          postData: { postKind: "subscriber-goal-v1" },
+        },
+        {
+          id: "t3_searched",
+          authorName: "subscriber-goal",
+          subredditName: "ExampleSub",
+          stickied: true,
+          postData: { postKind: "cta-only-v1" },
+        },
+      ]),
+    });
+
+    await expect(
+      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
+    ).resolves.toMatchObject({
+      postId: "t3_searched",
+      source: "search",
+      searchInspected: 2,
+      validated: 1,
+    });
+    expect(reddit.searchPosts).toHaveBeenCalledWith({
+      query: "author:subscriber-goal",
+      subredditName: "ExampleSub",
+      sort: "new",
+      timeframe: "all",
+      limit: 100,
+      pageSize: 100,
+    });
+    expect(reddit.getNewPosts).not.toHaveBeenCalled();
+  });
+
   it("discovers and validates a persisted Tiny post created 24 hours earlier", async () => {
     await redis.hSet("subscriber_goals", {
       t3_tiny_post_kind: "subscribe-only-v1",
@@ -421,6 +476,7 @@ describe("onboarding subscriber goal", () => {
       id: "t3_tiny",
       authorName: "subscriber-goal",
       subredditId: "t5_example",
+      stickied: true,
       createdAt: new Date(nowMs - 24 * 60 * 60 * 1000),
       postData: { postKind: "subscribe-only-v1" },
     });
@@ -447,6 +503,7 @@ describe("onboarding subscriber goal", () => {
       id: "t3_registered_tiny",
       authorName: "subscriber-goal",
       subredditId: "t5_example",
+      stickied: true,
       postData: { postKind: "subscribe-only-v1" },
       createdAt: new Date(nowMs),
     });
@@ -801,6 +858,163 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
+  it("stops after three total creation-phase attempts", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    hoisted.getTrackedPosts.mockRejectedValue(new Error("redis unavailable"));
+
+    let runAt = nowMs + onboardingSubscriberGoalDelayMs;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: runAt,
+      });
+      const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      expect(state.attempts).toBe(String(attempt));
+      if (attempt < 3) runAt = Number(state.nextRunAt);
+    }
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "retry_exhausted",
+      attempts: "3",
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("cancels automatic creation when Manage Posts cannot be verified", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "unknown",
+      healthy: false,
+      permissions: [],
+      notification: "not_needed",
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notify: false,
+        scheduleUnknownRetry: false,
+      }),
+    );
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "cancelled_permission",
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("does not retry an unknown permission result from the creation boundary", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const error = new Error("permission lookup failed");
+    error.name = "SubscriberGoalPermissionVerificationError";
+    hoisted.createSubscriberGoal.mockRejectedValue(error);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "retry_exhausted",
+      attempts: "1",
+    });
+  });
+
+  it("pauses armed creation and re-randomizes it when re-enabled", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const dueAt = nowMs + onboardingSubscriberGoalDelayMs;
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: dueAt,
+        automationEnabled: false,
+      }),
+    ).resolves.toMatchObject({ status: "paused" });
+    expect(reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: dueAt + 1,
+        automationEnabled: true,
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      nextRunAt: String(dueAt + 1 + 60_000),
+      pausedAt: "",
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("terminates a created but unpinned goal without retrying", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    hoisted.createSubscriberGoal.mockResolvedValue({
+      post: { id: "t3_unpinned", title: "Welcome to r/ExampleSub!" },
+      stickyResult: { status: "not_pinned", errorMessage: "no permission" },
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingSubscriberGoalDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "created", postId: "t3_unpinned" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "created_not_pinned",
+    });
+    expect(hoisted.notifyStickyFailure).toHaveBeenCalledOnce();
+  });
+
   it("allows only one overlapping automatic creation", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -872,7 +1086,7 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("does not arm onboarding when lifecycle state is absent", async () => {
+  it("recovers onboarding when lifecycle state is absent", async () => {
     await expect(
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
@@ -883,7 +1097,10 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({ status: "not_due" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
-    ).resolves.toEqual({});
+    ).resolves.toMatchObject({
+      status: "awaiting_warning",
+      lifecycleSource: "recovery",
+    });
   });
 
   it("arms creation from the actual successful modmail time", async () => {
@@ -977,10 +1194,14 @@ describe("onboarding subscriber goal", () => {
         redis: redis as never,
         nowMs: nowMs + 60_000,
       }),
-    ).resolves.toMatchObject({ status: "failed" });
+    ).resolves.toMatchObject({ status: "cancelled" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
-    ).resolves.toMatchObject({ status: "awaiting_warning", nextRunAt: "" });
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "delivery_unknown",
+      nextRunAt: "",
+    });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
@@ -1073,7 +1294,7 @@ describe("onboarding subscriber goal", () => {
     async (legacyKey, legacyVersion) => {
       await redis.hSet(legacyKey, {
         version: legacyVersion,
-        status: "processing",
+        status: "pending",
         armedAt: String(nowMs),
         nextRunAt: String(nowMs - 1),
         lifecycleSource: "upgrade",
@@ -1100,6 +1321,30 @@ describe("onboarding subscriber goal", () => {
       );
     },
   );
+
+  it("cancels ambiguous legacy processing work without resending", async () => {
+    await redis.hSet("onboarding_subscriber_goal_v3_state", {
+      version: "onboarding_subscriber_goal_v3",
+      status: "processing",
+      armedAt: String(nowMs),
+      nextRunAt: String(nowMs - 1),
+      lifecycleSource: "upgrade",
+      attempts: "1",
+    });
+
+    await initializeRawOnboardingSubscriberGoal(redis as never, {
+      nowMs,
+      migrationOnly: true,
+    });
+
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "delivery_unknown",
+      migratedFromVersion: "onboarding_subscriber_goal_v3",
+    });
+  });
 
   it("migrates legacy v1 JSON work", async () => {
     await redis.set(

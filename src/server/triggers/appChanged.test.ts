@@ -54,6 +54,7 @@ vi.mock("../data/subGoalData", () => ({
 }));
 
 vi.mock("../core/onboardingSubscriberGoal", () => ({
+  AUTOMATIC_ONBOARDING_ENABLED: true,
   getOnboardingEligibility: (subreddit: {
     numberOfSubscribers: number;
     type?: unknown;
@@ -128,10 +129,10 @@ vi.mock("../core/appRepair", () => ({
 import { onAppChanged, shouldInitializeReleaseOnboarding } from "./appChanged";
 
 describe("onAppChanged", () => {
-  it("uses the release flag only for new upgrade-wave initialization", () => {
+  it("uses the automation flag for lifecycle initialization", () => {
     expect(shouldInitializeReleaseOnboarding("upgrade", true)).toBe(true);
     expect(shouldInitializeReleaseOnboarding("upgrade", false)).toBe(false);
-    expect(shouldInitializeReleaseOnboarding("install", false)).toBe(true);
+    expect(shouldInitializeReleaseOnboarding("install", false)).toBe(false);
   });
   beforeEach(() => {
     hoisted.context.subredditName = undefined;

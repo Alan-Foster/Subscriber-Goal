@@ -1,6 +1,7 @@
 import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
+  AUTOMATIC_ONBOARDING_ENABLED,
   findExistingSubscriberGoal,
   getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
@@ -8,12 +9,16 @@ import {
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalIneligible,
+  markOnboardingSubscriberGoalCancelled,
+  onboardingMaxAttempts,
   onboardingMinimumSubscriberCount,
   scheduleOnboardingSubscriberGoalAfterWarning,
+  selectOnboardingRetryDelayMs,
   type OnboardingDetectionDiagnostics,
   type OnboardingExistingSource,
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
+import { checkAppAccountHealth } from "./appAccountHealth";
 
 export const onboardingReminderStateKey = "onboarding_reminder_v3_state";
 export const onboardingReminderLockKey = "onboarding_reminder_v3_lock";
@@ -25,10 +30,19 @@ export const onboardingReminderStaggerMaxMinutes = 300;
 export const onboardingReminderDelayMs =
   onboardingReminderStaggerMinMinutes * 60 * 1000;
 
-type OnboardingReminderStatus = "pending" | "processing" | "complete";
-type OnboardingReminderResult = "sent" | "existing" | "ineligible" | "failed";
-const onboardingReminderRetryBaseMs = 5 * 60 * 1000;
-const onboardingReminderRetryMaxMs = 60 * 60 * 1000;
+type OnboardingReminderStatus =
+  | "pending"
+  | "processing"
+  | "dispatching"
+  | "complete";
+type OnboardingReminderResult =
+  | "sent"
+  | "existing"
+  | "ineligible"
+  | "failed"
+  | "cancelled_permission"
+  | "delivery_unknown"
+  | "retry_exhausted";
 
 export type OnboardingReminderState = {
   version: typeof onboardingReminderVersion;
@@ -48,6 +62,8 @@ export type OnboardingReminderState = {
   result?: OnboardingReminderResult;
   errorMessage?: string;
   attempts?: number;
+  pausedAt?: number;
+  dispatchToken?: string;
 };
 
 export type OnboardingReminderSummary = OnboardingDetectionDiagnostics & {
@@ -56,6 +72,8 @@ export type OnboardingReminderSummary = OnboardingDetectionDiagnostics & {
     | "sent"
     | "existing"
     | "ineligible"
+    | "cancelled"
+    | "paused"
     | "failed"
     | "complete";
   postId?: string;
@@ -75,6 +93,7 @@ const emptySummary = (): Omit<OnboardingReminderSummary, "status"> => ({
   queuedInspected: 0,
   persistedInspected: 0,
   pinnedInspected: 0,
+  searchInspected: 0,
   recentInspected: 0,
   validated: 0,
   stalePruned: 0,
@@ -87,8 +106,8 @@ export function buildOnboardingReminderMessage(
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
   const automaticCreationNotice = isUpgrade
-    ? "If a Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. To stagger this release safely, the automatic creation attempt may occur during the following 1,000 minutes."
-    : "If a Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. The automatic creation attempt may occur during the following 1,000 minutes.";
+    ? "If a pinned Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following 1,000 minutes."
+    : "If a pinned Subscriber Goal does not already exist, the 24-hour countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following 1,000 minutes.";
   return {
     subject: isUpgrade
       ? `Subscriber Goal automatic goal update for r/${subredditName}`
@@ -110,12 +129,16 @@ export async function scheduleOnboardingReminder(
     lifecycleSource = "unknown",
     nowMs = Date.now(),
     migrationOnly = false,
+    automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
   }: {
     lifecycleSource?: OnboardingLifecycleSource;
     nowMs?: number;
     migrationOnly?: boolean;
+    automationEnabled?: boolean;
   },
 ): Promise<void> {
+  void migrationOnly;
+  if (!automationEnabled) return;
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(onboardingReminderInitializationLockKey, lockToken, {
     nx: true,
@@ -124,12 +147,12 @@ export async function scheduleOnboardingReminder(
   if ((await redis.get(onboardingReminderInitializationLockKey)) !== lockToken)
     return;
   try {
-    const existing = parseOnboardingReminderState(
-      await redis.hGetAll(onboardingReminderStateKey),
-    );
+    const rawState = await redis.hGetAll(onboardingReminderStateKey);
+    const existing = parseOnboardingReminderState(rawState);
     if (existing) return;
+    if (Object.keys(rawState).length > 0) return;
     const goalState = await getOnboardingSubscriberGoalState(redis);
-    if (migrationOnly && goalState?.status !== "awaiting_warning") return;
+    if (goalState?.status !== "awaiting_warning") return;
     const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
     const state: OnboardingReminderState = {
       version: onboardingReminderVersion,
@@ -193,23 +216,68 @@ export async function processDueOnboardingReminder({
   reddit,
   redis,
   nowMs = Date.now(),
+  automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
+  automationEnabled?: boolean;
 }): Promise<OnboardingReminderSummary> {
   const base = emptySummary();
   await initializeOnboardingSubscriberGoal(redis, {
     nowMs,
-    migrationOnly: true,
+    lifecycleSource: "recovery",
+    automationEnabled,
   });
-  await scheduleOnboardingReminder(redis, { nowMs, migrationOnly: true });
-  const state = parseOnboardingReminderState(
+  await scheduleOnboardingReminder(redis, {
+    nowMs,
+    lifecycleSource: "recovery",
+    automationEnabled,
+  });
+  let state = parseOnboardingReminderState(
     await redis.hGetAll(onboardingReminderStateKey),
   );
   if (state?.status === "complete") {
     await reconcileCompletedReminder(redis, state, nowMs);
     return { status: "complete", ...base };
+  }
+  if (state?.status === "dispatching") {
+    await saveOnboardingReminderState(redis, {
+      ...state,
+      status: "complete",
+      completedAt: nowMs,
+      result: "delivery_unknown",
+      errorMessage: "A previous modmail dispatch could not be confirmed.",
+    });
+    await markOnboardingSubscriberGoalCancelled(
+      redis,
+      "delivery_unknown",
+      nowMs,
+      "A previous modmail dispatch could not be confirmed.",
+    );
+    return { status: "cancelled", ...base };
+  }
+  if (state && !automationEnabled) {
+    await saveOnboardingReminderState(redis, {
+      ...state,
+      pausedAt: state.pausedAt ?? nowMs,
+    });
+    return { status: "paused", ...base };
+  }
+  if (state?.pausedAt !== undefined) {
+    const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
+    const { pausedAt: _pausedAt, ...unpausedState } = state;
+    state = {
+      ...unpausedState,
+      status: "pending",
+      reminderStaggerMinutes,
+      nextRunAt: Math.max(
+        state.nextRunAt,
+        nowMs + reminderStaggerMinutes * 60 * 1000,
+      ),
+    };
+    await saveOnboardingReminderState(redis, state);
+    return { status: "not_due", ...base };
   }
   if (!state || nowMs < state.nextRunAt) {
     return {
@@ -228,6 +296,7 @@ export async function processDueOnboardingReminder({
   }
 
   let inspected = base;
+  let dispatchStarted = false;
   try {
     const reloaded = parseOnboardingReminderState(
       await redis.hGetAll(onboardingReminderStateKey),
@@ -288,6 +357,7 @@ export async function processDueOnboardingReminder({
       queuedInspected: existing.queuedInspected ?? 0,
       persistedInspected: existing.persistedInspected ?? 0,
       pinnedInspected: existing.pinnedInspected ?? 0,
+      searchInspected: existing.searchInspected ?? 0,
       recentInspected: existing.recentInspected ?? 0,
       validated: existing.validated ?? 0,
       stalePruned: existing.stalePruned ?? 0,
@@ -320,10 +390,54 @@ export async function processDueOnboardingReminder({
       };
     }
 
+    const health = await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      notify: false,
+      scheduleUnknownRetry: false,
+      nowMs,
+    });
+    if (!health.healthy || health.status !== "healthy") {
+      const errorMessage =
+        "Subscriber Goal lacks verified Manage Posts permission.";
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        result: "cancelled_permission",
+        errorMessage,
+      });
+      await markOnboardingSubscriberGoalCancelled(
+        redis,
+        "cancelled_permission",
+        nowMs,
+        errorMessage,
+      );
+      return { status: "cancelled", errorMessage, ...inspected };
+    }
+
+    if (!automationEnabled) {
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: "pending",
+        pausedAt: nowMs,
+      });
+      return { status: "paused", ...inspected };
+    }
+
     const message = buildOnboardingReminderMessage(
       subreddit.name,
       reloaded.lifecycleSource,
     );
+    const dispatchToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+    await saveOnboardingReminderState(redis, {
+      ...reloaded,
+      status: "dispatching",
+      dispatchToken,
+    });
+    dispatchStarted = true;
     await reddit.modMail.createModNotification({
       subredditId: subreddit.id,
       subject: message.subject,
@@ -360,32 +474,49 @@ export async function processDueOnboardingReminder({
       if (latest?.status === "complete") {
         return { status: "complete", ...inspected };
       }
+      if (dispatchStarted || latest?.status === "dispatching") {
+        await saveOnboardingReminderState(redis, {
+          ...(latest ?? state),
+          status: "complete",
+          completedAt: nowMs,
+          result: "delivery_unknown",
+          errorMessage,
+        });
+        await markOnboardingSubscriberGoalCancelled(
+          redis,
+          "delivery_unknown",
+          nowMs,
+          errorMessage,
+        );
+        return { status: "cancelled", errorMessage, ...inspected };
+      }
       const attempts = (latest?.attempts ?? state.attempts ?? 0) + 1;
-      const retryDelayMs = Math.min(
-        onboardingReminderRetryMaxMs,
-        onboardingReminderRetryBaseMs * 2 ** (attempts - 1),
-      );
+      const terminal = attempts >= onboardingMaxAttempts;
+      const retryDelayMs = selectOnboardingRetryDelayMs(attempts);
       await saveOnboardingReminderState(redis, {
         ...(latest ?? state),
-        status: "pending",
-        nextRunAt: nowMs + retryDelayMs,
+        status: terminal ? "complete" : "pending",
+        ...(terminal
+          ? { completedAt: nowMs }
+          : { nextRunAt: nowMs + retryDelayMs }),
         attempts,
-        result: "failed",
+        result: terminal ? "retry_exhausted" : "failed",
         errorMessage,
       });
-      logDiagnostic(
-        "warn",
-        "onboarding_reminder_retry_scheduled",
-        {
-          workflow: "onboarding_reminder",
-          phase: "retry",
-          lifecycleSource: (latest ?? state).lifecycleSource,
-          reminderStaggerMinutes: (latest ?? state).reminderStaggerMinutes,
-          attempts,
-          nextRunAt: nowMs + retryDelayMs,
-        },
-        error,
-      );
+      if (!terminal)
+        logDiagnostic(
+          "warn",
+          "onboarding_reminder_retry_scheduled",
+          {
+            workflow: "onboarding_reminder",
+            phase: "retry",
+            lifecycleSource: (latest ?? state).lifecycleSource,
+            reminderStaggerMinutes: (latest ?? state).reminderStaggerMinutes,
+            attempts,
+            nextRunAt: nowMs + retryDelayMs,
+          },
+          error,
+        );
     } catch (stateError) {
       logDiagnostic(
         "error",
@@ -420,7 +551,7 @@ export async function processDueOnboardingReminder({
 function formatReminderDiagnostics(
   diagnostics: OnboardingDetectionDiagnostics,
 ): string {
-  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
 async function reconcileCompletedReminder(
@@ -450,6 +581,16 @@ async function reconcileCompletedReminder(
       state.eligibilitySubscriberCount,
       state.completedAt ?? nowMs,
     );
+  } else if (
+    state.result === "cancelled_permission" ||
+    state.result === "delivery_unknown"
+  ) {
+    await markOnboardingSubscriberGoalCancelled(
+      redis,
+      state.result,
+      state.completedAt ?? nowMs,
+      state.errorMessage,
+    );
   }
 }
 
@@ -461,7 +602,9 @@ function parseOnboardingReminderState(
   const reminderStaggerMinutes = Number(raw.reminderStaggerMinutes);
   if (
     raw.version !== onboardingReminderVersion ||
-    !["pending", "processing", "complete"].includes(raw.status ?? "") ||
+    !["pending", "processing", "dispatching", "complete"].includes(
+      raw.status ?? "",
+    ) ||
     !Number.isFinite(nextRunAt) ||
     !Number.isFinite(armedAt) ||
     !Number.isInteger(reminderStaggerMinutes) ||
@@ -476,7 +619,9 @@ function parseOnboardingReminderState(
     nextRunAt,
     armedAt,
     lifecycleSource:
-      raw.lifecycleSource === "install" || raw.lifecycleSource === "upgrade"
+      raw.lifecycleSource === "install" ||
+      raw.lifecycleSource === "upgrade" ||
+      raw.lifecycleSource === "recovery"
         ? raw.lifecycleSource
         : "unknown",
     reminderStaggerMinutes,
@@ -508,6 +653,10 @@ function parseOnboardingReminderState(
     ...(raw.attempts && Number.isFinite(Number(raw.attempts))
       ? { attempts: Number(raw.attempts) }
       : {}),
+    ...(raw.pausedAt && Number.isFinite(Number(raw.pausedAt))
+      ? { pausedAt: Number(raw.pausedAt) }
+      : {}),
+    ...(raw.dispatchToken ? { dispatchToken: raw.dispatchToken } : {}),
   };
 }
 
@@ -520,6 +669,7 @@ function isExistingSource(
     value === "queued" ||
     value === "persisted" ||
     value === "pinned" ||
+    value === "search" ||
     value === "recent"
   );
 }
@@ -531,7 +681,10 @@ function isResult(
     value === "sent" ||
     value === "existing" ||
     value === "ineligible" ||
-    value === "failed"
+    value === "failed" ||
+    value === "cancelled_permission" ||
+    value === "delivery_unknown" ||
+    value === "retry_exhausted"
   );
 }
 
@@ -556,6 +709,8 @@ function serializeOnboardingReminderState(
     result: state.result ?? "",
     errorMessage: state.errorMessage ?? "",
     attempts: String(state.attempts ?? 0),
+    pausedAt: String(state.pausedAt ?? ""),
+    dispatchToken: state.dispatchToken ?? "",
   };
 }
 

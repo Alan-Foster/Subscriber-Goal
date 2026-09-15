@@ -165,4 +165,22 @@ describe("app account health", () => {
     });
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
+
+  it("can fail closed without scheduling a permission retry", async () => {
+    reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
+
+    await expect(
+      checkAppAccountHealth({
+        reddit: reddit as never,
+        redis: redis as never,
+        subredditName: "ExampleSub",
+        subredditId: "t5_example",
+        scheduleUnknownRetry: false,
+        nowMs: 100,
+      }),
+    ).resolves.toMatchObject({ status: "unknown", healthy: false });
+    await expect(redis.hGetAll(appAccountHealthRetryStateKey)).resolves.toEqual(
+      {},
+    );
+  });
 });

@@ -55,6 +55,7 @@ type CreateSubscriberGoalOptions = {
   afterSubscribeAction?: AfterSubscribeAction;
   afterSubscribePreset?: AfterSubscribePreset;
   operationId?: string;
+  automaticPermissionCheck?: boolean;
   stickyVerification?: Partial<StickyVerificationOptions>;
 };
 
@@ -93,6 +94,15 @@ export class SubscriberGoalCreationInProgressError extends Error {
   }
 }
 
+export class SubscriberGoalPermissionVerificationError extends Error {
+  constructor(subredditName: string) {
+    super(
+      `Reddit could not verify Subscriber Goal's moderator permissions in r/${subredditName}.`,
+    );
+    this.name = "SubscriberGoalPermissionVerificationError";
+  }
+}
+
 export type StickyResult = {
   status: "pinned" | "not_pinned";
   errorMessage?: string;
@@ -120,7 +130,12 @@ export async function createSubscriberGoal({
 }): Promise<CreateSubscriberGoalResult> {
   const operationId = options.operationId?.trim();
   if (!operationId) {
-    return createSubscriberGoalInternal({ reddit, redis, appSettings, options });
+    return createSubscriberGoalInternal({
+      reddit,
+      redis,
+      appSettings,
+      options,
+    });
   }
 
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
@@ -263,10 +278,16 @@ async function createSubscriberGoalInternal(
     redis,
     subredditName: subreddit.name,
     subredditId: subreddit.id,
+    ...(options.automaticPermissionCheck
+      ? { notify: false, scheduleUnknownRetry: false }
+      : {}),
   });
   const { appUsername, permissions } = health;
   const hasAllPermissions = permissions.includes("all");
   if (health.status === "unknown") {
+    if (options.automaticPermissionCheck) {
+      throw new SubscriberGoalPermissionVerificationError(subreddit.name);
+    }
     throw new Error(
       `Reddit could not verify Subscriber Goal's moderator permissions in r/${subreddit.name}. Please try again shortly.`,
     );

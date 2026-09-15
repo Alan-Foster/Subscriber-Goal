@@ -6,10 +6,13 @@ const hoisted = vi.hoisted(() => ({
   initializeOnboardingSubscriberGoal: vi.fn(),
   markOnboardingSubscriberGoalExisting: vi.fn(),
   markOnboardingSubscriberGoalIneligible: vi.fn(),
+  markOnboardingSubscriberGoalCancelled: vi.fn(),
   scheduleOnboardingSubscriberGoalAfterWarning: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
 }));
 
 vi.mock("./onboardingSubscriberGoal", () => ({
+  AUTOMATIC_ONBOARDING_ENABLED: true,
   findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
   getOnboardingEligibility: (subreddit: {
     numberOfSubscribers: number;
@@ -34,9 +37,17 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
+  markOnboardingSubscriberGoalCancelled:
+    hoisted.markOnboardingSubscriberGoalCancelled,
   onboardingMinimumSubscriberCount: 50,
+  onboardingMaxAttempts: 3,
+  selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+}));
+
+vi.mock("./appAccountHealth", () => ({
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
 import {
@@ -102,11 +113,25 @@ describe("onboarding reminder", () => {
   let reddit: ReturnType<typeof createReddit>;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     redis = new InMemoryRedis();
     reddit = createReddit();
     vi.spyOn(Math, "random").mockReturnValue(0);
     hoisted.getOnboardingSubscriberGoalState.mockReset();
-    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue(undefined);
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      version: 4,
+      status: "awaiting_warning",
+      lifecycleSource: "upgrade",
+      armedAt: nowMs,
+      creationStaggerMinutes: 1,
+      attemptCount: 0,
+      lastAttemptAt: "",
+      lastRetryDelayMs: 0,
+      completedAt: "",
+      result: "",
+      createdPostId: "",
+      errorMessage: "",
+    });
     hoisted.initializeOnboardingSubscriberGoal.mockReset();
     hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
     hoisted.markOnboardingSubscriberGoalExisting.mockReset();
@@ -122,6 +147,16 @@ describe("onboarding reminder", () => {
       trackedInspected: 0,
       pinnedInspected: 0,
       recentInspected: 0,
+    });
+    hoisted.markOnboardingSubscriberGoalCancelled.mockReset();
+    hoisted.markOnboardingSubscriberGoalCancelled.mockResolvedValue(undefined);
+    hoisted.checkAppAccountHealth.mockReset();
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "healthy",
+      healthy: true,
+      appUsername: "subscriber-goal",
+      permissions: ["posts"],
+      notification: "not_needed",
     });
   });
 
@@ -348,7 +383,123 @@ describe("onboarding reminder", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("schedules a retry when modmail cannot be sent", async () => {
+  it("cancels without modmail when Manage Posts cannot be verified", async () => {
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "unknown",
+      healthy: false,
+      permissions: [],
+      notification: "not_needed",
+    });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notify: false,
+        scheduleUnknownRetry: false,
+      }),
+    );
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      result: "cancelled_permission",
+    });
+  });
+
+  it("pauses an armed reminder and re-randomizes it when re-enabled", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    const dueAt = nowMs + onboardingReminderDelayMs;
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: dueAt,
+        automationEnabled: false,
+      }),
+    ).resolves.toMatchObject({ status: "paused" });
+    expect(reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: dueAt + 1,
+        automationEnabled: true,
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      nextRunAt: String(dueAt + 1 + 60_000),
+      pausedAt: "",
+    });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("stops pre-dispatch failures after three total attempts", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    hoisted.findExistingSubscriberGoal.mockRejectedValue(
+      new Error("lookup unavailable"),
+    );
+
+    let runAt = nowMs + onboardingReminderDelayMs;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: runAt,
+      });
+      const state = await redis.hGetAll(onboardingReminderStateKey);
+      expect(state.attempts).toBe(String(attempt));
+      if (attempt < 3) runAt = Number(state.nextRunAt);
+    }
+
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      result: "retry_exhausted",
+      attempts: "3",
+    });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("cancels a stale dispatching state without resending", async () => {
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    await redis.hSet(onboardingReminderStateKey, {
+      status: "dispatching",
+      dispatchToken: "legacy-dispatch",
+    });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    expect(hoisted.markOnboardingSubscriberGoalCancelled).toHaveBeenCalledWith(
+      expect.anything(),
+      "delivery_unknown",
+      nowMs + onboardingReminderDelayMs,
+      expect.any(String),
+    );
+  });
+
+  it("cancels when a started modmail dispatch cannot be confirmed", async () => {
     await scheduleOnboardingReminder(redis as never, { nowMs });
     reddit.modMail.createModNotification.mockRejectedValue(
       new Error("modmail unavailable"),
@@ -361,15 +512,54 @@ describe("onboarding reminder", () => {
         nowMs: nowMs + onboardingReminderDelayMs,
       }),
     ).resolves.toMatchObject({
-      status: "failed",
+      status: "cancelled",
       errorMessage: "Error: modmail unavailable",
     });
     await expect(
       redis.hGetAll(onboardingReminderStateKey),
     ).resolves.toMatchObject({
-      status: "pending",
-      result: "failed",
-      attempts: "1",
+      status: "complete",
+      result: "delivery_unknown",
     });
+    expect(hoisted.markOnboardingSubscriberGoalCancelled).toHaveBeenCalledWith(
+      expect.anything(),
+      "delivery_unknown",
+      nowMs + onboardingReminderDelayMs,
+      "Error: modmail unavailable",
+    );
+  });
+
+  it("cancels when sent-modmail confirmation cannot be persisted", async () => {
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    const originalHSet = redis.hSet.bind(redis);
+    reddit.modMail.createModNotification.mockImplementation(async () => {
+      vi.spyOn(redis, "hSet").mockImplementation(async (key, fields) => {
+        if (key === onboardingReminderStateKey && fields.result === "sent") {
+          throw new Error("confirmation unavailable");
+        }
+        return originalHSet(key, fields);
+      });
+    });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "cancelled",
+      errorMessage: "Error: confirmation unavailable",
+    });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      result: "delivery_unknown",
+    });
+    expect(
+      hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+    ).not.toHaveBeenCalled();
   });
 });

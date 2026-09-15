@@ -5,7 +5,8 @@ export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
 export const appAccountHealthNotificationLockKey =
   "app_account_health_v1_notification_lock";
-export const appAccountHealthRetryStateKey = "app_account_health_v1_retry_state";
+export const appAccountHealthRetryStateKey =
+  "app_account_health_v1_retry_state";
 export const subscriberGoalAppUsername = "subscriber-goal";
 
 export type AppAccountHealthStatus = "healthy" | "unhealthy" | "unknown";
@@ -52,6 +53,7 @@ export async function checkAppAccountHealth({
   subredditName,
   subredditId,
   notify = true,
+  scheduleUnknownRetry = true,
   nowMs = Date.now(),
 }: {
   reddit: RedditClient;
@@ -59,6 +61,7 @@ export async function checkAppAccountHealth({
   subredditName: string;
   subredditId?: string;
   notify?: boolean;
+  scheduleUnknownRetry?: boolean;
   nowMs?: number;
 }): Promise<AppAccountHealthResult> {
   let appUsername: string | undefined;
@@ -69,17 +72,22 @@ export async function checkAppAccountHealth({
     if (!appUser) throw new Error("The app account could not be resolved.");
     permissions = await appUser.getModPermissionsForSubreddit(subredditName);
   } catch (error) {
-    const previousRetry = await redis.hGetAll(appAccountHealthRetryStateKey);
-    const attempts = (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
-    const retryDelayMs = Math.min(60 * 60 * 1000, 60_000 * 2 ** (attempts - 1));
-    await redis.hSet(appAccountHealthRetryStateKey, {
-      status: "pending",
-      attempts: String(attempts),
-      nextRunAt: String(nowMs + retryDelayMs),
-      subredditName,
-      subredditId: subredditId ?? "",
-      lastError: error instanceof Error ? error.message : String(error),
-    });
+    if (scheduleUnknownRetry) {
+      const previousRetry = await redis.hGetAll(appAccountHealthRetryStateKey);
+      const attempts = (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+      const retryDelayMs = Math.min(
+        60 * 60 * 1000,
+        60_000 * 2 ** (attempts - 1),
+      );
+      await redis.hSet(appAccountHealthRetryStateKey, {
+        status: "pending",
+        attempts: String(attempts),
+        nextRunAt: String(nowMs + retryDelayMs),
+        subredditName,
+        subredditId: subredditId ?? "",
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+    }
     logDiagnostic(
       "warn",
       "app_account_health_check_failed",
@@ -217,15 +225,16 @@ export async function checkAppAccountHealth({
       duplicateIncident ||
       !notify ||
       current.incidentToken === notificationLockToken;
-    if (mayFinalize) await redis.hSet(appAccountHealthStateKey, {
-      status: "unhealthy",
-      checkedAt: String(nowMs),
-      appUsername: appUsername ?? "",
-      permissions: permissions.join(","),
-      incidentFingerprint: fingerprint,
-      notification,
-      ...(duplicateIncident ? {} : { incidentStartedAt: String(nowMs) }),
-    });
+    if (mayFinalize)
+      await redis.hSet(appAccountHealthStateKey, {
+        status: "unhealthy",
+        checkedAt: String(nowMs),
+        appUsername: appUsername ?? "",
+        permissions: permissions.join(","),
+        incidentFingerprint: fingerprint,
+        notification,
+        ...(duplicateIncident ? {} : { incidentStartedAt: String(nowMs) }),
+      });
     logDiagnostic("warn", "app_account_unhealthy", {
       workflow: "app_account_health",
       phase: "permission_check",
