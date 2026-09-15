@@ -58,7 +58,8 @@ describe("ThanksPage", () => {
 
     expect(html).toContain("¡Gracias por suscribirte!");
     expect(html).toContain("Ahora hay 10 suscriptores en la comunidad!");
-    expect(html).toContain("Volver a la página anterior");
+    expect(html).toContain('aria-label="Volver a la página anterior"');
+    expect(html).toContain(">Volver</button>");
   });
 
   it("hides the subreddit logo for short posts", () => {
@@ -78,6 +79,9 @@ describe("ThanksPage", () => {
     expect(html).toContain("Thanks for Subscribing!");
     expect(html).toContain("Get Notified at 10");
     expect(html).toContain("sg-subscribe-attention");
+    expect(html).toContain('data-thanks-actions-layout="short"');
+    expect(html).toContain("flex-row items-center");
+    expect(html).toContain("px-4 py-2 text-sm leading-tight");
   });
 
   it("shows a large themed notification action in the button row", () => {
@@ -93,6 +97,11 @@ describe("ThanksPage", () => {
     expect(html).toContain('data-sg-theme="red"');
     expect(html).toContain("Get Notified at 10k");
     expect(html).toContain("sg-subscribe-attention");
+    expect(html).toContain('data-thanks-actions-layout="regular"');
+    expect(html).toContain("flex-col items-stretch");
+    expect(html).toContain("min-[380px]:flex-row");
+    expect(html).toContain("whitespace-normal");
+    expect(html).not.toContain("truncate");
     expect(html).not.toContain("You’ll be notified");
   });
 
@@ -164,7 +173,8 @@ describe("ThanksPage", () => {
 
     expect(html).not.toContain("Join the Discord");
     expect(html).toContain("Get Notified at 10");
-    expect(html).toContain("Return to Previous Page");
+    expect(html).toContain('aria-label="Return to Previous Page"');
+    expect(html).toContain(">Return</button>");
     expect(html).toContain('data-sg-theme="red"');
     expect(html).toContain("sg-subscribe-attention");
   });

@@ -2,7 +2,6 @@ import { useRef } from "react";
 import type { ReactNode } from "react";
 import type { SubGoalState } from "../../../shared/types/api";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
-import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { NotificationBellIcon } from "../components/NotificationBellIcon";
 import { NotificationSwitch } from "../components/NotificationSwitch";
 import { TopButtons } from "../components/TopButtons";
@@ -89,7 +88,9 @@ const NotificationPreferenceRow = ({
         <span className="shrink-0">
           <NotificationBellIcon enabled={enabled} />
         </span>
-        <span className="min-w-0 truncate">{label}:</span>
+        <span className="min-w-0 truncate" title={label}>
+          {label}:
+        </span>
         <StableLocalizedSlot
           current={statusText}
           alternatives={[enabledText, disabledText]}
@@ -121,7 +122,6 @@ export const NotificationSettingsPage = ({
   onVisitPromoSub,
 }: NotificationSettingsPageProps) => {
   const messages = getNotificationMessages(state.language);
-  const commonMessages = getSubGoalPostMessages(state.language);
   const compact = state.postHeight === "tiny" || state.postHeight === "cta";
   const short = state.postHeight === "short";
   const subredditName = state.subreddit.name;
@@ -206,19 +206,11 @@ export const NotificationSettingsPage = ({
   const returnButton = (
     <button
       type="button"
+      aria-label={messages.backAriaLabel}
       className={`cursor-pointer whitespace-nowrap rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-5 font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] ${short ? "py-2 text-base" : "py-2.5 text-sm"}`}
       onClick={handleReturn}
     >
-      {short ? (
-        messages.returnShort
-      ) : (
-        <>
-          <span className="sm:hidden">{messages.returnShort}</span>
-          <span className="hidden sm:inline">
-            {commonMessages.thanksReturnButton}
-          </span>
-        </>
-      )}
+      {messages.returnShort}
     </button>
   );
 
@@ -293,10 +285,10 @@ export const NotificationSettingsPage = ({
             <NotificationBellIcon enabled={enabled} size={24} />
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-[color:var(--sg-text-primary)] sm:text-base">
+            <span className="block text-sm leading-tight font-semibold break-words text-[color:var(--sg-text-primary)] [overflow-wrap:anywhere] sm:text-base">
               {messages.alertsLabel}
             </span>
-            <span className="block truncate text-xs text-[color:var(--sg-text-muted)] sm:text-sm">
+            <span className="block text-xs leading-tight break-words text-[color:var(--sg-text-muted)] [overflow-wrap:anywhere] sm:text-sm">
               r/{subredditName}: {statusText}
             </span>
           </span>

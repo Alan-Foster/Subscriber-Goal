@@ -78,23 +78,29 @@ export const ThanksPage = ({
           subscribersText: formatSubscriberCount(state.subreddit.subscribers),
         })}
       </div>
-      <div className="flex items-center justify-center gap-3">
+      <div
+        className={`flex w-full max-w-xl justify-center gap-3 ${isShort ? "flex-row items-center" : "flex-col items-stretch min-[380px]:flex-row min-[380px]:items-center"}`}
+        data-thanks-actions-layout={isShort ? "short" : "regular"}
+      >
         {state.goal !== null && onNotificationOptIn ? (
           <GoalNotificationButton
             colorTheme={state.colorTheme}
             label={notificationMessages.goalPrompt({
               goalText: formatSubscriberCount(state.goal),
             })}
+            compact={isShort}
             submitting={notificationSubmitting}
             error={notificationError}
             onOptIn={onNotificationOptIn}
           />
         ) : null}
         <button
-          className="cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
+          type="button"
+          aria-label={messages.thanksReturnButton}
+          className="min-h-10 shrink-0 cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold whitespace-nowrap text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
           onClick={onReturn}
         >
-          {messages.thanksReturnButton}
+          {notificationMessages.returnShort}
         </button>
       </div>
     </div>

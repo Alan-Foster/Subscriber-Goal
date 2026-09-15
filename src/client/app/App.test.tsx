@@ -366,7 +366,9 @@ describe("App", () => {
     ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
     await act(async () => subscribeButton?.click());
     const returnButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Return to Previous Page"),
+      (button) =>
+        button.textContent === "Return" &&
+        button.getAttribute("aria-label") === "Return to Previous Page",
     );
     await act(async () => returnButton?.click());
 

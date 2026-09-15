@@ -52,8 +52,9 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("Enabled");
     expect(html).toContain('role="switch"');
     expect(html).toContain('checked=""');
-    expect(html).toContain("Return to Previous Page");
+    expect(html).toContain(">Return</button>");
     expect(html).toContain('aria-label="Return to previous page"');
+    expect(html).not.toContain("truncate");
     expect(html).not.toContain("Disable Notifications");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
@@ -78,6 +79,23 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("sm:flex-row");
     expect(html).toContain("px-4");
     expect(html).not.toContain("r/ExampleSub");
+  });
+
+  it("wraps long localized labels in the regular settings card", () => {
+    const html = renderToStaticMarkup(
+      <NotificationSettingsPage
+        state={{ ...state, language: "es" }}
+        {...props}
+      />,
+    );
+
+    expect(html).toContain("Alertas de objetivo completado");
+    expect(html).toContain("r/ExampleSub: Activadas");
+    expect(html).toContain(">Volver</button>");
+    expect(html).toContain('aria-label="Volver a la página anterior"');
+    expect(html).toContain("break-words");
+    expect(html).toContain("[overflow-wrap:anywhere]");
+    expect(html).not.toContain("truncate");
   });
 
   it("renders a compact CTA layout without a subreddit icon", () => {
@@ -106,6 +124,8 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("text-base");
     expect(html).toContain('data-notification-stable-slot="state"');
     expect(html).not.toContain("Return to Previous Page");
+    expect(html).toContain('title="Notifications"');
+    expect(html).toContain("truncate");
   });
 
   it("disables consent changes for logged-out users", () => {
