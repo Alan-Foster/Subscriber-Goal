@@ -21,10 +21,7 @@ import { apiRoutes } from "../../shared/routes";
 import { getPublicAppSettings } from "../settings";
 import { checkCompletionStatus, getSubGoalData } from "../data/subGoalData";
 import { isTrackedSubscriber, setNewSubscriber } from "../data/subscriberStats";
-import {
-  getUtcDayStartMs,
-  observeDailySubscriberCount,
-} from "../data/subscriberDailyStats";
+import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
@@ -397,28 +394,32 @@ export function registerPublicApiRoutes(router: Router): void {
         const subreddit = await reddit.getCurrentSubreddit();
         let target: NavigationTarget | undefined;
         if (action.type === "top-post-day") {
-          const candidates = await reddit
-            .getTopPosts({
-              subredditName: subreddit.name,
-              timeframe: "day",
-              limit: dynamicPostCandidateLimit,
-              pageSize: dynamicPostCandidateLimit,
-            })
-            .all();
           const promoSubreddit = getPublicAppSettings().promoSubreddit;
           const allowAppAccountPosts =
             subreddit.name.toLowerCase() === promoSubreddit.toLowerCase();
 
-          for (const candidate of candidates) {
-            if (candidate.id.toLowerCase() === postId.toLowerCase()) continue;
-            if (
-              !allowAppAccountPosts &&
-              normalizeRedditUsername(candidate.authorName) ===
-                appAccountUsername
-            ) {
-              continue;
+          for (const timeframe of ["day", "week", "month", "all"] as const) {
+            const candidates = await reddit
+              .getTopPosts({
+                subredditName: subreddit.name,
+                timeframe,
+                limit: dynamicPostCandidateLimit,
+                pageSize: dynamicPostCandidateLimit,
+              })
+              .all();
+
+            for (const candidate of candidates) {
+              if (candidate.id.toLowerCase() === postId.toLowerCase()) continue;
+              if (
+                !allowAppAccountPosts &&
+                normalizeRedditUsername(candidate.authorName) ===
+                  appAccountUsername
+              ) {
+                continue;
+              }
+              target = createPostNavigationTarget(candidate);
+              if (target) break;
             }
-            target = createPostNavigationTarget(candidate);
             if (target) break;
           }
         } else {
@@ -429,16 +430,11 @@ export function registerPublicApiRoutes(router: Router): void {
               pageSize: dynamicPostCandidateLimit,
             })
             .all();
-          const todayStartMs = getUtcDayStartMs(Date.now());
           for (const candidate of candidates) {
             if (
               typeof candidate.id === "string" &&
               candidate.id.toLowerCase() === postId.toLowerCase()
             ) {
-              continue;
-            }
-            const createdAtMs = normalizePostCreatedAtMs(candidate.createdAt);
-            if (createdAtMs === null || createdAtMs < todayStartMs) {
               continue;
             }
             target = createPostNavigationTarget(candidate);
@@ -868,18 +864,6 @@ function hasUsableNavigationUrl(value: unknown): value is string {
     // diagnostic-allow-silent: URL parsing is an expected validation probe.
     return false;
   }
-}
-
-function normalizePostCreatedAtMs(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 1_000_000_000_000 ? value * 1_000 : value;
-  }
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
 }
 
 function createPostNavigationTarget(
