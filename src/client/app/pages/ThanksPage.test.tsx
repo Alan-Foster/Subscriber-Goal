@@ -82,6 +82,9 @@ describe("ThanksPage", () => {
     expect(html).toContain('data-thanks-actions-layout="short"');
     expect(html).toContain("flex-row items-center");
     expect(html).toContain("px-4 py-2 text-sm leading-tight");
+    expect(html).toContain("flex-1 sm:max-w-96 sm:flex-none");
+    expect(html).toContain("w-full");
+    expect(html).toContain("sm:w-auto sm:max-w-96");
   });
 
   it("shows a large themed notification action in the button row", () => {
@@ -100,6 +103,8 @@ describe("ThanksPage", () => {
     expect(html).toContain('data-thanks-actions-layout="regular"');
     expect(html).toContain("flex-col items-stretch");
     expect(html).toContain("min-[380px]:flex-row");
+    expect(html).toContain("flex-1 sm:max-w-96 sm:flex-none");
+    expect(html).toContain("sm:w-auto sm:max-w-96");
     expect(html).toContain("whitespace-normal");
     expect(html).not.toContain("truncate");
     expect(html).not.toContain("You’ll be notified");
