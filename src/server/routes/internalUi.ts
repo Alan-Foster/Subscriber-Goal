@@ -61,6 +61,7 @@ import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
+import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
   createDefaultAfterSubscribeAction,
   defaultAfterSubscribeColorTheme,
@@ -720,7 +721,7 @@ function buildCreateGoalDetailsForm(
     name: string;
     numberOfSubscribers: number;
     type?: unknown;
-    isNsfw?: boolean;
+    nsfw?: unknown;
   },
 ): NonNullable<UiResponse["showForm"]> {
   const defaultPostTitle = getSubGoalPostMessages(
@@ -782,13 +783,16 @@ function buildCreateGoalDetailsForm(
   }
 
   const appSettings = getAppSettings();
-  const sourceSubredditIsNsfw = subreddit.isNsfw === true;
+  const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
+  const sourceSubredditIsNsfw = sourceSubredditNsfw === true;
   const shouldCrosspost =
-    !sourceSubredditIsNsfw &&
+    sourceSubredditNsfw === false &&
     subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
   const crosspostHelpText = sourceSubredditIsNsfw
     ? "Crossposting is disabled for NSFW source subreddits."
-    : `Keep this enabled to announce your goal in the r/${appSettings.promoSubreddit} index subreddit.`;
+    : sourceSubredditNsfw === undefined
+      ? "Crossposting is disabled because the source subreddit safety status is unavailable."
+      : `Keep this enabled to announce your goal in the r/${appSettings.promoSubreddit} index subreddit.`;
 
   return {
     name: formNames.createSubscriberGoal,
@@ -1095,10 +1099,9 @@ async function submitCreateGoalStepTwo(
         return;
       }
       const appSettings = getAppSettings();
-      const sourceSubredditIsNsfw =
-        (subreddit as { isNsfw?: boolean }).isNsfw === true;
+      const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
       const defaultCrosspost =
-        !sourceSubredditIsNsfw &&
+        sourceSubredditNsfw === false &&
         subreddit.name.toLowerCase() !==
           appSettings.promoSubreddit.toLowerCase();
       details = {

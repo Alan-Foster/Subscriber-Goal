@@ -42,6 +42,7 @@ import {
   storeSubscriptionAttemptReceipt,
 } from "../data/subscriptionAttempt";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
+import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 
 const buildState = async (
   postId: string,
@@ -95,7 +96,7 @@ const buildState = async (
       icon: subredditIcon,
       subscribers:
         options?.subscribersOverride ?? subreddit.numberOfSubscribers,
-      isNsfw: (subreddit as { isNsfw?: boolean }).isNsfw === true,
+      isNsfw: getCurrentSubredditNsfw(subreddit) === true,
     },
   };
 };
@@ -685,10 +686,9 @@ export function registerPublicApiRoutes(router: Router): void {
           logSubscribePhase(operationId, postId, "attempt_receipt_stored");
         }
         const subreddit = await reddit.getCurrentSubreddit();
-        const sourceSubredditIsNsfw =
-          (subreddit as { isNsfw?: boolean }).isNsfw === true;
+        const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
         const newSubscriberCount = subreddit.numberOfSubscribers + 1;
-        const shareUsername = !sourceSubredditIsNsfw;
+        const shareUsername = sourceSubredditNsfw === false;
 
         const subscriberCreated = await setNewSubscriber(
           redis,
@@ -757,11 +757,10 @@ export function registerPublicApiRoutes(router: Router): void {
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
-      const sourceSubredditIsNsfw =
-        (subreddit as { isNsfw?: boolean }).isNsfw === true;
+      const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
       const effectiveShareUsername = resolveShareUsername(
         shareUsername,
-        sourceSubredditIsNsfw,
+        sourceSubredditNsfw !== false,
       );
       const newSubscriberCount = subreddit.numberOfSubscribers + 1;
 

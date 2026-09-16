@@ -148,7 +148,7 @@ describe("createSubscriberGoal sticky handling", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 100,
-      isNsfw: false,
+      nsfw: false,
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getAppUser.mockResolvedValue({
@@ -369,7 +369,7 @@ describe("createSubscriberGoal sticky handling", () => {
           id: "t5_example",
           name: "ExampleSub",
           numberOfSubscribers: 100,
-          isNsfw: false,
+          nsfw: false,
         },
       },
     );

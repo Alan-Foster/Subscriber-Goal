@@ -96,8 +96,20 @@ export async function onAppChanged({
       }
     }
     const eligibility = getOnboardingEligibility(currentSubreddit);
+    logDiagnostic("info", "onboarding_eligibility_checked", {
+      workflow: "app_changed",
+      phase: "lifecycle_setup",
+      lifecycleSource,
+      subscriberCount: eligibility.subscriberCount,
+      minimumSubscriberCount: onboardingMinimumSubscriberCount,
+      subredditType: eligibility.subredditType,
+      isSfw: eligibility.isSfw,
+      safetyStatus: eligibility.safetyStatus,
+      eligible: eligibility.eligible,
+      reason: eligibility.reason ?? "none",
+    });
     console.info(
-      `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
+      `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} safetyStatus=${eligibility.safetyStatus} isSfw=${eligibility.isSfw} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
     );
     await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
     await scheduleOnboardingReminder(redis, { lifecycleSource });

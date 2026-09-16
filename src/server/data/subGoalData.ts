@@ -26,6 +26,7 @@ import {
 import { dispatchNewPost } from "./crosspostData";
 import { postsKey, queueUpdate, trackPost } from "./updaterData";
 import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
+import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
   createTopPostFallbackAction,
   defaultAfterSubscribeAction,
@@ -786,14 +787,16 @@ export async function registerNewSubGoalPost(
   }
 
   const sourceSubreddit = await reddit.getCurrentSubreddit();
-  const sourceSubredditIsNsfw =
-    (sourceSubreddit as { isNsfw?: boolean }).isNsfw === true;
-  if (sourceSubredditIsNsfw) {
+  const sourceSubredditNsfw = getCurrentSubredditNsfw(sourceSubreddit);
+  if (sourceSubredditNsfw !== false) {
     logCrosspostEvent({
       event: "crosspost_attempt_skipped",
       sourcePostId: post.id,
       targetSubreddit: appSettings.promoSubreddit,
-      reason: "source_subreddit_nsfw",
+      reason:
+        sourceSubredditNsfw === true
+          ? "source_subreddit_nsfw"
+          : "source_subreddit_safety_unknown",
     });
     return { status: "skipped" };
   }

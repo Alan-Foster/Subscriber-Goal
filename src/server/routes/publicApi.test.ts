@@ -129,7 +129,7 @@ describe("publicApi routes", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 100,
-      isNsfw: false,
+      nsfw: false,
     });
     hoisted.reddit.getTopPosts.mockReturnValue({ all: vi.fn() });
     hoisted.reddit.getNewPosts.mockReturnValue({ all: vi.fn() });
@@ -241,6 +241,25 @@ describe("publicApi routes", () => {
       url: "https://discord.com/invite/example",
       colorTheme: "pink",
     });
+  });
+
+  it("maps the Devvit nsfw flag to the client-facing isNsfw field", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      nsfw: true,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as InitResponse;
+    expect(response.state.subreddit.isNsfw).toBe(true);
   });
 
   it("initializes tiny posts from persistent anonymous subscriber status", async () => {
@@ -498,6 +517,31 @@ describe("publicApi routes", () => {
       subscribed: true,
     });
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+  });
+
+  it("overrides username sharing for regular goals in NSFW subreddits", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      nsfw: true,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { shareUsername: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_post",
+      101,
+      { id: "t2_user", username: "TinyUser" },
+      false,
+    );
   });
 
   it("records and broadcasts Tiny subscriptions through the normal subscriber path", async () => {
@@ -771,7 +815,7 @@ describe("publicApi routes", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 100,
-      isNsfw: true,
+      nsfw: true,
     });
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscribe-only-v1",
@@ -800,6 +844,38 @@ describe("publicApi routes", () => {
       type: "sub",
       newSubscriberCount: 101,
     });
+  });
+
+  it("does not share a Tiny subscriber username when safety metadata is missing", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+    });
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscribe-only-v1",
+      subredditDisplayName: "ExampleSub",
+      colorTheme: "red",
+      postHeight: "tiny",
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_post",
+      101,
+      { id: "t2_user", username: "TinyUser" },
+      false,
+    );
   });
 
   it("does not subscribe a Tiny viewer when their username cannot be resolved", async () => {
@@ -953,7 +1029,7 @@ describe("publicApi routes", () => {
       id: "t5_subgoal",
       name: "sUbGoAl",
       numberOfSubscribers: 100,
-      isNsfw: false,
+      nsfw: false,
     });
     hoisted.getSubGoalData.mockResolvedValue({
       afterSubscribeAction: {

@@ -249,7 +249,7 @@ describe("internalUi color theme create goal routes", () => {
       name: "ExampleSub",
       numberOfSubscribers: 100,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
     });
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
@@ -700,7 +700,7 @@ describe("internalUi color theme create goal routes", () => {
       name: "ExampleSub",
       numberOfSubscribers: 100,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
       language: "es",
     });
     const routes = createRouteHarness();
@@ -726,7 +726,7 @@ describe("internalUi color theme create goal routes", () => {
       name: "ExampleSub",
       numberOfSubscribers: 100,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
       language: "ja",
     });
     const routes = createRouteHarness();
@@ -935,7 +935,7 @@ describe("internalUi color theme create goal routes", () => {
       name: "ExampleSub",
       numberOfSubscribers: 100,
       type: "restricted",
-      isNsfw: false,
+      nsfw: false,
     });
 
     for (const postHeight of ["regular", "short", "tiny", "cta"] as const) {
@@ -981,7 +981,7 @@ describe("internalUi color theme create goal routes", () => {
         name: "ExampleSub",
         numberOfSubscribers,
         type: "public",
-        isNsfw: false,
+        nsfw: false,
       });
       const routes = createRouteHarness();
       const json = vi.fn();
@@ -1250,7 +1250,7 @@ describe("internalUi color theme create goal routes", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 100,
-      isNsfw: true,
+      nsfw: true,
     });
     const routes = createRouteHarness();
     const json = vi.fn();

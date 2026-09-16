@@ -100,7 +100,8 @@ describe('processDueAutoCreateNextGoals', () => {
       id: 't5_example',
       name: 'examplesub',
       numberOfSubscribers: 12,
-      isNsfw: false
+      type: 'public',
+      nsfw: false
     });
     hoisted.reddit.getPostById.mockResolvedValue({
       id: 't3_source',
@@ -201,7 +202,8 @@ describe('processDueAutoCreateNextGoals', () => {
       id: 't5_example',
       name: 'examplesub',
       numberOfSubscribers: 12,
-      isNsfw: false,
+      type: 'public',
+      nsfw: false,
       language: 'de'
     });
 
@@ -221,13 +223,75 @@ describe('processDueAutoCreateNextGoals', () => {
     );
   });
 
-  it('disables crossposting for NSFW subreddits', async () => {
+  it('cancels queued goals without creating in an NSFW subreddit', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: 't5_example',
       name: 'examplesub',
       numberOfSubscribers: 12,
-      isNsfw: true
+      type: 'public',
+      nsfw: true
+    });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
+      })
+    ).resolves.toEqual({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0
+    });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+  });
+
+  it.each(['restricted', 'private'])(
+    'cancels queued goals without creating in a %s subreddit',
+    async (type) => {
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: 't5_example',
+        name: 'examplesub',
+        numberOfSubscribers: 12,
+        type,
+        nsfw: false
+      });
+
+      await expect(
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+          redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+          appSettings: baseSettings
+        })
+      ).resolves.toMatchObject({
+        due: 1,
+        created: 0,
+        skipped: 1,
+        failed: 0,
+        rescheduled: 0
+      });
+
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
+      expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    }
+  );
+
+  it('fails closed when subreddit safety metadata is missing', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: 't5_example',
+      name: 'examplesub',
+      numberOfSubscribers: 12,
+      type: 'public'
     });
 
     await processDueAutoCreateNextGoals({
@@ -236,10 +300,33 @@ describe('processDueAutoCreateNextGoals', () => {
       appSettings: baseSettings
     });
 
-    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.objectContaining({ crosspost: false })
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(hoisted.redis);
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+  });
+
+  it('reschedules when subreddit eligibility cannot be fetched', async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
+    hoisted.reddit.getCurrentSubreddit.mockRejectedValue(new Error('subreddit unavailable'));
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<typeof processDueAutoCreateNextGoals>[0]['reddit'],
+        redis: hoisted.redis as Parameters<typeof processDueAutoCreateNextGoals>[0]['redis'],
+        appSettings: baseSettings
       })
+    ).resolves.toMatchObject({
+      due: 1,
+      created: 0,
+      failed: 1,
+      rescheduled: 1
+    });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.recordAutoCreateNextGoalFailure).toHaveBeenCalledWith(
+      hoisted.redis,
+      't3_source',
+      expect.any(Number)
     );
   });
 

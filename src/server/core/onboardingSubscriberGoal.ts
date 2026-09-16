@@ -44,6 +44,10 @@ import { createSubscriberGoal } from "./createSubscriberGoal";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {
+  getAutomaticGoalEligibility,
+  type AutomaticGoalIneligibilityReason,
+} from "./automaticGoalEligibility";
+import {
   onboardingGoalBaseDelayMs,
   onboardingGoalStaggerMaxMinutes,
   onboardingGoalStaggerMinMinutes,
@@ -101,11 +105,13 @@ export type OnboardingLifecycleSource =
   | "unknown";
 export type OnboardingIneligibilityReason =
   | "subscriber_count"
-  | "subreddit_not_public";
+  | AutomaticGoalIneligibilityReason;
 export type OnboardingEligibility = {
   eligible: boolean;
   subscriberCount: number;
   subredditType: string;
+  isSfw: boolean;
+  safetyStatus: "sfw" | "nsfw" | "unknown";
   reason?: OnboardingIneligibilityReason;
 };
 export type OnboardingExistingSource =
@@ -209,29 +215,35 @@ const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
 export function getOnboardingEligibility(subreddit: {
   numberOfSubscribers: number;
   type?: unknown;
+  nsfw?: unknown;
 }): OnboardingEligibility {
-  const subredditType =
-    typeof subreddit.type === "string" ? subreddit.type : "unknown";
+  const automaticEligibility = getAutomaticGoalEligibility(subreddit);
   if (!(subreddit.numberOfSubscribers >= onboardingMinimumSubscriberCount)) {
     return {
       eligible: false,
       subscriberCount: subreddit.numberOfSubscribers,
-      subredditType,
+      subredditType: automaticEligibility.subredditType,
+      isSfw: automaticEligibility.isSfw,
+      safetyStatus: automaticEligibility.safetyStatus,
       reason: "subscriber_count",
     };
   }
-  if (subredditType !== "public") {
+  if (!automaticEligibility.eligible) {
     return {
       eligible: false,
       subscriberCount: subreddit.numberOfSubscribers,
-      subredditType,
-      reason: "subreddit_not_public",
+      subredditType: automaticEligibility.subredditType,
+      isSfw: automaticEligibility.isSfw,
+      safetyStatus: automaticEligibility.safetyStatus,
+      reason: automaticEligibility.reason,
     };
   }
   return {
     eligible: true,
     subscriberCount: subreddit.numberOfSubscribers,
-    subredditType,
+    subredditType: automaticEligibility.subredditType,
+    isSfw: automaticEligibility.isSfw,
+    safetyStatus: automaticEligibility.safetyStatus,
   };
 }
 
@@ -550,7 +562,7 @@ export async function processDueOnboardingSubscriberGoal({
       return { status: "paused", ...base };
     }
 
-    const subreddit = await reddit.getCurrentSubreddit();
+    let subreddit = await reddit.getCurrentSubreddit();
     const eligibility = getOnboardingEligibility(subreddit);
     logDiagnostic("info", "onboarding_eligibility_checked", {
       workflow: "onboarding_subscriber_goal",
@@ -560,6 +572,8 @@ export async function processDueOnboardingSubscriberGoal({
       subscriberCount: eligibility.subscriberCount,
       minimumSubscriberCount: onboardingMinimumSubscriberCount,
       subredditType: eligibility.subredditType,
+      isSfw: eligibility.isSfw,
+      safetyStatus: eligibility.safetyStatus,
       eligible: eligibility.eligible,
       reason: eligibility.reason ?? "none",
     });
@@ -658,8 +672,39 @@ export async function processDueOnboardingSubscriberGoal({
       return { status: "paused", ...inspected };
     }
 
+    subreddit = await reddit.getCurrentSubreddit();
+    const creationEligibility = getOnboardingEligibility(subreddit);
+    if (!creationEligibility.eligible) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "ineligible",
+        eligibilitySubscriberCount: creationEligibility.subscriberCount,
+      });
+      logDiagnostic("info", "onboarding_eligibility_checked", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "pre_create_eligibility",
+        lifecycleSource: reloaded.lifecycleSource,
+        operationId: reloaded.operationId,
+        subscriberCount: creationEligibility.subscriberCount,
+        minimumSubscriberCount: onboardingMinimumSubscriberCount,
+        subredditType: creationEligibility.subredditType,
+        isSfw: creationEligibility.isSfw,
+        safetyStatus: creationEligibility.safetyStatus,
+        eligible: false,
+        reason: creationEligibility.reason ?? "none",
+      });
+      return {
+        status: "ineligible",
+        lifecycleSource: reloaded.lifecycleSource,
+        creationStaggerMinutes: reloaded.creationStaggerMinutes,
+        eligibilitySubscriberCount: creationEligibility.subscriberCount,
+        ...inspected,
+      };
+    }
+
     const crosspost =
-      (subreddit as { isNsfw?: boolean }).isNsfw !== true &&
       subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
     const useTinyPost =
       subreddit.numberOfSubscribers > onboardingTinySubscriberThreshold;

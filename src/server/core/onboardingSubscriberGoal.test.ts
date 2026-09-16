@@ -162,7 +162,7 @@ function createReddit() {
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
     }),
     getAppUser: vi.fn().mockResolvedValue({ username: "subscriber-goal" }),
     getPostById: vi.fn(),
@@ -251,14 +251,42 @@ describe("onboarding subscriber goal", () => {
   it("requires more than 1,000 subscribers for automatic onboarding", () => {
     expect(onboardingMinimumSubscriberCount).toBe(1_001);
     expect(
-      getOnboardingEligibility({ numberOfSubscribers: 999, type: "public" }),
+      getOnboardingEligibility({
+        numberOfSubscribers: 999,
+        type: "public",
+        nsfw: false,
+      }),
     ).toMatchObject({ eligible: false, reason: "subscriber_count" });
     expect(
-      getOnboardingEligibility({ numberOfSubscribers: 1_000, type: "public" }),
+      getOnboardingEligibility({
+        numberOfSubscribers: 1_000,
+        type: "public",
+        nsfw: false,
+      }),
     ).toMatchObject({ eligible: false, reason: "subscriber_count" });
     expect(
-      getOnboardingEligibility({ numberOfSubscribers: 1_001, type: "public" }),
+      getOnboardingEligibility({
+        numberOfSubscribers: 1_001,
+        type: "public",
+        nsfw: false,
+      }),
     ).toMatchObject({ eligible: true });
+  });
+
+  it("requires explicit SFW metadata for automatic onboarding", () => {
+    expect(
+      getOnboardingEligibility({
+        numberOfSubscribers: 1_001,
+        type: "public",
+        nsfw: true,
+      }),
+    ).toMatchObject({ eligible: false, reason: "subreddit_not_sfw" });
+    expect(
+      getOnboardingEligibility({
+        numberOfSubscribers: 1_001,
+        type: "public",
+      }),
+    ).toMatchObject({ eligible: false, reason: "subreddit_not_sfw" });
   });
 
   it("selects inclusive goal stagger boundaries", () => {
@@ -666,7 +694,7 @@ describe("onboarding subscriber goal", () => {
         name: "ExampleSub",
         numberOfSubscribers,
         type: "public",
-        isNsfw: false,
+        nsfw: false,
       });
 
       await expect(
@@ -701,7 +729,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
       language: "es",
     });
 
@@ -736,7 +764,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
       language: "ja",
     });
 
@@ -773,7 +801,7 @@ describe("onboarding subscriber goal", () => {
         name: "ExampleSub",
         numberOfSubscribers: 1_001,
         type,
-        isNsfw: false,
+        nsfw: false,
       });
 
       await expect(
@@ -793,6 +821,72 @@ describe("onboarding subscriber goal", () => {
     },
   );
 
+  it("does not create an onboarding goal for an NSFW subreddit", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 1_001,
+      type: "public",
+      nsfw: true,
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "ineligible" });
+
+    expect(reddit.getAppUser).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("rechecks SFW eligibility immediately before creating", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getCurrentSubreddit
+      .mockResolvedValueOnce({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 1_001,
+        type: "public",
+        nsfw: false,
+      })
+      .mockResolvedValueOnce({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 1_001,
+        type: "public",
+        nsfw: false,
+      })
+      .mockResolvedValueOnce({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 1_001,
+        type: "public",
+        nsfw: true,
+      });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "ineligible" });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
   it.each([999_999, onboardingTinySubscriberThreshold])(
     "keeps the regular onboarding goal at %i subscribers",
     async (numberOfSubscribers) => {
@@ -805,7 +899,7 @@ describe("onboarding subscriber goal", () => {
         name: "ExampleSub",
         numberOfSubscribers,
         type: "public",
-        isNsfw: false,
+        nsfw: false,
       });
 
       await processDueOnboardingSubscriberGoal({
@@ -837,7 +931,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: onboardingTinySubscriberThreshold + 1,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
       language: "es",
     });
 
@@ -1322,7 +1416,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: 1_000,
       type: "public",
-      isNsfw: false,
+      nsfw: false,
     });
     const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
 
@@ -1362,7 +1456,7 @@ describe("onboarding subscriber goal", () => {
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
       type: "restricted",
-      isNsfw: false,
+      nsfw: false,
     });
     const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
 

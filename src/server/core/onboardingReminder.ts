@@ -364,6 +364,8 @@ export async function processDueOnboardingReminder({
       subscriberCount: eligibility.subscriberCount,
       minimumSubscriberCount: onboardingMinimumSubscriberCount,
       subredditType: eligibility.subredditType,
+      isSfw: eligibility.isSfw,
+      safetyStatus: eligibility.safetyStatus,
       eligible: eligibility.eligible,
       reason: eligibility.reason ?? "none",
     });

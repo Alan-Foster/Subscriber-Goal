@@ -58,17 +58,29 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
   getOnboardingEligibility: (subreddit: {
     numberOfSubscribers: number;
     type?: unknown;
+    nsfw?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 1_001 && subreddit.type === "public",
+      subreddit.numberOfSubscribers >= 1_001 &&
+      subreddit.type === "public" &&
+      subreddit.nsfw === false,
     subscriberCount: subreddit.numberOfSubscribers,
     subredditType:
       typeof subreddit.type === "string" ? subreddit.type : "unknown",
+    isSfw: subreddit.nsfw === false,
+    safetyStatus:
+      subreddit.nsfw === false
+        ? "sfw"
+        : subreddit.nsfw === true
+          ? "nsfw"
+          : "unknown",
     ...(subreddit.numberOfSubscribers < 1_001
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
-        : {}),
+        : subreddit.nsfw !== false
+          ? { reason: "subreddit_not_sfw" }
+          : {}),
   }),
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
@@ -143,6 +155,7 @@ describe("onAppChanged", () => {
       name: "SubGoal",
       type: "public",
       numberOfSubscribers: 1_001,
+      nsfw: false,
     });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
@@ -332,6 +345,30 @@ describe("onAppChanged", () => {
       ).toHaveBeenCalledWith(expect.anything(), 1_001, expect.any(Number));
     },
   );
+
+  it("marks onboarding terminally ineligible for an NSFW subreddit", async () => {
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_subgoal",
+      name: "SubGoal",
+      type: "public",
+      numberOfSubscribers: 1_001,
+      nsfw: true,
+    });
+
+    await onAppChanged({ lifecycleSource: "install" });
+
+    expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
+      expect.anything(),
+      1_001,
+      expect.any(Number),
+    );
+    expect(hoisted.markOnboardingSubscriberGoalIneligible).toHaveBeenCalledWith(
+      expect.anything(),
+      1_001,
+      expect.any(Number),
+    );
+  });
 
   it("does not arm install onboarding when eligibility lookup fails", async () => {
     hoisted.context.subredditName = "SubGoal";

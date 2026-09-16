@@ -629,6 +629,40 @@ describe("subGoalData subreddit display name", () => {
     await expect(redis.zRange(updatesKey, 0, -1)).resolves.toEqual(expected);
   });
 
+  it.each([
+    [true, "source_subreddit_nsfw"],
+    [undefined, "source_subreddit_safety_unknown"],
+  ] as const)(
+    "skips manual crossposting when current subreddit nsfw is %s",
+    async (nsfw, reason) => {
+      const redis = new InMemoryRedis();
+      const infoSpy = vi
+        .spyOn(console, "info")
+        .mockImplementation(() => undefined);
+      const createdAt = new Date("2026-02-01T00:00:00.000Z");
+
+      const result = await registerNewSubGoalPost(
+        {
+          getCurrentSubreddit: async () => ({ nsfw }),
+        } as never,
+        redis as unknown as Parameters<typeof registerNewSubGoalPost>[1],
+        { promoSubreddit: "SubGoal" } as never,
+        {
+          id: "t3_regular",
+          createdAt,
+          subredditName: "ExampleSub",
+        } as never,
+        100,
+        true,
+        "ExampleSub",
+      );
+
+      expect(result).toEqual({ status: "skipped" });
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining(reason));
+      infoSpy.mockRestore();
+    },
+  );
+
   it("defaults missing auto-create settings to disabled", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(subscriberGoalsKey, {

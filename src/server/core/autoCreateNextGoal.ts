@@ -20,6 +20,7 @@ import {
   notifyStickyFailure,
 } from "../utils/stickyFailureNotifications";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -55,7 +56,7 @@ export async function processDueAutoCreateNextGoals({
     exhausted: 0,
   };
 
-  for (const sourcePostId of duePostIds) {
+  for (const [sourceIndex, sourcePostId] of duePostIds.entries()) {
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
     const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     let acquired = false;
@@ -124,15 +125,27 @@ export async function processDueAutoCreateNextGoals({
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
+      const eligibility = getAutomaticGoalEligibility(subreddit);
+      if (!eligibility.eligible) {
+        summary.skipped += duePostIds.length - sourceIndex;
+        await cancelAllAutoCreateNextGoals(redis);
+        logDiagnostic("info", "auto_create_goal_ineligible", {
+          workflow: "auto_create_next_goal",
+          phase: "eligibility",
+          subredditType: eligibility.subredditType,
+          isSfw: eligibility.isSfw,
+          safetyStatus: eligibility.safetyStatus,
+          reason: eligibility.reason,
+        });
+        break;
+      }
+
       const subredditDisplayName =
         sourceGoalData.subredditDisplayName ?? subreddit.name;
       const messages = getSubGoalPostMessages(sourceGoalData.language);
-      const sourceSubredditIsNsfw =
-        (subreddit as { isNsfw?: boolean }).isNsfw === true;
       const crosspost =
-        !sourceSubredditIsNsfw &&
         subreddit.name.toLowerCase() !==
-          appSettings.promoSubreddit.toLowerCase();
+        appSettings.promoSubreddit.toLowerCase();
 
       const { post, stickyResult } = await createSubscriberGoal({
         reddit,
