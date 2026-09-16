@@ -52,7 +52,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.1.1 - Fixed Top post Today fallback. Scroll trap compliance. More Notifications prep. Staggered upgrade auto-goals (public, >1,000 subscribers). Devvit 0.14.4
+- 2.1.1 - Fixed Top post Today fallback. Scroll trap compliance. More Notifications prep. Staggered upgrade auto-goals (public, >1k subscribers). Devvit 0.14.4
 - 2.0.1 - Various fixes and data hardening. Fixed CTA Confetti not firing. Added interface setup for SubGoal Milestone Alerts. Devvit 0.14.3
 - 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals. Improved ReadMe Images.
 - 1.8.3 - Fixed error-catching for failed JSON RPC Error on subscribe with retry system. More robust console error logging.
