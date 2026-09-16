@@ -19,11 +19,11 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     type?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 40 && subreddit.type === "public",
+      subreddit.numberOfSubscribers >= 1_001 && subreddit.type === "public",
     subscriberCount: subreddit.numberOfSubscribers,
     subredditType:
       typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    ...(subreddit.numberOfSubscribers < 40
+    ...(subreddit.numberOfSubscribers < 1_001
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -39,7 +39,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
     hoisted.markOnboardingSubscriberGoalCancelled,
-  onboardingMinimumSubscriberCount: 40,
+  onboardingMinimumSubscriberCount: 1_001,
   onboardingMaxAttempts: 3,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
@@ -105,7 +105,7 @@ function createReddit() {
     getCurrentSubreddit: vi.fn().mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 91,
+      numberOfSubscribers: 1_001,
       type: "public",
     }),
     modMail: { createModNotification: vi.fn().mockResolvedValue(undefined) },
@@ -229,7 +229,7 @@ describe("onboarding reminder", () => {
     );
   });
 
-  it.each([0, 3, 39])(
+  it.each([999, 1_000])(
     "sends no warning and cancels automatic creation at %i subscribers",
     async (numberOfSubscribers) => {
       reddit.getCurrentSubreddit.mockResolvedValue({
@@ -265,11 +265,11 @@ describe("onboarding reminder", () => {
     },
   );
 
-  it("keeps a community with exactly 40 subscribers eligible", async () => {
+  it("keeps a community with exactly 1,001 subscribers eligible", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 40,
+      numberOfSubscribers: 1_001,
       type: "public",
     });
     await scheduleOnboardingReminder(redis as never, { nowMs });
@@ -290,7 +290,7 @@ describe("onboarding reminder", () => {
       reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
         name: "ExampleSub",
-        numberOfSubscribers: 40,
+        numberOfSubscribers: 1_001,
         type,
       });
       await scheduleOnboardingReminder(redis as never, { nowMs });
@@ -303,7 +303,7 @@ describe("onboarding reminder", () => {
         }),
       ).resolves.toMatchObject({
         status: "ineligible",
-        eligibilitySubscriberCount: 40,
+        eligibilitySubscriberCount: 1_001,
       });
       expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();

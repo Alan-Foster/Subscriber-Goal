@@ -160,7 +160,7 @@ function createReddit() {
     getCurrentSubreddit: vi.fn().mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 91,
+      numberOfSubscribers: 1_001,
       type: "public",
       isNsfw: false,
     }),
@@ -248,12 +248,16 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("requires at least 40 subscribers for automatic onboarding", () => {
+  it("requires more than 1,000 subscribers for automatic onboarding", () => {
+    expect(onboardingMinimumSubscriberCount).toBe(1_001);
     expect(
-      getOnboardingEligibility({ numberOfSubscribers: 39, type: "public" }),
+      getOnboardingEligibility({ numberOfSubscribers: 999, type: "public" }),
     ).toMatchObject({ eligible: false, reason: "subscriber_count" });
     expect(
-      getOnboardingEligibility({ numberOfSubscribers: 40, type: "public" }),
+      getOnboardingEligibility({ numberOfSubscribers: 1_000, type: "public" }),
+    ).toMatchObject({ eligible: false, reason: "subscriber_count" });
+    expect(
+      getOnboardingEligibility({ numberOfSubscribers: 1_001, type: "public" }),
     ).toMatchObject({ eligible: true });
   });
 
@@ -621,7 +625,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          goal: 100,
+          goal: 1_500,
           colorTheme: "red",
           language: "en",
           postHeight: "regular",
@@ -695,7 +699,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 40,
+      numberOfSubscribers: 1_001,
       type: "public",
       isNsfw: false,
       language: "es",
@@ -730,7 +734,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 40,
+      numberOfSubscribers: 1_001,
       type: "public",
       isNsfw: false,
       language: "ja",
@@ -767,7 +771,7 @@ describe("onboarding subscriber goal", () => {
       reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
         name: "ExampleSub",
-        numberOfSubscribers: 40,
+        numberOfSubscribers: 1_001,
         type,
         isNsfw: false,
       });
@@ -781,7 +785,7 @@ describe("onboarding subscriber goal", () => {
         }),
       ).resolves.toMatchObject({
         status: "ineligible",
-        eligibilitySubscriberCount: 40,
+        eligibilitySubscriberCount: 1_001,
       });
 
       expect(reddit.getAppUser).not.toHaveBeenCalled();
@@ -1296,7 +1300,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("skips a community that drops below 40 after its warning", async () => {
+  it("skips a community that drops to 1,000 after its warning", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
@@ -1316,7 +1320,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 39,
+      numberOfSubscribers: 1_000,
       type: "public",
       isNsfw: false,
     });
@@ -1331,7 +1335,7 @@ describe("onboarding subscriber goal", () => {
       }),
     ).resolves.toMatchObject({
       status: "ineligible",
-      eligibilitySubscriberCount: 39,
+      eligibilitySubscriberCount: 1_000,
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
@@ -1356,7 +1360,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 91,
+      numberOfSubscribers: 1_001,
       type: "restricted",
       isNsfw: false,
     });
@@ -1371,7 +1375,7 @@ describe("onboarding subscriber goal", () => {
       }),
     ).resolves.toMatchObject({
       status: "ineligible",
-      eligibilitySubscriberCount: 91,
+      eligibilitySubscriberCount: 1_001,
     });
     expect(reddit.getAppUser).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();

@@ -60,11 +60,11 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
     type?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 40 && subreddit.type === "public",
+      subreddit.numberOfSubscribers >= 1_001 && subreddit.type === "public",
     subscriberCount: subreddit.numberOfSubscribers,
     subredditType:
       typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    ...(subreddit.numberOfSubscribers < 40
+    ...(subreddit.numberOfSubscribers < 1_001
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -74,7 +74,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
     hoisted.initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
-  onboardingMinimumSubscriberCount: 40,
+  onboardingMinimumSubscriberCount: 1_001,
   onboardingUpgradeWaveEnabled: true,
 }));
 
@@ -142,7 +142,7 @@ describe("onAppChanged", () => {
       id: "t5_subgoal",
       name: "SubGoal",
       type: "public",
-      numberOfSubscribers: 91,
+      numberOfSubscribers: 1_001,
     });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
@@ -221,7 +221,7 @@ describe("onAppChanged", () => {
       id: "t5_subgoal",
       name: "SubGoal",
       type: "public",
-      numberOfSubscribers: 91,
+      numberOfSubscribers: 1_001,
     });
 
     await expect(onAppChanged()).resolves.toBeUndefined();
@@ -309,7 +309,7 @@ describe("onAppChanged", () => {
         id: "t5_subgoal",
         name: "SubGoal",
         type,
-        numberOfSubscribers: 500,
+        numberOfSubscribers: 1_001,
       });
 
       await onAppChanged({ lifecycleSource });
@@ -324,12 +324,12 @@ describe("onAppChanged", () => {
       );
       expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
         expect.anything(),
-        500,
+        1_001,
         expect.any(Number),
       );
       expect(
         hoisted.markOnboardingSubscriberGoalIneligible,
-      ).toHaveBeenCalledWith(expect.anything(), 500, expect.any(Number));
+      ).toHaveBeenCalledWith(expect.anything(), 1_001, expect.any(Number));
     },
   );
 
