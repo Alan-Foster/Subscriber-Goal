@@ -64,7 +64,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
     nsfw?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 40 &&
+      subreddit.numberOfSubscribers >= 1_000 &&
       subreddit.type === "public" &&
       subreddit.nsfw === false,
     subscriberCount: subreddit.numberOfSubscribers,
@@ -77,7 +77,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
         : subreddit.nsfw === true
           ? "nsfw"
           : "unknown",
-    ...(subreddit.numberOfSubscribers < 40
+    ...(subreddit.numberOfSubscribers < 1_000
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -90,7 +90,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
-  onboardingMinimumSubscriberCount: 40,
+  onboardingMinimumSubscriberCount: 1_000,
   onboardingUpgradeWaveEnabled: true,
 }));
 

@@ -21,7 +21,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     nsfw?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 40 &&
+      subreddit.numberOfSubscribers >= 1_000 &&
       subreddit.type === "public" &&
       subreddit.nsfw === false,
     subscriberCount: subreddit.numberOfSubscribers,
@@ -34,7 +34,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
         : subreddit.nsfw === true
           ? "nsfw"
           : "unknown",
-    ...(subreddit.numberOfSubscribers < 40
+    ...(subreddit.numberOfSubscribers < 1_000
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -53,7 +53,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
     hoisted.markOnboardingSubscriberGoalCancelled,
-  onboardingMinimumSubscriberCount: 40,
+  onboardingMinimumSubscriberCount: 1_000,
   onboardingMaxAttempts: 3,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
@@ -309,11 +309,11 @@ describe("onboarding reminder", () => {
     },
   );
 
-  it("keeps a community with exactly 40 subscribers eligible", async () => {
+  it("keeps a community with exactly 1,000 subscribers eligible", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 40,
+      numberOfSubscribers: 1_000,
       type: "public",
       nsfw: false,
     });

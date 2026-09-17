@@ -255,18 +255,18 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("requires at least 40 subscribers for automatic onboarding", () => {
-    expect(onboardingMinimumSubscriberCount).toBe(40);
+  it("requires at least 1,000 subscribers for automatic onboarding", () => {
+    expect(onboardingMinimumSubscriberCount).toBe(1_000);
     expect(
       getOnboardingEligibility({
-        numberOfSubscribers: 39,
+        numberOfSubscribers: 999,
         type: "public",
         nsfw: false,
       }),
     ).toMatchObject({ eligible: false, reason: "subscriber_count" });
     expect(
       getOnboardingEligibility({
-        numberOfSubscribers: 40,
+        numberOfSubscribers: 1_000,
         type: "public",
         nsfw: false,
       }),
