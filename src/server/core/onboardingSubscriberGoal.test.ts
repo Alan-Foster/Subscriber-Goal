@@ -21,6 +21,12 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
+  stickyAndVerifyPost: vi.fn(async () => ({
+    status: "pinned",
+    verifiedStickied: true,
+  })),
+  STICKY_VERIFICATION_INTERVAL_MS: 5_000,
+  STICKY_VERIFICATION_MAX_WAIT_MS: 30_000,
 }));
 
 vi.mock("../utils/stickyFailureNotifications", () => ({
@@ -54,7 +60,7 @@ import {
   scheduleOnboardingReminder,
 } from "./onboardingReminder";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
-import { rearmPreviouslyIneligibleOnboarding } from "./onboardingLifecycle";
+import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
@@ -212,7 +218,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
+    expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
 
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -285,7 +291,7 @@ describe("onboarding subscriber goal", () => {
 
   it("selects inclusive goal stagger boundaries", () => {
     expect(onboardingGoalStaggerMinMinutes).toBe(1);
-    expect(onboardingGoalStaggerMaxMinutes).toBe(5);
+    expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
     expect(selectOnboardingGoalStaggerMinutes(0)).toBe(
       onboardingGoalStaggerMinMinutes,
     );
@@ -294,10 +300,10 @@ describe("onboarding subscriber goal", () => {
     );
     expect(
       onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMinMinutes,
-    ).toBe(6);
+    ).toBe(1_441);
     expect(
       onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMaxMinutes,
-    ).toBe(10);
+    ).toBe(2_440);
   });
 
   it("schedules creation from the configured base delay and maximum stagger", async () => {
@@ -582,6 +588,88 @@ describe("onboarding subscriber goal", () => {
     expect(reddit.getHotPosts).not.toHaveBeenCalled();
   });
 
+  it("detects an active unpinned tracked goal only in duplicate-prevention mode", async () => {
+    hoisted.getTrackedPosts.mockResolvedValue(["t3_active_unpinned"]);
+    reddit.getPostById.mockResolvedValue({
+      id: "t3_active_unpinned",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      stickied: false,
+      createdAt: new Date(nowMs - 30 * 60 * 60 * 1000),
+      postData: { postKind: "subscriber-goal-v1" },
+    });
+
+    await expect(
+      findExistingSubscriberGoal(
+        reddit as never,
+        redis as never,
+        nowMs,
+        "active_or_recent",
+      ),
+    ).resolves.toMatchObject({
+      postId: "t3_active_unpinned",
+      source: "tracked",
+      isPinned: false,
+    });
+    await expect(
+      findExistingSubscriberGoal(
+        reddit as never,
+        redis as never,
+        nowMs,
+        "pinned",
+      ),
+    ).resolves.not.toHaveProperty("postId");
+  });
+
+  it("detects a recently created unpinned goal without preserving old inactive posts", async () => {
+    reddit.getNewPosts.mockReturnValueOnce({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_recent_unpinned",
+          authorName: "subscriber-goal",
+          subredditId: "t5_example",
+          stickied: false,
+          createdAt: new Date(nowMs - 60_000),
+          postData: { postKind: "subscriber-goal-v1" },
+        },
+      ]),
+    });
+
+    await expect(
+      findExistingSubscriberGoal(
+        reddit as never,
+        redis as never,
+        nowMs,
+        "active_or_recent",
+      ),
+    ).resolves.toMatchObject({
+      postId: "t3_recent_unpinned",
+      source: "recent",
+      isPinned: false,
+    });
+
+    reddit.getNewPosts.mockReturnValueOnce({
+      all: vi.fn().mockResolvedValue([
+        {
+          id: "t3_old_unpinned",
+          authorName: "subscriber-goal",
+          subredditId: "t5_example",
+          stickied: false,
+          createdAt: new Date(nowMs - 26 * 60 * 60 * 1000),
+          postData: { postKind: "subscriber-goal-v1" },
+        },
+      ]),
+    });
+    await expect(
+      findExistingSubscriberGoal(
+        reddit as never,
+        redis as never,
+        nowMs,
+        "active_or_recent",
+      ),
+    ).resolves.not.toHaveProperty("postId");
+  });
+
   it("does not classify an ordinary markerless app-authored post as a goal", async () => {
     reddit.getNewPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
@@ -674,6 +762,41 @@ describe("onboarding subscriber goal", () => {
       postId: "t3_created",
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses creation when a goal appears after the initial duplicate check", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    reddit.getNewPosts
+      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({
+        all: vi.fn().mockResolvedValue([
+          {
+            id: "t3_racing_goal",
+            authorName: "subscriber-goal",
+            subredditId: "t5_example",
+            stickied: false,
+            createdAt: new Date(nowMs + onboardingGoalBaseDelayMs - 1),
+            postData: { postKind: "subscriber-goal-v1" },
+          },
+        ]),
+      });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "existing",
+      postId: "t3_racing_goal",
+      existingSource: "recent",
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
   it.each([0, 3, onboardingMinimumSubscriberCount - 1])(
@@ -1302,7 +1425,7 @@ describe("onboarding subscriber goal", () => {
     });
     vi.spyOn(Math, "random").mockReturnValue(0);
 
-    await rearmPreviouslyIneligibleOnboarding(redis as never, {
+    await reconcileOnboardingForLifecycle(reddit as never, redis as never, {
       lifecycleSource: "upgrade",
       nowMs,
     });

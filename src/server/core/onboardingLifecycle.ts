@@ -1,12 +1,15 @@
 import { logDiagnostic } from "../../shared/diagnostics";
-import type { RedisClient } from "../types";
+import type { RedditClient, RedisClient } from "../types";
 import {
+  ensureExistingSubscriberGoalPinned,
   getOnboardingSubscriberGoalState,
   onboardingSubscriberGoalLockKey,
   onboardingSubscriberGoalLockTtlMs,
+  onboardingSubscriberGoalStateKey,
   onboardingSubscriberGoalVersion,
   saveOnboardingState,
   selectOnboardingGoalStaggerMinutes,
+  type OnboardingExistingSource,
   type OnboardingLifecycleSource,
   type OnboardingSubscriberGoalState,
 } from "./onboardingSubscriberGoal";
@@ -14,6 +17,7 @@ import {
   getOnboardingReminderState,
   onboardingReminderLockKey,
   onboardingReminderLockTtlMs,
+  onboardingReminderStateKey,
   onboardingReminderVersion,
   saveOnboardingReminderState,
   selectOnboardingReminderStaggerMinutes,
@@ -21,18 +25,25 @@ import {
 } from "./onboardingReminder";
 
 export type OnboardingLifecycleReconciliation =
-  | { status: "unchanged" }
+  | { status: "unchanged"; reason: string }
   | {
       status: "rearmed";
       operationId: string;
-      previousSubscriberCount?: number;
+    }
+  | {
+      status: "existing";
+      operationId: string;
+      postId: string;
+      existingSource: OnboardingExistingSource;
+      pinStatus: "pinned" | "not_pinned";
     };
 
 /**
- * Reopens only a completed ineligible attempt during an install/upgrade.
+ * Reconciles install/upgrade onboarding against Reddit's current pinned goal.
  * Both workflow locks are held while the paired goal/reminder state is replaced.
  */
-export async function rearmPreviouslyIneligibleOnboarding(
+export async function reconcileOnboardingForLifecycle(
+  reddit: RedditClient,
   redis: RedisClient,
   {
     lifecycleSource,
@@ -42,12 +53,6 @@ export async function rearmPreviouslyIneligibleOnboarding(
     nowMs?: number;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
-  const initialGoal = await getOnboardingSubscriberGoalState(redis);
-  const initialReminder = await getOnboardingReminderState(redis);
-  if (!isRearmablePair(initialGoal, initialReminder)) {
-    return { status: "unchanged" };
-  }
-
   const goalLockToken = await acquireLock(
     redis,
     onboardingSubscriberGoalLockKey,
@@ -62,15 +67,125 @@ export async function rearmPreviouslyIneligibleOnboarding(
       nowMs,
     );
     try {
-      const previousGoal = await getOnboardingSubscriberGoalState(redis);
-      const previousReminder = await getOnboardingReminderState(redis);
-      if (!isRearmablePair(previousGoal, previousReminder)) {
-        return { status: "unchanged" };
+      const [rawGoal, rawReminder, previousGoal, previousReminder] =
+        await Promise.all([
+          redis.hGetAll(onboardingSubscriberGoalStateKey),
+          redis.hGetAll(onboardingReminderStateKey),
+          getOnboardingSubscriberGoalState(redis),
+          getOnboardingReminderState(redis),
+        ]);
+      if (
+        (!previousGoal && Object.keys(rawGoal).length > 0) ||
+        (!previousReminder && Object.keys(rawReminder).length > 0)
+      ) {
+        const reason = "unparseable_nonempty_state_preserved";
+        logReconciliationDecision(
+          lifecycleSource,
+          "unchanged",
+          reason,
+          previousGoal,
+          previousReminder,
+        );
+        return { status: "unchanged", reason };
+      }
+
+      const pinned = await ensureExistingSubscriberGoalPinned({
+        reddit,
+        redis,
+        nowMs,
+        notifyOnFailure: true,
+      });
+      logDiagnostic("info", "onboarding_lifecycle_pinned_goal_checked", {
+        workflow: "onboarding_lifecycle",
+        phase: "pinned_goal_check",
+        lifecycleSource,
+        found: pinned.status !== "missing",
+        pinStatus: pinned.status,
+        postId: pinned.postId ?? "none",
+        existingSource: pinned.source ?? "none",
+        validated: pinned.validated,
+        pinnedInspected: pinned.pinnedInspected,
+        searchInspected: pinned.searchInspected,
+        failed: pinned.failed,
+      });
+
+      if (pinned.status !== "missing" && pinned.postId && pinned.source) {
+        const operationId =
+          previousGoal?.operationId ?? createOperationId(nowMs);
+        const nextGoal: OnboardingSubscriberGoalState = {
+          version: onboardingSubscriberGoalVersion,
+          status: "complete",
+          armedAt: previousGoal?.armedAt ?? nowMs,
+          lifecycleSource,
+          creationStaggerMinutes:
+            previousGoal?.creationStaggerMinutes ??
+            selectOnboardingGoalStaggerMinutes(),
+          operationId,
+          completedAt: nowMs,
+          postId: pinned.postId,
+          existingSource: pinned.source,
+          resultStatus:
+            pinned.status === "existing"
+              ? "existing"
+              : "existing_not_pinned",
+          ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
+        };
+        const nextReminder: OnboardingReminderState = {
+          version: onboardingReminderVersion,
+          status: "complete",
+          armedAt: previousReminder?.armedAt ?? nextGoal.armedAt,
+          nextRunAt: previousReminder?.nextRunAt ?? nowMs,
+          lifecycleSource,
+          reminderStaggerMinutes:
+            previousReminder?.reminderStaggerMinutes ??
+            selectOnboardingReminderStaggerMinutes(),
+          completedAt: nowMs,
+          postId: pinned.postId,
+          existingSource: pinned.source,
+          result:
+            pinned.status === "existing"
+              ? "existing"
+              : "existing_not_pinned",
+          ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
+        };
+        await savePairedState(redis, previousGoal, nextGoal, nextReminder);
+        logDiagnostic("info", "onboarding_lifecycle_pinned_goal_preserved", {
+          workflow: "onboarding_lifecycle",
+          phase: "reconcile",
+          lifecycleSource,
+          decision:
+            pinned.status === "existing"
+              ? "existing_pinned_goal"
+              : "existing_goal_pin_failed",
+          operationId,
+          postId: pinned.postId,
+          existingSource: pinned.source,
+        });
+        return {
+          status: "existing",
+          operationId,
+          postId: pinned.postId,
+          existingSource: pinned.source,
+          pinStatus:
+            pinned.status === "existing" ? "pinned" : "not_pinned",
+        };
+      }
+
+      if (isWorkflowActive(previousGoal, previousReminder)) {
+        const reason = "active_workflow_preserved";
+        logReconciliationDecision(
+          lifecycleSource,
+          "unchanged",
+          reason,
+          previousGoal,
+          previousReminder,
+        );
+        return { status: "unchanged", reason };
       }
 
       const creationStaggerMinutes = selectOnboardingGoalStaggerMinutes();
       const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
-      const operationId = `onboarding:${onboardingSubscriberGoalVersion}:${nowMs}`;
+      const operationId = createOperationId(nowMs);
       const nextGoal: OnboardingSubscriberGoalState = {
         version: onboardingSubscriberGoalVersion,
         status: "awaiting_warning",
@@ -87,41 +202,21 @@ export async function rearmPreviouslyIneligibleOnboarding(
         lifecycleSource,
         reminderStaggerMinutes,
       };
-
-      await saveOnboardingState(redis, nextGoal);
-      try {
-        await saveOnboardingReminderState(redis, nextReminder);
-      } catch (error) {
-        await saveOnboardingState(redis, previousGoal);
-        throw error;
-      }
-
-      logDiagnostic("info", "onboarding_rearmed_after_eligibility_change", {
+      await savePairedState(redis, previousGoal, nextGoal, nextReminder);
+      logDiagnostic("info", "onboarding_rearmed_after_missing_pinned_goal", {
         workflow: "onboarding_lifecycle",
         phase: "rearm",
         lifecycleSource,
-        previousResult: previousGoal.resultStatus,
-        previousSubscriberCount:
-          previousGoal.eligibilitySubscriberCount ?? "unknown",
-        previousIneligibilityReason:
-          previousGoal.ineligibilityReason ??
-          previousReminder?.ineligibilityReason ??
-          "unknown",
+        previousGoalResult: previousGoal?.resultStatus ?? "none",
+        previousReminderResult: previousReminder?.result ?? "none",
         operationId,
         armedAt: nowMs,
         creationStaggerMinutes,
         reminderStaggerMinutes,
         reminderNextRunAt: nextReminder.nextRunAt,
+        reminderNextRunAtIso: new Date(nextReminder.nextRunAt).toISOString(),
       });
-      return {
-        status: "rearmed",
-        operationId,
-        ...(previousGoal.eligibilitySubscriberCount !== undefined
-          ? {
-              previousSubscriberCount: previousGoal.eligibilitySubscriberCount,
-            }
-          : {}),
-      };
+      return { status: "rearmed", operationId };
     } finally {
       await releaseOwnedLock(
         redis,
@@ -138,19 +233,57 @@ export async function rearmPreviouslyIneligibleOnboarding(
   }
 }
 
-function isRearmablePair(
+function isWorkflowActive(
   goal: OnboardingSubscriberGoalState | undefined,
   reminder: OnboardingReminderState | undefined,
-): goal is OnboardingSubscriberGoalState & {
-  status: "complete";
-  resultStatus: "ineligible";
-} {
+): boolean {
   return (
-    goal?.status === "complete" &&
-    goal.resultStatus === "ineligible" &&
-    (reminder === undefined ||
-      (reminder.status === "complete" && reminder.result === "ineligible"))
+    (goal !== undefined && goal.status !== "complete") ||
+    (reminder !== undefined && reminder.status !== "complete")
   );
+}
+
+function createOperationId(nowMs: number): string {
+  return `onboarding:${onboardingSubscriberGoalVersion}:${nowMs}`;
+}
+
+async function savePairedState(
+  redis: RedisClient,
+  previousGoal: OnboardingSubscriberGoalState | undefined,
+  nextGoal: OnboardingSubscriberGoalState,
+  nextReminder: OnboardingReminderState,
+): Promise<void> {
+  await saveOnboardingState(redis, nextGoal);
+  try {
+    await saveOnboardingReminderState(redis, nextReminder);
+  } catch (error) {
+    if (previousGoal) await saveOnboardingState(redis, previousGoal);
+    else await redis.del(onboardingSubscriberGoalStateKey);
+    throw error;
+  }
+}
+
+function logReconciliationDecision(
+  lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">,
+  decision: "unchanged",
+  reason: string,
+  goal: OnboardingSubscriberGoalState | undefined,
+  reminder: OnboardingReminderState | undefined,
+): void {
+  logDiagnostic("info", "onboarding_lifecycle_reconciliation_checked", {
+    workflow: "onboarding_lifecycle",
+    phase: "reconcile",
+    lifecycleSource,
+    decision,
+    reason,
+    goalState: goal?.status ?? "missing_or_unparseable",
+    goalResult: goal?.resultStatus ?? "none",
+    goalOperationId: goal?.operationId ?? "none",
+    goalNextRunAt: goal?.nextRunAt ?? "none",
+    reminderState: reminder?.status ?? "missing_or_unparseable",
+    reminderResult: reminder?.result ?? "none",
+    reminderNextRunAt: reminder?.nextRunAt ?? "none",
+  });
 }
 
 async function acquireLock(

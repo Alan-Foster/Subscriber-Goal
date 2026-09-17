@@ -11,6 +11,11 @@ import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
 import { reconcileSubscriberGoalStickies } from "../utils/redditUtils";
+import {
+  postHeightSuffix,
+  postKindSuffix,
+  subscriberGoalsKey,
+} from "../data/subGoalData";
 
 export const appRepairStateKey = "app_repair_1_9_1_state";
 export const appRepairLockKey = "app_repair_1_9_1_lock";
@@ -135,10 +140,26 @@ export async function processDueAppRepair({
         );
       }
       await runPhase("sticky_reconciliation", () =>
-        reconcileSubscriberGoalStickies(reddit, {
-          knownPostIds: candidatePostIds!,
-          subreddit,
-        }),
+        (async () => {
+          const knownClassicPostIds: string[] = [];
+          for (const postId of candidatePostIds!) {
+            const [postKind, postHeight] = await redis.hMGet(
+              subscriberGoalsKey,
+              [`${postId}${postKindSuffix}`, `${postId}${postHeightSuffix}`],
+            );
+            if (
+              postKind === "subscriber-goal-v1" &&
+              (postHeight === "regular" || postHeight === "short")
+            ) {
+              knownClassicPostIds.push(postId);
+            }
+          }
+          return reconcileSubscriberGoalStickies(reddit, {
+            knownPostIds: candidatePostIds!,
+            knownClassicPostIds,
+            subreddit,
+          });
+        })(),
       );
     } else {
       failures.push("migration_discovery: incomplete");

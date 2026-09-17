@@ -1,15 +1,18 @@
 import type { ServerAppSettings } from "../settings";
-import type { RedditClient, RedisClient } from "../types";
+import type { LinkId, RedditClient, RedisClient } from "../types";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 import {
   cancelAllAutoCreateNextGoals,
+  postHeightSuffix,
+  postKindSuffix,
   registerNewCtaOnlyPost,
   registerNewSubGoalPost,
   registerNewSubscribeOnlyPost,
   setSubredditDisplayNameForPost,
+  subscriberGoalsKey,
   type CrosspostDispatchResult,
 } from "../data/subGoalData";
 import { setSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
@@ -109,10 +112,10 @@ export type StickyResult = {
   verifiedStickied?: boolean;
 };
 
-const STICKY_VERIFICATION_MAX_WAIT_MS = 30_000;
-const STICKY_VERIFICATION_INTERVAL_MS = 5_000;
+export const STICKY_VERIFICATION_MAX_WAIT_MS = 30_000;
+export const STICKY_VERIFICATION_INTERVAL_MS = 5_000;
 
-type StickyVerificationOptions = {
+export type StickyVerificationOptions = {
   maxWaitMs: number;
   intervalMs: number;
 };
@@ -313,6 +316,19 @@ async function createSubscriberGoalInternal(
     canManageFlair: hasAllPermissions || permissions.includes("flair"),
   });
   const existingGoalPostIds = await getSubscriberGoalCandidatePostIds(redis);
+  const existingClassicGoalPostIds: string[] = [];
+  for (const postId of existingGoalPostIds) {
+    const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
+      `${postId}${postKindSuffix}`,
+      `${postId}${postHeightSuffix}`,
+    ]);
+    if (
+      postKind === "subscriber-goal-v1" &&
+      (postHeight === "regular" || postHeight === "short")
+    ) {
+      existingClassicGoalPostIds.push(postId);
+    }
+  }
 
   const textFallback = isCtaOnlyPost
     ? ctaOnlyTextFallbackMaker(
@@ -429,10 +445,13 @@ async function createSubscriberGoalInternal(
   await post.approve();
   let stickyResult: StickyResult;
   try {
-    await clearSubscriberGoalStickies(reddit, {
-      knownPostIds: existingGoalPostIds,
-      subreddit,
-    });
+    if (!isCompactActionPost) {
+      await clearSubscriberGoalStickies(reddit, {
+        knownPostIds: existingGoalPostIds,
+        knownClassicPostIds: existingClassicGoalPostIds,
+        subreddit,
+      });
+    }
     stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
       maxWaitMs:
         options.stickyVerification?.maxWaitMs ??
@@ -512,9 +531,13 @@ async function prepareSubscriberGoalFlair({
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-async function stickyAndVerifyPost(
+export async function stickyAndVerifyPost(
   reddit: RedditClient,
-  post: Awaited<ReturnType<typeof createGoalPost>>,
+  post: {
+    id: LinkId;
+    sticky: () => Promise<void>;
+    isStickied?: () => boolean | Promise<boolean>;
+  },
   subredditName: string,
   verificationOptions: StickyVerificationOptions,
 ): Promise<StickyResult> {

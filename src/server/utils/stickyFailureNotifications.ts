@@ -9,6 +9,7 @@ type StickyFailureNotificationParams = {
   postTitle: string;
   postUrl?: string | undefined;
   errorMessage?: string | undefined;
+  postOrigin?: "created" | "existing";
 };
 
 export type StickyFailureMessage = {
@@ -22,6 +23,7 @@ export function buildStickyFailureMessage({
   postTitle,
   postUrl,
   errorMessage,
+  postOrigin = "created",
 }: Omit<
   StickyFailureNotificationParams,
   "reddit" | "subredditId"
@@ -35,16 +37,19 @@ export function buildStickyFailureMessage({
     ? `\n\nTechnical note: ${errorMessage}`
     : "";
 
+  const isExisting = postOrigin === "existing";
   return {
     subject,
     body:
-      `The new Subscriber Goal post was created successfully, but it could not be pinned in r/${subredditName}.\n\n` +
+      (isExisting
+        ? `Subscriber Goal found an existing valid goal, but it could not be pinned in r/${subredditName}.\n\n`
+        : `The new Subscriber Goal post was created successfully, but it could not be pinned in r/${subredditName}.\n\n`) +
       "The app attempted to pin it automatically, but could not confirm that the post was pinned. This usually means the subreddit already has too many pinned or stickied posts.\n\n" +
-      "Manual moderator action is required. Please remove or unpin an existing pinned post if appropriate, then manually pin the new Subscriber Goal post.\n\n" +
-      "The app removes older recognized Subscriber Goal pins during replacement, but never removes unrelated Community Highlights.\n\n" +
+      `Manual moderator action is required. Please remove or unpin an existing pinned post if appropriate, then manually pin the ${isExisting ? "existing" : "new"} Subscriber Goal post.\n\n` +
+      "The app removes only older classic Subscriber Goal pins during replacement; CTA, Tiny, ambiguous, and unrelated Community Highlights are preserved.\n\n" +
       `Subreddit: r/${subredditName}\n` +
       `${moderatorLine}\n\n` +
-      `New Subscriber Goal:\n${postTitle}${postUrlLine}` +
+      `${isExisting ? "Existing" : "New"} Subscriber Goal:\n${postTitle}${postUrlLine}` +
       technicalNote,
   };
 }
@@ -69,18 +74,21 @@ export async function notifyStickyFailure({
   postTitle,
   postUrl,
   errorMessage,
-}: StickyFailureNotificationParams): Promise<void> {
+  postOrigin = "created",
+}: StickyFailureNotificationParams): Promise<"sent" | "failed"> {
   const message = buildStickyFailureMessage({
     subredditName,
     moderatorUsername,
     postTitle,
     postUrl,
     errorMessage,
+    postOrigin,
   });
 
   console.info(
     `[sticky] sending sticky failure modmail: subreddit=${subredditName} subredditId=${subredditId}`,
   );
+  let modmailOutcome: "sent" | "failed" = "sent";
   try {
     await reddit.modMail.createModNotification({
       subredditId,
@@ -91,6 +99,7 @@ export async function notifyStickyFailure({
       `[sticky] sticky failure modmail sent: subreddit=${subredditName} subredditId=${subredditId}`,
     );
   } catch (error) {
+    modmailOutcome = "failed";
     logDiagnostic(
       "warn",
       "sticky_notification_failed",
@@ -104,7 +113,7 @@ export async function notifyStickyFailure({
       workflow: "sticky_notification",
       phase: "missing_moderator",
     });
-    return;
+    return modmailOutcome;
   }
 
   logDiagnostic("info", "sticky_notification_started", {
@@ -129,4 +138,5 @@ export async function notifyStickyFailure({
       error,
     );
   }
+  return modmailOutcome;
 }

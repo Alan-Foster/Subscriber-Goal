@@ -3,11 +3,7 @@ import { isLinkId, isSubredditId, type RedditClient } from "../types";
 import { logCrosspostEvent, toErrorMessage } from "./crosspostLogs";
 import { isMissingPostError } from "./postStatus";
 import { logDiagnostic } from "../../shared/diagnostics";
-import {
-  ctaOnlyPostKind,
-  subscriberGoalPostKind,
-  subscribeOnlyPostKind,
-} from "../../shared/postKind";
+import { subscriberGoalPostKind } from "../../shared/postKind";
 
 export type WikiPageRevision = {
   id: string;
@@ -215,30 +211,32 @@ async function unstickyAndVerify(
   }
 }
 
-function hasSubscriberGoalPostKind(post: SubscriberGoalPost): boolean {
+function hasClassicSubscriberGoalMetadata(post: SubscriberGoalPost): boolean {
   const data =
     (post as { postData?: unknown; customPostData?: unknown }).postData ??
     (post as { customPostData?: unknown }).customPostData;
+  const metadata = data as { postKind?: unknown; postHeight?: unknown } | undefined;
   const kind =
     data && typeof data === "object"
-      ? (data as { postKind?: unknown }).postKind
+      ? metadata?.postKind
       : undefined;
+  const height = metadata?.postHeight;
   return (
-    kind === subscriberGoalPostKind ||
-    kind === subscribeOnlyPostKind ||
-    kind === ctaOnlyPostKind
+    kind === subscriberGoalPostKind &&
+    (height === "regular" || height === "short")
   );
 }
 
 /**
- * Removes only authoritative or self-identifying Subscriber Goal highlights.
- * Known IDs are trusted regardless of author, but are always constrained to the
- * current subreddit. Any unresolved known sticky blocks replacement creation.
+ * Removes only posts that affirmatively identify themselves as classic
+ * Subscriber Goals. Compact CTA/Tiny experiences and ambiguous legacy posts
+ * are deliberately preserved.
  */
 export async function clearSubscriberGoalStickies(
   reddit: RedditClient,
   options: {
     knownPostIds: string[];
+    knownClassicPostIds?: string[];
     subreddit: { id: string; name: string };
   },
 ): Promise<SubscriberGoalStickyCleanupResult> {
@@ -253,7 +251,7 @@ export async function clearSubscriberGoalStickies(
 
   const inspect = async (
     post: SubscriberGoalPost,
-    trusted: boolean,
+    trustedClassicMetadata: boolean,
   ): Promise<void> => {
     if (seen.has(post.id)) return;
     seen.add(post.id);
@@ -262,7 +260,7 @@ export async function clearSubscriberGoalStickies(
       result.skippedCrossSubreddit.push(post.id);
       return;
     }
-    if (!trusted && !hasSubscriberGoalPostKind(post)) return;
+    if (!trustedClassicMetadata && !hasClassicSubscriberGoalMetadata(post)) return;
     try {
       if (!(await getPostStickyState(post))) return;
       if (!(await unstickyAndVerify(reddit, post))) {
@@ -284,10 +282,14 @@ export async function clearSubscriberGoalStickies(
     }
   };
 
+  const knownClassicPostIds = new Set(options.knownClassicPostIds ?? []);
   for (const postId of [...new Set(options.knownPostIds)]) {
     if (!isLinkId(postId)) continue;
     try {
-      await inspect(await reddit.getPostById(postId), true);
+      await inspect(
+        await reddit.getPostById(postId),
+        knownClassicPostIds.has(postId),
+      );
     } catch (error) {
       if (isMissingPostError(error)) {
         result.missing.push(postId);
@@ -327,10 +329,12 @@ export async function reconcileSubscriberGoalStickies(
   reddit: RedditClient,
   options: {
     knownPostIds: string[];
+    knownClassicPostIds?: string[];
     subreddit: { id: string; name: string };
   },
 ): Promise<{ keptPostId?: string; unstickied: string[]; failed: string[] }> {
   const pinned: SubscriberGoalPost[] = [];
+  const knownClassicPostIds = new Set(options.knownClassicPostIds ?? []);
   const orderedPostIds = [...new Set(options.knownPostIds)];
   const candidateOrder = new Map(
     orderedPostIds.map((postId, index) => [postId, index]),
@@ -341,6 +345,8 @@ export async function reconcileSubscriberGoalStickies(
       const post = await reddit.getPostById(postId);
       if (
         post.subredditId === options.subreddit.id &&
+        (knownClassicPostIds.has(post.id) ||
+          hasClassicSubscriberGoalMetadata(post)) &&
         (await getPostStickyState(post))
       ) {
         pinned.push(post);

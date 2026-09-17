@@ -245,7 +245,7 @@ describe("clearUserStickies", () => {
 });
 
 describe("Subscriber Goal sticky enforcement", () => {
-  it("unstickies a trusted moderator-authored tiny goal and verifies removal", async () => {
+  it("preserves a trusted Tiny goal during classic replacement cleanup", async () => {
     let pinned = true;
     const post = {
       id: "t3_tiny",
@@ -256,6 +256,7 @@ describe("Subscriber Goal sticky enforcement", () => {
       unsticky: vi.fn(async () => {
         pinned = false;
       }),
+      postData: { postKind: "subscribe-only-v1", postHeight: "tiny" },
     };
     const reddit = {
       getPostById: vi.fn(async () => post),
@@ -267,8 +268,8 @@ describe("Subscriber Goal sticky enforcement", () => {
       subreddit: { id: "t5_abc123", name: "ExampleSub" },
     });
 
-    expect(post.unsticky).toHaveBeenCalledOnce();
-    expect(result.unstickied).toEqual(["t3_tiny"]);
+    expect(post.unsticky).not.toHaveBeenCalled();
+    expect(result.unstickied).toEqual([]);
   });
 
   it("never unsticks unrelated or cross-subreddit posts", async () => {
@@ -289,7 +290,10 @@ describe("Subscriber Goal sticky enforcement", () => {
   });
 
   it("throws a typed blocking error when an old goal remains pinned", async () => {
-    const post = createPost();
+    const post = {
+      ...createPost(),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+    };
     const reddit = {
       getPostById: vi.fn(async () => post),
       getHotPosts: vi.fn(() => ({ get: vi.fn(async () => []) })),
@@ -330,6 +334,7 @@ describe("Subscriber Goal sticky enforcement", () => {
 
     const result = await reconcileSubscriberGoalStickies(reddit as never, {
       knownPostIds: ["t3_old", "t3_new"],
+      knownClassicPostIds: ["t3_old", "t3_new"],
       subreddit: { id: "t5_abc123", name: "ExampleSub" },
     });
 

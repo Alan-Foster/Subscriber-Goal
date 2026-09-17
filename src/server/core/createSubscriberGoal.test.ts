@@ -27,6 +27,10 @@ const hoisted = vi.hoisted(() => ({
       Object.entries(fields).forEach(([field, value]) => hash.set(field, value));
       hoisted.redisHashes.set(key, hash);
     }),
+    hMGet: vi.fn(async (key: string, fields: string[]) => {
+      const hash = hoisted.redisHashes.get(key);
+      return fields.map((field) => hash?.get(field));
+    }),
   },
   createGoalPost: vi.fn(),
   registerNewSubGoalPost: vi.fn(),
@@ -53,6 +57,9 @@ vi.mock("./post", () => ({
 }));
 
 vi.mock("../data/subGoalData", () => ({
+  subscriberGoalsKey: "subscriber_goals",
+  postKindSuffix: "_post_kind",
+  postHeightSuffix: "_post_height",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
@@ -353,6 +360,15 @@ describe("createSubscriberGoal sticky handling", () => {
       "t3_oldtiny",
       "t3_tracked",
     ]);
+    hoisted.redisHashes.set(
+      "subscriber_goals",
+      new Map([
+        ["t3_oldtiny_post_kind", "subscribe-only-v1"],
+        ["t3_oldtiny_post_height", "tiny"],
+        ["t3_tracked_post_kind", "subscriber-goal-v1"],
+        ["t3_tracked_post_height", "regular"],
+      ]),
+    );
     hoisted.reddit.getPostById.mockImplementation(async (postId) => ({
       id: postId,
       subredditId: "t5_example",
@@ -365,6 +381,7 @@ describe("createSubscriberGoal sticky handling", () => {
       hoisted.reddit,
       {
         knownPostIds: ["t3_oldtiny", "t3_tracked"],
+        knownClassicPostIds: ["t3_tracked"],
         subreddit: {
           id: "t5_example",
           name: "ExampleSub",
@@ -387,6 +404,13 @@ describe("createSubscriberGoal sticky handling", () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_old"]);
+    hoisted.redisHashes.set(
+      "subscriber_goals",
+      new Map([
+        ["t3_old_post_kind", "subscriber-goal-v1"],
+        ["t3_old_post_height", "regular"],
+      ]),
+    );
     hoisted.clearSubscriberGoalStickies.mockRejectedValue(
       new Error("moderator action required"),
     );

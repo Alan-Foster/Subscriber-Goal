@@ -2,12 +2,13 @@ import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   AUTOMATIC_ONBOARDING_ENABLED,
-  findExistingSubscriberGoal,
+  ensureExistingSubscriberGoalPinned,
   getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError,
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting,
+  markOnboardingSubscriberGoalExistingNotPinned,
   markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled,
   onboardingMaxAttempts,
@@ -49,6 +50,7 @@ type OnboardingReminderStatus =
 type OnboardingReminderResult =
   | "sent"
   | "existing"
+  | "existing_not_pinned"
   | "ineligible"
   | "failed"
   | "cancelled_permission"
@@ -159,21 +161,55 @@ export async function scheduleOnboardingReminder(
   },
 ): Promise<void> {
   void migrationOnly;
-  if (!automationEnabled) return;
+  if (!automationEnabled) {
+    logReminderSchedulingSkipped("automation_disabled", lifecycleSource);
+    return;
+  }
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(onboardingReminderInitializationLockKey, lockToken, {
     nx: true,
     expiration: new Date(nowMs + 60 * 1000),
   });
-  if ((await redis.get(onboardingReminderInitializationLockKey)) !== lockToken)
+  if (
+    (await redis.get(onboardingReminderInitializationLockKey)) !== lockToken
+  ) {
+    logReminderSchedulingSkipped("initialization_lock_busy", lifecycleSource);
     return;
+  }
   try {
     const rawState = await redis.hGetAll(onboardingReminderStateKey);
     const existing = parseOnboardingReminderState(rawState);
-    if (existing) return;
-    if (Object.keys(rawState).length > 0) return;
+    if (existing) {
+      logReminderSchedulingSkipped(
+        "existing_state_preserved",
+        lifecycleSource,
+        existing,
+      );
+      return;
+    }
+    if (Object.keys(rawState).length > 0) {
+      logDiagnostic("warn", "onboarding_reminder_scheduling_skipped", {
+        workflow: "onboarding_reminder",
+        phase: "schedule",
+        lifecycleSource,
+        reason: "unparseable_nonempty_state",
+        rawFieldCount: Object.keys(rawState).length,
+      });
+      return;
+    }
     const goalState = await getOnboardingSubscriberGoalState(redis);
-    if (goalState?.status !== "awaiting_warning") return;
+    if (goalState?.status !== "awaiting_warning") {
+      logDiagnostic("info", "onboarding_reminder_scheduling_skipped", {
+        workflow: "onboarding_reminder",
+        phase: "schedule",
+        lifecycleSource,
+        reason: "goal_not_awaiting_warning",
+        goalState: goalState?.status ?? "missing_or_unparseable",
+        goalResult: goalState?.resultStatus ?? "none",
+        operationId: goalState?.operationId ?? "none",
+      });
+      return;
+    }
     const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
     const state: OnboardingReminderState = {
       version: onboardingReminderVersion,
@@ -206,6 +242,26 @@ export async function scheduleOnboardingReminder(
     )
       await redis.del(onboardingReminderInitializationLockKey);
   }
+}
+
+function logReminderSchedulingSkipped(
+  reason: string,
+  lifecycleSource: OnboardingLifecycleSource,
+  state?: OnboardingReminderState,
+): void {
+  logDiagnostic("info", "onboarding_reminder_scheduling_skipped", {
+    workflow: "onboarding_reminder",
+    phase: "schedule",
+    lifecycleSource,
+    reason,
+    reminderState: state?.status ?? "none",
+    reminderResult: state?.result ?? "none",
+    nextRunAt: state?.nextRunAt ?? "none",
+    nextRunAtIso:
+      state?.nextRunAt === undefined
+        ? "none"
+        : new Date(state.nextRunAt).toISOString(),
+  });
 }
 
 export async function markOnboardingReminderIneligible(
@@ -405,7 +461,12 @@ export async function processDueOnboardingReminder({
       };
     }
 
-    const existing = await findExistingSubscriberGoal(reddit, redis, nowMs);
+    const existing = await ensureExistingSubscriberGoalPinned({
+      reddit,
+      redis,
+      nowMs,
+      notifyOnFailure: true,
+    });
     inspected = {
       registeredInspected: existing.registeredInspected ?? 0,
       trackedInspected: existing.trackedInspected ?? 0,
@@ -418,24 +479,40 @@ export async function processDueOnboardingReminder({
       stalePruned: existing.stalePruned ?? 0,
       failed: existing.failed ?? 0,
     };
-    if (existing.postId) {
+    if (existing.status !== "missing" && existing.postId) {
       const existingSource = existing.source ?? "tracked";
       await saveOnboardingReminderState(redis, {
         ...reloaded,
         status: "complete",
         completedAt: nowMs,
-        result: "existing",
+        result:
+          existing.status === "existing"
+            ? "existing"
+            : "existing_not_pinned",
         postId: existing.postId,
         existingSource,
+        ...(existing.errorMessage
+          ? { errorMessage: existing.errorMessage }
+          : {}),
       });
-      await markOnboardingSubscriberGoalExisting(
-        redis,
-        existing.postId,
-        existingSource,
-        nowMs,
-      );
+      if (existing.status === "existing") {
+        await markOnboardingSubscriberGoalExisting(
+          redis,
+          existing.postId,
+          existingSource,
+          nowMs,
+        );
+      } else {
+        await markOnboardingSubscriberGoalExistingNotPinned(
+          redis,
+          existing.postId,
+          existingSource,
+          nowMs,
+          existing.errorMessage,
+        );
+      }
       console.info(
-        `[onboardingReminder] complete: status=existing existingSource=${existingSource} postId=${existing.postId} ${formatReminderDiagnostics(inspected)}`,
+        `[onboardingReminder] complete: status=${existing.status} existingSource=${existingSource} postId=${existing.postId} ${formatReminderDiagnostics(inspected)}`,
       );
       return {
         status: "existing",
@@ -649,16 +726,26 @@ async function reconcileCompletedReminder(
   if (state.result === "sent" && state.sentAt !== undefined) {
     await scheduleOnboardingSubscriberGoalAfterWarning(redis, state.sentAt);
   } else if (
-    state.result === "existing" &&
+    (state.result === "existing" || state.result === "existing_not_pinned") &&
     state.postId &&
     state.existingSource
   ) {
-    await markOnboardingSubscriberGoalExisting(
-      redis,
-      state.postId,
-      state.existingSource,
-      state.completedAt ?? nowMs,
-    );
+    if (state.result === "existing") {
+      await markOnboardingSubscriberGoalExisting(
+        redis,
+        state.postId,
+        state.existingSource,
+        state.completedAt ?? nowMs,
+      );
+    } else {
+      await markOnboardingSubscriberGoalExistingNotPinned(
+        redis,
+        state.postId,
+        state.existingSource,
+        state.completedAt ?? nowMs,
+        state.errorMessage,
+      );
+    }
   } else if (
     state.result === "ineligible" &&
     state.eligibilitySubscriberCount !== undefined
@@ -770,6 +857,7 @@ function isResult(
   return (
     value === "sent" ||
     value === "existing" ||
+    value === "existing_not_pinned" ||
     value === "ineligible" ||
     value === "failed" ||
     value === "cancelled_permission" ||

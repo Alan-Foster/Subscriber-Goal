@@ -10,11 +10,13 @@ const hoisted = vi.hoisted(() => ({
   clearLegacySubscriberErasureTombstones: vi.fn(),
   initializeRecentSubscriberIndexMigration: vi.fn(),
   initializeSubscriberStatsMigration: vi.fn(),
+  getOnboardingSubscriberGoalState: vi.fn(),
+  getOnboardingReminderState: vi.fn(),
   initializeOnboardingSubscriberGoal: vi.fn(),
   markOnboardingSubscriberGoalIneligible: vi.fn(),
   markOnboardingReminderIneligible: vi.fn(),
   scheduleOnboardingReminder: vi.fn(),
-  rearmPreviouslyIneligibleOnboarding: vi.fn(),
+  reconcileOnboardingForLifecycle: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
   initializePostKindMigration: vi.fn(),
@@ -85,6 +87,7 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
   }),
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
+  getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
   onboardingMinimumSubscriberCount: 40,
@@ -92,13 +95,13 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
 }));
 
 vi.mock("../core/onboardingReminder", () => ({
+  getOnboardingReminderState: hoisted.getOnboardingReminderState,
   markOnboardingReminderIneligible: hoisted.markOnboardingReminderIneligible,
   scheduleOnboardingReminder: hoisted.scheduleOnboardingReminder,
 }));
 
 vi.mock("../core/onboardingLifecycle", () => ({
-  rearmPreviouslyIneligibleOnboarding:
-    hoisted.rearmPreviouslyIneligibleOnboarding,
+  reconcileOnboardingForLifecycle: hoisted.reconcileOnboardingForLifecycle,
 }));
 
 vi.mock("../data/updaterData", () => ({
@@ -167,11 +170,13 @@ describe("onAppChanged", () => {
     hoisted.clearLegacySubscriberErasureTombstones.mockReset();
     hoisted.initializeRecentSubscriberIndexMigration.mockReset();
     hoisted.initializeSubscriberStatsMigration.mockReset();
+    hoisted.getOnboardingSubscriberGoalState.mockReset();
+    hoisted.getOnboardingReminderState.mockReset();
     hoisted.initializeOnboardingSubscriberGoal.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
     hoisted.markOnboardingReminderIneligible.mockReset();
     hoisted.scheduleOnboardingReminder.mockReset();
-    hoisted.rearmPreviouslyIneligibleOnboarding.mockReset();
+    hoisted.reconcileOnboardingForLifecycle.mockReset();
     hoisted.getTrackedPosts.mockReset();
     hoisted.queueUpdates.mockReset();
     hoisted.initializePostKindMigration.mockReset();
@@ -192,12 +197,15 @@ describe("onAppChanged", () => {
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue(undefined);
+    hoisted.getOnboardingReminderState.mockResolvedValue(undefined);
     hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
     hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
     hoisted.markOnboardingReminderIneligible.mockResolvedValue(undefined);
     hoisted.scheduleOnboardingReminder.mockResolvedValue(undefined);
-    hoisted.rearmPreviouslyIneligibleOnboarding.mockResolvedValue({
+    hoisted.reconcileOnboardingForLifecycle.mockResolvedValue({
       status: "unchanged",
+      reason: "active_workflow_preserved",
     });
     hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(
       undefined,
@@ -291,7 +299,8 @@ describe("onAppChanged", () => {
       expect.anything(),
       { lifecycleSource: "install" },
     );
-    expect(hoisted.rearmPreviouslyIneligibleOnboarding).toHaveBeenCalledWith(
+    expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
       expect.anything(),
       { lifecycleSource: "install" },
     );
@@ -307,6 +316,17 @@ describe("onAppChanged", () => {
 
   it("initializes release-scoped onboarding during upgrades", async () => {
     hoisted.context.subredditName = "SubGoal";
+    const reminderNextRunAt = Date.parse("2026-09-17T14:00:00.000Z");
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      status: "awaiting_warning",
+      armedAt: reminderNextRunAt - 60_000,
+      operationId: "onboarding:test",
+    });
+    hoisted.getOnboardingReminderState.mockResolvedValue({
+      status: "pending",
+      nextRunAt: reminderNextRunAt,
+    });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
 
     await onAppChanged({ lifecycleSource: "upgrade" });
 
@@ -318,7 +338,8 @@ describe("onAppChanged", () => {
       expect.anything(),
       { lifecycleSource: "upgrade" },
     );
-    expect(hoisted.rearmPreviouslyIneligibleOnboarding).toHaveBeenCalledWith(
+    expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
       expect.anything(),
       { lifecycleSource: "upgrade" },
     );
@@ -327,6 +348,15 @@ describe("onAppChanged", () => {
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"onboarding_lifecycle_setup_complete"'),
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"nextAction":"awaiting_modmail_timer"'),
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringContaining("reminderNextRunAt=2026-09-17T14:00:00.000Z"),
+    );
   });
 
   it("does not re-arm a community that is still below the minimum", async () => {
@@ -341,7 +371,7 @@ describe("onAppChanged", () => {
 
     await onAppChanged({ lifecycleSource: "upgrade" });
 
-    expect(hoisted.rearmPreviouslyIneligibleOnboarding).not.toHaveBeenCalled();
+    expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
     expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
       expect.anything(),
       39,
@@ -394,9 +424,7 @@ describe("onAppChanged", () => {
         expect.any(Number),
         "subreddit_not_public",
       );
-      expect(
-        hoisted.rearmPreviouslyIneligibleOnboarding,
-      ).not.toHaveBeenCalled();
+      expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
     },
   );
 
@@ -424,7 +452,7 @@ describe("onAppChanged", () => {
       expect.any(Number),
       "subreddit_not_sfw",
     );
-    expect(hoisted.rearmPreviouslyIneligibleOnboarding).not.toHaveBeenCalled();
+    expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
   });
 
   it("does not arm install onboarding when eligibility lookup fails", async () => {

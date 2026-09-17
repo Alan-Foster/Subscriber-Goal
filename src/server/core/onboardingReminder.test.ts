@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
-  findExistingSubscriberGoal: vi.fn(),
+  ensureExistingSubscriberGoalPinned: vi.fn(),
   getOnboardingSubscriberGoalState: vi.fn(),
   initializeOnboardingSubscriberGoal: vi.fn(),
   markOnboardingSubscriberGoalExisting: vi.fn(),
@@ -13,7 +13,8 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("./onboardingSubscriberGoal", () => ({
   AUTOMATIC_ONBOARDING_ENABLED: true,
-  findExistingSubscriberGoal: hoisted.findExistingSubscriberGoal,
+  ensureExistingSubscriberGoalPinned:
+    hoisted.ensureExistingSubscriberGoalPinned,
   getOnboardingEligibility: (subreddit: {
     numberOfSubscribers: number;
     type?: unknown;
@@ -47,6 +48,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting:
     hoisted.markOnboardingSubscriberGoalExisting,
+  markOnboardingSubscriberGoalExistingNotPinned: vi.fn(),
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
@@ -76,6 +78,7 @@ import {
 import {
   onboardingGoalBaseDelayMs,
   onboardingGoalStaggerMaxMinutes,
+  onboardingGoalStaggerMinMinutes,
 } from "./onboardingConfig";
 
 class InMemoryRedis {
@@ -157,13 +160,27 @@ describe("onboarding reminder", () => {
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockResolvedValue(
       undefined,
     );
-    hoisted.findExistingSubscriberGoal.mockReset();
+    hoisted.ensureExistingSubscriberGoalPinned.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
-    hoisted.findExistingSubscriberGoal.mockResolvedValue({
+    hoisted.ensureExistingSubscriberGoalPinned.mockResolvedValue({
+      status: "missing",
+      candidateCount: 0,
+      pinnedClassicCount: 0,
+      pinnedProtectedCount: 0,
+      pinnedAmbiguousCount: 0,
+      classicPostsUnpinned: [],
+      protectedPinsPreserved: [],
       trackedInspected: 0,
+      registeredInspected: 0,
+      queuedInspected: 0,
+      persistedInspected: 0,
       pinnedInspected: 0,
+      searchInspected: 0,
       recentInspected: 0,
+      validated: 0,
+      stalePruned: 0,
+      failed: 0,
     });
     hoisted.markOnboardingSubscriberGoalCancelled.mockReset();
     hoisted.markOnboardingSubscriberGoalCancelled.mockResolvedValue(undefined);
@@ -181,23 +198,33 @@ describe("onboarding reminder", () => {
     const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
 
     expect(message.bodyMarkdown).toContain(
-      "5-minute countdown begins when this message is sent",
+      "24-hour countdown begins when this message is sent",
     );
-    expect(message.bodyMarkdown).toContain("following 5 minutes");
+    expect(message.bodyMarkdown).toContain("following 1,000 minutes");
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
-    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
-    expect(onboardingGoalStaggerMaxMinutes).toBe(5);
+    expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
+    expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
   });
 
   it("selects inclusive reminder stagger boundaries", () => {
     expect(onboardingReminderStaggerMinMinutes).toBe(1);
-    expect(onboardingReminderStaggerMaxMinutes).toBe(5);
+    expect(onboardingReminderStaggerMaxMinutes).toBe(300);
     expect(selectOnboardingReminderStaggerMinutes(0)).toBe(
       onboardingReminderStaggerMinMinutes,
     );
     expect(selectOnboardingReminderStaggerMinutes(1)).toBe(
       onboardingReminderStaggerMaxMinutes,
     );
+    expect(
+      onboardingReminderStaggerMinMinutes +
+        onboardingGoalBaseDelayMs / (60 * 1000) +
+        onboardingGoalStaggerMinMinutes,
+    ).toBe(1_442);
+    expect(
+      onboardingReminderStaggerMaxMinutes +
+        onboardingGoalBaseDelayMs / (60 * 1000) +
+        onboardingGoalStaggerMaxMinutes,
+    ).toBe(2_740);
   });
 
   it("persists the configured maximum reminder delay", async () => {
@@ -270,7 +297,7 @@ describe("onboarding reminder", () => {
         nowMs + onboardingReminderDelayMs,
         "subscriber_count",
       );
-      expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.ensureExistingSubscriberGoalPinned).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
       await expect(
         redis.hGetAll(onboardingReminderStateKey),
@@ -323,7 +350,7 @@ describe("onboarding reminder", () => {
         status: "ineligible",
         eligibilitySubscriberCount: 1_001,
       });
-      expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.ensureExistingSubscriberGoalPinned).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
     },
   );
@@ -349,7 +376,7 @@ describe("onboarding reminder", () => {
       }),
     ).resolves.toMatchObject({ status: "ineligible" });
 
-    expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.ensureExistingSubscriberGoalPinned).not.toHaveBeenCalled();
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
@@ -412,7 +439,14 @@ describe("onboarding reminder", () => {
         lifecycleSource: "install",
         nowMs,
       });
-      hoisted.findExistingSubscriberGoal.mockResolvedValue({
+      hoisted.ensureExistingSubscriberGoalPinned.mockResolvedValue({
+        status: "existing",
+        candidateCount: 1,
+        pinnedClassicCount: source === "pinned" ? 1 : 0,
+        pinnedProtectedCount: 0,
+        pinnedAmbiguousCount: 0,
+        classicPostsUnpinned: [],
+        protectedPinsPreserved: [],
         postId: "t3_existing",
         source,
         trackedInspected: source === "tracked" ? 1 : 0,
@@ -526,7 +560,7 @@ describe("onboarding reminder", () => {
   it("stops pre-dispatch failures after three total attempts", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     await scheduleOnboardingReminder(redis as never, { nowMs });
-    hoisted.findExistingSubscriberGoal.mockRejectedValue(
+    hoisted.ensureExistingSubscriberGoalPinned.mockRejectedValue(
       new Error("lookup unavailable"),
     );
 

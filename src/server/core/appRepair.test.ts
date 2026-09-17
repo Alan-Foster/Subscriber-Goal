@@ -70,6 +70,10 @@ class TestRedis {
     Object.entries(fields).forEach(([field, value]) => hash.set(field, value));
     this.hashes.set(key, hash);
   }
+  async hMGet(key: string, fields: string[]): Promise<(string | undefined)[]> {
+    const hash = this.hashes.get(key);
+    return fields.map((field) => hash?.get(field));
+  }
 }
 
 describe("scheduled app repair", () => {
