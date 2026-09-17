@@ -19,6 +19,7 @@ import {
 import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
 import { scheduleAppRepair } from "../core/appRepair";
+import { rearmPreviouslyIneligibleOnboarding } from "../core/onboardingLifecycle";
 
 export async function onAppChanged({
   lifecycleSource = "unknown",
@@ -111,6 +112,11 @@ export async function onAppChanged({
     console.info(
       `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} safetyStatus=${eligibility.safetyStatus} isSfw=${eligibility.isSfw} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
     );
+    if (eligibility.eligible) {
+      await rearmPreviouslyIneligibleOnboarding(redis, {
+        lifecycleSource: lifecycleSource === "install" ? "install" : "upgrade",
+      });
+    }
     await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
     await scheduleOnboardingReminder(redis, { lifecycleSource });
     if (!eligibility.eligible) {
@@ -119,11 +125,13 @@ export async function onAppChanged({
         redis,
         eligibility.subscriberCount,
         nowMs,
+        eligibility.reason,
       );
       await markOnboardingSubscriberGoalIneligible(
         redis,
         eligibility.subscriberCount,
         nowMs,
+        eligibility.reason,
       );
     }
   }

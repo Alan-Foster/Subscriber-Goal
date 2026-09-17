@@ -16,6 +16,7 @@ import {
   selectOnboardingRetryDelayMs,
   type OnboardingDetectionDiagnostics,
   type OnboardingExistingSource,
+  type OnboardingIneligibilityReason,
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
 import { checkAppAccountHealth } from "./appAccountHealth";
@@ -36,6 +37,7 @@ export const onboardingReminderLockKey = "onboarding_reminder_v3_lock";
 export const onboardingReminderInitializationLockKey =
   "onboarding_reminder_v3_init_lock";
 export const onboardingReminderVersion = "onboarding_reminder_v3";
+export const onboardingReminderLockTtlMs = 5 * 60 * 1000;
 export const onboardingReminderDelayMs =
   onboardingReminderStaggerMinMinutes * 60 * 1000;
 
@@ -64,6 +66,7 @@ export type OnboardingReminderState = {
   migratedFromVersion?: string;
   legacyAttempts?: number;
   eligibilitySubscriberCount?: number;
+  ineligibilityReason?: OnboardingIneligibilityReason;
   startedAt?: number;
   completedAt?: number;
   postId?: string;
@@ -209,6 +212,7 @@ export async function markOnboardingReminderIneligible(
   redis: RedisClient,
   subscriberCount: number,
   nowMs = Date.now(),
+  reason?: OnboardingIneligibilityReason,
 ): Promise<void> {
   const state = parseOnboardingReminderState(
     await redis.hGetAll(onboardingReminderStateKey),
@@ -220,7 +224,16 @@ export async function markOnboardingReminderIneligible(
     completedAt: nowMs,
     result: "ineligible",
     eligibilitySubscriberCount: subscriberCount,
+    ...(reason ? { ineligibilityReason: reason } : {}),
   });
+}
+
+export async function getOnboardingReminderState(
+  redis: RedisClient,
+): Promise<OnboardingReminderState | undefined> {
+  return parseOnboardingReminderState(
+    await redis.hGetAll(onboardingReminderStateKey),
+  );
 }
 
 export function selectOnboardingReminderStaggerMinutes(
@@ -320,7 +333,7 @@ export async function processDueOnboardingReminder({
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(onboardingReminderLockKey, lockToken, {
     nx: true,
-    expiration: new Date(nowMs + 5 * 60 * 1000),
+    expiration: new Date(nowMs + onboardingReminderLockTtlMs),
   });
   if ((await redis.get(onboardingReminderLockKey)) !== lockToken) {
     return { status: "not_due", ...base };
@@ -374,11 +387,13 @@ export async function processDueOnboardingReminder({
         redis,
         eligibility.subscriberCount,
         nowMs,
+        eligibility.reason,
       );
       await markOnboardingSubscriberGoalIneligible(
         redis,
         eligibility.subscriberCount,
         nowMs,
+        eligibility.reason,
       );
       console.info(
         `[onboardingReminder] complete: status=ineligible subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} reason=${eligibility.reason} source=${reloaded.lifecycleSource}`,
@@ -652,6 +667,7 @@ async function reconcileCompletedReminder(
       redis,
       state.eligibilitySubscriberCount,
       state.completedAt ?? nowMs,
+      state.ineligibilityReason,
     );
   } else if (
     state.result === "cancelled_permission" ||
@@ -721,6 +737,9 @@ function parseOnboardingReminderState(
     Number.isFinite(Number(raw.eligibilitySubscriberCount))
       ? { eligibilitySubscriberCount: Number(raw.eligibilitySubscriberCount) }
       : {}),
+    ...(isOnboardingIneligibilityReason(raw.ineligibilityReason)
+      ? { ineligibilityReason: raw.ineligibilityReason }
+      : {}),
     ...(raw.attempts && Number.isFinite(Number(raw.attempts))
       ? { attempts: Number(raw.attempts) }
       : {}),
@@ -773,6 +792,7 @@ function serializeOnboardingReminderState(
     migratedFromVersion: state.migratedFromVersion ?? "",
     legacyAttempts: String(state.legacyAttempts ?? ""),
     eligibilitySubscriberCount: String(state.eligibilitySubscriberCount ?? ""),
+    ineligibilityReason: state.ineligibilityReason ?? "",
     startedAt: String(state.startedAt ?? 0),
     completedAt: String(state.completedAt ?? 0),
     postId: state.postId ?? "",
@@ -785,12 +805,22 @@ function serializeOnboardingReminderState(
   };
 }
 
-async function saveOnboardingReminderState(
+export async function saveOnboardingReminderState(
   redis: RedisClient,
   state: OnboardingReminderState,
 ): Promise<void> {
   await redis.hSet(
     onboardingReminderStateKey,
     serializeOnboardingReminderState(state),
+  );
+}
+
+function isOnboardingIneligibilityReason(
+  value: string | undefined,
+): value is OnboardingIneligibilityReason {
+  return (
+    value === "subscriber_count" ||
+    value === "subreddit_not_public" ||
+    value === "subreddit_not_sfw"
   );
 }

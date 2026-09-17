@@ -148,6 +148,7 @@ export type OnboardingSubscriberGoalState = {
   migratedFromVersion?: string;
   legacyAttempts?: number;
   eligibilitySubscriberCount?: number;
+  ineligibilityReason?: OnboardingIneligibilityReason;
   startedAt?: number;
   completedAt?: number;
   postId?: string;
@@ -418,6 +419,7 @@ export async function markOnboardingSubscriberGoalIneligible(
   redis: RedisClient,
   subscriberCount: number,
   nowMs = Date.now(),
+  reason?: OnboardingIneligibilityReason,
 ): Promise<void> {
   let completedState: OnboardingSubscriberGoalState | undefined;
   await mutateGoalTerminalOrSchedule(redis, nowMs, (state) => {
@@ -428,6 +430,7 @@ export async function markOnboardingSubscriberGoalIneligible(
       completedAt: nowMs,
       resultStatus: "ineligible",
       eligibilitySubscriberCount: subscriberCount,
+      ...(reason ? { ineligibilityReason: reason } : {}),
     };
   });
   if (!completedState) return;
@@ -584,6 +587,9 @@ export async function processDueOnboardingSubscriberGoal({
         completedAt: nowMs,
         resultStatus: "ineligible",
         eligibilitySubscriberCount: eligibility.subscriberCount,
+        ...(eligibility.reason
+          ? { ineligibilityReason: eligibility.reason }
+          : {}),
       });
       return {
         status: "ineligible",
@@ -681,6 +687,9 @@ export async function processDueOnboardingSubscriberGoal({
         completedAt: nowMs,
         resultStatus: "ineligible",
         eligibilitySubscriberCount: creationEligibility.subscriberCount,
+        ...(creationEligibility.reason
+          ? { ineligibilityReason: creationEligibility.reason }
+          : {}),
       });
       logDiagnostic("info", "onboarding_eligibility_checked", {
         workflow: "onboarding_subscriber_goal",
@@ -1223,6 +1232,9 @@ function parseOnboardingState(
   if (eligibilitySubscriberCount !== undefined) {
     state.eligibilitySubscriberCount = eligibilitySubscriberCount;
   }
+  if (isOnboardingIneligibilityReason(raw.ineligibilityReason)) {
+    state.ineligibilityReason = raw.ineligibilityReason;
+  }
   const startedAt = parseStateNumber(raw.startedAt);
   const completedAt = parseStateNumber(raw.completedAt);
   if (startedAt !== undefined) state.startedAt = startedAt;
@@ -1280,6 +1292,7 @@ function serializeOnboardingState(
     migratedFromVersion: state.migratedFromVersion ?? "",
     legacyAttempts: String(state.legacyAttempts ?? ""),
     eligibilitySubscriberCount: String(state.eligibilitySubscriberCount ?? ""),
+    ineligibilityReason: state.ineligibilityReason ?? "",
     startedAt: String(state.startedAt ?? 0),
     completedAt: String(state.completedAt ?? 0),
     postId: state.postId ?? "",
@@ -1291,13 +1304,23 @@ function serializeOnboardingState(
   };
 }
 
-async function saveOnboardingState(
+export async function saveOnboardingState(
   redis: RedisClient,
   state: OnboardingSubscriberGoalState,
 ): Promise<void> {
   await redis.hSet(
     onboardingSubscriberGoalStateKey,
     serializeOnboardingState(state),
+  );
+}
+
+function isOnboardingIneligibilityReason(
+  value: string | undefined,
+): value is OnboardingIneligibilityReason {
+  return (
+    value === "subscriber_count" ||
+    value === "subreddit_not_public" ||
+    value === "subreddit_not_sfw"
   );
 }
 

@@ -54,6 +54,7 @@ import {
   scheduleOnboardingReminder,
 } from "./onboardingReminder";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
+import { rearmPreviouslyIneligibleOnboarding } from "./onboardingLifecycle";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
@@ -211,7 +212,7 @@ describe("onboarding subscriber goal", () => {
   });
 
   it("does not re-arm an existing onboarding lifecycle state", async () => {
-    expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
+    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
 
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -248,25 +249,18 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("requires more than 1,000 subscribers for automatic onboarding", () => {
-    expect(onboardingMinimumSubscriberCount).toBe(1_001);
+  it("requires at least 40 subscribers for automatic onboarding", () => {
+    expect(onboardingMinimumSubscriberCount).toBe(40);
     expect(
       getOnboardingEligibility({
-        numberOfSubscribers: 999,
+        numberOfSubscribers: 39,
         type: "public",
         nsfw: false,
       }),
     ).toMatchObject({ eligible: false, reason: "subscriber_count" });
     expect(
       getOnboardingEligibility({
-        numberOfSubscribers: 1_000,
-        type: "public",
-        nsfw: false,
-      }),
-    ).toMatchObject({ eligible: false, reason: "subscriber_count" });
-    expect(
-      getOnboardingEligibility({
-        numberOfSubscribers: 1_001,
+        numberOfSubscribers: 40,
         type: "public",
         nsfw: false,
       }),
@@ -291,7 +285,7 @@ describe("onboarding subscriber goal", () => {
 
   it("selects inclusive goal stagger boundaries", () => {
     expect(onboardingGoalStaggerMinMinutes).toBe(1);
-    expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
+    expect(onboardingGoalStaggerMaxMinutes).toBe(5);
     expect(selectOnboardingGoalStaggerMinutes(0)).toBe(
       onboardingGoalStaggerMinMinutes,
     );
@@ -300,10 +294,10 @@ describe("onboarding subscriber goal", () => {
     );
     expect(
       onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMinMinutes,
-    ).toBe(1_441);
+    ).toBe(6);
     expect(
       onboardingGoalBaseDelayMs / (60 * 1000) + onboardingGoalStaggerMaxMinutes,
-    ).toBe(2_440);
+    ).toBe(10);
   });
 
   it("schedules creation from the configured base delay and maximum stagger", async () => {
@@ -1282,6 +1276,57 @@ describe("onboarding subscriber goal", () => {
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
+  it("re-arms a newly eligible lifecycle and creates exactly one goal", async () => {
+    const previousCompletedAt = nowMs - 60_000;
+    await redis.hSet(onboardingSubscriberGoalStateKey, {
+      version: "onboarding_subscriber_goal_v4",
+      status: "complete",
+      armedAt: String(nowMs - 120_000),
+      lifecycleSource: "upgrade",
+      creationStaggerMinutes: "5",
+      operationId: `onboarding:onboarding_subscriber_goal_v4:${nowMs - 120_000}`,
+      completedAt: String(previousCompletedAt),
+      resultStatus: "ineligible",
+      eligibilitySubscriberCount: "44",
+    });
+    await redis.hSet(onboardingReminderStateKey, {
+      version: "onboarding_reminder_v3",
+      status: "complete",
+      nextRunAt: String(previousCompletedAt),
+      armedAt: String(nowMs - 120_000),
+      lifecycleSource: "upgrade",
+      reminderStaggerMinutes: "1",
+      completedAt: String(previousCompletedAt),
+      result: "ineligible",
+      eligibilitySubscriberCount: "44",
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    await rearmPreviouslyIneligibleOnboarding(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + 60_000,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+
+    const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(goal.nextRunAt),
+      }),
+    ).resolves.toMatchObject({ status: "created", postId: "t3_created" });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+  });
+
   it("logs each successful onboarding transition in order", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -1394,7 +1439,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("skips a community that drops to 1,000 after its warning", async () => {
+  it("skips a community that drops to 39 subscribers after its warning", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     await initializeRawOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "upgrade",
@@ -1414,7 +1459,7 @@ describe("onboarding subscriber goal", () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 1_000,
+      numberOfSubscribers: 39,
       type: "public",
       nsfw: false,
     });
@@ -1429,7 +1474,14 @@ describe("onboarding subscriber goal", () => {
       }),
     ).resolves.toMatchObject({
       status: "ineligible",
-      eligibilitySubscriberCount: 1_000,
+      eligibilitySubscriberCount: 39,
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      resultStatus: "ineligible",
+      eligibilitySubscriberCount: "39",
+      ineligibilityReason: "subscriber_count",
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });

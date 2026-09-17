@@ -20,7 +20,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     nsfw?: unknown;
   }) => ({
     eligible:
-      subreddit.numberOfSubscribers >= 1_001 &&
+      subreddit.numberOfSubscribers >= 40 &&
       subreddit.type === "public" &&
       subreddit.nsfw === false,
     subscriberCount: subreddit.numberOfSubscribers,
@@ -33,7 +33,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
         : subreddit.nsfw === true
           ? "nsfw"
           : "unknown",
-    ...(subreddit.numberOfSubscribers < 1_001
+    ...(subreddit.numberOfSubscribers < 40
       ? { reason: "subscriber_count" }
       : subreddit.type !== "public"
         ? { reason: "subreddit_not_public" }
@@ -51,7 +51,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
     hoisted.markOnboardingSubscriberGoalCancelled,
-  onboardingMinimumSubscriberCount: 1_001,
+  onboardingMinimumSubscriberCount: 40,
   onboardingMaxAttempts: 3,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
@@ -179,23 +179,19 @@ describe("onboarding reminder", () => {
 
   it("builds an accurate staggered upgrade warning", () => {
     const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
-    const baseDelayMinutes = onboardingGoalBaseDelayMs / (60 * 1000);
-    const baseDelayLabel = Number.isInteger(baseDelayMinutes / 60)
-      ? `${(baseDelayMinutes / 60).toLocaleString("en-US")}-hour`
-      : `${baseDelayMinutes.toLocaleString("en-US")}-minute`;
 
     expect(message.bodyMarkdown).toContain(
-      `${baseDelayLabel} countdown begins when this message is sent`,
+      "5-minute countdown begins when this message is sent",
     );
-    expect(message.bodyMarkdown).toContain(
-      `following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes`,
-    );
+    expect(message.bodyMarkdown).toContain("following 5 minutes");
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
+    expect(onboardingGoalBaseDelayMs).toBe(5 * 60 * 1000);
+    expect(onboardingGoalStaggerMaxMinutes).toBe(5);
   });
 
   it("selects inclusive reminder stagger boundaries", () => {
     expect(onboardingReminderStaggerMinMinutes).toBe(1);
-    expect(onboardingReminderStaggerMaxMinutes).toBe(300);
+    expect(onboardingReminderStaggerMaxMinutes).toBe(5);
     expect(selectOnboardingReminderStaggerMinutes(0)).toBe(
       onboardingReminderStaggerMinMinutes,
     );
@@ -242,7 +238,7 @@ describe("onboarding reminder", () => {
     );
   });
 
-  it.each([999, 1_000])(
+  it.each([0, 39])(
     "sends no warning and cancels automatic creation at %i subscribers",
     async (numberOfSubscribers) => {
       reddit.getCurrentSubreddit.mockResolvedValue({
@@ -272,17 +268,25 @@ describe("onboarding reminder", () => {
         expect.anything(),
         numberOfSubscribers,
         nowMs + onboardingReminderDelayMs,
+        "subscriber_count",
       );
       expect(hoisted.findExistingSubscriberGoal).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+      await expect(
+        redis.hGetAll(onboardingReminderStateKey),
+      ).resolves.toMatchObject({
+        result: "ineligible",
+        eligibilitySubscriberCount: String(numberOfSubscribers),
+        ineligibilityReason: "subscriber_count",
+      });
     },
   );
 
-  it("keeps a community with exactly 1,001 subscribers eligible", async () => {
+  it("keeps a community with exactly 40 subscribers eligible", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
-      numberOfSubscribers: 1_001,
+      numberOfSubscribers: 40,
       type: "public",
       nsfw: false,
     });

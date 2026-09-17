@@ -5,11 +5,11 @@
  * production timings can be restored without searching through the workflow.
  * The scheduler runs once per minute, so sub-minute delays are not useful.
  */
-export const onboardingMinimumSubscriberCount = 1_001;
+export const onboardingMinimumSubscriberCount = 40;
 
 export const onboardingReminderStaggerMinMinutes = 1;
-export const onboardingReminderStaggerMaxMinutes = 300;
+export const onboardingReminderStaggerMaxMinutes = 5;
 
-export const onboardingGoalBaseDelayMs = 24 * 60 * 60 * 1000;
+export const onboardingGoalBaseDelayMs = 5 * 60 * 1000;
 export const onboardingGoalStaggerMinMinutes = 1;
-export const onboardingGoalStaggerMaxMinutes = 1_000;
+export const onboardingGoalStaggerMaxMinutes = 5;
