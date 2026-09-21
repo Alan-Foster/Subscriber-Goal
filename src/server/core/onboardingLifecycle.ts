@@ -1,5 +1,14 @@
 import { logDiagnostic } from "../../shared/diagnostics";
+import {
+  autoCreateNextGoalDelayMs,
+  scheduleAutoCreateNextGoal,
+} from "../data/subGoalData";
+import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
+import {
+  autoCreateNextGoalSuccessorsKey,
+  processDueAutoCreateNextGoals,
+} from "./autoCreateNextGoal";
 import {
   ensureExistingSubscriberGoalPinned,
   getOnboardingSubscriberGoalState,
@@ -36,6 +45,16 @@ export type OnboardingLifecycleReconciliation =
       postId: string;
       existingSource: OnboardingExistingSource;
       pinStatus: "pinned" | "not_pinned";
+    }
+  | {
+      status:
+        | "replacement_scheduled"
+        | "replacement_created"
+        | "replacement_retrying"
+        | "completed_auto_disabled";
+      operationId: string;
+      sourcePostId: string;
+      postId?: string;
     };
 
 /**
@@ -48,9 +67,11 @@ export async function reconcileOnboardingForLifecycle(
   {
     lifecycleSource,
     nowMs = Date.now(),
+    appSettings = getAppSettings(),
   }: {
     lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">;
     nowMs?: number;
+    appSettings?: ServerAppSettings;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
   const goalLockToken = await acquireLock(
@@ -94,6 +115,7 @@ export async function reconcileOnboardingForLifecycle(
         redis,
         nowMs,
         notifyOnFailure: true,
+        respectClassicGoalCompletion: lifecycleSource === "upgrade",
       });
       logDiagnostic("info", "onboarding_lifecycle_pinned_goal_checked", {
         workflow: "onboarding_lifecycle",
@@ -109,7 +131,105 @@ export async function reconcileOnboardingForLifecycle(
         failed: pinned.failed,
       });
 
-      if (pinned.status !== "missing" && pinned.postId && pinned.source) {
+      if (
+        pinned.status === "completed" &&
+        pinned.postId &&
+        pinned.source &&
+        pinned.completedTime
+      ) {
+        const operationId =
+          previousGoal?.operationId ?? createOperationId(nowMs);
+        let outcome:
+          | "replacement_scheduled"
+          | "replacement_created"
+          | "replacement_retrying"
+          | "completed_auto_disabled" = "completed_auto_disabled";
+        let successorPostId: string | undefined;
+        if (pinned.autoCreateNextGoal) {
+          await scheduleAutoCreateNextGoal(
+            redis,
+            pinned.postId,
+            pinned.completedTime,
+          );
+          outcome = "replacement_scheduled";
+          if (pinned.completedTime + autoCreateNextGoalDelayMs <= nowMs) {
+            const summary = await processDueAutoCreateNextGoals({
+              reddit,
+              redis,
+              appSettings,
+              nowMs,
+            });
+            const mappedSuccessor = await redis.hGet(
+              autoCreateNextGoalSuccessorsKey,
+              pinned.postId,
+            );
+            successorPostId =
+              mappedSuccessor && mappedSuccessor.length > 0
+                ? mappedSuccessor
+                : undefined;
+            outcome =
+              summary.created > 0 || successorPostId
+                ? "replacement_created"
+                : summary.rescheduled > 0 || summary.failed > 0
+                  ? "replacement_retrying"
+                  : "replacement_scheduled";
+          }
+        }
+
+        const terminalPostId = successorPostId ?? pinned.postId;
+        const nextGoal: OnboardingSubscriberGoalState = {
+          version: onboardingSubscriberGoalVersion,
+          status: "complete",
+          armedAt: previousGoal?.armedAt ?? nowMs,
+          lifecycleSource,
+          creationStaggerMinutes:
+            previousGoal?.creationStaggerMinutes ??
+            selectOnboardingGoalStaggerMinutes(),
+          operationId,
+          completedAt: nowMs,
+          postId: terminalPostId,
+          existingSource: pinned.source,
+          resultStatus: outcome,
+        };
+        const nextReminder: OnboardingReminderState = {
+          version: onboardingReminderVersion,
+          status: "complete",
+          armedAt: previousReminder?.armedAt ?? nextGoal.armedAt,
+          nextRunAt: previousReminder?.nextRunAt ?? nowMs,
+          lifecycleSource,
+          reminderStaggerMinutes:
+            previousReminder?.reminderStaggerMinutes ??
+            selectOnboardingReminderStaggerMinutes(),
+          completedAt: nowMs,
+          postId: terminalPostId,
+          existingSource: pinned.source,
+          result: outcome,
+        };
+        await savePairedState(redis, previousGoal, nextGoal, nextReminder);
+        logDiagnostic("info", "onboarding_completed_goal_reconciled", {
+          workflow: "onboarding_lifecycle",
+          phase: "completed_goal_replacement",
+          lifecycleSource,
+          outcome,
+          sourcePostId: pinned.postId,
+          successorPostId: successorPostId ?? "none",
+          completedTime: pinned.completedTime,
+          autoCreateNextGoal: pinned.autoCreateNextGoal ?? false,
+        });
+        return {
+          status: outcome,
+          operationId,
+          sourcePostId: pinned.postId,
+          ...(successorPostId ? { postId: successorPostId } : {}),
+        };
+      }
+
+      if (
+        pinned.status !== "missing" &&
+        pinned.status !== "completed" &&
+        pinned.postId &&
+        pinned.source
+      ) {
         const operationId =
           previousGoal?.operationId ?? createOperationId(nowMs);
         const nextGoal: OnboardingSubscriberGoalState = {
@@ -125,9 +245,7 @@ export async function reconcileOnboardingForLifecycle(
           postId: pinned.postId,
           existingSource: pinned.source,
           resultStatus:
-            pinned.status === "existing"
-              ? "existing"
-              : "existing_not_pinned",
+            pinned.status === "existing" ? "existing" : "existing_not_pinned",
           ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
         };
         const nextReminder: OnboardingReminderState = {
@@ -143,9 +261,7 @@ export async function reconcileOnboardingForLifecycle(
           postId: pinned.postId,
           existingSource: pinned.source,
           result:
-            pinned.status === "existing"
-              ? "existing"
-              : "existing_not_pinned",
+            pinned.status === "existing" ? "existing" : "existing_not_pinned",
           ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
         };
         await savePairedState(redis, previousGoal, nextGoal, nextReminder);
@@ -166,8 +282,7 @@ export async function reconcileOnboardingForLifecycle(
           operationId,
           postId: pinned.postId,
           existingSource: pinned.source,
-          pinStatus:
-            pinned.status === "existing" ? "pinned" : "not_pinned",
+          pinStatus: pinned.status === "existing" ? "pinned" : "not_pinned",
         };
       }
 

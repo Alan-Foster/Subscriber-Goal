@@ -31,6 +31,8 @@ import {
   untrackPost,
 } from "../data/updaterData";
 import {
+  checkCompletionStatus,
+  getSubGoalData,
   postGoalSuffix,
   postHeightSuffix,
   postKindSuffix,
@@ -107,7 +109,11 @@ type ExtendedOnboardingResultStatus =
   | "delivery_unknown"
   | "retry_exhausted"
   | "created_not_pinned"
-  | "existing_not_pinned";
+  | "existing_not_pinned"
+  | "replacement_scheduled"
+  | "replacement_created"
+  | "replacement_retrying"
+  | "completed_auto_disabled";
 
 export type OnboardingLifecycleSource =
   | "install"
@@ -133,10 +139,7 @@ export type OnboardingExistingSource =
   | "pinned"
   | "search"
   | "recent";
-export type OnboardingGoalDetectionMode =
-  | "pinned"
-  | "active_or_recent"
-  | "all";
+export type OnboardingGoalDetectionMode = "pinned" | "active_or_recent" | "all";
 export type OnboardingGoalClassification =
   | "classic"
   | "tiny"
@@ -235,11 +238,14 @@ export type OnboardingGoalCandidate = {
   postKind?: string;
   postHeight?: string;
   classification: OnboardingGoalClassification;
+  goal?: number;
+  completedTime?: number;
+  autoCreateNextGoal?: boolean;
   discoveryOrder: number;
 };
 
 export type OnboardingPinEnsuranceResult = OnboardingDetectionDiagnostics & {
-  status: "missing" | "existing" | "existing_not_pinned";
+  status: "missing" | "existing" | "existing_not_pinned" | "completed";
   postId?: string;
   source?: OnboardingExistingSource;
   classification?: OnboardingGoalClassification;
@@ -252,6 +258,9 @@ export type OnboardingPinEnsuranceResult = OnboardingDetectionDiagnostics & {
   protectedPinsPreserved: string[];
   verificationResult?: "pinned" | "not_pinned";
   notificationOutcome?: "sent" | "failed" | "not_requested";
+  goal?: number;
+  completedTime?: number;
+  autoCreateNextGoal?: boolean;
   errorMessage?: string;
 };
 
@@ -746,10 +755,10 @@ export async function processDueOnboardingSubscriberGoal({
         postId: existing.postId,
         existingSource: existing.source!,
         resultStatus:
-          existing.status === "existing"
-            ? "existing"
-            : "existing_not_pinned",
-        ...(existing.errorMessage ? { errorMessage: existing.errorMessage } : {}),
+          existing.status === "existing" ? "existing" : "existing_not_pinned",
+        ...(existing.errorMessage
+          ? { errorMessage: existing.errorMessage }
+          : {}),
       });
       console.info(
         `[onboardingSubscriberGoal] complete: status=${existing.status} existingSource=${existing.source} postId=${existing.postId} source=${reloaded.lifecycleSource} creationStaggerMinutes=${reloaded.creationStaggerMinutes} ${formatDetectionDiagnostics(inspected)}`,
@@ -1295,7 +1304,9 @@ export async function findValidSubscriberGoals(
   reddit: RedditClient,
   redis: RedisClient,
   nowMs = Date.now(),
-): Promise<OnboardingDetectionDiagnostics & { candidates: OnboardingGoalCandidate[] }> {
+): Promise<
+  OnboardingDetectionDiagnostics & { candidates: OnboardingGoalCandidate[] }
+> {
   const diagnostics: OnboardingDetectionDiagnostics = {
     registeredInspected: 0,
     trackedInspected: 0,
@@ -1318,7 +1329,9 @@ export async function findValidSubscriberGoals(
       reddit.getAppUser(),
     ]);
   if (!appUser?.username) {
-    throw new Error("Could not resolve app user while checking onboarding posts.");
+    throw new Error(
+      "Could not resolve app user while checking onboarding posts.",
+    );
   }
 
   const candidates: OnboardingGoalCandidate[] = [];
@@ -1332,7 +1345,14 @@ export async function findValidSubscriberGoals(
     const postId = post.id;
     if (!postId || seen.has(postId) || !isLinkId(postId)) return;
     seen.add(postId);
-    if (!(await isSubscriberGoalCandidate(redis, post, subreddit, appUser.username))) {
+    if (
+      !(await isSubscriberGoalCandidate(
+        redis,
+        post,
+        subreddit,
+        appUser.username,
+      ))
+    ) {
       if (pruneInvalid) {
         await pruneStaleCandidate(redis, postId);
         diagnostics.stalePruned += 1;
@@ -1433,12 +1453,14 @@ export async function ensureExistingSubscriberGoalPinned({
   redis,
   nowMs = Date.now(),
   notifyOnFailure = false,
+  respectClassicGoalCompletion = false,
   stickyVerification,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
   notifyOnFailure?: boolean;
+  respectClassicGoalCompletion?: boolean;
   stickyVerification?: Partial<{
     maxWaitMs: number;
     intervalMs: number;
@@ -1446,14 +1468,44 @@ export async function ensureExistingSubscriberGoalPinned({
 }): Promise<OnboardingPinEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
   const { candidates, ...diagnostics } = discovery;
+  if (respectClassicGoalCompletion) {
+    const subreddit = await reddit.getCurrentSubreddit();
+    for (const candidate of candidates) {
+      if (
+        candidate.classification === "tiny" ||
+        candidate.classification === "cta"
+      ) {
+        continue;
+      }
+      const goalData = await getSubGoalData(
+        redis,
+        candidate.postId,
+        candidate.post.postData ?? candidate.post.customPostData,
+      );
+      if (goalData.goal <= 0) continue;
+      candidate.goal = goalData.goal;
+      candidate.completedTime = goalData.completedTime;
+      candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
+      if (
+        !candidate.completedTime &&
+        subreddit.numberOfSubscribers >= candidate.goal
+      ) {
+        candidate.completedTime = await checkCompletionStatus(
+          reddit,
+          redis,
+          candidate.postId,
+          { now: () => nowMs },
+        );
+      }
+    }
+  }
   const pinned = candidates.filter((candidate) => candidate.isPinned);
   const pinnedClassic = pinned.filter(
     (candidate) => candidate.classification === "classic",
   );
   const protectedPinned = pinned.filter(
     (candidate) =>
-      candidate.classification === "tiny" ||
-      candidate.classification === "cta",
+      candidate.classification === "tiny" || candidate.classification === "cta",
   );
   const ambiguousPinned = pinned.filter(
     (candidate) => candidate.classification === "ambiguous",
@@ -1465,11 +1517,105 @@ export async function ensureExistingSubscriberGoalPinned({
     pinnedProtectedCount: protectedPinned.length,
     pinnedAmbiguousCount: ambiguousPinned.length,
     classicPostsUnpinned: [] as string[],
-    protectedPinsPreserved: protectedPinned.map((candidate) => candidate.postId),
+    protectedPinsPreserved: protectedPinned.map(
+      (candidate) => candidate.postId,
+    ),
   };
   if (candidates.length === 0) {
     logPinEnsurance("missing", base);
     return { status: "missing", ...base };
+  }
+
+  if (respectClassicGoalCompletion) {
+    const targetGoals = candidates.filter(
+      (candidate) => candidate.goal !== undefined && candidate.goal > 0,
+    );
+    const activeGoals = targetGoals.filter(
+      (candidate) => !candidate.completedTime,
+    );
+    if (activeGoals.length > 0) {
+      const pinnedActiveGoals = activeGoals.filter(
+        (candidate) => candidate.isPinned,
+      );
+      const selected = newestGoalCandidate(
+        pinnedActiveGoals.length > 0 ? pinnedActiveGoals : activeGoals,
+      );
+      const selectedWasAlreadyPinned = selected.isPinned;
+      const pinFailure = selectedWasAlreadyPinned
+        ? undefined
+        : await pinExistingGoal({
+            reddit,
+            selected,
+            notifyOnFailure,
+            ...(stickyVerification ? { stickyVerification } : {}),
+          });
+      if (pinFailure) {
+        const result: OnboardingPinEnsuranceResult = {
+          status: "existing_not_pinned",
+          ...base,
+          postId: selected.postId,
+          source: selected.source,
+          classification: selected.classification,
+          selectedWasAlreadyPinned,
+          verificationResult: "not_pinned",
+          notificationOutcome: pinFailure.notificationOutcome,
+          ...(pinFailure.errorMessage
+            ? { errorMessage: pinFailure.errorMessage }
+            : {}),
+        };
+        logPinEnsurance(result.status, result);
+        return result;
+      }
+      for (const candidate of pinnedClassic) {
+        if (candidate.postId === selected.postId) continue;
+        if (await safelyUnstickyCandidate(reddit, candidate)) {
+          base.classicPostsUnpinned.push(candidate.postId);
+        }
+      }
+      const result: OnboardingPinEnsuranceResult = {
+        status: "existing",
+        ...base,
+        postId: selected.postId,
+        source: selected.source,
+        classification: selected.classification,
+        selectedWasAlreadyPinned,
+        verificationResult: "pinned",
+        notificationOutcome: "not_requested",
+      };
+      logPinEnsurance(result.status, result);
+      return result;
+    }
+
+    const completedGoals = targetGoals.filter((candidate) =>
+      Boolean(candidate.completedTime),
+    );
+    if (completedGoals.length > 0) {
+      const autoReplaceableGoals = completedGoals.filter(
+        (candidate) => candidate.autoCreateNextGoal,
+      );
+      const selected = newestGoalCandidate(
+        autoReplaceableGoals.length > 0 ? autoReplaceableGoals : completedGoals,
+      );
+      const result: OnboardingPinEnsuranceResult = {
+        status: "completed",
+        ...base,
+        postId: selected.postId,
+        source: selected.source,
+        classification: selected.classification,
+        selectedWasAlreadyPinned: selected.isPinned,
+        ...(selected.isPinned ? { verificationResult: "pinned" as const } : {}),
+        notificationOutcome: "not_requested",
+        ...(selected.goal === undefined ? {} : { goal: selected.goal }),
+        ...(selected.completedTime === undefined
+          ? {}
+          : { completedTime: selected.completedTime }),
+        ...(selected.autoCreateNextGoal === undefined
+          ? {}
+          : { autoCreateNextGoal: selected.autoCreateNextGoal }),
+      };
+      logPinEnsurance(result.status, result);
+      return result;
+    }
   }
 
   let selected: OnboardingGoalCandidate;
@@ -1482,7 +1628,8 @@ export async function ensureExistingSubscriberGoalPinned({
       stickyResult = {
         status: "not_pinned",
         verifiedStickied: false,
-        errorMessage: "Unable to pin the existing goal because post.sticky is unavailable.",
+        errorMessage:
+          "Unable to pin the existing goal because post.sticky is unavailable.",
       };
     } else {
       stickyResult = await stickyAndVerifyPost(
@@ -1499,8 +1646,7 @@ export async function ensureExistingSubscriberGoalPinned({
           maxWaitMs:
             stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
           intervalMs:
-            stickyVerification?.intervalMs ??
-            STICKY_VERIFICATION_INTERVAL_MS,
+            stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
         },
       );
     }
@@ -1576,6 +1722,86 @@ export async function ensureExistingSubscriberGoalPinned({
   return result;
 }
 
+async function pinExistingGoal({
+  reddit,
+  selected,
+  notifyOnFailure,
+  stickyVerification,
+}: {
+  reddit: RedditClient;
+  selected: OnboardingGoalCandidate;
+  notifyOnFailure: boolean;
+  stickyVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+}): Promise<
+  | {
+      notificationOutcome: "sent" | "failed" | "not_requested";
+      errorMessage?: string;
+    }
+  | undefined
+> {
+  const stickyResult =
+    typeof selected.post.sticky !== "function"
+      ? {
+          status: "not_pinned" as const,
+          verifiedStickied: false,
+          errorMessage:
+            "Unable to pin the existing goal because post.sticky is unavailable.",
+        }
+      : await stickyAndVerifyPost(
+          reddit,
+          {
+            id: selected.postId,
+            sticky: selected.post.sticky,
+            ...(selected.post.isStickied
+              ? { isStickied: selected.post.isStickied }
+              : {}),
+          },
+          (await reddit.getCurrentSubreddit()).name,
+          {
+            maxWaitMs:
+              stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
+            intervalMs:
+              stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
+          },
+        );
+  if (stickyResult.status === "pinned") return undefined;
+
+  let notificationOutcome: "sent" | "failed" | "not_requested" =
+    "not_requested";
+  if (notifyOnFailure) {
+    try {
+      const subreddit = await reddit.getCurrentSubreddit();
+      notificationOutcome = await notifyStickyFailure({
+        reddit,
+        subredditId: subreddit.id,
+        subredditName: subreddit.name,
+        postTitle: selected.post.title ?? "Subscriber Goal",
+        postUrl: getPostUrl(selected.post),
+        errorMessage: stickyResult.errorMessage,
+        postOrigin: "existing",
+      });
+    } catch (error) {
+      notificationOutcome = "failed";
+      logDiagnostic(
+        "warn",
+        "onboarding_existing_goal_notification_failed",
+        {
+          workflow: "onboarding_pin_ensurance",
+          phase: "sticky_notification",
+          postId: selected.postId,
+        },
+        error,
+      );
+    }
+  }
+  return {
+    notificationOutcome,
+    ...(stickyResult.errorMessage
+      ? { errorMessage: stickyResult.errorMessage }
+      : {}),
+  };
+}
+
 async function getGoalCandidateMetadata(
   redis: RedisClient,
   post: CandidatePost,
@@ -1639,7 +1865,9 @@ async function safelyUnstickyCandidate(
   }
   try {
     await candidate.post.unsticky();
-    const refreshed = (await reddit.getPostById(candidate.postId)) as CandidatePost;
+    const refreshed = (await reddit.getPostById(
+      candidate.postId,
+    )) as CandidatePost;
     return !(await isStickied(refreshed));
   } catch (error) {
     if (isMissingPostError(error)) return true;
@@ -1659,7 +1887,9 @@ async function safelyUnstickyCandidate(
 
 function logPinEnsurance(
   status: OnboardingPinEnsuranceResult["status"],
-  result: Omit<OnboardingPinEnsuranceResult, "status"> | OnboardingPinEnsuranceResult,
+  result:
+    | Omit<OnboardingPinEnsuranceResult, "status">
+    | OnboardingPinEnsuranceResult,
 ): void {
   logDiagnostic("info", "onboarding_goal_pin_ensurance_completed", {
     workflow: "onboarding_pin_ensurance",
@@ -1672,8 +1902,7 @@ function logPinEnsurance(
     pinnedProtectedCount: result.pinnedProtectedCount,
     pinnedAmbiguousCount: result.pinnedAmbiguousCount,
     classicPostsUnpinned: result.classicPostsUnpinned.join(",") || "none",
-    protectedPinsPreserved:
-      result.protectedPinsPreserved.join(",") || "none",
+    protectedPinsPreserved: result.protectedPinsPreserved.join(",") || "none",
     verificationResult: result.verificationResult ?? "not_attempted",
     notificationOutcome: result.notificationOutcome ?? "not_requested",
   });
@@ -1896,7 +2125,11 @@ function parseOnboardingState(
     raw.resultStatus === "delivery_unknown" ||
     raw.resultStatus === "retry_exhausted" ||
     raw.resultStatus === "created_not_pinned" ||
-    raw.resultStatus === "existing_not_pinned"
+    raw.resultStatus === "existing_not_pinned" ||
+    raw.resultStatus === "replacement_scheduled" ||
+    raw.resultStatus === "replacement_created" ||
+    raw.resultStatus === "replacement_retrying" ||
+    raw.resultStatus === "completed_auto_disabled"
   ) {
     state.resultStatus = raw.resultStatus;
   }

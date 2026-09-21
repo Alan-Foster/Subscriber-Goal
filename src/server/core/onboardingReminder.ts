@@ -55,7 +55,11 @@ type OnboardingReminderResult =
   | "failed"
   | "cancelled_permission"
   | "delivery_unknown"
-  | "retry_exhausted";
+  | "retry_exhausted"
+  | "replacement_scheduled"
+  | "replacement_created"
+  | "replacement_retrying"
+  | "completed_auto_disabled";
 
 export type OnboardingReminderState = {
   version: typeof onboardingReminderVersion;
@@ -486,9 +490,7 @@ export async function processDueOnboardingReminder({
         status: "complete",
         completedAt: nowMs,
         result:
-          existing.status === "existing"
-            ? "existing"
-            : "existing_not_pinned",
+          existing.status === "existing" ? "existing" : "existing_not_pinned",
         postId: existing.postId,
         existingSource,
         ...(existing.errorMessage
@@ -862,7 +864,11 @@ function isResult(
     value === "failed" ||
     value === "cancelled_permission" ||
     value === "delivery_unknown" ||
-    value === "retry_exhausted"
+    value === "retry_exhausted" ||
+    value === "replacement_scheduled" ||
+    value === "replacement_created" ||
+    value === "replacement_retrying" ||
+    value === "completed_auto_disabled"
   );
 }
 
