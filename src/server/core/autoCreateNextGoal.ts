@@ -5,6 +5,7 @@ import {
   cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
+  markAutoCreateNextGoalExhausted,
   recordAutoCreateNextGoalFailure,
 } from "../data/subGoalData";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
@@ -233,7 +234,11 @@ export async function processDueAutoCreateNextGoals({
         );
       } else {
         summary.exhausted += 1;
-        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        await markAutoCreateNextGoalExhausted(
+          redis,
+          sourcePostId,
+          retry.failureCount,
+        );
         logDiagnostic(
           "error",
           "auto_create_goal_retries_exhausted",

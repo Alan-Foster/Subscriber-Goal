@@ -1,14 +1,10 @@
 import { logDiagnostic } from "../../shared/diagnostics";
-import {
-  autoCreateNextGoalDelayMs,
-  scheduleAutoCreateNextGoal,
-} from "../data/subGoalData";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import {
-  autoCreateNextGoalSuccessorsKey,
-  processDueAutoCreateNextGoals,
-} from "./autoCreateNextGoal";
+  reconcileCompletedGoal,
+  type CompletedGoalReconciliationOutcome,
+} from "./completedGoalReconciliation";
 import {
   ensureExistingSubscriberGoalPinned,
   getOnboardingSubscriberGoalState,
@@ -47,11 +43,7 @@ export type OnboardingLifecycleReconciliation =
       pinStatus: "pinned" | "not_pinned";
     }
   | {
-      status:
-        | "replacement_scheduled"
-        | "replacement_created"
-        | "replacement_retrying"
-        | "completed_auto_disabled";
+      status: CompletedGoalReconciliationOutcome;
       operationId: string;
       sourcePostId: string;
       postId?: string;
@@ -115,7 +107,6 @@ export async function reconcileOnboardingForLifecycle(
         redis,
         nowMs,
         notifyOnFailure: true,
-        respectClassicGoalCompletion: lifecycleSource === "upgrade",
       });
       logDiagnostic("info", "onboarding_lifecycle_pinned_goal_checked", {
         workflow: "onboarding_lifecycle",
@@ -139,42 +130,17 @@ export async function reconcileOnboardingForLifecycle(
       ) {
         const operationId =
           previousGoal?.operationId ?? createOperationId(nowMs);
-        let outcome:
-          | "replacement_scheduled"
-          | "replacement_created"
-          | "replacement_retrying"
-          | "completed_auto_disabled" = "completed_auto_disabled";
-        let successorPostId: string | undefined;
-        if (pinned.autoCreateNextGoal) {
-          await scheduleAutoCreateNextGoal(
-            redis,
-            pinned.postId,
-            pinned.completedTime,
-          );
-          outcome = "replacement_scheduled";
-          if (pinned.completedTime + autoCreateNextGoalDelayMs <= nowMs) {
-            const summary = await processDueAutoCreateNextGoals({
-              reddit,
-              redis,
-              appSettings,
-              nowMs,
-            });
-            const mappedSuccessor = await redis.hGet(
-              autoCreateNextGoalSuccessorsKey,
-              pinned.postId,
-            );
-            successorPostId =
-              mappedSuccessor && mappedSuccessor.length > 0
-                ? mappedSuccessor
-                : undefined;
-            outcome =
-              summary.created > 0 || successorPostId
-                ? "replacement_created"
-                : summary.rescheduled > 0 || summary.failed > 0
-                  ? "replacement_retrying"
-                  : "replacement_scheduled";
-          }
-        }
+        const completed = await reconcileCompletedGoal({
+          reddit,
+          redis,
+          appSettings,
+          lifecycleSource,
+          sourcePostId: pinned.postId,
+          completedTime: pinned.completedTime,
+          autoCreateNextGoal: pinned.autoCreateNextGoal ?? false,
+          nowMs,
+        });
+        const { outcome, successorPostId } = completed;
 
         const terminalPostId = successorPostId ?? pinned.postId;
         const nextGoal: OnboardingSubscriberGoalState = {

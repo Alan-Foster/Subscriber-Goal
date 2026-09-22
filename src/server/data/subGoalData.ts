@@ -62,6 +62,8 @@ export const completionTransitionLockKeyPrefix =
 export const completionTransitionLockTtlMs = 30_000;
 export const autoCreateNextGoalRetryAttemptsKey =
   "auto_create_next_goal_retry_attempts_v1";
+export const autoCreateNextGoalExhaustedKey =
+  "auto_create_next_goal_exhausted_v1";
 export const autoCreateNextGoalRetryDelayMs = [
   5 * 60 * 1000,
   15 * 60 * 1000,
@@ -562,6 +564,76 @@ export async function scheduleAutoCreateNextGoal(
       score: completedTime + autoCreateNextGoalDelayMs,
     }),
     redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+    redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),
+  ]);
+}
+
+export type AutoCreateNextGoalRepairResult = {
+  status: "scheduled" | "queued" | "retrying" | "exhausted";
+  runAt?: number;
+  failureCount: number;
+};
+
+export async function repairAutoCreateNextGoal(
+  redis: RedisClient,
+  postId: string,
+  completedTime: number,
+  nowMs = Date.now(),
+): Promise<AutoCreateNextGoalRepairResult> {
+  const [pending, rawFailureCount, exhausted] = await Promise.all([
+    redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+    redis.hGet(autoCreateNextGoalRetryAttemptsKey, postId),
+    redis.hGet(autoCreateNextGoalExhaustedKey, postId),
+  ]);
+  const failureCount = Number(rawFailureCount) || 0;
+  const queued = pending.find((entry) => entry.member === postId);
+  if (queued) {
+    return {
+      status: failureCount > 0 ? "retrying" : "queued",
+      runAt: queued.score,
+      failureCount,
+    };
+  }
+  if (exhausted) {
+    return {
+      status: "exhausted",
+      failureCount: Number(exhausted) || failureCount,
+    };
+  }
+  const retryDelay = autoCreateNextGoalRetryDelayMs[failureCount - 1];
+  if (failureCount > 0 && retryDelay !== undefined) {
+    const runAt = nowMs + retryDelay;
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: postId,
+      score: runAt,
+    });
+    return { status: "retrying", runAt, failureCount };
+  }
+  if (failureCount > autoCreateNextGoalRetryDelayMs.length) {
+    await redis.hSet(autoCreateNextGoalExhaustedKey, {
+      [postId]: String(failureCount),
+    });
+    return { status: "exhausted", failureCount };
+  }
+
+  const runAt = completedTime + autoCreateNextGoalDelayMs;
+  await Promise.all([
+    redis.zAdd(autoCreateNextGoalQueueKey, { member: postId, score: runAt }),
+    redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+  ]);
+  return { status: "scheduled", runAt, failureCount: 0 };
+}
+
+export async function markAutoCreateNextGoalExhausted(
+  redis: RedisClient,
+  postId: string,
+  failureCount: number,
+): Promise<void> {
+  await Promise.all([
+    redis.zRem(autoCreateNextGoalQueueKey, [postId]),
+    redis.hSet(autoCreateNextGoalExhaustedKey, {
+      [postId]: String(failureCount),
+    }),
   ]);
 }
 
@@ -594,6 +666,7 @@ export async function cancelAutoCreateNextGoal(
   await Promise.all([
     redis.zRem(autoCreateNextGoalQueueKey, [postId]),
     redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+    redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),
   ]);
 }
 
@@ -606,6 +679,7 @@ export async function cancelAllAutoCreateNextGoals(
     await Promise.all([
       redis.zRem(autoCreateNextGoalQueueKey, postIds),
       redis.hDel(autoCreateNextGoalRetryAttemptsKey, postIds),
+      redis.hDel(autoCreateNextGoalExhaustedKey, postIds),
     ]);
   }
 }
@@ -638,6 +712,7 @@ export async function checkCompletionStatus(
     now?: () => number;
     wait?: (delayMs: number) => Promise<void>;
     scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
+    scheduleAutomaticSuccessor?: boolean;
   } = {},
 ): Promise<number> {
   const subGoalData = await getSubGoalData(redis, postId);
@@ -714,7 +789,10 @@ export async function checkCompletionStatus(
         );
       }
     }
-    if (lockedSubGoalData.autoCreateNextGoal) {
+    if (
+      lockedSubGoalData.autoCreateNextGoal &&
+      options.scheduleAutomaticSuccessor !== false
+    ) {
       try {
         await scheduleAutoCreateNextGoal(
           redis,

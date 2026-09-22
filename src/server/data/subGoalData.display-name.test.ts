@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,
+  autoCreateNextGoalExhaustedKey,
   autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalRetryDelayMs,
   cancelAutoCreateNextGoal,
@@ -11,6 +12,7 @@ import {
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
   recordAutoCreateNextGoalFailure,
+  repairAutoCreateNextGoal,
   recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
   registerNewSubGoalPost,
@@ -771,6 +773,67 @@ describe("subGoalData subreddit display name", () => {
       redis.hGet(autoCreateNextGoalRetryAttemptsKey, "t3_retry"),
     ).resolves.toBeUndefined();
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+  });
+
+  it("repairs only missing auto-create work and preserves retry backoff", async () => {
+    const redis = new InMemoryRedis();
+    const typedRedis = redis as unknown as Parameters<
+      typeof repairAutoCreateNextGoal
+    >[0];
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: "t3_retry",
+      score: 123_000,
+    });
+    await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { t3_retry: "2" });
+
+    await expect(
+      repairAutoCreateNextGoal(typedRedis, "t3_retry", 1_000),
+    ).resolves.toEqual({
+      status: "retrying",
+      runAt: 123_000,
+      failureCount: 2,
+    });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: "t3_retry", score: 123_000 },
+    ]);
+    await expect(
+      redis.hGet(autoCreateNextGoalRetryAttemptsKey, "t3_retry"),
+    ).resolves.toBe("2");
+  });
+
+  it("does not repair exhausted auto-create work", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_exhausted: "6" });
+
+    await expect(
+      repairAutoCreateNextGoal(
+        redis as unknown as Parameters<typeof repairAutoCreateNextGoal>[0],
+        "t3_exhausted",
+        1_000,
+      ),
+    ).resolves.toEqual({ status: "exhausted", failureCount: 6 });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+  });
+
+  it("repairs an orphaned retry without resetting its failure count", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { t3_retry: "2" });
+
+    await expect(
+      repairAutoCreateNextGoal(
+        redis as unknown as Parameters<typeof repairAutoCreateNextGoal>[0],
+        "t3_retry",
+        1_000,
+        10_000,
+      ),
+    ).resolves.toEqual({
+      status: "retrying",
+      runAt: 10_000 + autoCreateNextGoalRetryDelayMs[1],
+      failureCount: 2,
+    });
+    await expect(
+      redis.hGet(autoCreateNextGoalRetryAttemptsKey, "t3_retry"),
+    ).resolves.toBe("2");
   });
 
   it("queues auto-create when an enabled goal reaches completion", async () => {

@@ -21,6 +21,7 @@ const hoisted = vi.hoisted(() => ({
   cancelAutoCreateNextGoal: vi.fn(),
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
+  markAutoCreateNextGoalExhausted: vi.fn(),
   recordAutoCreateNextGoalFailure: vi.fn(),
   createSubscriberGoal: vi.fn(),
   notifyStickyFailure: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock('../data/subGoalData', () => ({
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
   getSubGoalData: hoisted.getSubGoalData,
+  markAutoCreateNextGoalExhausted: hoisted.markAutoCreateNextGoalExhausted,
   recordAutoCreateNextGoalFailure: hoisted.recordAutoCreateNextGoalFailure
 }));
 
@@ -79,6 +81,7 @@ describe('processDueAutoCreateNextGoals', () => {
       failureCount: 1,
       retryAt: 301_000
     });
+    hoisted.markAutoCreateNextGoalExhausted.mockResolvedValue(undefined);
     hoisted.getSubGoalData.mockResolvedValue({
       goal: 5,
       recentSubscriber: '',
@@ -471,7 +474,7 @@ describe('processDueAutoCreateNextGoals', () => {
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
-  it('clears a failed automatic creation after retries are exhausted', async () => {
+  it('marks a failed automatic creation after retries are exhausted', async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(['t3_source']);
     hoisted.createSubscriberGoal.mockRejectedValue(new Error('post failed'));
     hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
@@ -494,7 +497,11 @@ describe('processDueAutoCreateNextGoals', () => {
       exhausted: 1
     });
 
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(hoisted.redis, 't3_source');
+    expect(hoisted.markAutoCreateNextGoalExhausted).toHaveBeenCalledWith(
+      hoisted.redis,
+      't3_source',
+      6
+    );
   });
 
   it('notifies moderators when an auto-created goal cannot be pinned', async () => {

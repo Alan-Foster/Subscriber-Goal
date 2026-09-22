@@ -56,6 +56,10 @@ import {
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {
+  reconcileCompletedGoal,
+  type CompletedGoalReconciliationOutcome,
+} from "./completedGoalReconciliation";
+import {
   getAutomaticGoalEligibility,
   type AutomaticGoalIneligibilityReason,
 } from "./automaticGoalEligibility";
@@ -113,7 +117,9 @@ type ExtendedOnboardingResultStatus =
   | "replacement_scheduled"
   | "replacement_created"
   | "replacement_retrying"
-  | "completed_auto_disabled";
+  | "replacement_exhausted"
+  | "completed_auto_disabled"
+  | "completed_no_recovery";
 
 export type OnboardingLifecycleSource =
   | "install"
@@ -544,6 +550,23 @@ export async function markOnboardingSubscriberGoalExistingNotPinned(
   }));
 }
 
+export async function markOnboardingSubscriberGoalCompleted(
+  redis: RedisClient,
+  postId: string,
+  existingSource: OnboardingExistingSource,
+  resultStatus: CompletedGoalReconciliationOutcome,
+  nowMs = Date.now(),
+): Promise<void> {
+  await mutateGoalTerminalOrSchedule(redis, nowMs, (state) => ({
+    ...state,
+    status: "complete",
+    completedAt: nowMs,
+    postId,
+    existingSource,
+    resultStatus,
+  }));
+}
+
 export async function markOnboardingSubscriberGoalIneligible(
   redis: RedisClient,
   subscriberCount: number,
@@ -747,6 +770,39 @@ export async function processDueOnboardingSubscriberGoal({
       stalePruned: existing.stalePruned,
       failed: existing.failed,
     };
+    if (
+      existing.status === "completed" &&
+      existing.postId &&
+      existing.source &&
+      existing.completedTime
+    ) {
+      const completed = await reconcileCompletedGoal({
+        reddit,
+        redis,
+        appSettings,
+        lifecycleSource: reloaded.lifecycleSource,
+        sourcePostId: existing.postId,
+        completedTime: existing.completedTime,
+        autoCreateNextGoal: existing.autoCreateNextGoal ?? false,
+        nowMs,
+      });
+      const terminalPostId = completed.successorPostId ?? existing.postId;
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        postId: terminalPostId,
+        existingSource: existing.source,
+        resultStatus: completed.outcome,
+      });
+      return {
+        status: "existing",
+        postId: terminalPostId,
+        existingSource: existing.source,
+        lifecycleSource: reloaded.lifecycleSource,
+        ...inspected,
+      };
+    }
     if (existing.status !== "missing" && existing.postId) {
       await saveOnboardingState(redis, {
         ...reloaded,
@@ -869,6 +925,39 @@ export async function processDueOnboardingSubscriberGoal({
       stalePruned: finalExisting.stalePruned,
       failed: finalExisting.failed,
     };
+    if (
+      finalExisting.status === "completed" &&
+      finalExisting.postId &&
+      finalExisting.source &&
+      finalExisting.completedTime
+    ) {
+      const completed = await reconcileCompletedGoal({
+        reddit,
+        redis,
+        appSettings,
+        lifecycleSource: reloaded.lifecycleSource,
+        sourcePostId: finalExisting.postId,
+        completedTime: finalExisting.completedTime,
+        autoCreateNextGoal: finalExisting.autoCreateNextGoal ?? false,
+        nowMs,
+      });
+      const terminalPostId = completed.successorPostId ?? finalExisting.postId;
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        postId: terminalPostId,
+        existingSource: finalExisting.source,
+        resultStatus: completed.outcome,
+      });
+      return {
+        status: "existing",
+        postId: terminalPostId,
+        existingSource: finalExisting.source,
+        lifecycleSource: reloaded.lifecycleSource,
+        ...inspected,
+      };
+    }
     if (finalExisting.status !== "missing" && finalExisting.postId) {
       await saveOnboardingState(redis, {
         ...reloaded,
@@ -1453,14 +1542,12 @@ export async function ensureExistingSubscriberGoalPinned({
   redis,
   nowMs = Date.now(),
   notifyOnFailure = false,
-  respectClassicGoalCompletion = false,
   stickyVerification,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
   notifyOnFailure?: boolean;
-  respectClassicGoalCompletion?: boolean;
   stickyVerification?: Partial<{
     maxWaitMs: number;
     intervalMs: number;
@@ -1468,8 +1555,8 @@ export async function ensureExistingSubscriberGoalPinned({
 }): Promise<OnboardingPinEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
   const { candidates, ...diagnostics } = discovery;
-  if (respectClassicGoalCompletion) {
-    const subreddit = await reddit.getCurrentSubreddit();
+  {
+    let subscriberCount: number | undefined;
     for (const candidate of candidates) {
       if (
         candidate.classification === "tiny" ||
@@ -1486,15 +1573,20 @@ export async function ensureExistingSubscriberGoalPinned({
       candidate.goal = goalData.goal;
       candidate.completedTime = goalData.completedTime;
       candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
+      if (!candidate.completedTime && subscriberCount === undefined) {
+        subscriberCount = (await reddit.getCurrentSubreddit())
+          .numberOfSubscribers;
+      }
       if (
         !candidate.completedTime &&
-        subreddit.numberOfSubscribers >= candidate.goal
+        subscriberCount !== undefined &&
+        subscriberCount >= candidate.goal
       ) {
         candidate.completedTime = await checkCompletionStatus(
           reddit,
           redis,
           candidate.postId,
-          { now: () => nowMs },
+          { now: () => nowMs, scheduleAutomaticSuccessor: false },
         );
       }
     }
@@ -1526,14 +1618,20 @@ export async function ensureExistingSubscriberGoalPinned({
     return { status: "missing", ...base };
   }
 
-  if (respectClassicGoalCompletion) {
+  {
     const targetGoals = candidates.filter(
       (candidate) => candidate.goal !== undefined && candidate.goal > 0,
     );
-    const activeGoals = targetGoals.filter(
-      (candidate) => !candidate.completedTime,
+    const activeGoals = candidates.filter(
+      (candidate) =>
+        candidate.classification !== "tiny" &&
+        candidate.classification !== "cta" &&
+        !candidate.completedTime,
     );
-    if (activeGoals.length > 0) {
+    const completedGoals = targetGoals.filter((candidate) =>
+      Boolean(candidate.completedTime),
+    );
+    if (completedGoals.length > 0 && activeGoals.length > 0) {
       const pinnedActiveGoals = activeGoals.filter(
         (candidate) => candidate.isPinned,
       );
@@ -1586,9 +1684,6 @@ export async function ensureExistingSubscriberGoalPinned({
       return result;
     }
 
-    const completedGoals = targetGoals.filter((candidate) =>
-      Boolean(candidate.completedTime),
-    );
     if (completedGoals.length > 0) {
       const autoReplaceableGoals = completedGoals.filter(
         (candidate) => candidate.autoCreateNextGoal,
@@ -2129,7 +2224,9 @@ function parseOnboardingState(
     raw.resultStatus === "replacement_scheduled" ||
     raw.resultStatus === "replacement_created" ||
     raw.resultStatus === "replacement_retrying" ||
-    raw.resultStatus === "completed_auto_disabled"
+    raw.resultStatus === "replacement_exhausted" ||
+    raw.resultStatus === "completed_auto_disabled" ||
+    raw.resultStatus === "completed_no_recovery"
   ) {
     state.resultStatus = raw.resultStatus;
   }

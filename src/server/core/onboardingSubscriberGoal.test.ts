@@ -88,6 +88,15 @@ class InMemoryRedis {
     return Object.fromEntries(this.hashes.get(key) ?? []);
   }
 
+  async hGet(key: string, field: string): Promise<string | undefined> {
+    return this.hashes.get(key)?.get(field);
+  }
+
+  async hDel(key: string, fields: string[]): Promise<void> {
+    const hash = this.hashes.get(key);
+    for (const field of fields) hash?.delete(field);
+  }
+
   async hSet(key: string, values: Record<string, string>): Promise<void> {
     const hash = this.hashes.get(key) ?? new Map<string, string>();
     for (const [field, value] of Object.entries(values)) {
@@ -796,6 +805,103 @@ describe("onboarding subscriber goal", () => {
       postId: "t3_racing_goal",
       existingSource: "recent",
     });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("does not repin a completed goal found by the initial delayed upgrade check", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const sticky = vi.fn(async () => undefined);
+    const completedPost = {
+      id: "t3_completed_initial",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      stickied: false,
+      createdAt: new Date(nowMs),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+      sticky,
+    };
+    await redis.hSet("subscriber_goals", {
+      [`${completedPost.id}_goal`]: "1000",
+      [`${completedPost.id}_completed_time`]: String(
+        nowMs + onboardingGoalBaseDelayMs - 60 * 60 * 1000,
+      ),
+      [`${completedPost.id}_auto_create_next_goal`]: "true",
+      [`${completedPost.id}_post_kind`]: "subscriber-goal-v1",
+    });
+    reddit.getPostById.mockResolvedValue(completedPost);
+    reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([completedPost]),
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "existing",
+      postId: completedPost.id,
+    });
+    expect(sticky).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("does not repin a completed goal found by the final delayed upgrade check", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const sticky = vi.fn(async () => undefined);
+    const completedPost = {
+      id: "t3_completed_final",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      stickied: false,
+      createdAt: new Date(nowMs),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+      sticky,
+    };
+    reddit.getPostById.mockResolvedValue(completedPost);
+    reddit.getNewPosts
+      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([completedPost]) });
+    hoisted.checkAppAccountHealth.mockImplementationOnce(async () => {
+      await redis.hSet("subscriber_goals", {
+        [`${completedPost.id}_goal`]: "1000",
+        [`${completedPost.id}_completed_time`]: String(
+          nowMs + onboardingGoalBaseDelayMs - 60 * 60 * 1000,
+        ),
+        [`${completedPost.id}_auto_create_next_goal`]: "true",
+        [`${completedPost.id}_post_kind`]: "subscriber-goal-v1",
+      });
+      return {
+        status: "healthy",
+        healthy: true,
+        appUsername: "subscriber-goal",
+        permissions: ["posts"],
+        notification: "not_needed",
+      };
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: nowMs + onboardingGoalBaseDelayMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "existing",
+      postId: completedPost.id,
+    });
+    expect(sticky).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 

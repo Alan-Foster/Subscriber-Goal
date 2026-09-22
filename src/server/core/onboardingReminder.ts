@@ -9,6 +9,7 @@ import {
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalExistingNotPinned,
+  markOnboardingSubscriberGoalCompleted,
   markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled,
   onboardingMaxAttempts,
@@ -20,6 +21,7 @@ import {
   type OnboardingIneligibilityReason,
   type OnboardingLifecycleSource,
 } from "./onboardingSubscriberGoal";
+import { reconcileCompletedGoal } from "./completedGoalReconciliation";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {
   onboardingGoalBaseDelayMs,
@@ -59,7 +61,9 @@ type OnboardingReminderResult =
   | "replacement_scheduled"
   | "replacement_created"
   | "replacement_retrying"
-  | "completed_auto_disabled";
+  | "replacement_exhausted"
+  | "completed_auto_disabled"
+  | "completed_no_recovery";
 
 export type OnboardingReminderState = {
   version: typeof onboardingReminderVersion;
@@ -483,6 +487,44 @@ export async function processDueOnboardingReminder({
       stalePruned: existing.stalePruned ?? 0,
       failed: existing.failed ?? 0,
     };
+    if (
+      existing.status === "completed" &&
+      existing.postId &&
+      existing.source &&
+      existing.completedTime
+    ) {
+      const completed = await reconcileCompletedGoal({
+        reddit,
+        redis,
+        lifecycleSource: reloaded.lifecycleSource,
+        sourcePostId: existing.postId,
+        completedTime: existing.completedTime,
+        autoCreateNextGoal: existing.autoCreateNextGoal ?? false,
+        nowMs,
+      });
+      const terminalPostId = completed.successorPostId ?? existing.postId;
+      await markOnboardingSubscriberGoalCompleted(
+        redis,
+        terminalPostId,
+        existing.source,
+        completed.outcome,
+        nowMs,
+      );
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        result: completed.outcome,
+        postId: terminalPostId,
+        existingSource: existing.source,
+      });
+      return {
+        status: "existing",
+        postId: terminalPostId,
+        existingSource: existing.source,
+        ...inspected,
+      };
+    }
     if (existing.status !== "missing" && existing.postId) {
       const existingSource = existing.source ?? "tracked";
       await saveOnboardingReminderState(redis, {
@@ -768,6 +810,23 @@ async function reconcileCompletedReminder(
       state.completedAt ?? nowMs,
       state.errorMessage,
     );
+  } else if (
+    (state.result === "completed_no_recovery" ||
+      state.result === "completed_auto_disabled" ||
+      state.result === "replacement_scheduled" ||
+      state.result === "replacement_created" ||
+      state.result === "replacement_retrying" ||
+      state.result === "replacement_exhausted") &&
+    state.postId &&
+    state.existingSource
+  ) {
+    await markOnboardingSubscriberGoalCompleted(
+      redis,
+      state.postId,
+      state.existingSource,
+      state.result,
+      state.completedAt ?? nowMs,
+    );
   }
 }
 
@@ -868,7 +927,9 @@ function isResult(
     value === "replacement_scheduled" ||
     value === "replacement_created" ||
     value === "replacement_retrying" ||
-    value === "completed_auto_disabled"
+    value === "replacement_exhausted" ||
+    value === "completed_auto_disabled" ||
+    value === "completed_no_recovery"
   );
 }
 

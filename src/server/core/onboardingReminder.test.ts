@@ -7,8 +7,10 @@ const hoisted = vi.hoisted(() => ({
   markOnboardingSubscriberGoalExisting: vi.fn(),
   markOnboardingSubscriberGoalIneligible: vi.fn(),
   markOnboardingSubscriberGoalCancelled: vi.fn(),
+  markOnboardingSubscriberGoalCompleted: vi.fn(),
   scheduleOnboardingSubscriberGoalAfterWarning: vi.fn(),
   checkAppAccountHealth: vi.fn(),
+  reconcileCompletedGoal: vi.fn(),
 }));
 
 vi.mock("./onboardingSubscriberGoal", () => ({
@@ -53,11 +55,17 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
     hoisted.markOnboardingSubscriberGoalCancelled,
+  markOnboardingSubscriberGoalCompleted:
+    hoisted.markOnboardingSubscriberGoalCompleted,
   onboardingMinimumSubscriberCount: 1_000,
   onboardingMaxAttempts: 3,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+}));
+
+vi.mock("./completedGoalReconciliation", () => ({
+  reconcileCompletedGoal: hoisted.reconcileCompletedGoal,
 }));
 
 vi.mock("./appAccountHealth", () => ({
@@ -184,6 +192,13 @@ describe("onboarding reminder", () => {
     });
     hoisted.markOnboardingSubscriberGoalCancelled.mockReset();
     hoisted.markOnboardingSubscriberGoalCancelled.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalCompleted.mockReset();
+    hoisted.markOnboardingSubscriberGoalCompleted.mockResolvedValue(undefined);
+    hoisted.reconcileCompletedGoal.mockReset();
+    hoisted.reconcileCompletedGoal.mockResolvedValue({
+      outcome: "replacement_scheduled",
+      sourcePostId: "t3_completed",
+    });
     hoisted.checkAppAccountHealth.mockReset();
     hoisted.checkAppAccountHealth.mockResolvedValue({
       status: "healthy",
@@ -474,6 +489,53 @@ describe("onboarding reminder", () => {
       });
     },
   );
+
+  it("does not repin a completed goal discovered by a delayed upgrade reminder", async () => {
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    hoisted.ensureExistingSubscriberGoalPinned.mockResolvedValue({
+      status: "completed",
+      candidateCount: 1,
+      pinnedClassicCount: 0,
+      pinnedProtectedCount: 0,
+      pinnedAmbiguousCount: 0,
+      classicPostsUnpinned: [],
+      protectedPinsPreserved: [],
+      postId: "t3_completed",
+      source: "recent",
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+      autoCreateNextGoal: true,
+      registeredInspected: 0,
+      trackedInspected: 0,
+      queuedInspected: 0,
+      persistedInspected: 0,
+      pinnedInspected: 0,
+      searchInspected: 0,
+      recentInspected: 1,
+      validated: 1,
+      stalePruned: 0,
+      failed: 0,
+    });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "existing", postId: "t3_completed" });
+
+    expect(hoisted.reconcileCompletedGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lifecycleSource: "upgrade",
+        sourcePostId: "t3_completed",
+      }),
+    );
+    expect(hoisted.markOnboardingSubscriberGoalCompleted).toHaveBeenCalled();
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
 
   it("does not send duplicate modmail while another scheduler run holds the lock", async () => {
     await scheduleOnboardingReminder(redis as never, { nowMs });

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { autoCreateNextGoalQueueKey } from "../data/subGoalData";
+import {
+  autoCreateNextGoalExhaustedKey,
+  autoCreateNextGoalQueueKey,
+  autoCreateNextGoalRetryAttemptsKey,
+} from "../data/subGoalData";
 import { autoCreateNextGoalSuccessorsKey } from "./autoCreateNextGoal";
 import {
   ensureExistingSubscriberGoalPinned,
@@ -694,19 +698,99 @@ describe("onboarding lifecycle reconciliation", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("does not run completed-goal recovery during install reconciliation", async () => {
+  it("does not pin or recover a completed goal during install reconciliation", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
       completedTime: nowMs - 48 * 60 * 60 * 1000,
     });
 
-    await reconcileOnboardingForLifecycle(
-      createReddit({ posts: [post] }) as never,
-      redis as never,
-      { lifecycleSource: "install", nowMs },
-    );
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit({ posts: [post] }) as never,
+        redis as never,
+        { lifecycleSource: "install", nowMs },
+      ),
+    ).resolves.toMatchObject({
+      status: "completed_no_recovery",
+      sourcePostId: post.id,
+    });
 
+    expect(post.sticky).not.toHaveBeenCalled();
+    expect(
+      lifecycleHoisted.processDueAutoCreateNextGoals,
+    ).not.toHaveBeenCalled();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+  });
+
+  it("records newly detected completion during install without scheduling recovery", async () => {
+    const post = makeLifecycleGoalPost({ id: "t3_install_met" });
+    await seedGoalData(redis, post.id, { goal: 1_500 });
+
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit({ posts: [post], subscriberCount: 2_000 }) as never,
+        redis as never,
+        { lifecycleSource: "install", nowMs },
+      ),
+    ).resolves.toMatchObject({ status: "completed_no_recovery" });
+
+    expect(post.sticky).not.toHaveBeenCalled();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    await expect(
+      redis.hGet("subscriber_goals", `${post.id}_completed_time`),
+    ).resolves.toBe(String(nowMs));
+  });
+
+  it("preserves an existing replacement retry and its backoff", async () => {
+    const post = makeLifecycleGoalPost({ id: "t3_retrying" });
+    await seedGoalData(redis, post.id, {
+      goal: 1_500,
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+    });
+    const retryAt = nowMs + 15 * 60 * 1000;
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: post.id,
+      score: retryAt,
+    });
+    await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { [post.id]: "2" });
+
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit({ posts: [post] }) as never,
+        redis as never,
+        { lifecycleSource: "upgrade", nowMs },
+      ),
+    ).resolves.toMatchObject({ status: "replacement_retrying" });
+
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: retryAt },
+    ]);
+    await expect(
+      redis.hGet(autoCreateNextGoalRetryAttemptsKey, post.id),
+    ).resolves.toBe("2");
+    expect(
+      lifecycleHoisted.processDueAutoCreateNextGoals,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("keeps exhausted replacement work terminal across upgrades", async () => {
+    const post = makeLifecycleGoalPost({ id: "t3_exhausted" });
+    await seedGoalData(redis, post.id, {
+      goal: 1_500,
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+    });
+    await redis.hSet(autoCreateNextGoalExhaustedKey, { [post.id]: "6" });
+
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit({ posts: [post] }) as never,
+        redis as never,
+        { lifecycleSource: "upgrade", nowMs },
+      ),
+    ).resolves.toMatchObject({ status: "replacement_exhausted" });
+
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
