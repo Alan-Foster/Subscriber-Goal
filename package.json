@@ -19,12 +19,12 @@
     "type-check": "tsc --build"
   },
   "dependencies": {
-    "@devvit/analytics": "0.14.4",
-    "@devvit/notifications": "0.14.4",
-    "@devvit/start": "0.14.4",
-    "@devvit/web": "0.14.4",
+    "@devvit/analytics": "0.14.5",
+    "@devvit/notifications": "0.14.5",
+    "@devvit/start": "0.14.5",
+    "@devvit/web": "0.14.5",
     "clsx": "2.1.1",
-    "devvit": "0.14.4",
+    "devvit": "0.14.5",
     "express": "5.1.0",
     "intl-messageformat": "10.7.18",
     "react": "19.2.3",
@@ -54,6 +54,8 @@
   },
   "overrides": {
     "esbuild": "0.28.1",
+    "image-size": "2.0.4",
+    "js-yaml": "4.3.2",
     "protobufjs": "7.6.5",
     "tmp": "0.2.7",
     "ws": "8.21.0"

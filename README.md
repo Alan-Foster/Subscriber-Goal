@@ -52,7 +52,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update.
+- 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update. Devvit 0.14.5
 - 2.1.5 - Auto-goal system now attempts to re-pin existing goals. Fixed eternal completed lockout.
 - 2.1.3 - Automatic goals now require public, SFW communities. Corrected NSFW crosspost and username-sharing safeguards.
 - 2.1.1 - Fixed Top post Today fallback. Scroll trap compliance. More Notifications prep. Staggered upgrade auto-goals (public, >1k subscribers). Devvit 0.14.4
