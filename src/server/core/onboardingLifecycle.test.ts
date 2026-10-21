@@ -6,7 +6,7 @@ import {
 } from "../data/subGoalData";
 import { autoCreateNextGoalSuccessorsKey } from "./autoCreateNextGoal";
 import {
-  ensureExistingSubscriberGoalPinned,
+  ensureExistingSubscriberGoalHighlighted,
   onboardingSubscriberGoalLockKey,
   onboardingSubscriberGoalStateKey,
 } from "./onboardingSubscriberGoal";
@@ -86,8 +86,17 @@ class InMemoryRedis {
     this.sortedSets.set(key, set);
   }
 
-  async hScan(): Promise<{ cursor: number; fieldValues: never[] }> {
-    return { cursor: 0, fieldValues: [] };
+  async hScan(key: string): Promise<{
+    cursor: number;
+    fieldValues: { field: string; value: string }[];
+  }> {
+    return {
+      cursor: 0,
+      fieldValues: [...(this.hashes.get(key) ?? [])].map(([field, value]) => ({
+        field,
+        value,
+      })),
+    };
   }
 
   async hMGet(key: string, fields: string[]): Promise<(string | undefined)[]> {
@@ -99,23 +108,37 @@ const oldArmedAt = Date.parse("2026-09-16T12:00:00.000Z");
 const nowMs = Date.parse("2026-09-17T12:00:00.000Z");
 
 function createReddit({
-  pinned = false,
+  highlighted = false,
   posts,
   subscriberCount = 2_000,
 }: {
-  pinned?: boolean;
+  highlighted?: boolean;
   posts?: Record<string, unknown>[];
   subscriberCount?: number;
 } = {}) {
-  const pinnedPost = {
-    id: "t3_pinned",
+  const highlightedPost = {
+    id: "t3_highlighted",
     authorName: "subscriber-goal-app",
     subredditId: "t5_example",
     subredditName: "ExampleSub",
     createdAt: new Date(nowMs - 60_000),
     postData: { postKind: "subscriber-goal-v1" },
-    isStickied: () => true,
+    isHighlighted: () => true,
   };
+  const availablePosts = posts ?? (highlighted ? [highlightedPost] : []);
+  const getHighlightedPosts = vi.fn(async () => {
+    if (highlighted) return [{ postId: "t3_highlighted" as const }];
+    const result = [] as { postId: `t3_${string}` }[];
+    for (const post of availablePosts) {
+      const verifier = (post as { isHighlighted?: () => boolean })
+        .isHighlighted;
+      if (verifier && (await verifier())) {
+        result.push({ postId: post.id as `t3_${string}` });
+      }
+    }
+    return result;
+  });
+  const reorderHighlightedPosts = vi.fn(async () => undefined);
   return {
     getCurrentSubreddit: vi.fn(async () => ({
       id: "t5_example",
@@ -123,15 +146,14 @@ function createReddit({
       numberOfSubscribers: subscriberCount,
       type: "public",
       nsfw: false,
+      getHighlightedPosts,
+      reorderHighlightedPosts,
     })),
     getAppUser: vi.fn(async () => ({ username: "subscriber-goal-app" })),
     getPostById: vi.fn(async (postId: string) =>
-      posts?.find((post) => post.id === postId),
+      availablePosts.find((post) => post.id === postId),
     ),
-    getHotPosts: vi.fn(() => ({
-      get: vi.fn(async () => posts ?? (pinned ? [pinnedPost] : [])),
-    })),
-    searchPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
+    searchPosts: vi.fn(() => ({ all: vi.fn(async () => availablePosts) })),
     getNewPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
   };
 }
@@ -195,13 +217,13 @@ async function seedGoalData(
 function makeLifecycleGoalPost({
   id,
   createdAt = nowMs - 60_000,
-  pinned = false,
+  highlighted = false,
 }: {
   id: `t3_${string}`;
   createdAt?: number;
-  pinned?: boolean;
+  highlighted?: boolean;
 }) {
-  let isPinned = pinned;
+  let isHighlighted = highlighted;
   return {
     id,
     title: id,
@@ -213,12 +235,12 @@ function makeLifecycleGoalPost({
       postKind: "subscriber-goal-v1",
       postHeight: "regular",
     },
-    isStickied: vi.fn(() => isPinned),
-    sticky: vi.fn(async () => {
-      isPinned = true;
+    isHighlighted: vi.fn(() => isHighlighted),
+    highlight: vi.fn(async () => {
+      isHighlighted = true;
     }),
-    unsticky: vi.fn(async () => {
-      isPinned = false;
+    unhighlight: vi.fn(async () => {
+      isHighlighted = false;
     }),
   };
 }
@@ -241,7 +263,7 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
-  it("arms a fresh workflow when no pinned goal exists", async () => {
+  it("arms a fresh workflow when no highlighted goal exists", async () => {
     const reddit = createReddit();
 
     await expect(
@@ -270,8 +292,8 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
-  it("records a pinned goal as existing without arming timers", async () => {
-    const reddit = createReddit({ pinned: true });
+  it("records a highlighted goal as existing without arming timers", async () => {
+    const reddit = createReddit({ highlighted: true });
 
     await expect(
       reconcileOnboardingForLifecycle(reddit as never, redis as never, {
@@ -280,22 +302,22 @@ describe("onboarding lifecycle reconciliation", () => {
       }),
     ).resolves.toMatchObject({
       status: "existing",
-      postId: "t3_pinned",
-      existingSource: "pinned",
+      postId: "t3_highlighted",
+      existingSource: "highlighted",
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "complete",
       resultStatus: "existing",
-      postId: "t3_pinned",
+      postId: "t3_highlighted",
     });
     await expect(
       redis.hGetAll(onboardingReminderStateKey),
     ).resolves.toMatchObject({
       status: "complete",
       result: "existing",
-      postId: "t3_pinned",
+      postId: "t3_highlighted",
     });
   });
 
@@ -307,25 +329,35 @@ describe("onboarding lifecycle reconciliation", () => {
     "cancelled_permission",
     "delivery_unknown",
     "retry_exhausted",
-    "created_not_pinned",
-  ])("re-arms terminal %s state when no pinned goal exists", async (result) => {
-    await seedCompleted(redis, result, "sent");
+    "created_not_highlighted",
+  ])(
+    "re-arms terminal %s state when no highlighted goal exists",
+    async (result) => {
+      await seedCompleted(redis, result, "sent");
 
-    await expect(
-      reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
-        lifecycleSource: "upgrade",
-        nowMs,
-      }),
-    ).resolves.toMatchObject({ status: "rearmed" });
-    await expect(
-      redis.hGetAll(onboardingSubscriberGoalStateKey),
-    ).resolves.toMatchObject({ status: "awaiting_warning", resultStatus: "" });
-    await expect(
-      redis.hGetAll(onboardingReminderStateKey),
-    ).resolves.toMatchObject({ status: "pending", result: "" });
-  });
+      await expect(
+        reconcileOnboardingForLifecycle(
+          createReddit() as never,
+          redis as never,
+          {
+            lifecycleSource: "upgrade",
+            nowMs,
+          },
+        ),
+      ).resolves.toMatchObject({ status: "rearmed" });
+      await expect(
+        redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).resolves.toMatchObject({
+        status: "awaiting_warning",
+        resultStatus: "",
+      });
+      await expect(
+        redis.hGetAll(onboardingReminderStateKey),
+      ).resolves.toMatchObject({ status: "pending", result: "" });
+    },
+  );
 
-  it("preserves active operation identity and timers when no pin exists", async () => {
+  it("preserves active operation identity and timers when no highlight exists", async () => {
     await seedCompleted(redis);
     await redis.hSet(onboardingSubscriberGoalStateKey, {
       status: "pending",
@@ -356,7 +388,7 @@ describe("onboarding lifecycle reconciliation", () => {
     );
   });
 
-  it("turns an active workflow terminal when a pinned goal is found", async () => {
+  it("turns an active workflow terminal when a highlighted goal is found", async () => {
     await seedCompleted(redis);
     await redis.hSet(onboardingSubscriberGoalStateKey, {
       status: "awaiting_warning",
@@ -369,11 +401,11 @@ describe("onboarding lifecycle reconciliation", () => {
 
     await expect(
       reconcileOnboardingForLifecycle(
-        createReddit({ pinned: true }) as never,
+        createReddit({ highlighted: true }) as never,
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "existing", postId: "t3_pinned" });
+    ).resolves.toMatchObject({ status: "existing", postId: "t3_highlighted" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({ status: "complete", resultStatus: "existing" });
@@ -443,7 +475,7 @@ describe("onboarding lifecycle reconciliation", () => {
       sourcePostId: post.id,
     });
 
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
@@ -479,7 +511,7 @@ describe("onboarding lifecycle reconciliation", () => {
       sourcePostId: post.id,
     });
 
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).toHaveBeenCalledOnce();
@@ -500,7 +532,7 @@ describe("onboarding lifecycle reconciliation", () => {
       sourcePostId: post.id,
     });
 
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
     ).resolves.toBe(String(nowMs));
@@ -509,10 +541,10 @@ describe("onboarding lifecycle reconciliation", () => {
     ]);
   });
 
-  it("keeps a protected Tiny pin while replacing an overdue classic goal", async () => {
+  it("keeps a protected Tiny highlight while replacing an overdue classic goal", async () => {
     const completed = makeLifecycleGoalPost({ id: "t3_completed" });
     const tiny = {
-      ...makeLifecycleGoalPost({ id: "t3_tiny", pinned: true }),
+      ...makeLifecycleGoalPost({ id: "t3_tiny", highlighted: true }),
       postData: { postKind: "subscribe-only-v1", postHeight: "tiny" },
     };
     await seedGoalData(redis, completed.id, {
@@ -535,8 +567,8 @@ describe("onboarding lifecycle reconciliation", () => {
         { lifecycleSource: "upgrade", nowMs },
       ),
     ).resolves.toMatchObject({ status: "replacement_created" });
-    expect(tiny.unsticky).not.toHaveBeenCalled();
-    expect(completed.sticky).not.toHaveBeenCalled();
+    expect(tiny.unhighlight).not.toHaveBeenCalled();
+    expect(completed.highlight).not.toHaveBeenCalled();
   });
 
   it("keeps failed overdue replacement work terminal while the retry is scheduled", async () => {
@@ -618,7 +650,7 @@ describe("onboarding lifecycle reconciliation", () => {
       status: "completed_auto_disabled",
       sourcePostId: post.id,
     });
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
@@ -691,14 +723,14 @@ describe("onboarding lifecycle reconciliation", () => {
         { lifecycleSource: "upgrade", nowMs },
       ),
     ).resolves.toMatchObject({ status: "existing", postId: active.id });
-    expect(active.sticky).toHaveBeenCalledOnce();
-    expect(completed.sticky).not.toHaveBeenCalled();
+    expect(active.highlight).toHaveBeenCalledOnce();
+    expect(completed.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
   });
 
-  it("does not pin or recover a completed goal during install reconciliation", async () => {
+  it("does not highlight or recover a completed goal during install reconciliation", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -716,7 +748,7 @@ describe("onboarding lifecycle reconciliation", () => {
       sourcePostId: post.id,
     });
 
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
@@ -735,7 +767,7 @@ describe("onboarding lifecycle reconciliation", () => {
       ),
     ).resolves.toMatchObject({ status: "completed_no_recovery" });
 
-    expect(post.sticky).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
     await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
@@ -797,23 +829,23 @@ describe("onboarding lifecycle reconciliation", () => {
   });
 });
 
-describe("existing goal pin ensurance", () => {
+describe("existing goal highlight ensurance", () => {
   const makePost = ({
     id,
     createdAt,
     postKind,
     postHeight,
-    pinned = false,
-    stickyFails = false,
+    highlighted = false,
+    highlightFails = false,
   }: {
     id: `t3_${string}`;
     createdAt: string;
     postKind?: string;
     postHeight?: string;
-    pinned?: boolean;
-    stickyFails?: boolean;
+    highlighted?: boolean;
+    highlightFails?: boolean;
   }) => {
-    let isPinned = pinned;
+    let isHighlighted = highlighted;
     return {
       id,
       title: id,
@@ -825,33 +857,45 @@ describe("existing goal pin ensurance", () => {
         ...(postKind ? { postKind } : {}),
         ...(postHeight ? { postHeight } : {}),
       },
-      isStickied: vi.fn(() => isPinned),
-      sticky: vi.fn(async () => {
-        if (stickyFails) throw new Error("sticky slots full");
-        isPinned = true;
+      isHighlighted: vi.fn(() => isHighlighted),
+      highlight: vi.fn(async () => {
+        if (highlightFails) throw new Error("highlight slots full");
+        isHighlighted = true;
       }),
-      unsticky: vi.fn(async () => {
-        isPinned = false;
+      unhighlight: vi.fn(async () => {
+        isHighlighted = false;
       }),
     };
   };
 
-  const makeReddit = (posts: ReturnType<typeof makePost>[]) => ({
-    getCurrentSubreddit: vi.fn(async () => ({
-      id: "t5_example",
-      name: "ExampleSub",
-    })),
-    getAppUser: vi.fn(async () => ({ username: "subscriber-goal-app" })),
-    getPostById: vi.fn(async (postId: string) =>
-      posts.find((post) => post.id === postId),
-    ),
-    getHotPosts: vi.fn(() => ({ get: vi.fn(async () => posts) })),
-    searchPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
-    getNewPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
-    modMail: { createModNotification: vi.fn(async () => undefined) },
-  });
+  const makeReddit = (posts: ReturnType<typeof makePost>[]) => {
+    const getHighlightedPosts = vi.fn(async () => {
+      const highlightedPosts = [] as { postId: `t3_${string}` }[];
+      for (const post of posts) {
+        if (await post.isHighlighted()) {
+          highlightedPosts.push({ postId: post.id as `t3_${string}` });
+        }
+      }
+      return highlightedPosts;
+    });
+    return {
+      getCurrentSubreddit: vi.fn(async () => ({
+        id: "t5_example",
+        name: "ExampleSub",
+        getHighlightedPosts,
+        reorderHighlightedPosts: vi.fn(async () => undefined),
+      })),
+      getAppUser: vi.fn(async () => ({ username: "subscriber-goal-app" })),
+      getPostById: vi.fn(async (postId: string) =>
+        posts.find((post) => post.id === postId),
+      ),
+      searchPosts: vi.fn(() => ({ all: vi.fn(async () => posts) })),
+      getNewPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
+      modMail: { createModNotification: vi.fn(async () => undefined) },
+    };
+  };
 
-  it("pins the newest candidate when every valid goal is unpinned", async () => {
+  it("highlights the newest candidate when every valid goal is unhighlighted", async () => {
     const older = makePost({
       id: "t3_older",
       createdAt: "2026-09-15T00:00:00Z",
@@ -864,7 +908,7 @@ describe("existing goal pin ensurance", () => {
       postKind: "subscribe-only-v1",
       postHeight: "tiny",
     });
-    const result = await ensureExistingSubscriberGoalPinned({
+    const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([older, newer]) as never,
       redis: new InMemoryRedis() as never,
       nowMs,
@@ -874,19 +918,19 @@ describe("existing goal pin ensurance", () => {
       status: "existing",
       postId: "t3_newer",
       classification: "tiny",
-      selectedWasAlreadyPinned: false,
+      selectedWasAlreadyHighlighted: false,
     });
-    expect(newer.sticky).toHaveBeenCalledOnce();
-    expect(older.sticky).not.toHaveBeenCalled();
+    expect(newer.highlight).toHaveBeenCalledOnce();
+    expect(older.highlight).not.toHaveBeenCalled();
   });
 
-  it("preserves one existing pin even when a newer candidate is unpinned", async () => {
-    const pinned = makePost({
-      id: "t3_pinned",
+  it("preserves one existing highlight even when a newer candidate is unhighlighted", async () => {
+    const highlighted = makePost({
+      id: "t3_highlighted",
       createdAt: "2026-09-15T00:00:00Z",
       postKind: "subscriber-goal-v1",
       postHeight: "regular",
-      pinned: true,
+      highlighted: true,
     });
     const newer = makePost({
       id: "t3_newer",
@@ -894,56 +938,56 @@ describe("existing goal pin ensurance", () => {
       postKind: "subscriber-goal-v1",
       postHeight: "short",
     });
-    const result = await ensureExistingSubscriberGoalPinned({
-      reddit: makeReddit([pinned, newer]) as never,
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([highlighted, newer]) as never,
       redis: new InMemoryRedis() as never,
       nowMs,
     });
 
-    expect(result.postId).toBe("t3_pinned");
-    expect(pinned.unsticky).not.toHaveBeenCalled();
-    expect(newer.sticky).not.toHaveBeenCalled();
+    expect(result.postId).toBe("t3_highlighted");
+    expect(highlighted.unhighlight).not.toHaveBeenCalled();
+    expect(newer.highlight).not.toHaveBeenCalled();
   });
 
-  it("consolidates only older classic pins and preserves CTA, Tiny, and ambiguous pins", async () => {
+  it("consolidates only older classic highlights and preserves CTA, Tiny, and ambiguous highlights", async () => {
     const oldClassic = makePost({
       id: "t3_oldclassic",
       createdAt: "2026-09-14T00:00:00Z",
       postKind: "subscriber-goal-v1",
       postHeight: "regular",
-      pinned: true,
+      highlighted: true,
     });
     const newClassic = makePost({
       id: "t3_newclassic",
       createdAt: "2026-09-15T00:00:00Z",
       postKind: "subscriber-goal-v1",
       postHeight: "short",
-      pinned: true,
+      highlighted: true,
     });
     const cta = makePost({
       id: "t3_cta",
       createdAt: "2026-09-16T00:00:00Z",
       postKind: "cta-only-v1",
       postHeight: "cta",
-      pinned: true,
+      highlighted: true,
     });
     const tiny = makePost({
       id: "t3_tiny",
       createdAt: "2026-09-16T01:00:00Z",
       postKind: "subscribe-only-v1",
       postHeight: "tiny",
-      pinned: true,
+      highlighted: true,
     });
     const ambiguous = makePost({
       id: "t3_legacy",
       createdAt: "2026-09-13T00:00:00Z",
       postKind: "subscriber-goal-v1",
-      pinned: true,
+      highlighted: true,
     });
     const redis = new InMemoryRedis();
     await redis.hSet("subscriber_goals", { t3_legacy_goal: "100" });
 
-    const result = await ensureExistingSubscriberGoalPinned({
+    const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([
         oldClassic,
         newClassic,
@@ -955,34 +999,34 @@ describe("existing goal pin ensurance", () => {
       nowMs,
     });
 
-    expect(result.classicPostsUnpinned).toEqual(["t3_oldclassic"]);
-    expect(result.protectedPinsPreserved).toEqual(["t3_cta", "t3_tiny"]);
-    expect(oldClassic.unsticky).toHaveBeenCalledOnce();
-    expect(newClassic.unsticky).not.toHaveBeenCalled();
-    expect(cta.unsticky).not.toHaveBeenCalled();
-    expect(tiny.unsticky).not.toHaveBeenCalled();
-    expect(ambiguous.unsticky).not.toHaveBeenCalled();
+    expect(result.classicPostsUnhighlighted).toEqual(["t3_oldclassic"]);
+    expect(result.protectedHighlightsPreserved).toEqual(["t3_cta", "t3_tiny"]);
+    expect(oldClassic.unhighlight).toHaveBeenCalledOnce();
+    expect(newClassic.unhighlight).not.toHaveBeenCalled();
+    expect(cta.unhighlight).not.toHaveBeenCalled();
+    expect(tiny.unhighlight).not.toHaveBeenCalled();
+    expect(ambiguous.unhighlight).not.toHaveBeenCalled();
   });
 
-  it("records a failed existing-goal pin and sends one accurate modmail", async () => {
+  it("records a failed existing-goal highlight and sends one accurate modmail", async () => {
     const existing = makePost({
       id: "t3_existing",
       createdAt: "2026-09-16T00:00:00Z",
       postKind: "subscriber-goal-v1",
       postHeight: "regular",
-      stickyFails: true,
+      highlightFails: true,
     });
     const reddit = makeReddit([existing]);
-    const result = await ensureExistingSubscriberGoalPinned({
+    const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: reddit as never,
       redis: new InMemoryRedis() as never,
       nowMs,
       notifyOnFailure: true,
-      stickyVerification: { maxWaitMs: 0, intervalMs: 0 },
+      highlightVerification: { maxWaitMs: 0, intervalMs: 0 },
     });
 
     expect(result).toMatchObject({
-      status: "existing_not_pinned",
+      status: "existing_not_highlighted",
       postId: "t3_existing",
       notificationOutcome: "sent",
     });

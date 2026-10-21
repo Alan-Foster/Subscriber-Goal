@@ -6,7 +6,7 @@ import {
   type CompletedGoalReconciliationOutcome,
 } from "./completedGoalReconciliation";
 import {
-  ensureExistingSubscriberGoalPinned,
+  ensureExistingSubscriberGoalHighlighted,
   getOnboardingSubscriberGoalState,
   onboardingSubscriberGoalLockKey,
   onboardingSubscriberGoalLockTtlMs,
@@ -40,7 +40,7 @@ export type OnboardingLifecycleReconciliation =
       operationId: string;
       postId: string;
       existingSource: OnboardingExistingSource;
-      pinStatus: "pinned" | "not_pinned";
+      highlightStatus: "highlighted" | "not_highlighted";
     }
   | {
       status: CompletedGoalReconciliationOutcome;
@@ -50,7 +50,7 @@ export type OnboardingLifecycleReconciliation =
     };
 
 /**
- * Reconciles install/upgrade onboarding against Reddit's current pinned goal.
+ * Reconciles install/upgrade onboarding against Reddit's current highlighted goal.
  * Both workflow locks are held while the paired goal/reminder state is replaced.
  */
 export async function reconcileOnboardingForLifecycle(
@@ -102,31 +102,37 @@ export async function reconcileOnboardingForLifecycle(
         return { status: "unchanged", reason };
       }
 
-      const pinned = await ensureExistingSubscriberGoalPinned({
+      const highlighted = await ensureExistingSubscriberGoalHighlighted({
         reddit,
         redis,
         nowMs,
         notifyOnFailure: true,
       });
-      logDiagnostic("info", "onboarding_lifecycle_pinned_goal_checked", {
+      logDiagnostic("info", "onboarding_lifecycle_highlighted_goal_checked", {
         workflow: "onboarding_lifecycle",
-        phase: "pinned_goal_check",
+        phase: "highlighted_goal_check",
         lifecycleSource,
-        found: pinned.status !== "missing",
-        pinStatus: pinned.status,
-        postId: pinned.postId ?? "none",
-        existingSource: pinned.source ?? "none",
-        validated: pinned.validated,
-        pinnedInspected: pinned.pinnedInspected,
-        searchInspected: pinned.searchInspected,
-        failed: pinned.failed,
+        found: highlighted.status !== "missing",
+        highlightStatus: highlighted.status,
+        reconciliationOutcome:
+          highlighted.reconciliationOutcome ?? "not_attempted",
+        capacityOutcome: highlighted.capacityOutcome ?? "not_attempted",
+        cleanupOutcome: highlighted.cleanupOutcome ?? "not_attempted",
+        rollbackOutcome: highlighted.rollbackOutcome ?? "not_attempted",
+        reorderOutcome: highlighted.reorderOutcome ?? "not_attempted",
+        postId: highlighted.postId ?? "none",
+        existingSource: highlighted.source ?? "none",
+        validated: highlighted.validated,
+        highlightedInspected: highlighted.highlightedInspected,
+        searchInspected: highlighted.searchInspected,
+        failed: highlighted.failed,
       });
 
       if (
-        pinned.status === "completed" &&
-        pinned.postId &&
-        pinned.source &&
-        pinned.completedTime
+        highlighted.status === "completed" &&
+        highlighted.postId &&
+        highlighted.source &&
+        highlighted.completedTime
       ) {
         const operationId =
           previousGoal?.operationId ?? createOperationId(nowMs);
@@ -135,14 +141,14 @@ export async function reconcileOnboardingForLifecycle(
           redis,
           appSettings,
           lifecycleSource,
-          sourcePostId: pinned.postId,
-          completedTime: pinned.completedTime,
-          autoCreateNextGoal: pinned.autoCreateNextGoal ?? false,
+          sourcePostId: highlighted.postId,
+          completedTime: highlighted.completedTime,
+          autoCreateNextGoal: highlighted.autoCreateNextGoal ?? false,
           nowMs,
         });
         const { outcome, successorPostId } = completed;
 
-        const terminalPostId = successorPostId ?? pinned.postId;
+        const terminalPostId = successorPostId ?? highlighted.postId;
         const nextGoal: OnboardingSubscriberGoalState = {
           version: onboardingSubscriberGoalVersion,
           status: "complete",
@@ -154,7 +160,7 @@ export async function reconcileOnboardingForLifecycle(
           operationId,
           completedAt: nowMs,
           postId: terminalPostId,
-          existingSource: pinned.source,
+          existingSource: highlighted.source,
           resultStatus: outcome,
         };
         const nextReminder: OnboardingReminderState = {
@@ -168,7 +174,7 @@ export async function reconcileOnboardingForLifecycle(
             selectOnboardingReminderStaggerMinutes(),
           completedAt: nowMs,
           postId: terminalPostId,
-          existingSource: pinned.source,
+          existingSource: highlighted.source,
           result: outcome,
         };
         await savePairedState(redis, previousGoal, nextGoal, nextReminder);
@@ -177,24 +183,24 @@ export async function reconcileOnboardingForLifecycle(
           phase: "completed_goal_replacement",
           lifecycleSource,
           outcome,
-          sourcePostId: pinned.postId,
+          sourcePostId: highlighted.postId,
           successorPostId: successorPostId ?? "none",
-          completedTime: pinned.completedTime,
-          autoCreateNextGoal: pinned.autoCreateNextGoal ?? false,
+          completedTime: highlighted.completedTime,
+          autoCreateNextGoal: highlighted.autoCreateNextGoal ?? false,
         });
         return {
           status: outcome,
           operationId,
-          sourcePostId: pinned.postId,
+          sourcePostId: highlighted.postId,
           ...(successorPostId ? { postId: successorPostId } : {}),
         };
       }
 
       if (
-        pinned.status !== "missing" &&
-        pinned.status !== "completed" &&
-        pinned.postId &&
-        pinned.source
+        highlighted.status !== "missing" &&
+        highlighted.status !== "completed" &&
+        highlighted.postId &&
+        highlighted.source
       ) {
         const operationId =
           previousGoal?.operationId ?? createOperationId(nowMs);
@@ -208,11 +214,15 @@ export async function reconcileOnboardingForLifecycle(
             selectOnboardingGoalStaggerMinutes(),
           operationId,
           completedAt: nowMs,
-          postId: pinned.postId,
-          existingSource: pinned.source,
+          postId: highlighted.postId,
+          existingSource: highlighted.source,
           resultStatus:
-            pinned.status === "existing" ? "existing" : "existing_not_pinned",
-          ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
+            highlighted.status === "existing"
+              ? "existing"
+              : "existing_not_highlighted",
+          ...(highlighted.errorMessage
+            ? { errorMessage: highlighted.errorMessage }
+            : {}),
         };
         const nextReminder: OnboardingReminderState = {
           version: onboardingReminderVersion,
@@ -224,31 +234,42 @@ export async function reconcileOnboardingForLifecycle(
             previousReminder?.reminderStaggerMinutes ??
             selectOnboardingReminderStaggerMinutes(),
           completedAt: nowMs,
-          postId: pinned.postId,
-          existingSource: pinned.source,
+          postId: highlighted.postId,
+          existingSource: highlighted.source,
           result:
-            pinned.status === "existing" ? "existing" : "existing_not_pinned",
-          ...(pinned.errorMessage ? { errorMessage: pinned.errorMessage } : {}),
+            highlighted.status === "existing"
+              ? "existing"
+              : "existing_not_highlighted",
+          ...(highlighted.errorMessage
+            ? { errorMessage: highlighted.errorMessage }
+            : {}),
         };
         await savePairedState(redis, previousGoal, nextGoal, nextReminder);
-        logDiagnostic("info", "onboarding_lifecycle_pinned_goal_preserved", {
-          workflow: "onboarding_lifecycle",
-          phase: "reconcile",
-          lifecycleSource,
-          decision:
-            pinned.status === "existing"
-              ? "existing_pinned_goal"
-              : "existing_goal_pin_failed",
-          operationId,
-          postId: pinned.postId,
-          existingSource: pinned.source,
-        });
+        logDiagnostic(
+          "info",
+          "onboarding_lifecycle_highlighted_goal_preserved",
+          {
+            workflow: "onboarding_lifecycle",
+            phase: "reconcile",
+            lifecycleSource,
+            decision:
+              highlighted.status === "existing"
+                ? "existing_highlighted_goal"
+                : "existing_goal_pin_failed",
+            operationId,
+            postId: highlighted.postId,
+            existingSource: highlighted.source,
+          },
+        );
         return {
           status: "existing",
           operationId,
-          postId: pinned.postId,
-          existingSource: pinned.source,
-          pinStatus: pinned.status === "existing" ? "pinned" : "not_pinned",
+          postId: highlighted.postId,
+          existingSource: highlighted.source,
+          highlightStatus:
+            highlighted.status === "existing"
+              ? "highlighted"
+              : "not_highlighted",
         };
       }
 
@@ -284,19 +305,23 @@ export async function reconcileOnboardingForLifecycle(
         reminderStaggerMinutes,
       };
       await savePairedState(redis, previousGoal, nextGoal, nextReminder);
-      logDiagnostic("info", "onboarding_rearmed_after_missing_pinned_goal", {
-        workflow: "onboarding_lifecycle",
-        phase: "rearm",
-        lifecycleSource,
-        previousGoalResult: previousGoal?.resultStatus ?? "none",
-        previousReminderResult: previousReminder?.result ?? "none",
-        operationId,
-        armedAt: nowMs,
-        creationStaggerMinutes,
-        reminderStaggerMinutes,
-        reminderNextRunAt: nextReminder.nextRunAt,
-        reminderNextRunAtIso: new Date(nextReminder.nextRunAt).toISOString(),
-      });
+      logDiagnostic(
+        "info",
+        "onboarding_rearmed_after_missing_highlighted_goal",
+        {
+          workflow: "onboarding_lifecycle",
+          phase: "rearm",
+          lifecycleSource,
+          previousGoalResult: previousGoal?.resultStatus ?? "none",
+          previousReminderResult: previousReminder?.result ?? "none",
+          operationId,
+          armedAt: nowMs,
+          creationStaggerMinutes,
+          reminderStaggerMinutes,
+          reminderNextRunAt: nextReminder.nextRunAt,
+          reminderNextRunAtIso: new Date(nextReminder.nextRunAt).toISOString(),
+        },
+      );
       return { status: "rearmed", operationId };
     } finally {
       await releaseOwnedLock(

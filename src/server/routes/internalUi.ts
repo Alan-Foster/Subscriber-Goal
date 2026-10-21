@@ -53,13 +53,13 @@ import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
+  describeHighlightResult,
   getPostUrl,
-  notifyStickyFailure,
-} from "../utils/stickyFailureNotifications";
+  notifyHighlightFailure,
+} from "../utils/highlightFailureNotifications";
 import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
-import { SubscriberGoalStickyCleanupError } from "../utils/redditUtils";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
@@ -1245,7 +1245,7 @@ async function submitCreateGoalFollowUp(
       draft.details.kind === "subscriber-goal"
         ? draft.details.autoCreateNextGoal
         : false;
-    const { post, crosspostDispatchResult, stickyResult, flairResult } =
+    const { post, crosspostDispatchResult, highlightResult, flairResult } =
       await createSubscriberGoal({
         reddit,
         redis,
@@ -1273,12 +1273,14 @@ async function submitCreateGoalFollowUp(
           afterSubscribeAction: afterSubscribeResult.action,
           afterSubscribePreset: persistedAfterSubscribePreset,
           cancelPendingAutoCreateGoals: true,
-          operationId: `manual:${subreddit.id}:${userId}:${stableDraftFingerprint({
-            draft,
-            afterSubscribeAction: afterSubscribeResult.action,
-            submitAsUser: developerCommands.submitAsUser,
-            headerText: developerCommands.headerText,
-          })}`,
+          operationId: `manual:${subreddit.id}:${userId}:${stableDraftFingerprint(
+            {
+              draft,
+              afterSubscribeAction: afterSubscribeResult.action,
+              submitAsUser: developerCommands.submitAsUser,
+              headerText: developerCommands.headerText,
+            },
+          )}`,
           submitAsUser: developerCommands.submitAsUser,
           ...(developerCommands.headerText
             ? { headerText: developerCommands.headerText }
@@ -1294,24 +1296,37 @@ async function submitCreateGoalFollowUp(
     console.info(
       `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${crosspost}`,
     );
-    if (stickyResult.status === "not_pinned") {
+    if (highlightResult.issues.length > 0) {
+      logDiagnostic("warn", "manual_goal_highlight_degraded", {
+        workflow: "internal_ui",
+        phase: "highlight",
+        postId: post.id,
+        failureCategories: highlightResult.issues
+          .map(({ category }) => category)
+          .join(","),
+        capacityOutcome: highlightResult.capacityOutcome,
+        cleanupOutcome: highlightResult.cleanupOutcome,
+        rollbackOutcome: highlightResult.rollbackOutcome,
+        reorderOutcome: highlightResult.reorderOutcome,
+      });
       const moderatorUsername = await resolveCurrentUsername();
-      await notifyStickyFailure({
+      await notifyHighlightFailure({
         reddit,
         subredditId: subreddit.id,
         subredditName: subreddit.name,
         moderatorUsername,
         postTitle: post.title ?? draft.details.postTitle,
         postUrl: getPostUrl(post),
-        errorMessage: stickyResult.errorMessage,
+        errorMessage: highlightResult.errorMessage,
+        highlightResult,
       });
     }
 
     const createdPostLabel =
       draft.details.kind === "cta-only" ? "CTA post" : "Subscriber Goal post";
     const baseToast =
-      stickyResult.status === "not_pinned"
-        ? `${createdPostLabel} created, but it could not be pinned. Manual moderator action is required.`
+      highlightResult.issues.length > 0
+        ? `${createdPostLabel} created. ${describeHighlightResult(highlightResult)}`
         : crosspostDispatchResult.status === "failed"
           ? `${createdPostLabel} created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
           : `${createdPostLabel} created!`;
@@ -1340,7 +1355,6 @@ async function submitCreateGoalFollowUp(
     res.json({
       showToast:
         error instanceof ProhibitedSubredditError ||
-        error instanceof SubscriberGoalStickyCleanupError ||
         error instanceof SubscriberGoalModeratorPermissionError
           ? error.message
           : "An error occurred while creating the post.",
@@ -1408,7 +1422,7 @@ async function resolveCurrentUsername(): Promise<string | undefined> {
     logDiagnostic(
       "warn",
       "username_resolution_failed",
-      { workflow: "sticky_notification", phase: "username_lookup" },
+      { workflow: "highlight_notification", phase: "username_lookup" },
       error,
     );
   }

@@ -46,8 +46,6 @@ const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
-  clearUserStickies: vi.fn(),
-  clearSubscriberGoalStickies: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   ensureSubscriberGoalPostFlair: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
@@ -108,12 +106,6 @@ vi.mock("../data/crosspostData", () => ({
 
 vi.mock("../data/subscriberGoalPostRegistry", () => ({
   removeSubscriberGoalPost: hoisted.removeSubscriberGoalPost,
-}));
-
-vi.mock("../utils/redditUtils", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../utils/redditUtils")>()),
-  clearUserStickies: hoisted.clearUserStickies,
-  clearSubscriberGoalStickies: hoisted.clearSubscriberGoalStickies,
 }));
 
 vi.mock("../data/subscriberGoalCandidates", () => ({
@@ -236,8 +228,8 @@ describe("internalUi color theme create goal routes", () => {
     );
     hoisted.redis.hSet.mockImplementation(async (key, fields) => {
       const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
-      Object.entries(fields as Record<string, string>).forEach(([field, value]) =>
-        hash.set(field, value),
+      Object.entries(fields as Record<string, string>).forEach(
+        ([field, value]) => hash.set(field, value),
       );
       hoisted.redisHashes.set(key, hash);
     });
@@ -250,6 +242,8 @@ describe("internalUi color theme create goal routes", () => {
       numberOfSubscribers: 100,
       type: "public",
       nsfw: false,
+      getHighlightedPosts: vi.fn(async () => []),
+      reorderHighlightedPosts: vi.fn(async () => undefined),
     });
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
@@ -310,8 +304,8 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       permalink: "/r/ExampleSub/comments/newpost/welcome/",
       approve: vi.fn(),
-      sticky: vi.fn(),
-      isStickied: vi.fn(() => true),
+      highlight: vi.fn(),
+      isHighlighted: vi.fn(() => true),
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
@@ -332,12 +326,6 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({
       id: "flair_subgoal",
-    });
-    hoisted.clearSubscriberGoalStickies.mockResolvedValue({
-      inspected: 0,
-      unstickied: [],
-      skippedCrossSubreddit: [],
-      missing: [],
     });
   });
 
@@ -1498,7 +1486,6 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
-    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast:
         "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
@@ -1914,7 +1901,6 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
-    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast: "Experimental selfPost submitted to r/u_ExampleMod.",
       navigateTo:
@@ -2169,7 +2155,7 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("notifies moderators and returns a partial-success toast when the new goal cannot be pinned", async () => {
+  it("notifies moderators and returns a partial-success toast when the new goal cannot be highlighted", async () => {
     vi.useFakeTimers();
     seedCreateGoalDraft("regular", "en", {
       afterSubscribePreset: "top-post-day",
@@ -2182,8 +2168,8 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       permalink: "/r/ExampleSub/comments/newpost/welcome/",
       approve: vi.fn(),
-      sticky: vi.fn(),
-      isStickied: vi.fn(() => false),
+      highlight: vi.fn(),
+      isHighlighted: vi.fn(() => false),
     });
     const routes = createRouteHarness();
     const res = { json: vi.fn() } as unknown as Response;
@@ -2209,21 +2195,21 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalledWith({
       subredditId: "t5_example",
-      subject: "Action Required - SubGoal Not Pinned in r/ExampleSub",
+      subject: "Action Required - SubGoal Not Highlighted in r/ExampleSub",
       bodyMarkdown: expect.stringContaining(
         "The new Subscriber Goal post was created successfully",
       ),
     });
     expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalledWith({
       to: "ExampleMod",
-      subject: "Action Required - SubGoal Not Pinned in r/ExampleSub",
+      subject: "Action Required - SubGoal Not Highlighted in r/ExampleSub",
       text: expect.stringContaining(
         "https://reddit.com/r/ExampleSub/comments/newpost/welcome/",
       ),
     });
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "Subscriber Goal post created, but it could not be pinned. Manual moderator action is required.",
+        "Subscriber Goal post created, but it could not be highlighted. Manual moderator action is required.",
       navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
     });
   });
@@ -2240,10 +2226,10 @@ describe("internalUi color theme create goal routes", () => {
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
       title: "Welcome!",
       approve: vi.fn(),
-      sticky: vi.fn(() => {
-        throw new Error("sticky slots full");
+      highlight: vi.fn(() => {
+        throw new Error("highlight slots full");
       }),
-      isStickied: vi.fn(() => false),
+      isHighlighted: vi.fn(() => false),
     });
     hoisted.reddit.modMail.createModNotification.mockRejectedValue(
       new Error("modmail unavailable"),
@@ -2277,7 +2263,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "Subscriber Goal post created, but it could not be pinned. Manual moderator action is required.",
+        "Subscriber Goal post created, but it could not be highlighted. Manual moderator action is required.",
       navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
     });
   });

@@ -10,7 +10,7 @@ const hoisted = vi.hoisted(() => ({
   getSubscriberGoalCandidatePostIds: vi.fn(),
   getTrackedPosts: vi.fn(),
   queueUpdates: vi.fn(),
-  reconcileSubscriberGoalStickies: vi.fn(),
+  ensureExistingSubscriberGoalHighlighted: vi.fn(),
 }));
 
 vi.mock("./appAccountHealth", () => ({
@@ -21,7 +21,8 @@ vi.mock("./subscriberGoalPostFlair", () => ({
   backfillSubscriberGoalPostFlair: hoisted.backfillSubscriberGoalPostFlair,
 }));
 vi.mock("../data/ctaActivity", () => ({
-  ensureCommunityPostActivityBackfill: hoisted.ensureCommunityPostActivityBackfill,
+  ensureCommunityPostActivityBackfill:
+    hoisted.ensureCommunityPostActivityBackfill,
 }));
 vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   initializeLegacyAfterSubscribeActionMigration:
@@ -37,8 +38,9 @@ vi.mock("../data/updaterData", () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdates: hoisted.queueUpdates,
 }));
-vi.mock("../utils/redditUtils", () => ({
-  reconcileSubscriberGoalStickies: hoisted.reconcileSubscriberGoalStickies,
+vi.mock("./onboardingSubscriberGoal", () => ({
+  ensureExistingSubscriberGoalHighlighted:
+    hoisted.ensureExistingSubscriberGoalHighlighted,
 }));
 
 import {
@@ -54,7 +56,11 @@ class TestRedis {
   async get(key: string): Promise<string | undefined> {
     return this.values.get(key);
   }
-  async set(key: string, value: string, options?: { nx?: boolean }): Promise<void> {
+  async set(
+    key: string,
+    value: string,
+    options?: { nx?: boolean },
+  ): Promise<void> {
     if (options?.nx && this.values.has(key)) return;
     this.values.set(key, value);
   }
@@ -92,27 +98,39 @@ describe("scheduled app repair", () => {
     });
     hoisted.checkAppAccountHealth.mockResolvedValue({ status: "healthy" });
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({ id: "flair_1" });
-    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_registered"]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
+      "t3_registered",
+    ]);
     hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked"]);
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "missing",
+    });
   });
 
   it("discovers candidates before initializing migrations", async () => {
     await scheduleAppRepair(redis as never, 100, 0);
 
     await expect(
-      processDueAppRepair({ reddit: reddit as never, redis: redis as never, nowMs: 100 }),
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
     ).resolves.toBe("complete");
 
     expect(hoisted.initializePostKindMigration).toHaveBeenCalledWith(
       expect.anything(),
       ["t3_tracked"],
     );
-    expect(hoisted.initializeLegacyAfterSubscribeActionMigration).toHaveBeenCalledWith(
-      expect.anything(),
-      ["t3_registered"],
-      { name: "ExampleSub", type: "public" },
-    );
-    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({ status: "complete" });
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).toHaveBeenCalledWith(expect.anything(), ["t3_registered"], {
+      name: "ExampleSub",
+      type: "public",
+    });
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "complete",
+    });
   });
 
   it("retries discovery failures without completing empty migrations", async () => {
@@ -123,20 +141,52 @@ describe("scheduled app repair", () => {
     await scheduleAppRepair(redis as never, 100, 0);
 
     await expect(
-      processDueAppRepair({ reddit: reddit as never, redis: redis as never, nowMs: 100 }),
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
     ).resolves.toBe("retry");
 
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
-    expect(hoisted.initializeLegacyAfterSubscribeActionMigration).not.toHaveBeenCalled();
+    expect(
+      hoisted.initializeLegacyAfterSubscribeActionMigration,
+    ).not.toHaveBeenCalled();
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "pending",
       attempts: "1",
     });
   });
 
+  it("retries when Community Highlight reconciliation cannot safely complete", async () => {
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "existing_not_highlighted",
+      errorMessage: "All six Community Highlight slots are protected.",
+    });
+    await scheduleAppRepair(redis as never, 100, 0);
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("retry");
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      lastError: expect.stringContaining("six Community Highlight slots"),
+    });
+  });
+
   it("does nothing until lifecycle initialization creates the repair marker", async () => {
     await expect(
-      processDueAppRepair({ reddit: reddit as never, redis: redis as never, nowMs: 100 }),
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
     ).resolves.toBe("not_due");
     expect(reddit.getCurrentSubreddit).not.toHaveBeenCalled();
   });

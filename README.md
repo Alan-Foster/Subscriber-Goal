@@ -3,12 +3,10 @@
 - The webpage for this Devvit application is: [https://developers.reddit.com/apps/subscriber-goal](https://developers.reddit.com/apps/subscriber-goal)
 
 Subscriber Goal is an app that lets you set a subscriber target goal and track your progress towards it!
-Generate a post and pin it near the top of your subreddit to encourage new subscriptions.
+Generate a post and place it first in your Community Highlights to encourage new subscriptions.
 Celebrate the growth of your subreddit using Subscriber Goals!
 
 - To view a live version of Subscriber Goal, visit [https://www.reddit.com/r/SubGoal](https://www.reddit.com/r/SubGoal)
-
-
 
 ![An example of the Subscriber Goal Success Page](https://i.redd.it/7d65rf601foh1.jpeg)
 
@@ -26,14 +24,9 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## New CTA (Call To Action) Mini-Posts and 28 Supported Languages!
 
-- **Compressed CTA Buttons**: Perfect for large subreddits that want simple, elegant pinned tools
+- **Compressed CTA Buttons**: Perfect for large subreddits that want simple, elegant highlighted tools
 
 ![An example of CTA Posts](https://i.redd.it/4tkh6pj43foh1.jpeg)
-
-
-
-
-
 
 ## Install Instructions
 
@@ -41,17 +34,14 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 2. Navigate to your subreddit and access the Settings Menu (...)
 3. Select "Create a New Sub Goal". The app will guide you and recommend a value for your goal to achieve next.
 4. Click "Okay". Post generation may take 5-10 seconds, and you will be automatically redirected.
-5. If you had less than 4 pinned posts, the new Subscriber Goal post will be pinned automatically.
+5. The app adds the new Subscriber Goal to the first Community Highlight position when a slot is available. Reddit supports up to six Community Highlights; the app never evicts unrelated moderator-managed highlights.
 6. Once the goal is reached, the post will convert to a Success Page, showing the date and milestone.
-
-
 
 ![Select Create a New Goal from the dropdown next to Mod Tools](https://i.redd.it/qqrxpxt094af1.jpeg)
 
-
-
 ## Changelog
 
+- 2.2.1 - Integrated post.highlight functionality of 0.14.7 to better track pinned goals. Devvit 0.15.0
 - 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update. Devvit 0.14.5
 - 2.1.5 - Auto-goal system now attempts to re-pin existing goals. Fixed eternal completed lockout.
 - 2.1.3 - Automatic goals now require public, SFW communities. Corrected NSFW crosspost and username-sharing safeguards.

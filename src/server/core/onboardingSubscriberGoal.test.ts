@@ -7,7 +7,7 @@ const hoisted = vi.hoisted(() => ({
   cancelUpdates: vi.fn(),
   untrackPost: vi.fn(),
   createSubscriberGoal: vi.fn(),
-  notifyStickyFailure: vi.fn(),
+  notifyHighlightFailure: vi.fn(),
   getPostUrl: vi.fn(),
   checkAppAccountHealth: vi.fn(),
 }));
@@ -21,16 +21,44 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
-  stickyAndVerifyPost: vi.fn(async () => ({
-    status: "pinned",
-    verifiedStickied: true,
-  })),
-  STICKY_VERIFICATION_INTERVAL_MS: 5_000,
-  STICKY_VERIFICATION_MAX_WAIT_MS: 30_000,
 }));
 
-vi.mock("../utils/stickyFailureNotifications", () => ({
-  notifyStickyFailure: hoisted.notifyStickyFailure,
+vi.mock("../utils/communityHighlights", () => ({
+  highlightAndVerifyPost: vi.fn(async () => ({
+    status: "highlighted",
+    selectedPostId: "t3_existing",
+    verifiedHighlighted: true,
+    issues: [],
+    capacityOutcome: "not_needed",
+    cleanupOutcome: "not_needed",
+    removedManagedHighlightIds: [],
+    preservedHighlightIds: [],
+    rollbackOutcome: "not_needed",
+    reorderOutcome: "reordered",
+  })),
+  createFailedHighlightResult: vi.fn(
+    (selectedPostId: string, category: string, message: string) => ({
+      status: "not_highlighted",
+      selectedPostId,
+      verifiedHighlighted: false,
+      failureCategory: category,
+      errorMessage: message,
+      issues: [{ category, message, postId: selectedPostId }],
+      capacityOutcome: "not_needed",
+      cleanupOutcome: "not_needed",
+      removedManagedHighlightIds: [],
+      preservedHighlightIds: [],
+      rollbackOutcome: "not_needed",
+      reorderOutcome: "not_attempted",
+    }),
+  ),
+  highlightVerificationIntervalMs: 5_000,
+  highlightVerificationMaxWaitMs: 30_000,
+}));
+
+vi.mock("../utils/highlightFailureNotifications", () => ({
+  notifyHighlightFailureIncident: hoisted.notifyHighlightFailure,
+  clearHighlightFailureIncident: vi.fn(),
   getPostUrl: hoisted.getPostUrl,
 }));
 
@@ -170,8 +198,14 @@ async function initializeOnboardingSubscriberGoal(
 }
 
 const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
+const highlightSubredditMethods = {
+  getHighlightedPosts: vi.fn(async () => []),
+  reorderHighlightedPosts: vi.fn(async () => undefined),
+};
 
 function createReddit() {
+  const getHighlightedPosts = vi.fn().mockResolvedValue([]);
+  const reorderHighlightedPosts = vi.fn().mockResolvedValue(undefined);
   return {
     getCurrentSubreddit: vi.fn().mockResolvedValue({
       id: "t5_example",
@@ -179,12 +213,13 @@ function createReddit() {
       numberOfSubscribers: 1_001,
       type: "public",
       nsfw: false,
+      getHighlightedPosts,
+      reorderHighlightedPosts,
     }),
+    getHighlightedPosts,
+    reorderHighlightedPosts,
     getAppUser: vi.fn().mockResolvedValue({ username: "subscriber-goal" }),
     getPostById: vi.fn(),
-    getHotPosts: vi
-      .fn()
-      .mockReturnValue({ get: vi.fn().mockResolvedValue([]) }),
     searchPosts: vi
       .fn()
       .mockReturnValue({ all: vi.fn().mockResolvedValue([]) }),
@@ -216,13 +251,24 @@ describe("onboarding subscriber goal", () => {
     hoisted.cancelUpdates.mockReset();
     hoisted.untrackPost.mockReset();
     hoisted.createSubscriberGoal.mockReset();
-    hoisted.notifyStickyFailure.mockReset();
+    hoisted.notifyHighlightFailure.mockReset();
     hoisted.getPostUrl.mockReset();
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
     hoisted.createSubscriberGoal.mockResolvedValue({
       post: { id: "t3_created", title: "Welcome to r/ExampleSub!" },
-      stickyResult: { status: "pinned" },
+      highlightResult: {
+        status: "highlighted",
+        selectedPostId: "t3_created",
+        verifiedHighlighted: true,
+        issues: [],
+        capacityOutcome: "slot_available",
+        cleanupOutcome: "not_needed",
+        removedManagedHighlightIds: [],
+        preservedHighlightIds: [],
+        rollbackOutcome: "not_needed",
+        reorderOutcome: "reordered",
+      },
     });
   });
 
@@ -404,21 +450,17 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
   });
 
-  it("recognizes a pinned Tiny post and a recent legacy app post", async () => {
+  it("recognizes a highlighted Tiny post and a recent legacy app post", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
     });
-    reddit.getHotPosts.mockReturnValue({
-      get: vi.fn().mockResolvedValue([
-        {
-          id: "t3_tiny",
-          authorName: "subscriber-goal",
-          subredditId: "t5_example",
-          stickied: true,
-          postData: { postKind: "subscribe-only-v1" },
-        },
-      ]),
+    reddit.getHighlightedPosts.mockResolvedValue([{ postId: "t3_tiny" }]);
+    reddit.getPostById.mockResolvedValue({
+      id: "t3_tiny",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      postData: { postKind: "subscribe-only-v1" },
     });
     await expect(
       processDueOnboardingSubscriberGoal({
@@ -430,7 +472,7 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "existing",
       postId: "t3_tiny",
-      existingSource: "pinned",
+      existingSource: "highlighted",
     });
 
     redis = new InMemoryRedis();
@@ -471,26 +513,26 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
-  it("prunes a missing tracked post and continues to a valid pinned post", async () => {
+  it("prunes a missing tracked post and continues to a valid highlighted post", async () => {
     hoisted.getTrackedPosts.mockResolvedValue(["t3_stale"]);
-    reddit.getPostById.mockRejectedValue(new Error("post not found"));
-    reddit.getHotPosts.mockReturnValue({
-      get: vi.fn().mockResolvedValue([
-        {
-          id: "t3_pinned",
-          authorName: "subscriber-goal",
-          subredditId: "t5_example",
-          stickied: true,
-          postData: { postKind: "subscriber-goal-v1" },
-        },
-      ]),
+    reddit.getHighlightedPosts.mockResolvedValue([
+      { postId: "t3_highlighted" },
+    ]);
+    reddit.getPostById.mockImplementation(async (postId) => {
+      if (postId === "t3_stale") throw new Error("post not found");
+      return {
+        id: "t3_highlighted",
+        authorName: "subscriber-goal",
+        subredditId: "t5_example",
+        postData: { postKind: "subscriber-goal-v1" },
+      };
     });
 
     await expect(
       findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
     ).resolves.toMatchObject({
-      postId: "t3_pinned",
-      source: "pinned",
+      postId: "t3_highlighted",
+      source: "highlighted",
       trackedInspected: 1,
       stalePruned: 1,
       validated: 1,
@@ -505,21 +547,21 @@ describe("onboarding subscriber goal", () => {
     );
   });
 
-  it("finds a strictly validated pinned goal through author search", async () => {
+  it("recovers a strictly validated recent goal through author search", async () => {
     reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
         {
           id: "t3_wrong_author",
           authorName: "someone-else",
           subredditId: "t5_example",
-          stickied: true,
+          createdAt: new Date(nowMs),
           postData: { postKind: "subscriber-goal-v1" },
         },
         {
           id: "t3_searched",
           authorName: "subscriber-goal",
           subredditName: "ExampleSub",
-          stickied: true,
+          createdAt: new Date(nowMs),
           postData: { postKind: "cta-only-v1" },
         },
       ]),
@@ -530,6 +572,7 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       postId: "t3_searched",
       source: "search",
+      isHighlighted: false,
       searchInspected: 2,
       validated: 1,
     });
@@ -594,13 +637,13 @@ describe("onboarding subscriber goal", () => {
       validated: 1,
     });
     expect(hoisted.getTrackedPosts).toHaveBeenCalled();
-    expect(reddit.getHotPosts).not.toHaveBeenCalled();
+    expect(reddit.getHighlightedPosts).toHaveBeenCalled();
   });
 
-  it("detects an active unpinned tracked goal only in duplicate-prevention mode", async () => {
-    hoisted.getTrackedPosts.mockResolvedValue(["t3_active_unpinned"]);
+  it("detects an active unhighlighted tracked goal only in duplicate-prevention mode", async () => {
+    hoisted.getTrackedPosts.mockResolvedValue(["t3_active_unhighlighted"]);
     reddit.getPostById.mockResolvedValue({
-      id: "t3_active_unpinned",
+      id: "t3_active_unhighlighted",
       authorName: "subscriber-goal",
       subredditId: "t5_example",
       stickied: false,
@@ -616,25 +659,25 @@ describe("onboarding subscriber goal", () => {
         "active_or_recent",
       ),
     ).resolves.toMatchObject({
-      postId: "t3_active_unpinned",
+      postId: "t3_active_unhighlighted",
       source: "tracked",
-      isPinned: false,
+      isHighlighted: false,
     });
     await expect(
       findExistingSubscriberGoal(
         reddit as never,
         redis as never,
         nowMs,
-        "pinned",
+        "highlighted",
       ),
     ).resolves.not.toHaveProperty("postId");
   });
 
-  it("detects a recently created unpinned goal without preserving old inactive posts", async () => {
+  it("detects a recently created unhighlighted goal without preserving old inactive posts", async () => {
     reddit.getNewPosts.mockReturnValueOnce({
       all: vi.fn().mockResolvedValue([
         {
-          id: "t3_recent_unpinned",
+          id: "t3_recent_unhighlighted",
           authorName: "subscriber-goal",
           subredditId: "t5_example",
           stickied: false,
@@ -652,15 +695,15 @@ describe("onboarding subscriber goal", () => {
         "active_or_recent",
       ),
     ).resolves.toMatchObject({
-      postId: "t3_recent_unpinned",
+      postId: "t3_recent_unhighlighted",
       source: "recent",
-      isPinned: false,
+      isHighlighted: false,
     });
 
     reddit.getNewPosts.mockReturnValueOnce({
       all: vi.fn().mockResolvedValue([
         {
-          id: "t3_old_unpinned",
+          id: "t3_old_unhighlighted",
           authorName: "subscriber-goal",
           subredditId: "t5_example",
           stickied: false,
@@ -706,7 +749,7 @@ describe("onboarding subscriber goal", () => {
     await expect(
       findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
     ).rejects.toThrow("reddit unavailable");
-    expect(reddit.getHotPosts).not.toHaveBeenCalled();
+    expect(reddit.getHighlightedPosts).toHaveBeenCalled();
     expect(await redis.zRange(subscriberGoalPostRegistryKey)).toContainEqual(
       expect.objectContaining({ member: "t3_candidate" }),
     );
@@ -813,7 +856,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "upgrade",
       nowMs,
     });
-    const sticky = vi.fn(async () => undefined);
+    const highlight = vi.fn(async () => undefined);
     const completedPost = {
       id: "t3_completed_initial",
       authorName: "subscriber-goal",
@@ -822,7 +865,7 @@ describe("onboarding subscriber goal", () => {
       stickied: false,
       createdAt: new Date(nowMs),
       postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
-      sticky,
+      highlight,
     };
     await redis.hSet("subscriber_goals", {
       [`${completedPost.id}_goal`]: "1000",
@@ -848,7 +891,7 @@ describe("onboarding subscriber goal", () => {
       status: "existing",
       postId: completedPost.id,
     });
-    expect(sticky).not.toHaveBeenCalled();
+    expect(highlight).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
@@ -857,7 +900,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "upgrade",
       nowMs,
     });
-    const sticky = vi.fn(async () => undefined);
+    const highlight = vi.fn(async () => undefined);
     const completedPost = {
       id: "t3_completed_final",
       authorName: "subscriber-goal",
@@ -866,7 +909,7 @@ describe("onboarding subscriber goal", () => {
       stickied: false,
       createdAt: new Date(nowMs),
       postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
-      sticky,
+      highlight,
     };
     reddit.getPostById.mockResolvedValue(completedPost);
     reddit.getNewPosts
@@ -901,7 +944,7 @@ describe("onboarding subscriber goal", () => {
       status: "existing",
       postId: completedPost.id,
     });
-    expect(sticky).not.toHaveBeenCalled();
+    expect(highlight).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
@@ -913,6 +956,7 @@ describe("onboarding subscriber goal", () => {
         nowMs,
       });
       reddit.getCurrentSubreddit.mockResolvedValue({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers,
@@ -948,6 +992,7 @@ describe("onboarding subscriber goal", () => {
       nowMs,
     });
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
@@ -983,6 +1028,7 @@ describe("onboarding subscriber goal", () => {
       nowMs,
     });
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
@@ -1020,6 +1066,7 @@ describe("onboarding subscriber goal", () => {
         nowMs,
       });
       reddit.getCurrentSubreddit.mockResolvedValue({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers: 1_001,
@@ -1050,6 +1097,7 @@ describe("onboarding subscriber goal", () => {
       nowMs,
     });
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
@@ -1077,6 +1125,7 @@ describe("onboarding subscriber goal", () => {
     });
     reddit.getCurrentSubreddit
       .mockResolvedValueOnce({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers: 1_001,
@@ -1084,6 +1133,7 @@ describe("onboarding subscriber goal", () => {
         nsfw: false,
       })
       .mockResolvedValueOnce({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers: 1_001,
@@ -1091,6 +1141,7 @@ describe("onboarding subscriber goal", () => {
         nsfw: false,
       })
       .mockResolvedValueOnce({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers: 1_001,
@@ -1118,6 +1169,7 @@ describe("onboarding subscriber goal", () => {
         nowMs,
       });
       reddit.getCurrentSubreddit.mockResolvedValue({
+        ...highlightSubredditMethods,
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers,
@@ -1150,6 +1202,7 @@ describe("onboarding subscriber goal", () => {
       nowMs,
     });
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: onboardingTinySubscriberThreshold + 1,
@@ -1353,14 +1406,27 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("terminates a created but unpinned goal without retrying", async () => {
+  it("terminates a created but unhighlighted goal without retrying", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
     });
     hoisted.createSubscriberGoal.mockResolvedValue({
-      post: { id: "t3_unpinned", title: "Welcome to r/ExampleSub!" },
-      stickyResult: { status: "not_pinned", errorMessage: "no permission" },
+      post: { id: "t3_unhighlighted", title: "Welcome to r/ExampleSub!" },
+      highlightResult: {
+        status: "not_highlighted",
+        selectedPostId: "t3_unhighlighted",
+        verifiedHighlighted: false,
+        failureCategory: "write",
+        errorMessage: "no permission",
+        issues: [{ category: "write", message: "no permission" }],
+        capacityOutcome: "not_needed",
+        cleanupOutcome: "not_needed",
+        removedManagedHighlightIds: [],
+        preservedHighlightIds: [],
+        rollbackOutcome: "not_needed",
+        reorderOutcome: "not_attempted",
+      },
     });
 
     await expect(
@@ -1370,14 +1436,14 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
-    ).resolves.toMatchObject({ status: "created", postId: "t3_unpinned" });
+    ).resolves.toMatchObject({ status: "created", postId: "t3_unhighlighted" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "complete",
-      resultStatus: "created_not_pinned",
+      resultStatus: "created_not_highlighted",
     });
-    expect(hoisted.notifyStickyFailure).toHaveBeenCalledOnce();
+    expect(hoisted.notifyHighlightFailure).toHaveBeenCalledOnce();
   });
 
   it("allows only one overlapping automatic creation", async () => {
@@ -1686,6 +1752,7 @@ describe("onboarding subscriber goal", () => {
     });
     reddit.getAppUser.mockClear();
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 39,
@@ -1733,6 +1800,7 @@ describe("onboarding subscriber goal", () => {
     });
     reddit.getAppUser.mockClear();
     reddit.getCurrentSubreddit.mockResolvedValue({
+      ...highlightSubredditMethods,
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 1_001,

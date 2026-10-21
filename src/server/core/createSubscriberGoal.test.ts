@@ -9,22 +9,27 @@ const hoisted = vi.hoisted(() => ({
   getModPermissionsForSubreddit: vi.fn(),
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
+  highlightedIds: new Set<string>(),
   redis: {
-    set: vi.fn(async (key: string, value: string, options?: { nx?: boolean }) => {
-      if (options?.nx && hoisted.redisValues.has(key)) return;
-      hoisted.redisValues.set(key, value);
-    }),
+    set: vi.fn(
+      async (key: string, value: string, options?: { nx?: boolean }) => {
+        if (options?.nx && hoisted.redisValues.has(key)) return;
+        hoisted.redisValues.set(key, value);
+      },
+    ),
     get: vi.fn(async (key: string) => hoisted.redisValues.get(key)),
     del: vi.fn(async (key: string) => {
       hoisted.redisValues.delete(key);
       hoisted.redisHashes.delete(key);
     }),
     hGetAll: vi.fn(async (key: string) =>
-      Object.fromEntries(hoisted.redisHashes.get(key) ?? [])
+      Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     ),
     hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
       const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
-      Object.entries(fields).forEach(([field, value]) => hash.set(field, value));
+      Object.entries(fields).forEach(([field, value]) =>
+        hash.set(field, value),
+      );
       hoisted.redisHashes.set(key, hash);
     }),
     hMGet: vi.fn(async (key: string, fields: string[]) => {
@@ -42,8 +47,6 @@ const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
-  clearUserStickies: vi.fn(),
-  clearSubscriberGoalStickies: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   ensureSubscriberGoalPostFlair: vi.fn(),
   checkAppAccountHealth: vi.fn(),
@@ -77,11 +80,6 @@ vi.mock("../data/updaterData", () => ({
   queueUpdate: hoisted.queueUpdate,
 }));
 
-vi.mock("../utils/redditUtils", () => ({
-  clearUserStickies: hoisted.clearUserStickies,
-  clearSubscriberGoalStickies: hoisted.clearSubscriberGoalStickies,
-}));
-
 vi.mock("../data/subscriberGoalCandidates", () => ({
   getSubscriberGoalCandidatePostIds: hoisted.getSubscriberGoalCandidatePostIds,
 }));
@@ -102,11 +100,11 @@ vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
 import { createSubscriberGoal } from "./createSubscriberGoal";
 
 const createPost = ({
-  sticky = vi.fn(),
-  isStickied = vi.fn(() => true),
+  highlight,
+  isHighlighted,
 }: {
-  sticky?: ReturnType<typeof vi.fn>;
-  isStickied?: ReturnType<typeof vi.fn>;
+  highlight?: ReturnType<typeof vi.fn>;
+  isHighlighted?: ReturnType<typeof vi.fn>;
 } = {}) => ({
   id: "t3_newpost",
   title: "Welcome!",
@@ -114,8 +112,14 @@ const createPost = ({
   subredditName: "ExampleSub",
   createdAt: new Date("2026-01-01T00:00:00.000Z"),
   approve: vi.fn(),
-  sticky,
-  isStickied,
+  highlight:
+    highlight ??
+    vi.fn(async () => {
+      hoisted.highlightedIds.add("t3_newpost");
+    }),
+  isHighlighted:
+    isHighlighted ??
+    vi.fn(async () => hoisted.highlightedIds.has("t3_newpost")),
 });
 
 const createGoal = (
@@ -142,20 +146,28 @@ const createGoal = (
     },
   });
 
-const noRetryStickyVerification = {
-  stickyVerification: { maxWaitMs: 0, intervalMs: 1 },
+const noRetryHighlightVerification = {
+  highlightVerification: { maxWaitMs: 0, intervalMs: 1 },
 };
 
-describe("createSubscriberGoal sticky handling", () => {
+describe("createSubscriberGoal highlight handling", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
+    hoisted.highlightedIds.clear();
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 100,
       nsfw: false,
+      getHighlightedPosts: vi.fn(async () =>
+        [...hoisted.highlightedIds].map((postId) => ({ postId })),
+      ),
+      reorderHighlightedPosts: vi.fn(async (postIds: string[]) => {
+        hoisted.highlightedIds.clear();
+        postIds.forEach((postId) => hoisted.highlightedIds.add(postId));
+      }),
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getAppUser.mockResolvedValue({
@@ -199,12 +211,6 @@ describe("createSubscriberGoal sticky handling", () => {
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({
       id: "flair_subgoal",
     });
-    hoisted.clearSubscriberGoalStickies.mockResolvedValue({
-      inspected: 0,
-      unstickied: [],
-      skippedCrossSubreddit: [],
-      missing: [],
-    });
     hoisted.reddit.getPostById.mockResolvedValue(undefined);
   });
 
@@ -224,14 +230,13 @@ describe("createSubscriberGoal sticky handling", () => {
       });
 
       expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
-      expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
       expect(hoisted.createGoalPost).not.toHaveBeenCalled();
       expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
       expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
     },
   );
 
-  it("returns pinned when sticky succeeds and verification confirms the post is stickied", async () => {
+  it("returns highlighted when highlight succeeds and verification confirms the post is stickied", async () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
 
@@ -251,17 +256,17 @@ describe("createSubscriberGoal sticky handling", () => {
       post,
       "regular",
     );
-    expect(post.sticky).toHaveBeenCalledTimes(1);
-    expect(post.sticky).toHaveBeenCalledWith();
-    expect(post.isStickied).toHaveBeenCalledWith();
+    expect(post.highlight).toHaveBeenCalledTimes(1);
+    expect(post.highlight).toHaveBeenCalledWith();
+    expect(post.isHighlighted).toHaveBeenCalledWith();
     expect(result.post).toBe(post);
     expect(result.flairResult).toEqual({
       status: "applied",
       flairId: "flair_subgoal",
     });
-    expect(result.stickyResult).toEqual({
-      status: "pinned",
-      verifiedStickied: true,
+    expect(result.highlightResult).toMatchObject({
+      status: "highlighted",
+      verifiedHighlighted: true,
     });
   });
 
@@ -278,7 +283,6 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(hoisted.getSubscriberGoalCandidatePostIds).not.toHaveBeenCalled();
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
-    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
   });
 
   it("creates and pins without flair when the app has Posts but not Flair permission", async () => {
@@ -294,7 +298,7 @@ describe("createSubscriberGoal sticky handling", () => {
     );
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
     expect(post.approve).toHaveBeenCalled();
-    expect(post.sticky).toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalled();
     expect(result.flairResult).toEqual({
       status: "omitted",
       reason: "missing_permission",
@@ -315,7 +319,7 @@ describe("createSubscriberGoal sticky handling", () => {
     );
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
     expect(post.approve).toHaveBeenCalled();
-    expect(post.sticky).toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalled();
     expect(result.flairResult).toEqual({
       status: "omitted",
       reason: "preparation_failed",
@@ -345,7 +349,9 @@ describe("createSubscriberGoal sticky handling", () => {
     await expect(createGoal({ operationId: "manual:test" })).rejects.toThrow(
       "redis unavailable",
     );
-    await expect(createGoal({ operationId: "manual:test" })).resolves.toMatchObject({
+    await expect(
+      createGoal({ operationId: "manual:test" }),
+    ).resolves.toMatchObject({
       post: { id: "t3_newpost" },
     });
 
@@ -353,8 +359,15 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(hoisted.reddit.getPostById).toHaveBeenCalledWith("t3_newpost");
   });
 
-  it("cleans up authoritative old goals only after the replacement is registered and approved", async () => {
+  it("removes an authoritative old classic highlight only after the replacement is registered and approved", async () => {
     const post = createPost();
+    const oldClassic = {
+      id: "t3_tracked",
+      subredditId: "t5_example",
+      unhighlight: vi.fn(async () => {
+        hoisted.highlightedIds.delete("t3_tracked");
+      }),
+    };
     hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
       "t3_oldtiny",
@@ -369,39 +382,33 @@ describe("createSubscriberGoal sticky handling", () => {
         ["t3_tracked_post_height", "regular"],
       ]),
     );
-    hoisted.reddit.getPostById.mockImplementation(async (postId) => ({
-      id: postId,
-      subredditId: "t5_example",
-      isStickied: vi.fn(() => true),
-    }));
+    hoisted.highlightedIds.add("t3_oldtiny");
+    hoisted.highlightedIds.add("t3_tracked");
+    hoisted.reddit.getPostById.mockResolvedValue(oldClassic);
 
     await createGoal();
 
-    expect(hoisted.clearSubscriberGoalStickies).toHaveBeenCalledWith(
-      hoisted.reddit,
-      {
-        knownPostIds: ["t3_oldtiny", "t3_tracked"],
-        knownClassicPostIds: ["t3_tracked"],
-        subreddit: {
-          id: "t5_example",
-          name: "ExampleSub",
-          numberOfSubscribers: 100,
-          nsfw: false,
-        },
-      },
+    expect(oldClassic.unhighlight).toHaveBeenCalledOnce();
+    expect(hoisted.highlightedIds).toEqual(
+      new Set(["t3_newpost", "t3_oldtiny"]),
     );
     expect(
       hoisted.registerNewSubGoalPost.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
-    );
+    ).toBeLessThan(oldClassic.unhighlight.mock.invocationCallOrder[0]);
     expect(post.approve.mock.invocationCallOrder[0]).toBeLessThan(
-      hoisted.clearSubscriberGoalStickies.mock.invocationCallOrder[0],
+      oldClassic.unhighlight.mock.invocationCallOrder[0],
     );
   });
 
-  it("keeps a ready replacement unpinned when an older goal cannot be unpinned", async () => {
+  it("keeps a ready replacement unhighlighted when a full list cannot free the managed slot", async () => {
     const post = createPost();
+    const oldClassic = {
+      id: "t3_old",
+      subredditId: "t5_example",
+      unhighlight: vi.fn(async () => {
+        throw new Error("moderator action required");
+      }),
+    };
     hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_old"]);
     hoisted.redisHashes.set(
@@ -411,19 +418,21 @@ describe("createSubscriberGoal sticky handling", () => {
         ["t3_old_post_height", "regular"],
       ]),
     );
-    hoisted.clearSubscriberGoalStickies.mockRejectedValue(
-      new Error("moderator action required"),
+    ["t3_old", "t3_a", "t3_b", "t3_c", "t3_d", "t3_e"].forEach((id) =>
+      hoisted.highlightedIds.add(id),
     );
+    hoisted.reddit.getPostById.mockResolvedValue(oldClassic);
 
     const result = await createGoal();
 
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalled();
     expect(post.approve).toHaveBeenCalled();
-    expect(post.sticky).not.toHaveBeenCalled();
-    expect(result.stickyResult).toEqual({
-      status: "not_pinned",
+    expect(post.highlight).not.toHaveBeenCalled();
+    expect(result.highlightResult).toMatchObject({
+      status: "not_highlighted",
       errorMessage: "moderator action required",
-      verifiedStickied: false,
+      verifiedHighlighted: false,
+      failureCategory: "cleanup",
     });
   });
 
@@ -431,7 +440,7 @@ describe("createSubscriberGoal sticky handling", () => {
     ["submission", "createGoalPost"],
     ["registration", "registerNewSubGoalPost"],
   ] as const)(
-    "leaves existing pins untouched after a %s failure",
+    "leaves existing Community Highlights untouched after a %s failure",
     async (_failureStage, mockName) => {
       const post = createPost();
       if (mockName === "createGoalPost") {
@@ -447,18 +456,18 @@ describe("createSubscriberGoal sticky handling", () => {
 
       await expect(createGoal()).rejects.toThrow(/failed/);
 
-      expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
+      expect(post.highlight).not.toHaveBeenCalled();
     },
   );
 
-  it("leaves existing pins untouched when replacement approval fails", async () => {
+  it("leaves existing Community Highlights untouched when replacement approval fails", async () => {
     const post = createPost();
     post.approve.mockRejectedValue(new Error("approval failed"));
     hoisted.createGoalPost.mockResolvedValue(post);
 
     await expect(createGoal()).rejects.toThrow("approval failed");
 
-    expect(hoisted.clearSubscriberGoalStickies).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
   });
 
   it("passes runAs creation through with fallback text without post-creation fallback updates", async () => {
@@ -478,7 +487,7 @@ describe("createSubscriberGoal sticky handling", () => {
       flairId: "flair_subgoal",
     });
     expect(result.post).toBe(post);
-    expect(result.stickyResult.status).toBe("pinned");
+    expect(result.highlightResult.status).toBe("highlighted");
   });
 
   it("applies short post frame styles after creating the post", async () => {
@@ -572,131 +581,118 @@ describe("createSubscriberGoal sticky handling", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
-  it("returns pinned when delayed sticky verification later confirms the post is stickied", async () => {
-    const refetchedBeforePropagation = createPost({
-      isStickied: vi.fn(() => false),
-    });
-    const refetchedAfterPropagation = createPost({
-      isStickied: vi.fn(() => true),
-    });
-    const post = createPost();
+  it("returns highlighted when delayed highlight verification later confirms the post", async () => {
+    const isHighlighted = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const post = createPost({ isHighlighted });
     hoisted.createGoalPost.mockResolvedValue(post);
-    hoisted.reddit.getPostById
-      .mockResolvedValueOnce(refetchedBeforePropagation)
-      .mockResolvedValueOnce(refetchedAfterPropagation);
 
     const result = await createGoal({
-      stickyVerification: { maxWaitMs: 5, intervalMs: 1 },
+      highlightVerification: { maxWaitMs: 5, intervalMs: 1 },
     });
 
-    expect(post.sticky).toHaveBeenCalledTimes(1);
-    expect(post.sticky).toHaveBeenCalledWith();
-    expect(hoisted.reddit.getPostById).toHaveBeenCalledTimes(2);
-    expect(refetchedBeforePropagation.isStickied).toHaveBeenCalled();
-    expect(refetchedAfterPropagation.isStickied).toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledTimes(1);
+    expect(post.highlight).toHaveBeenCalledWith();
+    expect(isHighlighted).toHaveBeenCalledTimes(2);
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "pinned",
-      verifiedStickied: true,
+    expect(result.highlightResult).toMatchObject({
+      status: "highlighted",
+      verifiedHighlighted: true,
     });
   });
 
-  it("returns pinned when sticky throws but delayed verification confirms the post is stickied", async () => {
-    const refetchedBeforePropagation = createPost({
-      isStickied: vi.fn(() => false),
-    });
-    const refetchedAfterPropagation = createPost({
-      isStickied: vi.fn(() => true),
-    });
+  it("returns highlighted when highlight throws but delayed verification confirms the post", async () => {
     const post = createPost({
-      sticky: vi.fn(async () => {
-        throw new Error("sticky slots full");
+      highlight: vi.fn(async () => {
+        throw new Error("highlight slots full");
       }),
+      isHighlighted: vi
+        .fn()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true),
     });
     hoisted.createGoalPost.mockResolvedValue(post);
-    hoisted.reddit.getPostById
-      .mockResolvedValueOnce(refetchedBeforePropagation)
-      .mockResolvedValueOnce(refetchedAfterPropagation);
 
     const result = await createGoal({
-      stickyVerification: { maxWaitMs: 5, intervalMs: 1 },
+      highlightVerification: { maxWaitMs: 5, intervalMs: 1 },
     });
 
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "pinned",
-      verifiedStickied: true,
+    expect(result.highlightResult).toMatchObject({
+      status: "highlighted",
+      verifiedHighlighted: true,
     });
   });
 
-  it("returns not_pinned when sticky throws and verification never confirms success", async () => {
+  it("returns not_highlighted when highlight throws and verification never confirms success", async () => {
     const post = createPost({
-      sticky: vi.fn(async () => {
-        throw new Error("sticky slots full");
+      highlight: vi.fn(async () => {
+        throw new Error("highlight slots full");
       }),
-      isStickied: vi.fn(() => false),
+      isHighlighted: vi.fn(() => false),
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal(noRetryStickyVerification);
+    const result = await createGoal(noRetryHighlightVerification);
 
-    expect(post.sticky).toHaveBeenCalledTimes(1);
-    expect(post.sticky).toHaveBeenCalledWith();
-    expect(post.isStickied).toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledTimes(1);
+    expect(post.highlight).toHaveBeenCalledWith();
+    expect(post.isHighlighted).toHaveBeenCalled();
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "not_pinned",
-      errorMessage: "sticky slots full",
-      verifiedStickied: false,
+    expect(result.highlightResult).toMatchObject({
+      status: "not_highlighted",
+      errorMessage: "highlight slots full",
+      verifiedHighlighted: false,
     });
   });
 
-  it("returns not_pinned when sticky does not throw but verification returns false", async () => {
+  it("returns not_highlighted when highlight does not throw but verification returns false", async () => {
     const post = createPost({
-      isStickied: vi.fn(() => false),
+      isHighlighted: vi.fn(() => false),
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal(noRetryStickyVerification);
+    const result = await createGoal(noRetryHighlightVerification);
 
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "not_pinned",
-      verifiedStickied: false,
+    expect(result.highlightResult).toMatchObject({
+      status: "not_highlighted",
+      verifiedHighlighted: false,
     });
   });
 
-  it("returns not_pinned when sticky verification throws", async () => {
+  it("returns not_highlighted when highlight verification throws", async () => {
     const post = createPost({
-      isStickied: vi.fn(() => {
+      isHighlighted: vi.fn(() => {
         throw new Error("verification unavailable");
       }),
     });
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    const result = await createGoal(noRetryStickyVerification);
+    const result = await createGoal(noRetryHighlightVerification);
 
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "not_pinned",
+    expect(result.highlightResult).toMatchObject({
+      status: "not_highlighted",
       errorMessage: "verification unavailable",
     });
   });
 
-  it("falls back to the original post when verification refetch fails", async () => {
+  it("verifies highlight state on the created post", async () => {
     const post = createPost({
-      isStickied: vi.fn(() => true),
+      isHighlighted: vi.fn(() => true),
     });
     hoisted.createGoalPost.mockResolvedValue(post);
-    hoisted.reddit.getPostById.mockRejectedValue(new Error("not ready"));
 
     const result = await createGoal();
 
-    expect(post.isStickied).toHaveBeenCalled();
+    expect(post.isHighlighted).toHaveBeenCalled();
     expect(result.post).toBe(post);
-    expect(result.stickyResult).toEqual({
-      status: "pinned",
-      verifiedStickied: true,
+    expect(result.highlightResult).toMatchObject({
+      status: "highlighted",
+      verifiedHighlighted: true,
     });
   });
 });

@@ -25,7 +25,7 @@ const hoisted = vi.hoisted(() => ({
   getSubscriberGoalCandidatePostIds: vi.fn(),
   ensureSubscriberGoalPostFlair: vi.fn(),
   backfillSubscriberGoalPostFlair: vi.fn(),
-  reconcileSubscriberGoalStickies: vi.fn(),
+  reconcileSubscriberGoalHighlights: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   rememberAppInstaller: vi.fn(),
   checkAppAccountHealth: vi.fn(),
@@ -130,7 +130,7 @@ vi.mock("../core/subscriberGoalPostFlair", () => ({
 }));
 
 vi.mock("../utils/redditUtils", () => ({
-  reconcileSubscriberGoalStickies: hoisted.reconcileSubscriberGoalStickies,
+  reconcileSubscriberGoalHighlights: hoisted.reconcileSubscriberGoalHighlights,
 }));
 
 vi.mock("../data/ctaActivity", () => ({
@@ -185,7 +185,7 @@ describe("onAppChanged", () => {
     hoisted.getSubscriberGoalCandidatePostIds.mockReset();
     hoisted.ensureSubscriberGoalPostFlair.mockReset();
     hoisted.backfillSubscriberGoalPostFlair.mockReset();
-    hoisted.reconcileSubscriberGoalStickies.mockReset();
+    hoisted.reconcileSubscriberGoalHighlights.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockReset();
     hoisted.rememberAppInstaller.mockReset();
     hoisted.checkAppAccountHealth.mockReset();
@@ -223,7 +223,7 @@ describe("onAppChanged", () => {
       applied: 0,
       failed: [],
     });
-    hoisted.reconcileSubscriberGoalStickies.mockResolvedValue({
+    hoisted.reconcileSubscriberGoalHighlights.mockResolvedValue({
       unstickied: [],
       failed: [],
     });
@@ -311,7 +311,7 @@ describe("onAppChanged", () => {
     );
     expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
-    expect(hoisted.reconcileSubscriberGoalStickies).not.toHaveBeenCalled();
+    expect(hoisted.reconcileSubscriberGoalHighlights).not.toHaveBeenCalled();
   });
 
   it("initializes release-scoped onboarding during upgrades", async () => {
@@ -494,7 +494,7 @@ describe("onAppChanged", () => {
     ).resolves.toBeUndefined();
 
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
-    expect(hoisted.reconcileSubscriberGoalStickies).not.toHaveBeenCalled();
+    expect(hoisted.reconcileSubscriberGoalHighlights).not.toHaveBeenCalled();
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
   });
 

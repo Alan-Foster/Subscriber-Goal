@@ -10,16 +10,11 @@ import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAft
 import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
-import { reconcileSubscriberGoalStickies } from "../utils/redditUtils";
-import {
-  postHeightSuffix,
-  postKindSuffix,
-  subscriberGoalsKey,
-} from "../data/subGoalData";
+import { ensureExistingSubscriberGoalHighlighted } from "./onboardingSubscriberGoal";
 
-export const appRepairStateKey = "app_repair_1_9_1_state";
-export const appRepairLockKey = "app_repair_1_9_1_lock";
-export const appRepairVersion = "app_repair_1_9_1";
+export const appRepairStateKey = "app_repair_community_highlights_v1_state";
+export const appRepairLockKey = "app_repair_community_highlights_v1_lock";
+export const appRepairVersion = "app_repair_community_highlights_v1";
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
 
@@ -71,7 +66,9 @@ export async function processDueAppRepair({
     try {
       await operation();
     } catch (error) {
-      failures.push(`${phase}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(
+        `${phase}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       logDiagnostic(
         "warn",
         "app_repair_phase_failed",
@@ -122,12 +119,15 @@ export async function processDueAppRepair({
         ),
       );
       if (trackedPosts.length > 0) {
-        await runPhase("update_queue", () => queueUpdates(redis, trackedPosts!));
+        await runPhase("update_queue", () =>
+          queueUpdates(redis, trackedPosts!),
+        );
       }
 
       let flairId: string | undefined;
       await runPhase("flair_ensure", async () => {
-        flairId = (await ensureSubscriberGoalPostFlair(reddit, subreddit.name)).id;
+        flairId = (await ensureSubscriberGoalPostFlair(reddit, subreddit.name))
+          .id;
       });
       if (flairId) {
         await runPhase("flair_backfill", () =>
@@ -139,28 +139,24 @@ export async function processDueAppRepair({
           ),
         );
       }
-      await runPhase("sticky_reconciliation", () =>
-        (async () => {
-          const knownClassicPostIds: string[] = [];
-          for (const postId of candidatePostIds!) {
-            const [postKind, postHeight] = await redis.hMGet(
-              subscriberGoalsKey,
-              [`${postId}${postKindSuffix}`, `${postId}${postHeightSuffix}`],
-            );
-            if (
-              postKind === "subscriber-goal-v1" &&
-              (postHeight === "regular" || postHeight === "short")
-            ) {
-              knownClassicPostIds.push(postId);
-            }
-          }
-          return reconcileSubscriberGoalStickies(reddit, {
-            knownPostIds: candidatePostIds!,
-            knownClassicPostIds,
-            subreddit,
-          });
-        })(),
-      );
+      await runPhase("highlight_reconciliation", async () => {
+        const result = await ensureExistingSubscriberGoalHighlighted({
+          reddit,
+          redis,
+          nowMs,
+          notifyOnFailure: true,
+        });
+        if (
+          result.status === "existing_not_highlighted" ||
+          result.reconciliationOutcome === "degraded" ||
+          result.reconciliationOutcome === "failed"
+        ) {
+          throw new Error(
+            result.errorMessage ??
+              `Subscriber Goal Community Highlight reconciliation ${result.reconciliationOutcome ?? "failed"}.`,
+          );
+        }
+      });
     } else {
       failures.push("migration_discovery: incomplete");
     }

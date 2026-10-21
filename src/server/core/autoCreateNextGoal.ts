@@ -18,8 +18,8 @@ import {
 import { isLinkId } from "../types";
 import {
   getPostUrl,
-  notifyStickyFailure,
-} from "../utils/stickyFailureNotifications";
+  notifyHighlightFailure,
+} from "../utils/highlightFailureNotifications";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
 
@@ -33,7 +33,8 @@ export type AutoCreateNextGoalSummary = {
 };
 
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
-export const autoCreateNextGoalSuccessorsKey = "auto_create_next_goal_v1_successors";
+export const autoCreateNextGoalSuccessorsKey =
+  "auto_create_next_goal_v1_successors";
 const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
 
 export async function processDueAutoCreateNextGoals({
@@ -148,7 +149,7 @@ export async function processDueAutoCreateNextGoals({
         subreddit.name.toLowerCase() !==
         appSettings.promoSubreddit.toLowerCase();
 
-      const { post, stickyResult } = await createSubscriberGoal({
+      const { post, highlightResult } = await createSubscriberGoal({
         reddit,
         redis,
         appSettings,
@@ -171,19 +172,27 @@ export async function processDueAutoCreateNextGoals({
           operationId: `auto-next:${sourcePostId}`,
         },
       });
-      if (stickyResult.status === "not_pinned") {
+      if (highlightResult.issues.length > 0) {
         logDiagnostic("warn", "auto_create_goal_degraded", {
           workflow: "auto_create_next_goal",
-          phase: "sticky",
+          phase: "highlight",
           postId: post.id,
+          failureCategories: highlightResult.issues
+            .map(({ category }) => category)
+            .join(","),
+          capacityOutcome: highlightResult.capacityOutcome,
+          cleanupOutcome: highlightResult.cleanupOutcome,
+          rollbackOutcome: highlightResult.rollbackOutcome,
+          reorderOutcome: highlightResult.reorderOutcome,
         });
-        await notifyStickyFailure({
+        await notifyHighlightFailure({
           reddit,
           subredditId: subreddit.id,
           subredditName: subreddit.name,
           postTitle: post.title,
           postUrl: getPostUrl(post),
-          errorMessage: stickyResult.errorMessage,
+          errorMessage: highlightResult.errorMessage,
+          highlightResult,
         });
       }
       await redis.hSet(autoCreateNextGoalSuccessorsKey, {
@@ -195,7 +204,11 @@ export async function processDueAutoCreateNextGoals({
         logDiagnostic(
           "error",
           "auto_create_cleanup_failed",
-          { workflow: "auto_create_next_goal", phase: "cancel_all", postId: sourcePostId },
+          {
+            workflow: "auto_create_next_goal",
+            phase: "cancel_all",
+            postId: sourcePostId,
+          },
           cancelError,
         );
         try {
@@ -204,7 +217,11 @@ export async function processDueAutoCreateNextGoals({
           logDiagnostic(
             "error",
             "auto_create_cleanup_failed",
-            { workflow: "auto_create_next_goal", phase: "cancel_source", postId: sourcePostId },
+            {
+              workflow: "auto_create_next_goal",
+              phase: "cancel_source",
+              postId: sourcePostId,
+            },
             sourceCancelError,
           );
         }
@@ -215,7 +232,11 @@ export async function processDueAutoCreateNextGoals({
       logDiagnostic(
         "error",
         "auto_create_goal_failed",
-        { workflow: "auto_create_next_goal", phase: "create", postId: sourcePostId },
+        {
+          workflow: "auto_create_next_goal",
+          phase: "create",
+          postId: sourcePostId,
+        },
         error,
       );
       summary.failed += 1;
@@ -229,7 +250,12 @@ export async function processDueAutoCreateNextGoals({
         logDiagnostic(
           "warn",
           "auto_create_goal_retry_scheduled",
-          { workflow: "auto_create_next_goal", phase: "retry", postId: sourcePostId, failureCount: retry.failureCount },
+          {
+            workflow: "auto_create_next_goal",
+            phase: "retry",
+            postId: sourcePostId,
+            failureCount: retry.failureCount,
+          },
           error,
         );
       } else {
@@ -242,7 +268,12 @@ export async function processDueAutoCreateNextGoals({
         logDiagnostic(
           "error",
           "auto_create_goal_retries_exhausted",
-          { workflow: "auto_create_next_goal", phase: "terminal", postId: sourcePostId, failureCount: retry.failureCount },
+          {
+            workflow: "auto_create_next_goal",
+            phase: "terminal",
+            postId: sourcePostId,
+            failureCount: retry.failureCount,
+          },
           error,
         );
       }

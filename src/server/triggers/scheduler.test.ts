@@ -220,13 +220,13 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processDueOnboardingSubscriberGoal.mockResolvedValue({
       status: "not_due",
       trackedInspected: 0,
-      pinnedInspected: 0,
+      highlightedInspected: 0,
       recentInspected: 0,
     });
     hoisted.processDueOnboardingReminder.mockResolvedValue({
       status: "not_due",
       trackedInspected: 0,
-      pinnedInspected: 0,
+      highlightedInspected: 0,
       recentInspected: 0,
     });
     hoisted.getQueuedUpdates.mockResolvedValue([]);

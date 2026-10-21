@@ -2,13 +2,13 @@ import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   AUTOMATIC_ONBOARDING_ENABLED,
-  ensureExistingSubscriberGoalPinned,
+  ensureExistingSubscriberGoalHighlighted,
   getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError,
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting,
-  markOnboardingSubscriberGoalExistingNotPinned,
+  markOnboardingSubscriberGoalExistingNotHighlighted,
   markOnboardingSubscriberGoalCompleted,
   markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled,
@@ -52,7 +52,7 @@ type OnboardingReminderStatus =
 type OnboardingReminderResult =
   | "sent"
   | "existing"
-  | "existing_not_pinned"
+  | "existing_not_highlighted"
   | "ineligible"
   | "failed"
   | "cancelled_permission"
@@ -114,7 +114,7 @@ const emptySummary = (): Omit<OnboardingReminderSummary, "status"> => ({
   trackedInspected: 0,
   queuedInspected: 0,
   persistedInspected: 0,
-  pinnedInspected: 0,
+  highlightedInspected: 0,
   searchInspected: 0,
   recentInspected: 0,
   validated: 0,
@@ -128,8 +128,8 @@ export function buildOnboardingReminderMessage(
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
   const automaticCreationNotice =
-    `If a pinned Subscriber Goal does not already exist, the ${formatDelay(onboardingGoalBaseDelayMs)} countdown begins when this message is sent. ` +
-    `If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and pin a goal during the following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes.`;
+    `If a highlighted Subscriber Goal does not already exist, the ${formatDelay(onboardingGoalBaseDelayMs)} countdown begins when this message is sent. ` +
+    `If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add a goal to Community Highlights during the following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes. A subreddit can have at most six Community Highlights.`;
   return {
     subject: isUpgrade
       ? `Subscriber Goal automatic goal update for r/${subredditName}`
@@ -469,7 +469,7 @@ export async function processDueOnboardingReminder({
       };
     }
 
-    const existing = await ensureExistingSubscriberGoalPinned({
+    const existing = await ensureExistingSubscriberGoalHighlighted({
       reddit,
       redis,
       nowMs,
@@ -480,7 +480,7 @@ export async function processDueOnboardingReminder({
       trackedInspected: existing.trackedInspected ?? 0,
       queuedInspected: existing.queuedInspected ?? 0,
       persistedInspected: existing.persistedInspected ?? 0,
-      pinnedInspected: existing.pinnedInspected ?? 0,
+      highlightedInspected: existing.highlightedInspected ?? 0,
       searchInspected: existing.searchInspected ?? 0,
       recentInspected: existing.recentInspected ?? 0,
       validated: existing.validated ?? 0,
@@ -532,7 +532,9 @@ export async function processDueOnboardingReminder({
         status: "complete",
         completedAt: nowMs,
         result:
-          existing.status === "existing" ? "existing" : "existing_not_pinned",
+          existing.status === "existing"
+            ? "existing"
+            : "existing_not_highlighted",
         postId: existing.postId,
         existingSource,
         ...(existing.errorMessage
@@ -547,7 +549,7 @@ export async function processDueOnboardingReminder({
           nowMs,
         );
       } else {
-        await markOnboardingSubscriberGoalExistingNotPinned(
+        await markOnboardingSubscriberGoalExistingNotHighlighted(
           redis,
           existing.postId,
           existingSource,
@@ -759,7 +761,7 @@ export async function processDueOnboardingReminder({
 function formatReminderDiagnostics(
   diagnostics: OnboardingDetectionDiagnostics,
 ): string {
-  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} highlightedInspected=${diagnostics.highlightedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
 async function reconcileCompletedReminder(
@@ -770,7 +772,8 @@ async function reconcileCompletedReminder(
   if (state.result === "sent" && state.sentAt !== undefined) {
     await scheduleOnboardingSubscriberGoalAfterWarning(redis, state.sentAt);
   } else if (
-    (state.result === "existing" || state.result === "existing_not_pinned") &&
+    (state.result === "existing" ||
+      state.result === "existing_not_highlighted") &&
     state.postId &&
     state.existingSource
   ) {
@@ -782,7 +785,7 @@ async function reconcileCompletedReminder(
         state.completedAt ?? nowMs,
       );
     } else {
-      await markOnboardingSubscriberGoalExistingNotPinned(
+      await markOnboardingSubscriberGoalExistingNotHighlighted(
         redis,
         state.postId,
         state.existingSource,
@@ -906,7 +909,7 @@ function isExistingSource(
     value === "tracked" ||
     value === "queued" ||
     value === "persisted" ||
-    value === "pinned" ||
+    value === "highlighted" ||
     value === "search" ||
     value === "recent"
   );
@@ -918,7 +921,7 @@ function isResult(
   return (
     value === "sent" ||
     value === "existing" ||
-    value === "existing_not_pinned" ||
+    value === "existing_not_highlighted" ||
     value === "ineligible" ||
     value === "failed" ||
     value === "cancelled_permission" ||

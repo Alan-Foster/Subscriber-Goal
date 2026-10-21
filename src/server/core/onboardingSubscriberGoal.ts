@@ -21,9 +21,11 @@ import {
 } from "../types";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
+  clearHighlightFailureIncident,
   getPostUrl,
-  notifyStickyFailure,
-} from "../utils/stickyFailureNotifications";
+  notifyHighlightFailureIncident,
+  type HighlightNotificationOutcome,
+} from "../utils/highlightFailureNotifications";
 import {
   cancelUpdates,
   getQueuedUpdates,
@@ -47,12 +49,14 @@ import {
   getTerminalRemovedByCategory,
   isMissingPostError,
 } from "../utils/postStatus";
+import { createSubscriberGoal } from "./createSubscriberGoal";
 import {
-  createSubscriberGoal,
-  stickyAndVerifyPost,
-  STICKY_VERIFICATION_INTERVAL_MS,
-  STICKY_VERIFICATION_MAX_WAIT_MS,
-} from "./createSubscriberGoal";
+  createFailedHighlightResult,
+  highlightAndVerifyPost,
+  highlightVerificationIntervalMs,
+  highlightVerificationMaxWaitMs,
+  type HighlightResult,
+} from "../utils/communityHighlights";
 import { getPersistedSubscriberGoalPostIds } from "../data/subscriberGoalCandidates";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {
@@ -89,7 +93,6 @@ export const AUTOMATIC_ONBOARDING_ENABLED = true;
 export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
 export const onboardingTinySubscriberThreshold = 1_000_000;
 export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
-export const onboardingPinnedPostScanLimit = 100;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
 export const onboardingAuthorSearchLimit = 100;
@@ -112,8 +115,8 @@ type ExtendedOnboardingResultStatus =
   | "cancelled_permission"
   | "delivery_unknown"
   | "retry_exhausted"
-  | "created_not_pinned"
-  | "existing_not_pinned"
+  | "created_not_highlighted"
+  | "existing_not_highlighted"
   | "replacement_scheduled"
   | "replacement_created"
   | "replacement_retrying"
@@ -142,10 +145,13 @@ export type OnboardingExistingSource =
   | "tracked"
   | "queued"
   | "persisted"
-  | "pinned"
+  | "highlighted"
   | "search"
   | "recent";
-export type OnboardingGoalDetectionMode = "pinned" | "active_or_recent" | "all";
+export type OnboardingGoalDetectionMode =
+  | "highlighted"
+  | "active_or_recent"
+  | "all";
 export type OnboardingGoalClassification =
   | "classic"
   | "tiny"
@@ -157,7 +163,7 @@ export type OnboardingDetectionDiagnostics = {
   trackedInspected: number;
   queuedInspected: number;
   persistedInspected: number;
-  pinnedInspected: number;
+  highlightedInspected: number;
   searchInspected: number;
   recentInspected: number;
   validated: number;
@@ -202,7 +208,7 @@ export type OnboardingSubscriberGoalSummary = {
   trackedInspected: number;
   queuedInspected: number;
   persistedInspected: number;
-  pinnedInspected: number;
+  highlightedInspected: number;
   searchInspected: number;
   recentInspected: number;
   validated: number;
@@ -221,14 +227,13 @@ type CandidatePost = {
   authorName?: string;
   subredditId?: string;
   subredditName?: string;
-  stickied?: boolean;
   createdAt?: Date | string | number;
   postData?: unknown;
   customPostData?: unknown;
   removedByCategory?: string;
-  isStickied?: () => boolean | Promise<boolean>;
-  sticky?: () => Promise<void>;
-  unsticky?: () => Promise<void>;
+  isHighlighted?: () => Promise<boolean>;
+  highlight?: () => Promise<void>;
+  unhighlight?: () => Promise<void>;
   title?: string;
   permalink?: string;
   url?: string;
@@ -240,7 +245,7 @@ export type OnboardingGoalCandidate = {
   post: CandidatePost;
   source: OnboardingExistingSource;
   createdAtMs?: number;
-  isPinned: boolean;
+  isHighlighted: boolean;
   postKind?: string;
   postHeight?: string;
   classification: OnboardingGoalClassification;
@@ -250,32 +255,39 @@ export type OnboardingGoalCandidate = {
   discoveryOrder: number;
 };
 
-export type OnboardingPinEnsuranceResult = OnboardingDetectionDiagnostics & {
-  status: "missing" | "existing" | "existing_not_pinned" | "completed";
-  postId?: string;
-  source?: OnboardingExistingSource;
-  classification?: OnboardingGoalClassification;
-  selectedWasAlreadyPinned?: boolean;
-  candidateCount: number;
-  pinnedClassicCount: number;
-  pinnedProtectedCount: number;
-  pinnedAmbiguousCount: number;
-  classicPostsUnpinned: string[];
-  protectedPinsPreserved: string[];
-  verificationResult?: "pinned" | "not_pinned";
-  notificationOutcome?: "sent" | "failed" | "not_requested";
-  goal?: number;
-  completedTime?: number;
-  autoCreateNextGoal?: boolean;
-  errorMessage?: string;
-};
+export type OnboardingHighlightEnsuranceResult =
+  OnboardingDetectionDiagnostics & {
+    status: "missing" | "existing" | "existing_not_highlighted" | "completed";
+    postId?: string;
+    source?: OnboardingExistingSource;
+    classification?: OnboardingGoalClassification;
+    selectedWasAlreadyHighlighted?: boolean;
+    candidateCount: number;
+    highlightedClassicCount: number;
+    highlightedProtectedCount: number;
+    highlightedAmbiguousCount: number;
+    classicPostsUnhighlighted: string[];
+    protectedHighlightsPreserved: string[];
+    verificationResult?: "highlighted" | "not_highlighted";
+    reconciliationOutcome?: "complete" | "degraded" | "failed";
+    failureCategories?: HighlightResult["issues"][number]["category"][];
+    capacityOutcome?: HighlightResult["capacityOutcome"];
+    cleanupOutcome?: HighlightResult["cleanupOutcome"];
+    rollbackOutcome?: HighlightResult["rollbackOutcome"];
+    reorderOutcome?: HighlightResult["reorderOutcome"];
+    notificationOutcome?: HighlightNotificationOutcome;
+    goal?: number;
+    completedTime?: number;
+    autoCreateNextGoal?: boolean;
+    errorMessage?: string;
+  };
 
 const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
   registeredInspected: 0,
   trackedInspected: 0,
   queuedInspected: 0,
   persistedInspected: 0,
-  pinnedInspected: 0,
+  highlightedInspected: 0,
   searchInspected: 0,
   recentInspected: 0,
   validated: 0,
@@ -532,7 +544,7 @@ export async function markOnboardingSubscriberGoalExisting(
   }));
 }
 
-export async function markOnboardingSubscriberGoalExistingNotPinned(
+export async function markOnboardingSubscriberGoalExistingNotHighlighted(
   redis: RedisClient,
   postId: string,
   existingSource: OnboardingExistingSource,
@@ -545,7 +557,7 @@ export async function markOnboardingSubscriberGoalExistingNotPinned(
     completedAt: nowMs,
     postId,
     existingSource,
-    resultStatus: "existing_not_pinned",
+    resultStatus: "existing_not_highlighted",
     ...(errorMessage ? { errorMessage } : {}),
   }));
 }
@@ -752,7 +764,7 @@ export async function processDueOnboardingSubscriberGoal({
       };
     }
 
-    const existing = await ensureExistingSubscriberGoalPinned({
+    const existing = await ensureExistingSubscriberGoalHighlighted({
       reddit,
       redis,
       nowMs,
@@ -763,7 +775,7 @@ export async function processDueOnboardingSubscriberGoal({
       trackedInspected: existing.trackedInspected,
       queuedInspected: existing.queuedInspected,
       persistedInspected: existing.persistedInspected,
-      pinnedInspected: existing.pinnedInspected,
+      highlightedInspected: existing.highlightedInspected,
       searchInspected: existing.searchInspected,
       recentInspected: existing.recentInspected,
       validated: existing.validated,
@@ -811,7 +823,9 @@ export async function processDueOnboardingSubscriberGoal({
         postId: existing.postId,
         existingSource: existing.source!,
         resultStatus:
-          existing.status === "existing" ? "existing" : "existing_not_pinned",
+          existing.status === "existing"
+            ? "existing"
+            : "existing_not_highlighted",
         ...(existing.errorMessage
           ? { errorMessage: existing.errorMessage }
           : {}),
@@ -907,7 +921,7 @@ export async function processDueOnboardingSubscriberGoal({
       };
     }
 
-    const finalExisting = await ensureExistingSubscriberGoalPinned({
+    const finalExisting = await ensureExistingSubscriberGoalHighlighted({
       reddit,
       redis,
       nowMs,
@@ -918,7 +932,7 @@ export async function processDueOnboardingSubscriberGoal({
       trackedInspected: finalExisting.trackedInspected,
       queuedInspected: finalExisting.queuedInspected,
       persistedInspected: finalExisting.persistedInspected,
-      pinnedInspected: finalExisting.pinnedInspected,
+      highlightedInspected: finalExisting.highlightedInspected,
       searchInspected: finalExisting.searchInspected,
       recentInspected: finalExisting.recentInspected,
       validated: finalExisting.validated,
@@ -968,7 +982,7 @@ export async function processDueOnboardingSubscriberGoal({
         resultStatus:
           finalExisting.status === "existing"
             ? "existing"
-            : "existing_not_pinned",
+            : "existing_not_highlighted",
         ...(finalExisting.errorMessage
           ? { errorMessage: finalExisting.errorMessage }
           : {}),
@@ -980,7 +994,7 @@ export async function processDueOnboardingSubscriberGoal({
         operationId: reloaded.operationId,
         postId: finalExisting.postId,
         existingSource: finalExisting.source!,
-        isPinned: finalExisting.selectedWasAlreadyPinned ?? false,
+        isHighlighted: finalExisting.selectedWasAlreadyHighlighted ?? false,
       });
       return {
         status: "existing",
@@ -1007,7 +1021,7 @@ export async function processDueOnboardingSubscriberGoal({
       startedAt: nowMs,
       startedAtIso: new Date(nowMs).toISOString(),
     });
-    const { post, stickyResult } = await createSubscriberGoal({
+    const { post, highlightResult } = await createSubscriberGoal({
       reddit,
       redis,
       appSettings,
@@ -1032,15 +1046,19 @@ export async function processDueOnboardingSubscriberGoal({
         automaticPermissionCheck: true,
       },
     });
-    if (stickyResult.status === "not_pinned") {
+    if (highlightResult.issues.length > 0) {
       try {
-        await notifyStickyFailure({
+        await notifyHighlightFailureIncident({
           reddit,
+          redis,
+          postId: post.id,
+          result: highlightResult,
           subredditId: subreddit.id,
           subredditName: subreddit.name,
           postTitle: post.title,
           postUrl: getPostUrl(post),
-          errorMessage: stickyResult.errorMessage,
+          errorMessage: highlightResult.errorMessage,
+          highlightResult,
         });
       } catch (notificationError) {
         logDiagnostic(
@@ -1048,12 +1066,14 @@ export async function processDueOnboardingSubscriberGoal({
           "onboarding_goal_notification_failed",
           {
             workflow: "onboarding_subscriber_goal",
-            phase: "sticky_notification",
+            phase: "highlight_notification",
             postId: post.id,
           },
           notificationError,
         );
       }
+    } else {
+      await clearHighlightFailureIncident(redis, post.id);
     }
     await saveOnboardingState(redis, {
       ...reloaded,
@@ -1061,7 +1081,9 @@ export async function processDueOnboardingSubscriberGoal({
       completedAt: nowMs,
       postId: post.id,
       resultStatus:
-        stickyResult.status === "pinned" ? "created" : "created_not_pinned",
+        highlightResult.status === "highlighted"
+          ? "created"
+          : "created_not_highlighted",
     });
     logDiagnostic("info", "onboarding_goal_created", {
       workflow: "onboarding_subscriber_goal",
@@ -1069,7 +1091,7 @@ export async function processDueOnboardingSubscriberGoal({
       lifecycleSource: reloaded.lifecycleSource,
       operationId: reloaded.operationId,
       postId: post.id,
-      pinStatus: stickyResult.status,
+      highlightStatus: highlightResult.status,
       completedAt: nowMs,
       completedAtIso: new Date(nowMs).toISOString(),
     });
@@ -1149,6 +1171,10 @@ export async function processDueOnboardingSubscriberGoal({
   }
 }
 
+/**
+ * Compatibility selector backed by the consolidated discovery pipeline.
+ * Production reconciliation consumes findValidSubscriberGoals directly.
+ */
 export async function findExistingSubscriberGoal(
   reddit: RedditClient,
   redis: RedisClient,
@@ -1158,241 +1184,43 @@ export async function findExistingSubscriberGoal(
   OnboardingDetectionDiagnostics & {
     postId?: string;
     source?: OnboardingExistingSource;
-    isPinned?: boolean;
+    isHighlighted?: boolean;
   }
 > {
-  const diagnostics: OnboardingDetectionDiagnostics = {
-    registeredInspected: 0,
-    trackedInspected: 0,
-    queuedInspected: 0,
-    persistedInspected: 0,
-    pinnedInspected: 0,
-    searchInspected: 0,
-    recentInspected: 0,
-    validated: 0,
-    stalePruned: 0,
-    failed: 0,
-  };
-  const [registered, tracked, queued, persisted] = await Promise.all([
-    getRegisteredSubscriberGoalPosts(redis),
-    getTrackedPosts(redis),
-    getQueuedUpdates(redis),
-    getPersistedSubscriberGoalPostIds(redis),
-  ]);
-  const [subreddit, appUser] = await Promise.all([
-    reddit.getCurrentSubreddit(),
-    reddit.getAppUser(),
-  ]);
-  if (!appUser?.username) {
-    throw new Error(
-      "Could not resolve app user while checking onboarding posts.",
-    );
-  }
-
-  const candidateSources: [OnboardingExistingSource, string[]][] = [
-    ["registered", registered],
-    ["tracked", tracked],
-    ["queued", queued],
-    ["persisted", persisted],
-  ];
-  const activePostIds = new Set([...tracked, ...queued]);
+  const discovery = await findValidSubscriberGoals(reddit, redis, nowMs, true);
   const recentCutoff = nowMs - onboardingRecentPostWindowMs;
-  const seen = new Set<string>();
-  for (const [source, postIds] of candidateSources) {
-    for (const postId of postIds) {
-      if (seen.has(postId) || !isLinkId(postId)) {
-        continue;
-      }
-      seen.add(postId);
-      incrementInspected(diagnostics, source);
-      let post: CandidatePost | undefined;
-      try {
-        post = (await reddit.getPostById(postId)) as CandidatePost;
-      } catch (error) {
-        if (!isMissingPostError(error)) {
-          diagnostics.failed += 1;
-          attachDetectionDiagnostics(error, diagnostics);
-          throw error;
-        }
-        await pruneStaleCandidate(redis, postId);
-        diagnostics.stalePruned += 1;
-        continue;
-      }
-      if (
-        !post ||
-        !(await isSubscriberGoalCandidate(
-          redis,
-          post,
-          subreddit,
-          appUser.username,
-        ))
-      ) {
-        await pruneStaleCandidate(redis, postId);
-        diagnostics.stalePruned += 1;
-        continue;
-      }
-      const pinned = await isStickied(post);
-      const createdAt = getCreatedAtMs(post.createdAt);
-      const activeKnownSource = activePostIds.has(postId);
-      if (
-        !isDetectedGoal({
-          mode,
-          pinned,
-          activeKnownSource,
-          createdAt,
-          recentCutoff,
-        })
-      ) {
-        continue;
-      }
-      diagnostics.validated += 1;
-      await registerSubscriberGoalPost(
-        redis,
-        postId,
-        getCreatedAtMs(post.createdAt) ?? nowMs,
-      );
-      return { postId, source, isPinned: pinned, ...diagnostics };
-    }
-  }
-
-  const hotPosts = (await reddit
-    .getHotPosts({
-      subredditName: subreddit.name,
-      limit: onboardingPinnedPostScanLimit,
-    })
-    .get(onboardingPinnedPostScanLimit)) as CandidatePost[];
-  diagnostics.pinnedInspected = hotPosts.length;
-  for (const post of hotPosts) {
-    const pinned = await isStickied(post);
-    const createdAt = getCreatedAtMs(post.createdAt);
-    if (
-      isDetectedGoal({
-        mode,
-        pinned,
-        activeKnownSource: false,
-        createdAt,
-        recentCutoff,
-      }) &&
-      (await isSubscriberGoalCandidate(
-        redis,
-        post,
-        subreddit,
-        appUser.username,
-      ))
-    ) {
-      diagnostics.validated += 1;
-      const postId = post.id!;
-      await registerSubscriberGoalPost(
-        redis,
-        postId,
-        getCreatedAtMs(post.createdAt) ?? nowMs,
-      );
-      return {
-        postId,
-        source: pinned ? "pinned" : "recent",
-        isPinned: pinned,
+  const eligible = discovery.candidates.filter((candidate) => {
+    if (candidate.isHighlighted) return true;
+    if (mode === "highlighted") return false;
+    return (
+      candidate.source === "tracked" ||
+      candidate.source === "queued" ||
+      (candidate.createdAtMs !== undefined &&
+        candidate.createdAtMs >= recentCutoff)
+    );
+  });
+  const selected = eligible[0];
+  const { candidates: _candidates, ...diagnostics } = discovery;
+  return selected
+    ? {
         ...diagnostics,
-      };
-    }
-  }
-
-  const searchedPosts = (await reddit
-    .searchPosts({
-      query: `author:${appUser.username}`,
-      subredditName: subreddit.name,
-      sort: "new",
-      timeframe: "all",
-      limit: onboardingAuthorSearchLimit,
-      pageSize: onboardingAuthorSearchLimit,
-    })
-    .all()) as CandidatePost[];
-  diagnostics.searchInspected = searchedPosts.length;
-  for (const post of searchedPosts) {
-    const pinned = await isStickied(post);
-    const createdAt = getCreatedAtMs(post.createdAt);
-    if (
-      isDetectedGoal({
-        mode,
-        pinned,
-        activeKnownSource: false,
-        createdAt,
-        recentCutoff,
-      }) &&
-      (await isSubscriberGoalCandidate(
-        redis,
-        post,
-        subreddit,
-        appUser.username,
-      ))
-    ) {
-      diagnostics.validated += 1;
-      const postId = post.id!;
-      await registerSubscriberGoalPost(
-        redis,
-        postId,
-        getCreatedAtMs(post.createdAt) ?? nowMs,
-      );
-      return {
-        postId,
-        source: "search",
-        isPinned: pinned,
-        ...diagnostics,
-      };
-    }
-  }
-
-  const recentPosts = (await reddit
-    .getNewPosts({
-      subredditName: subreddit.name,
-      limit: onboardingRecentPostScanLimit,
-      pageSize: onboardingRecentPostPageSize,
-    })
-    .all()) as CandidatePost[];
-  diagnostics.recentInspected = recentPosts.length;
-  for (const post of recentPosts) {
-    const createdAt = getCreatedAtMs(post.createdAt);
-    if (createdAt === undefined || createdAt < recentCutoff) {
-      continue;
-    }
-    const pinned = await isStickied(post);
-    if (
-      isDetectedGoal({
-        mode,
-        pinned,
-        activeKnownSource: false,
-        createdAt,
-        recentCutoff,
-      }) &&
-      (await isSubscriberGoalCandidate(
-        redis,
-        post,
-        subreddit,
-        appUser.username,
-      ))
-    ) {
-      diagnostics.validated += 1;
-      const postId = post.id!;
-      await registerSubscriberGoalPost(redis, postId, createdAt ?? nowMs);
-      return {
-        postId,
-        source: "recent",
-        isPinned: pinned,
-        ...diagnostics,
-      };
-    }
-  }
-  return diagnostics;
+        postId: selected.postId,
+        source: selected.source,
+        isHighlighted: selected.isHighlighted,
+      }
+    : diagnostics;
 }
 
 /**
- * Discovers every valid app-owned goal needed by pin reconciliation. Unlike
- * duplicate prevention, this intentionally includes old unpinned goals so an
+ * Discovers every valid app-owned goal needed by highlight reconciliation.
+ * Unlike duplicate prevention, this intentionally includes old unhighlighted goals so an
  * install/upgrade can restore the newest one instead of creating a duplicate.
  */
 export async function findValidSubscriberGoals(
   reddit: RedditClient,
   redis: RedisClient,
   nowMs = Date.now(),
+  includeRecovery = true,
 ): Promise<
   OnboardingDetectionDiagnostics & { candidates: OnboardingGoalCandidate[] }
 > {
@@ -1401,7 +1229,7 @@ export async function findValidSubscriberGoals(
     trackedInspected: 0,
     queuedInspected: 0,
     persistedInspected: 0,
-    pinnedInspected: 0,
+    highlightedInspected: 0,
     searchInspected: 0,
     recentInspected: 0,
     validated: 0,
@@ -1422,6 +1250,11 @@ export async function findValidSubscriberGoals(
       "Could not resolve app user while checking onboarding posts.",
     );
   }
+  const highlightedPosts = await subreddit.getHighlightedPosts();
+  const highlightedPostIds = new Set<string>(
+    highlightedPosts.map(({ postId }) => postId),
+  );
+  diagnostics.highlightedInspected = highlightedPosts.length;
 
   const candidates: OnboardingGoalCandidate[] = [];
   const seen = new Set<string>();
@@ -1449,7 +1282,7 @@ export async function findValidSubscriberGoals(
       return;
     }
     const metadata = await getGoalCandidateMetadata(redis, post);
-    const isPinned = await isStickied(post);
+    const isHighlighted = highlightedPostIds.has(postId);
     diagnostics.validated += 1;
     await registerSubscriberGoalPost(
       redis,
@@ -1462,7 +1295,7 @@ export async function findValidSubscriberGoals(
       post,
       source,
       ...(createdAtMs === undefined ? {} : { createdAtMs }),
-      isPinned,
+      isHighlighted,
       ...metadata,
       discoveryOrder: discoveryOrder++,
     });
@@ -1500,59 +1333,69 @@ export async function findValidSubscriberGoals(
     }
   }
 
-  const hotPosts = (await reddit
-    .getHotPosts({
-      subredditName: subreddit.name,
-      limit: onboardingPinnedPostScanLimit,
-    })
-    .get(onboardingPinnedPostScanLimit)) as CandidatePost[];
-  diagnostics.pinnedInspected = hotPosts.length;
-  for (const post of hotPosts) {
-    await inspect(post, (await isStickied(post)) ? "pinned" : "recent", false);
+  for (const { postId } of highlightedPosts) {
+    if (seen.has(postId)) continue;
+    try {
+      await inspect(
+        (await reddit.getPostById(postId)) as CandidatePost,
+        "highlighted",
+        false,
+      );
+    } catch (error) {
+      if (!isMissingPostError(error)) {
+        diagnostics.failed += 1;
+        attachDetectionDiagnostics(error, diagnostics);
+        throw error;
+      }
+    }
   }
 
-  const searchedPosts = (await reddit
-    .searchPosts({
-      query: `author:${appUser.username}`,
-      subredditName: subreddit.name,
-      sort: "new",
-      timeframe: "all",
-      limit: onboardingAuthorSearchLimit,
-      pageSize: onboardingAuthorSearchLimit,
-    })
-    .all()) as CandidatePost[];
-  diagnostics.searchInspected = searchedPosts.length;
-  for (const post of searchedPosts) await inspect(post, "search", false);
+  if (includeRecovery && candidates.length === 0) {
+    const searchedPosts = (await reddit
+      .searchPosts({
+        query: `author:${appUser.username}`,
+        subredditName: subreddit.name,
+        sort: "new",
+        timeframe: "all",
+        limit: onboardingAuthorSearchLimit,
+        pageSize: onboardingAuthorSearchLimit,
+      })
+      .all()) as CandidatePost[];
+    diagnostics.searchInspected = searchedPosts.length;
+    for (const post of searchedPosts) await inspect(post, "search", false);
 
-  const recentPosts = (await reddit
-    .getNewPosts({
-      subredditName: subreddit.name,
-      limit: onboardingRecentPostScanLimit,
-      pageSize: onboardingRecentPostPageSize,
-    })
-    .all()) as CandidatePost[];
-  diagnostics.recentInspected = recentPosts.length;
-  for (const post of recentPosts) await inspect(post, "recent", false);
+    if (candidates.length === 0) {
+      const recentPosts = (await reddit
+        .getNewPosts({
+          subredditName: subreddit.name,
+          limit: onboardingRecentPostScanLimit,
+          pageSize: onboardingRecentPostPageSize,
+        })
+        .all()) as CandidatePost[];
+      diagnostics.recentInspected = recentPosts.length;
+      for (const post of recentPosts) await inspect(post, "recent", false);
+    }
+  }
 
   return { ...diagnostics, candidates };
 }
 
-export async function ensureExistingSubscriberGoalPinned({
+export async function ensureExistingSubscriberGoalHighlighted({
   reddit,
   redis,
   nowMs = Date.now(),
   notifyOnFailure = false,
-  stickyVerification,
+  highlightVerification,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
   notifyOnFailure?: boolean;
-  stickyVerification?: Partial<{
+  highlightVerification?: Partial<{
     maxWaitMs: number;
     intervalMs: number;
   }>;
-}): Promise<OnboardingPinEnsuranceResult> {
+}): Promise<OnboardingHighlightEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
   const { candidates, ...diagnostics } = discovery;
   {
@@ -1591,30 +1434,30 @@ export async function ensureExistingSubscriberGoalPinned({
       }
     }
   }
-  const pinned = candidates.filter((candidate) => candidate.isPinned);
-  const pinnedClassic = pinned.filter(
+  const highlighted = candidates.filter((candidate) => candidate.isHighlighted);
+  const highlightedClassic = highlighted.filter(
     (candidate) => candidate.classification === "classic",
   );
-  const protectedPinned = pinned.filter(
+  const protectedHighlighted = highlighted.filter(
     (candidate) =>
       candidate.classification === "tiny" || candidate.classification === "cta",
   );
-  const ambiguousPinned = pinned.filter(
+  const ambiguousHighlighted = highlighted.filter(
     (candidate) => candidate.classification === "ambiguous",
   );
   const base = {
     ...diagnostics,
     candidateCount: candidates.length,
-    pinnedClassicCount: pinnedClassic.length,
-    pinnedProtectedCount: protectedPinned.length,
-    pinnedAmbiguousCount: ambiguousPinned.length,
-    classicPostsUnpinned: [] as string[],
-    protectedPinsPreserved: protectedPinned.map(
+    highlightedClassicCount: highlightedClassic.length,
+    highlightedProtectedCount: protectedHighlighted.length,
+    highlightedAmbiguousCount: ambiguousHighlighted.length,
+    classicPostsUnhighlighted: [] as string[],
+    protectedHighlightsPreserved: protectedHighlighted.map(
       (candidate) => candidate.postId,
     ),
   };
   if (candidates.length === 0) {
-    logPinEnsurance("missing", base);
+    logHighlightEnsurance("missing", base);
     return { status: "missing", ...base };
   }
 
@@ -1632,55 +1475,53 @@ export async function ensureExistingSubscriberGoalPinned({
       Boolean(candidate.completedTime),
     );
     if (completedGoals.length > 0 && activeGoals.length > 0) {
-      const pinnedActiveGoals = activeGoals.filter(
-        (candidate) => candidate.isPinned,
+      const highlightedActiveGoals = activeGoals.filter(
+        (candidate) => candidate.isHighlighted,
       );
       const selected = newestGoalCandidate(
-        pinnedActiveGoals.length > 0 ? pinnedActiveGoals : activeGoals,
+        highlightedActiveGoals.length > 0
+          ? highlightedActiveGoals
+          : activeGoals,
       );
-      const selectedWasAlreadyPinned = selected.isPinned;
-      const pinFailure = selectedWasAlreadyPinned
-        ? undefined
-        : await pinExistingGoal({
-            reddit,
-            selected,
-            notifyOnFailure,
-            ...(stickyVerification ? { stickyVerification } : {}),
-          });
-      if (pinFailure) {
-        const result: OnboardingPinEnsuranceResult = {
-          status: "existing_not_pinned",
+      const selectedWasAlreadyHighlighted = selected.isHighlighted;
+      const reconciliation = await highlightExistingGoal({
+        reddit,
+        redis,
+        selected,
+        notifyOnFailure,
+        removableManagedPostIds: highlightedClassic
+          .filter((candidate) => candidate.postId !== selected.postId)
+          .map((candidate) => candidate.postId),
+        ...(highlightVerification ? { highlightVerification } : {}),
+      });
+      base.classicPostsUnhighlighted.push(
+        ...reconciliation.highlightResult.removedManagedHighlightIds,
+      );
+      if (reconciliation.highlightResult.status === "not_highlighted") {
+        const result: OnboardingHighlightEnsuranceResult = {
+          status: "existing_not_highlighted",
           ...base,
           postId: selected.postId,
           source: selected.source,
           classification: selected.classification,
-          selectedWasAlreadyPinned,
-          verificationResult: "not_pinned",
-          notificationOutcome: pinFailure.notificationOutcome,
-          ...(pinFailure.errorMessage
-            ? { errorMessage: pinFailure.errorMessage }
-            : {}),
+          selectedWasAlreadyHighlighted,
+          ...reconciliationDetails(reconciliation.highlightResult),
+          notificationOutcome: reconciliation.notificationOutcome,
         };
-        logPinEnsurance(result.status, result);
+        logHighlightEnsurance(result.status, result);
         return result;
       }
-      for (const candidate of pinnedClassic) {
-        if (candidate.postId === selected.postId) continue;
-        if (await safelyUnstickyCandidate(reddit, candidate)) {
-          base.classicPostsUnpinned.push(candidate.postId);
-        }
-      }
-      const result: OnboardingPinEnsuranceResult = {
+      const result: OnboardingHighlightEnsuranceResult = {
         status: "existing",
         ...base,
         postId: selected.postId,
         source: selected.source,
         classification: selected.classification,
-        selectedWasAlreadyPinned,
-        verificationResult: "pinned",
-        notificationOutcome: "not_requested",
+        selectedWasAlreadyHighlighted,
+        ...reconciliationDetails(reconciliation.highlightResult),
+        notificationOutcome: reconciliation.notificationOutcome,
       };
-      logPinEnsurance(result.status, result);
+      logHighlightEnsurance(result.status, result);
       return result;
     }
 
@@ -1691,14 +1532,16 @@ export async function ensureExistingSubscriberGoalPinned({
       const selected = newestGoalCandidate(
         autoReplaceableGoals.length > 0 ? autoReplaceableGoals : completedGoals,
       );
-      const result: OnboardingPinEnsuranceResult = {
+      const result: OnboardingHighlightEnsuranceResult = {
         status: "completed",
         ...base,
         postId: selected.postId,
         source: selected.source,
         classification: selected.classification,
-        selectedWasAlreadyPinned: selected.isPinned,
-        ...(selected.isPinned ? { verificationResult: "pinned" as const } : {}),
+        selectedWasAlreadyHighlighted: selected.isHighlighted,
+        ...(selected.isHighlighted
+          ? { verificationResult: "highlighted" as const }
+          : {}),
         notificationOutcome: "not_requested",
         ...(selected.goal === undefined ? {} : { goal: selected.goal }),
         ...(selected.completedTime === undefined
@@ -1708,171 +1551,123 @@ export async function ensureExistingSubscriberGoalPinned({
           ? {}
           : { autoCreateNextGoal: selected.autoCreateNextGoal }),
       };
-      logPinEnsurance(result.status, result);
+      logHighlightEnsurance(result.status, result);
       return result;
     }
   }
 
-  let selected: OnboardingGoalCandidate;
-  let selectedWasAlreadyPinned = true;
-  if (pinned.length === 0) {
-    selected = newestGoalCandidate(candidates);
-    selectedWasAlreadyPinned = false;
-    let stickyResult: Awaited<ReturnType<typeof stickyAndVerifyPost>>;
-    if (typeof selected.post.sticky !== "function") {
-      stickyResult = {
-        status: "not_pinned",
-        verifiedStickied: false,
-        errorMessage:
-          "Unable to pin the existing goal because post.sticky is unavailable.",
-      };
-    } else {
-      stickyResult = await stickyAndVerifyPost(
-        reddit,
-        {
-          id: selected.postId,
-          sticky: selected.post.sticky,
-          ...(selected.post.isStickied
-            ? { isStickied: selected.post.isStickied }
-            : {}),
-        },
-        (await reddit.getCurrentSubreddit()).name,
-        {
-          maxWaitMs:
-            stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
-          intervalMs:
-            stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
-        },
-      );
-    }
-    if (stickyResult.status === "not_pinned") {
-      let notificationOutcome: OnboardingPinEnsuranceResult["notificationOutcome"] =
-        "not_requested";
-      if (notifyOnFailure) {
-        try {
-          const subreddit = await reddit.getCurrentSubreddit();
-          notificationOutcome = await notifyStickyFailure({
-            reddit,
-            subredditId: subreddit.id,
-            subredditName: subreddit.name,
-            postTitle: selected.post.title ?? "Subscriber Goal",
-            postUrl: getPostUrl(selected.post),
-            errorMessage: stickyResult.errorMessage,
-            postOrigin: "existing",
-          });
-        } catch (error) {
-          notificationOutcome = "failed";
-          logDiagnostic(
-            "warn",
-            "onboarding_existing_goal_notification_failed",
-            {
-              workflow: "onboarding_pin_ensurance",
-              phase: "sticky_notification",
-              postId: selected.postId,
-            },
-            error,
-          );
-        }
-      }
-      const result: OnboardingPinEnsuranceResult = {
-        status: "existing_not_pinned",
-        ...base,
-        postId: selected.postId,
-        source: selected.source,
-        classification: selected.classification,
-        selectedWasAlreadyPinned,
-        verificationResult: "not_pinned",
-        notificationOutcome,
-        ...(stickyResult.errorMessage
-          ? { errorMessage: stickyResult.errorMessage }
-          : {}),
-      };
-      logPinEnsurance(result.status, result);
-      return result;
-    }
-  } else {
-    selected = newestGoalCandidate(pinned);
-  }
-
-  if (pinned.length > 1 && pinnedClassic.length > 1) {
-    const keepClassic = newestGoalCandidate(pinnedClassic);
-    for (const candidate of pinnedClassic) {
-      if (candidate.postId === keepClassic.postId) continue;
-      if (await safelyUnstickyCandidate(reddit, candidate)) {
-        base.classicPostsUnpinned.push(candidate.postId);
-      }
-    }
-  }
-  const result: OnboardingPinEnsuranceResult = {
-    status: "existing",
+  const selected = newestGoalCandidate(
+    highlighted.length === 0 ? candidates : highlighted,
+  );
+  const selectedWasAlreadyHighlighted = selected.isHighlighted;
+  const keepClassic =
+    selected.classification === "classic"
+      ? selected
+      : highlightedClassic.length > 0
+        ? newestGoalCandidate(highlightedClassic)
+        : undefined;
+  const removableManagedPostIds = highlightedClassic
+    .filter(
+      (candidate) =>
+        highlightedClassic.length > 1 &&
+        candidate.postId !== keepClassic?.postId,
+    )
+    .map((candidate) => candidate.postId);
+  const reconciliation = await highlightExistingGoal({
+    reddit,
+    redis,
+    selected,
+    notifyOnFailure,
+    removableManagedPostIds,
+    ...(highlightVerification ? { highlightVerification } : {}),
+  });
+  base.classicPostsUnhighlighted.push(
+    ...reconciliation.highlightResult.removedManagedHighlightIds,
+  );
+  const result: OnboardingHighlightEnsuranceResult = {
+    status:
+      reconciliation.highlightResult.status === "highlighted"
+        ? "existing"
+        : "existing_not_highlighted",
     ...base,
     postId: selected.postId,
     source: selected.source,
     classification: selected.classification,
-    selectedWasAlreadyPinned,
-    verificationResult: "pinned",
-    notificationOutcome: "not_requested",
+    selectedWasAlreadyHighlighted,
+    ...reconciliationDetails(reconciliation.highlightResult),
+    notificationOutcome: reconciliation.notificationOutcome,
   };
-  logPinEnsurance(result.status, result);
+  logHighlightEnsurance(result.status, result);
   return result;
 }
 
-async function pinExistingGoal({
+async function highlightExistingGoal({
   reddit,
+  redis,
   selected,
   notifyOnFailure,
-  stickyVerification,
+  highlightVerification,
+  removableManagedPostIds,
 }: {
   reddit: RedditClient;
+  redis: RedisClient;
   selected: OnboardingGoalCandidate;
   notifyOnFailure: boolean;
-  stickyVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
-}): Promise<
-  | {
-      notificationOutcome: "sent" | "failed" | "not_requested";
-      errorMessage?: string;
-    }
-  | undefined
-> {
-  const stickyResult =
-    typeof selected.post.sticky !== "function"
-      ? {
-          status: "not_pinned" as const,
-          verifiedStickied: false,
-          errorMessage:
-            "Unable to pin the existing goal because post.sticky is unavailable.",
-        }
-      : await stickyAndVerifyPost(
+  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  removableManagedPostIds?: LinkId[];
+}): Promise<{
+  highlightResult: HighlightResult;
+  notificationOutcome: HighlightNotificationOutcome;
+}> {
+  const highlightResult =
+    typeof selected.post.highlight !== "function"
+      ? createFailedHighlightResult(
+          selected.postId,
+          "write",
+          "Unable to highlight the existing goal because post.highlight is unavailable.",
+        )
+      : await highlightAndVerifyPost(
           reddit,
+          await reddit.getCurrentSubreddit(),
           {
             id: selected.postId,
-            sticky: selected.post.sticky,
-            ...(selected.post.isStickied
-              ? { isStickied: selected.post.isStickied }
+            highlight: () => selected.post.highlight!(),
+            ...(selected.post.unhighlight
+              ? { unhighlight: () => selected.post.unhighlight!() }
+              : {}),
+            ...(selected.post.isHighlighted
+              ? { isHighlighted: () => selected.post.isHighlighted!() }
               : {}),
           },
-          (await reddit.getCurrentSubreddit()).name,
           {
             maxWaitMs:
-              stickyVerification?.maxWaitMs ?? STICKY_VERIFICATION_MAX_WAIT_MS,
+              highlightVerification?.maxWaitMs ??
+              highlightVerificationMaxWaitMs,
             intervalMs:
-              stickyVerification?.intervalMs ?? STICKY_VERIFICATION_INTERVAL_MS,
+              highlightVerification?.intervalMs ??
+              highlightVerificationIntervalMs,
+            ...(removableManagedPostIds ? { removableManagedPostIds } : {}),
           },
         );
-  if (stickyResult.status === "pinned") return undefined;
+  if (highlightResult.issues.length === 0) {
+    await clearHighlightFailureIncident(redis, selected.postId);
+    return { highlightResult, notificationOutcome: "not_requested" };
+  }
 
-  let notificationOutcome: "sent" | "failed" | "not_requested" =
-    "not_requested";
+  let notificationOutcome: HighlightNotificationOutcome = "not_requested";
   if (notifyOnFailure) {
     try {
       const subreddit = await reddit.getCurrentSubreddit();
-      notificationOutcome = await notifyStickyFailure({
+      notificationOutcome = await notifyHighlightFailureIncident({
         reddit,
+        redis,
+        postId: selected.postId,
+        result: highlightResult,
         subredditId: subreddit.id,
         subredditName: subreddit.name,
         postTitle: selected.post.title ?? "Subscriber Goal",
         postUrl: getPostUrl(selected.post),
-        errorMessage: stickyResult.errorMessage,
+        errorMessage: highlightResult.errorMessage,
         postOrigin: "existing",
       });
     } catch (error) {
@@ -1881,8 +1676,8 @@ async function pinExistingGoal({
         "warn",
         "onboarding_existing_goal_notification_failed",
         {
-          workflow: "onboarding_pin_ensurance",
-          phase: "sticky_notification",
+          workflow: "onboarding_highlight_ensurance",
+          phase: "highlight_notification",
           postId: selected.postId,
         },
         error,
@@ -1890,9 +1685,42 @@ async function pinExistingGoal({
     }
   }
   return {
+    highlightResult,
     notificationOutcome,
-    ...(stickyResult.errorMessage
-      ? { errorMessage: stickyResult.errorMessage }
+  };
+}
+
+function reconciliationDetails(
+  highlightResult: HighlightResult,
+): Pick<
+  OnboardingHighlightEnsuranceResult,
+  | "verificationResult"
+  | "reconciliationOutcome"
+  | "failureCategories"
+  | "capacityOutcome"
+  | "cleanupOutcome"
+  | "rollbackOutcome"
+  | "reorderOutcome"
+  | "errorMessage"
+> {
+  return {
+    verificationResult:
+      highlightResult.status === "highlighted"
+        ? "highlighted"
+        : "not_highlighted",
+    reconciliationOutcome:
+      highlightResult.status === "not_highlighted"
+        ? "failed"
+        : highlightResult.issues.length > 0
+          ? "degraded"
+          : "complete",
+    failureCategories: highlightResult.issues.map(({ category }) => category),
+    capacityOutcome: highlightResult.capacityOutcome,
+    cleanupOutcome: highlightResult.cleanupOutcome,
+    rollbackOutcome: highlightResult.rollbackOutcome,
+    reorderOutcome: highlightResult.reorderOutcome,
+    ...(highlightResult.errorMessage
+      ? { errorMessage: highlightResult.errorMessage }
       : {}),
   };
 }
@@ -1948,79 +1776,35 @@ function newestGoalCandidate(
   )[0]!;
 }
 
-async function safelyUnstickyCandidate(
-  reddit: RedditClient,
-  candidate: OnboardingGoalCandidate,
-): Promise<boolean> {
-  if (
-    candidate.classification !== "classic" ||
-    typeof candidate.post.unsticky !== "function"
-  ) {
-    return false;
-  }
-  try {
-    await candidate.post.unsticky();
-    const refreshed = (await reddit.getPostById(
-      candidate.postId,
-    )) as CandidatePost;
-    return !(await isStickied(refreshed));
-  } catch (error) {
-    if (isMissingPostError(error)) return true;
-    logDiagnostic(
-      "warn",
-      "sticky_operation_failed",
-      {
-        workflow: "onboarding_pin_ensurance",
-        phase: "classic_unsticky",
-        postId: candidate.postId,
-      },
-      error,
-    );
-    return false;
-  }
-}
-
-function logPinEnsurance(
-  status: OnboardingPinEnsuranceResult["status"],
+function logHighlightEnsurance(
+  status: OnboardingHighlightEnsuranceResult["status"],
   result:
-    | Omit<OnboardingPinEnsuranceResult, "status">
-    | OnboardingPinEnsuranceResult,
+    | Omit<OnboardingHighlightEnsuranceResult, "status">
+    | OnboardingHighlightEnsuranceResult,
 ): void {
-  logDiagnostic("info", "onboarding_goal_pin_ensurance_completed", {
-    workflow: "onboarding_pin_ensurance",
+  logDiagnostic("info", "onboarding_goal_highlight_ensurance_completed", {
+    workflow: "onboarding_highlight_ensurance",
     phase: "reconcile",
     outcome: status,
     candidateCount: result.candidateCount,
     selectedPostId: result.postId ?? "none",
     selectedType: result.classification ?? "none",
-    pinnedClassicCount: result.pinnedClassicCount,
-    pinnedProtectedCount: result.pinnedProtectedCount,
-    pinnedAmbiguousCount: result.pinnedAmbiguousCount,
-    classicPostsUnpinned: result.classicPostsUnpinned.join(",") || "none",
-    protectedPinsPreserved: result.protectedPinsPreserved.join(",") || "none",
+    highlightedClassicCount: result.highlightedClassicCount,
+    highlightedProtectedCount: result.highlightedProtectedCount,
+    highlightedAmbiguousCount: result.highlightedAmbiguousCount,
+    classicPostsUnhighlighted:
+      result.classicPostsUnhighlighted.join(",") || "none",
+    protectedHighlightsPreserved:
+      result.protectedHighlightsPreserved.join(",") || "none",
     verificationResult: result.verificationResult ?? "not_attempted",
+    reconciliationOutcome: result.reconciliationOutcome ?? "not_attempted",
+    failureCategories: result.failureCategories?.join(",") || "none",
+    capacityOutcome: result.capacityOutcome ?? "not_attempted",
+    cleanupOutcome: result.cleanupOutcome ?? "not_attempted",
+    rollbackOutcome: result.rollbackOutcome ?? "not_attempted",
+    reorderOutcome: result.reorderOutcome ?? "not_attempted",
     notificationOutcome: result.notificationOutcome ?? "not_requested",
   });
-}
-
-function isDetectedGoal({
-  mode,
-  pinned,
-  activeKnownSource,
-  createdAt,
-  recentCutoff,
-}: {
-  mode: OnboardingGoalDetectionMode;
-  pinned: boolean;
-  activeKnownSource: boolean;
-  createdAt: number | undefined;
-  recentCutoff: number;
-}): boolean {
-  if (pinned) return true;
-  if (mode === "pinned") return false;
-  return (
-    activeKnownSource || (createdAt !== undefined && createdAt >= recentCutoff)
-  );
 }
 
 async function isSubscriberGoalCandidate(
@@ -2089,7 +1873,7 @@ function incrementInspected(
 function formatDetectionDiagnostics(
   diagnostics: OnboardingDetectionDiagnostics,
 ): string {
-  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} pinnedInspected=${diagnostics.pinnedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
+  return `registeredInspected=${diagnostics.registeredInspected} trackedInspected=${diagnostics.trackedInspected} queuedInspected=${diagnostics.queuedInspected} persistedInspected=${diagnostics.persistedInspected} highlightedInspected=${diagnostics.highlightedInspected} searchInspected=${diagnostics.searchInspected} recentInspected=${diagnostics.recentInspected} validated=${diagnostics.validated} stalePruned=${diagnostics.stalePruned} failed=${diagnostics.failed}`;
 }
 
 function attachDetectionDiagnostics(
@@ -2122,15 +1906,6 @@ async function pruneStaleCandidate(
     cancelUpdates(redis, postId),
     untrackPost(redis, postId),
   ]);
-}
-
-async function isStickied(post: CandidatePost): Promise<boolean> {
-  if (post.stickied) {
-    return true;
-  }
-  return typeof post.isStickied === "function"
-    ? Boolean(await post.isStickied())
-    : false;
 }
 
 function getCreatedAtMs(value: CandidatePost["createdAt"]): number | undefined {
@@ -2219,8 +1994,8 @@ function parseOnboardingState(
     raw.resultStatus === "cancelled_permission" ||
     raw.resultStatus === "delivery_unknown" ||
     raw.resultStatus === "retry_exhausted" ||
-    raw.resultStatus === "created_not_pinned" ||
-    raw.resultStatus === "existing_not_pinned" ||
+    raw.resultStatus === "created_not_highlighted" ||
+    raw.resultStatus === "existing_not_highlighted" ||
     raw.resultStatus === "replacement_scheduled" ||
     raw.resultStatus === "replacement_created" ||
     raw.resultStatus === "replacement_retrying" ||
@@ -2229,17 +2004,23 @@ function parseOnboardingState(
     raw.resultStatus === "completed_no_recovery"
   ) {
     state.resultStatus = raw.resultStatus;
+  } else if (raw.resultStatus === "created_not_pinned") {
+    state.resultStatus = "created_not_highlighted";
+  } else if (raw.resultStatus === "existing_not_pinned") {
+    state.resultStatus = "existing_not_highlighted";
   }
   if (
     raw.existingSource === "registered" ||
     raw.existingSource === "tracked" ||
     raw.existingSource === "queued" ||
     raw.existingSource === "persisted" ||
-    raw.existingSource === "pinned" ||
+    raw.existingSource === "highlighted" ||
     raw.existingSource === "search" ||
     raw.existingSource === "recent"
   ) {
     state.existingSource = raw.existingSource;
+  } else if (raw.existingSource === "pinned") {
+    state.existingSource = "highlighted";
   }
   return state;
 }

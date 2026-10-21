@@ -1,5 +1,5 @@
 import type { ServerAppSettings } from "../settings";
-import type { LinkId, RedditClient, RedisClient } from "../types";
+import type { RedditClient, RedisClient } from "../types";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
@@ -22,7 +22,14 @@ import {
   queueUpdate,
 } from "../data/updaterData";
 import { isLinkId } from "../types";
-import { clearSubscriberGoalStickies } from "../utils/redditUtils";
+import {
+  createFailedHighlightResult,
+  highlightAndVerifyPost,
+  highlightVerificationIntervalMs,
+  highlightVerificationMaxWaitMs,
+  type HighlightResult,
+  type HighlightVerificationOptions,
+} from "../utils/communityHighlights";
 import {
   ctaOnlyTextFallbackMaker,
   subscribeOnlyTextFallbackMaker,
@@ -59,13 +66,13 @@ type CreateSubscriberGoalOptions = {
   afterSubscribePreset?: AfterSubscribePreset;
   operationId?: string;
   automaticPermissionCheck?: boolean;
-  stickyVerification?: Partial<StickyVerificationOptions>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
 };
 
 export type CreateSubscriberGoalResult = {
   post: Awaited<ReturnType<typeof createGoalPost>>;
   crosspostDispatchResult: CrosspostDispatchResult;
-  stickyResult: StickyResult;
+  highlightResult: HighlightResult;
   flairResult: SubscriberGoalFlairResult;
 };
 
@@ -106,20 +113,6 @@ export class SubscriberGoalPermissionVerificationError extends Error {
   }
 }
 
-export type StickyResult = {
-  status: "pinned" | "not_pinned";
-  errorMessage?: string;
-  verifiedStickied?: boolean;
-};
-
-export const STICKY_VERIFICATION_MAX_WAIT_MS = 30_000;
-export const STICKY_VERIFICATION_INTERVAL_MS = 5_000;
-
-export type StickyVerificationOptions = {
-  maxWaitMs: number;
-  intervalMs: number;
-};
-
 export async function createSubscriberGoal({
   reddit,
   redis,
@@ -151,19 +144,23 @@ export async function createSubscriberGoal({
       raw.status !== "complete" ||
       !isLinkId(postId) ||
       !raw.crosspostDispatchResult ||
-      !raw.stickyResult ||
+      !(raw.highlightResult || raw.stickyResult) ||
       !raw.flairResult
     ) {
       return undefined;
     }
     try {
+      const storedHighlightResult = raw.highlightResult || raw.stickyResult;
       const post = (await reddit.getPostById(postId)) as unknown as Awaited<
         ReturnType<typeof createGoalPost>
       >;
       return {
         post,
         crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
-        stickyResult: JSON.parse(raw.stickyResult),
+        highlightResult: normalizeStoredHighlightResult(
+          JSON.parse(storedHighlightResult!),
+          postId,
+        ),
         flairResult: JSON.parse(raw.flairResult),
       } as CreateSubscriberGoalResult;
     } catch (error) {
@@ -229,7 +226,7 @@ export async function createSubscriberGoal({
       completedAt: String(Date.now()),
       updatedAt: String(Date.now()),
       crosspostDispatchResult: JSON.stringify(result.crosspostDispatchResult),
-      stickyResult: JSON.stringify(result.stickyResult),
+      highlightResult: JSON.stringify(result.highlightResult),
       flairResult: JSON.stringify(result.flairResult),
     });
     return result;
@@ -316,7 +313,7 @@ async function createSubscriberGoalInternal(
     canManageFlair: hasAllPermissions || permissions.includes("flair"),
   });
   const existingGoalPostIds = await getSubscriberGoalCandidatePostIds(redis);
-  const existingClassicGoalPostIds: string[] = [];
+  const existingClassicGoalPostIds = [] as Array<`t3_${string}`>;
   for (const postId of existingGoalPostIds) {
     const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
       `${postId}${postKindSuffix}`,
@@ -326,7 +323,7 @@ async function createSubscriberGoalInternal(
       postKind === "subscriber-goal-v1" &&
       (postHeight === "regular" || postHeight === "short")
     ) {
-      existingClassicGoalPostIds.push(postId);
+      if (isLinkId(postId)) existingClassicGoalPostIds.push(postId);
     }
   }
 
@@ -443,47 +440,43 @@ async function createSubscriberGoalInternal(
   }
 
   await post.approve();
-  let stickyResult: StickyResult;
+  let highlightResult: HighlightResult;
   try {
-    if (!isCompactActionPost) {
-      await clearSubscriberGoalStickies(reddit, {
-        knownPostIds: existingGoalPostIds,
-        knownClassicPostIds: existingClassicGoalPostIds,
-        subreddit,
-      });
-    }
-    stickyResult = await stickyAndVerifyPost(reddit, post, subreddit.name, {
+    highlightResult = await highlightAndVerifyPost(reddit, subreddit, post, {
       maxWaitMs:
-        options.stickyVerification?.maxWaitMs ??
-        STICKY_VERIFICATION_MAX_WAIT_MS,
+        options.highlightVerification?.maxWaitMs ??
+        highlightVerificationMaxWaitMs,
       intervalMs:
-        options.stickyVerification?.intervalMs ??
-        STICKY_VERIFICATION_INTERVAL_MS,
+        options.highlightVerification?.intervalMs ??
+        highlightVerificationIntervalMs,
+      ...(!isCompactActionPost
+        ? { removableManagedPostIds: existingClassicGoalPostIds }
+        : {}),
     });
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     logDiagnostic(
       "warn",
-      "sticky_operation_failed",
+      "highlight_operation_failed",
       {
         workflow: "create_subscriber_goal",
-        phase: "replacement_cleanup",
+        phase: "replacement",
         postId: post.id,
       },
       error,
     );
-    stickyResult = {
-      status: "not_pinned",
+    highlightResult = createFailedHighlightResult(
+      post.id,
+      "write",
       errorMessage,
-      verifiedStickied: false,
-    };
+    );
   }
 
   if (options.cancelPendingAutoCreateGoals) {
     await cancelAllAutoCreateNextGoals(redis);
   }
 
-  return { post, crosspostDispatchResult, stickyResult, flairResult };
+  return { post, crosspostDispatchResult, highlightResult, flairResult };
 }
 
 async function prepareSubscriberGoalFlair({
@@ -528,142 +521,60 @@ async function prepareSubscriberGoalFlair({
   }
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-export async function stickyAndVerifyPost(
-  reddit: RedditClient,
-  post: {
-    id: LinkId;
-    sticky: () => Promise<void>;
-    isStickied?: () => boolean | Promise<boolean>;
-  },
-  subredditName: string,
-  verificationOptions: StickyVerificationOptions,
-): Promise<StickyResult> {
-  let stickyErrorMessage: string | undefined;
-  let lastVerificationErrorMessage: string | undefined;
-  let lastVerifiedStickied: boolean | undefined;
-
-  console.info(
-    `[sticky] append attempt: mode=append operation=write subreddit=${subredditName} postId=${post.id}`,
-  );
-  try {
-    await post.sticky();
-    console.info(
-      `[sticky] append completed: mode=append operation=write subreddit=${subredditName} postId=${post.id}`,
-    );
-  } catch (error) {
-    stickyErrorMessage = toErrorMessage(error);
-    logDiagnostic(
-      "warn",
-      "sticky_operation_failed",
-      { workflow: "sticky", phase: "write", postId: post.id },
-      error,
-    );
-  }
-
-  const startedAt = Date.now();
-  let attempt = 1;
-  while (true) {
-    const elapsedMs = Date.now() - startedAt;
-    let postToVerify = post;
-    let refetched = false;
-
-    try {
-      const refetchedPost = await reddit.getPostById(post.id);
-      if (
-        typeof (
-          refetchedPost as { isStickied?: () => boolean | Promise<boolean> }
-        )?.isStickied === "function"
-      ) {
-        postToVerify = refetchedPost;
-        refetched = true;
-      }
-    } catch (error) {
-      const refetchErrorMessage = toErrorMessage(error);
-      lastVerificationErrorMessage = refetchErrorMessage;
-      logDiagnostic(
-        "warn",
-        "sticky_operation_failed",
-        {
-          workflow: "sticky",
-          phase: "verification_refetch",
-          postId: post.id,
-          attempt,
-          elapsedMs,
-        },
-        error,
-      );
-    }
-
-    const verifier = (
-      postToVerify as { isStickied?: () => boolean | Promise<boolean> }
-    ).isStickied;
-    if (typeof verifier !== "function") {
-      lastVerificationErrorMessage =
-        "Unable to verify sticky status because post.isStickied is unavailable.";
-      logDiagnostic("warn", "sticky_verification_unavailable", {
-        workflow: "sticky",
-        phase: "verification",
-        postId: post.id,
-        attempt,
-        elapsedMs,
-        refetched,
-      });
-    } else {
-      try {
-        const verifiedStickied = await Promise.resolve(
-          verifier.call(postToVerify),
-        );
-        lastVerifiedStickied = verifiedStickied;
-        console.info(
-          `[sticky] verification result: mode=append operation=verify subreddit=${subredditName} postId=${post.id} attempt=${attempt} elapsedMs=${elapsedMs} refetched=${refetched} verifiedStickied=${verifiedStickied}`,
-        );
-        if (verifiedStickied) {
-          return { status: "pinned", verifiedStickied };
-        }
-      } catch (error) {
-        lastVerificationErrorMessage = toErrorMessage(error);
-        logDiagnostic(
-          "warn",
-          "sticky_operation_failed",
-          {
-            workflow: "sticky",
-            phase: "verification",
-            postId: post.id,
-            attempt,
-            elapsedMs,
-            refetched,
-          },
-          error,
-        );
-      }
-    }
-
-    if (elapsedMs >= verificationOptions.maxWaitMs) {
-      break;
-    }
-
-    await sleep(
-      Math.min(
-        verificationOptions.intervalMs,
-        verificationOptions.maxWaitMs - elapsedMs,
-      ),
-    );
-    attempt += 1;
-  }
-
+function normalizeStoredHighlightResult(
+  value: unknown,
+  postId: `t3_${string}`,
+): HighlightResult {
+  const legacy = value as {
+    status?: unknown;
+    errorMessage?: unknown;
+    verifiedStickied?: unknown;
+    verifiedHighlighted?: unknown;
+    failureCategory?: unknown;
+    issues?: unknown;
+    selectedPostId?: unknown;
+  };
+  const status =
+    legacy?.status === "pinned"
+      ? "highlighted"
+      : legacy?.status === "not_pinned"
+        ? "not_highlighted"
+        : legacy?.status === "highlighted"
+          ? "highlighted"
+          : "not_highlighted";
+  const verifiedHighlighted =
+    typeof legacy.verifiedHighlighted === "boolean"
+      ? legacy.verifiedHighlighted
+      : typeof legacy.verifiedStickied === "boolean"
+        ? legacy.verifiedStickied
+        : status === "highlighted";
+  const failureCategory =
+    typeof legacy.failureCategory === "string"
+      ? (legacy.failureCategory as HighlightResult["failureCategory"])
+      : undefined;
   const errorMessage =
-    stickyErrorMessage && lastVerificationErrorMessage
-      ? `${stickyErrorMessage}; verification failed: ${lastVerificationErrorMessage}`
-      : (stickyErrorMessage ?? lastVerificationErrorMessage);
-
+    typeof legacy.errorMessage === "string" ? legacy.errorMessage : undefined;
+  const current = value as Partial<HighlightResult>;
   return {
-    status: "not_pinned",
+    ...current,
+    status,
+    selectedPostId:
+      typeof legacy.selectedPostId === "string"
+        ? (legacy.selectedPostId as `t3_${string}`)
+        : postId,
+    verifiedHighlighted,
+    issues: Array.isArray(legacy.issues)
+      ? (legacy.issues as HighlightResult["issues"])
+      : failureCategory && errorMessage
+        ? [{ category: failureCategory, message: errorMessage, postId }]
+        : [],
+    capacityOutcome: current.capacityOutcome ?? "not_needed",
+    cleanupOutcome: current.cleanupOutcome ?? "not_needed",
+    removedManagedHighlightIds: current.removedManagedHighlightIds ?? [],
+    preservedHighlightIds: current.preservedHighlightIds ?? [],
+    rollbackOutcome: current.rollbackOutcome ?? "not_needed",
+    reorderOutcome: current.reorderOutcome ?? "not_attempted",
+    ...(failureCategory ? { failureCategory } : {}),
     ...(errorMessage ? { errorMessage } : {}),
-    ...(lastVerifiedStickied !== undefined
-      ? { verifiedStickied: lastVerifiedStickied }
-      : {}),
   };
 }
