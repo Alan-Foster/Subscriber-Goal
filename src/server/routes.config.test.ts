@@ -18,6 +18,8 @@ describe("devvit.json route alignment", () => {
       tasks: {
         "posts-updater-job": { endpoint: string };
         "milestone-notification-job": { endpoint: string };
+        "invite-new-subs-poll-job": { endpoint: string; cron: string };
+        "invite-new-subs-delivery-job": { endpoint: string };
       };
     };
     menu: {
@@ -93,6 +95,13 @@ describe("devvit.json route alignment", () => {
     expect(
       devvitConfig.scheduler.tasks["milestone-notification-job"].endpoint,
     ).toBe(internalRoutes.scheduler.milestoneNotificationJob);
+    expect(devvitConfig.scheduler.tasks["invite-new-subs-poll-job"]).toEqual({
+      endpoint: internalRoutes.scheduler.inviteNewSubsPollJob,
+      cron: "*/5 * * * *",
+    });
+    expect(
+      devvitConfig.scheduler.tasks["invite-new-subs-delivery-job"].endpoint,
+    ).toBe(internalRoutes.scheduler.inviteNewSubsDeliveryJob);
   });
 
   it("includes expected menu endpoints", () => {

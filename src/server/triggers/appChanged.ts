@@ -22,6 +22,10 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
 import { scheduleAppRepair } from "../core/appRepair";
 import { reconcileOnboardingForLifecycle } from "../core/onboardingLifecycle";
+import {
+  ensureInviteNewSubsWikiPages,
+  isInviteNewSubsHost,
+} from "../core/inviteNewSubs";
 
 export async function onAppChanged({
   lifecycleSource = "unknown",
@@ -74,6 +78,10 @@ export async function onAppChanged({
 
   await rememberAppInstaller(redis, installerUsername);
   await scheduleAppRepair(redis);
+
+  if (isInviteNewSubsHost(subredditName)) {
+    await ensureInviteNewSubsWikiPages(reddit, subredditName);
+  }
 
   await runPhase("subreddit_display_name", () =>
     ensureSavedSubredditDisplayName(redis, subredditName),
