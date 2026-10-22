@@ -59,6 +59,7 @@ vi.mock("../utils/communityHighlights", () => ({
 vi.mock("../utils/highlightFailureNotifications", () => ({
   notifyHighlightFailureIncident: hoisted.notifyHighlightFailure,
   clearHighlightFailureIncident: vi.fn(),
+  clearActiveHighlightFailureIncident: vi.fn(),
   getPostUrl: hoisted.getPostUrl,
 }));
 
@@ -67,7 +68,6 @@ vi.mock("./appAccountHealth", () => ({
 }));
 
 import {
-  findExistingSubscriberGoal,
   getOnboardingEligibility,
   initializeOnboardingSubscriberGoal as initializeRawOnboardingSubscriberGoal,
   onboardingGoalBaseDelayMs,
@@ -87,7 +87,6 @@ import {
   processDueOnboardingReminder,
   scheduleOnboardingReminder,
 } from "./onboardingReminder";
-import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 
 class InMemoryRedis {
@@ -511,248 +510,6 @@ describe("onboarding subscriber goal", () => {
       limit: onboardingRecentPostScanLimit,
       pageSize: onboardingRecentPostPageSize,
     });
-  });
-
-  it("prunes a missing tracked post and continues to a valid highlighted post", async () => {
-    hoisted.getTrackedPosts.mockResolvedValue(["t3_stale"]);
-    reddit.getHighlightedPosts.mockResolvedValue([
-      { postId: "t3_highlighted" },
-    ]);
-    reddit.getPostById.mockImplementation(async (postId) => {
-      if (postId === "t3_stale") throw new Error("post not found");
-      return {
-        id: "t3_highlighted",
-        authorName: "subscriber-goal",
-        subredditId: "t5_example",
-        postData: { postKind: "subscriber-goal-v1" },
-      };
-    });
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).resolves.toMatchObject({
-      postId: "t3_highlighted",
-      source: "highlighted",
-      trackedInspected: 1,
-      stalePruned: 1,
-      validated: 1,
-    });
-    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_stale",
-    );
-    expect(hoisted.untrackPost).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_stale",
-    );
-  });
-
-  it("recovers a strictly validated recent goal through author search", async () => {
-    reddit.searchPosts.mockReturnValue({
-      all: vi.fn().mockResolvedValue([
-        {
-          id: "t3_wrong_author",
-          authorName: "someone-else",
-          subredditId: "t5_example",
-          createdAt: new Date(nowMs),
-          postData: { postKind: "subscriber-goal-v1" },
-        },
-        {
-          id: "t3_searched",
-          authorName: "subscriber-goal",
-          subredditName: "ExampleSub",
-          createdAt: new Date(nowMs),
-          postData: { postKind: "cta-only-v1" },
-        },
-      ]),
-    });
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).resolves.toMatchObject({
-      postId: "t3_searched",
-      source: "search",
-      isHighlighted: false,
-      searchInspected: 2,
-      validated: 1,
-    });
-    expect(reddit.searchPosts).toHaveBeenCalledWith({
-      query: "author:subscriber-goal",
-      subredditName: "ExampleSub",
-      sort: "new",
-      timeframe: "all",
-      limit: 100,
-      pageSize: 100,
-    });
-    expect(reddit.getNewPosts).not.toHaveBeenCalled();
-  });
-
-  it("discovers and validates a persisted Tiny post created 24 hours earlier", async () => {
-    await redis.hSet("subscriber_goals", {
-      t3_tiny_post_kind: "subscribe-only-v1",
-      t3_tiny_post_height: "tiny",
-    });
-    reddit.getPostById.mockResolvedValue({
-      id: "t3_tiny",
-      authorName: "subscriber-goal",
-      subredditId: "t5_example",
-      stickied: true,
-      createdAt: new Date(nowMs - 24 * 60 * 60 * 1000),
-      postData: { postKind: "subscribe-only-v1" },
-    });
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).resolves.toMatchObject({
-      postId: "t3_tiny",
-      source: "persisted",
-      persistedInspected: 1,
-      validated: 1,
-    });
-    expect(await redis.zRange(subscriberGoalPostRegistryKey)).toContainEqual(
-      expect.objectContaining({ member: "t3_tiny" }),
-    );
-  });
-
-  it("validates a registered Tiny post without relying on updater tracking", async () => {
-    await redis.zAdd(subscriberGoalPostRegistryKey, {
-      member: "t3_registered_tiny",
-      score: nowMs,
-    });
-    reddit.getPostById.mockResolvedValue({
-      id: "t3_registered_tiny",
-      authorName: "subscriber-goal",
-      subredditId: "t5_example",
-      stickied: true,
-      postData: { postKind: "subscribe-only-v1" },
-      createdAt: new Date(nowMs),
-    });
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).resolves.toMatchObject({
-      postId: "t3_registered_tiny",
-      source: "registered",
-      registeredInspected: 1,
-      validated: 1,
-    });
-    expect(hoisted.getTrackedPosts).toHaveBeenCalled();
-    expect(reddit.getHighlightedPosts).toHaveBeenCalled();
-  });
-
-  it("detects an active unhighlighted tracked goal only in duplicate-prevention mode", async () => {
-    hoisted.getTrackedPosts.mockResolvedValue(["t3_active_unhighlighted"]);
-    reddit.getPostById.mockResolvedValue({
-      id: "t3_active_unhighlighted",
-      authorName: "subscriber-goal",
-      subredditId: "t5_example",
-      stickied: false,
-      createdAt: new Date(nowMs - 30 * 60 * 60 * 1000),
-      postData: { postKind: "subscriber-goal-v1" },
-    });
-
-    await expect(
-      findExistingSubscriberGoal(
-        reddit as never,
-        redis as never,
-        nowMs,
-        "active_or_recent",
-      ),
-    ).resolves.toMatchObject({
-      postId: "t3_active_unhighlighted",
-      source: "tracked",
-      isHighlighted: false,
-    });
-    await expect(
-      findExistingSubscriberGoal(
-        reddit as never,
-        redis as never,
-        nowMs,
-        "highlighted",
-      ),
-    ).resolves.not.toHaveProperty("postId");
-  });
-
-  it("detects a recently created unhighlighted goal without preserving old inactive posts", async () => {
-    reddit.getNewPosts.mockReturnValueOnce({
-      all: vi.fn().mockResolvedValue([
-        {
-          id: "t3_recent_unhighlighted",
-          authorName: "subscriber-goal",
-          subredditId: "t5_example",
-          stickied: false,
-          createdAt: new Date(nowMs - 60_000),
-          postData: { postKind: "subscriber-goal-v1" },
-        },
-      ]),
-    });
-
-    await expect(
-      findExistingSubscriberGoal(
-        reddit as never,
-        redis as never,
-        nowMs,
-        "active_or_recent",
-      ),
-    ).resolves.toMatchObject({
-      postId: "t3_recent_unhighlighted",
-      source: "recent",
-      isHighlighted: false,
-    });
-
-    reddit.getNewPosts.mockReturnValueOnce({
-      all: vi.fn().mockResolvedValue([
-        {
-          id: "t3_old_unhighlighted",
-          authorName: "subscriber-goal",
-          subredditId: "t5_example",
-          stickied: false,
-          createdAt: new Date(nowMs - 26 * 60 * 60 * 1000),
-          postData: { postKind: "subscriber-goal-v1" },
-        },
-      ]),
-    });
-    await expect(
-      findExistingSubscriberGoal(
-        reddit as never,
-        redis as never,
-        nowMs,
-        "active_or_recent",
-      ),
-    ).resolves.not.toHaveProperty("postId");
-  });
-
-  it("does not classify an ordinary markerless app-authored post as a goal", async () => {
-    reddit.getNewPosts.mockReturnValue({
-      all: vi.fn().mockResolvedValue([
-        {
-          id: "t3_ordinary",
-          authorName: "subscriber-goal",
-          subredditId: "t5_example",
-          createdAt: new Date(nowMs),
-        },
-      ]),
-    });
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).resolves.not.toHaveProperty("postId");
-  });
-
-  it("fails closed on a transient candidate lookup error", async () => {
-    await redis.zAdd(subscriberGoalPostRegistryKey, {
-      member: "t3_candidate",
-      score: nowMs,
-    });
-    reddit.getPostById.mockRejectedValue(new Error("reddit unavailable"));
-
-    await expect(
-      findExistingSubscriberGoal(reddit as never, redis as never, nowMs),
-    ).rejects.toThrow("reddit unavailable");
-    expect(reddit.getHighlightedPosts).toHaveBeenCalled();
-    expect(await redis.zRange(subscriberGoalPostRegistryKey)).toContainEqual(
-      expect.objectContaining({ member: "t3_candidate" }),
-    );
   });
 
   it("creates an English Red regular goal with the small-subreddit Blue CTA and then becomes terminal", async () => {

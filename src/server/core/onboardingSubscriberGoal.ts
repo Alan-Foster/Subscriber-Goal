@@ -21,6 +21,7 @@ import {
 } from "../types";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
+  clearActiveHighlightFailureIncident,
   clearHighlightFailureIncident,
   getPostUrl,
   notifyHighlightFailureIncident,
@@ -92,7 +93,6 @@ export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v4";
 export const AUTOMATIC_ONBOARDING_ENABLED = true;
 export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
 export const onboardingTinySubscriberThreshold = 1_000_000;
-export const onboardingRecentPostWindowMs = 25 * 60 * 60 * 1000;
 export const onboardingRecentPostScanLimit = 1_000;
 export const onboardingRecentPostPageSize = 100;
 export const onboardingAuthorSearchLimit = 100;
@@ -148,10 +148,6 @@ export type OnboardingExistingSource =
   | "highlighted"
   | "search"
   | "recent";
-export type OnboardingGoalDetectionMode =
-  | "highlighted"
-  | "active_or_recent"
-  | "all";
 export type OnboardingGoalClassification =
   | "classic"
   | "tiny"
@@ -1172,46 +1168,6 @@ export async function processDueOnboardingSubscriberGoal({
 }
 
 /**
- * Compatibility selector backed by the consolidated discovery pipeline.
- * Production reconciliation consumes findValidSubscriberGoals directly.
- */
-export async function findExistingSubscriberGoal(
-  reddit: RedditClient,
-  redis: RedisClient,
-  nowMs: number,
-  mode: OnboardingGoalDetectionMode = "active_or_recent",
-): Promise<
-  OnboardingDetectionDiagnostics & {
-    postId?: string;
-    source?: OnboardingExistingSource;
-    isHighlighted?: boolean;
-  }
-> {
-  const discovery = await findValidSubscriberGoals(reddit, redis, nowMs, true);
-  const recentCutoff = nowMs - onboardingRecentPostWindowMs;
-  const eligible = discovery.candidates.filter((candidate) => {
-    if (candidate.isHighlighted) return true;
-    if (mode === "highlighted") return false;
-    return (
-      candidate.source === "tracked" ||
-      candidate.source === "queued" ||
-      (candidate.createdAtMs !== undefined &&
-        candidate.createdAtMs >= recentCutoff)
-    );
-  });
-  const selected = eligible[0];
-  const { candidates: _candidates, ...diagnostics } = discovery;
-  return selected
-    ? {
-        ...diagnostics,
-        postId: selected.postId,
-        source: selected.source,
-        isHighlighted: selected.isHighlighted,
-      }
-    : diagnostics;
-}
-
-/**
  * Discovers every valid app-owned goal needed by highlight reconciliation.
  * Unlike duplicate prevention, this intentionally includes old unhighlighted goals so an
  * install/upgrade can restore the newest one instead of creating a duplicate.
@@ -1457,6 +1413,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
     ),
   };
   if (candidates.length === 0) {
+    await clearActiveHighlightFailureIncident(redis);
     logHighlightEnsurance("missing", base);
     return { status: "missing", ...base };
   }
@@ -1526,6 +1483,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
     }
 
     if (completedGoals.length > 0) {
+      await clearActiveHighlightFailureIncident(redis);
       const autoReplaceableGoals = completedGoals.filter(
         (candidate) => candidate.autoCreateNextGoal,
       );

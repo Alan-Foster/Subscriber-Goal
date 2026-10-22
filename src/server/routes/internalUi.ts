@@ -461,9 +461,9 @@ export function registerInternalUiRoutes(router: Router): void {
         showForm: {
           name: formNames.eraseMyData,
           form: {
-            title: "Sub Goal - Erase My User Data",
+            title: "Sub Goal - Remove My Own Data",
             description:
-              "This will erase all data stored by Sub Goal for your Reddit account.",
+              "This will remove all data stored by Sub Goal for your Reddit account.",
             fields: [
               {
                 name: "confirm",
@@ -473,7 +473,7 @@ export function registerInternalUiRoutes(router: Router): void {
                 helpText: "This action is irreversible.",
               },
             ],
-            acceptLabel: "Erase My Data",
+            acceptLabel: "Remove My Data",
             cancelLabel: "Cancel",
           },
         },
@@ -590,7 +590,7 @@ export function registerInternalUiRoutes(router: Router): void {
         if (!confirm) {
           res.json({
             showToast:
-              "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+              "You did not confirm removal. Please enable the confirmation toggle before proceeding.",
           });
           return;
         }
@@ -598,7 +598,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const currentUserId = context.userId;
         if (!currentUserId) {
           res.json({
-            showToast: "Please log in to erase your Sub Goal user data.",
+            showToast: "Please log in to remove your Sub Goal user data.",
           });
           return;
         }
@@ -624,7 +624,7 @@ export function registerInternalUiRoutes(router: Router): void {
         }
 
         phase = "response_completion";
-        res.json({ showToast: "Your Sub Goal user data has been erased." });
+        res.json({ showToast: "Your Sub Goal user data has been removed." });
       } catch (error) {
         logDiagnostic(
           "error",
@@ -633,7 +633,7 @@ export function registerInternalUiRoutes(router: Router): void {
           error,
         );
         res.json({
-          showToast: `Your Sub Goal user data could not be fully erased. Reference: ${operationId}`,
+          showToast: `Your Sub Goal user data could not be fully removed. Reference: ${operationId}`,
         });
       }
     },

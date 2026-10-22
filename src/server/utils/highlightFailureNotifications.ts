@@ -3,8 +3,10 @@ import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
 import type { HighlightResult } from "./communityHighlights";
 
 const highlightIncidentKeyPrefix = "highlight_failure_incident_v1";
+const activeHighlightIncidentKey = "highlight_failure_incident_active_v1";
 const highlightIncidentRetryMs = 60 * 60 * 1000;
 const highlightIncidentLockMs = 5 * 60 * 1000;
+const highlightIncidentRetentionSeconds = 30 * 24 * 60 * 60;
 
 export type HighlightNotificationOutcome =
   | "sent"
@@ -123,6 +125,7 @@ export async function notifyHighlightFailure({
   postUrl,
   errorMessage,
   postOrigin = "created",
+  highlightResult,
 }: HighlightFailureNotificationParams): Promise<"sent" | "failed"> {
   const message = buildHighlightFailureMessage({
     subredditName,
@@ -131,6 +134,7 @@ export async function notifyHighlightFailure({
     postUrl,
     errorMessage,
     postOrigin,
+    ...(highlightResult ? { highlightResult } : {}),
   });
 
   console.info(
@@ -211,6 +215,21 @@ export async function clearHighlightFailureIncident(
   postId: LinkId,
 ): Promise<void> {
   await redis.del(incidentKey(postId));
+  const activePostId = await redis.get(activeHighlightIncidentKey);
+  if (activePostId && activePostId !== postId) {
+    await redis.del(incidentKey(activePostId as LinkId));
+  }
+  if (activePostId) await redis.del(activeHighlightIncidentKey);
+}
+
+export async function clearActiveHighlightFailureIncident(
+  redis: RedisClient,
+): Promise<void> {
+  const activePostId = await redis.get(activeHighlightIncidentKey);
+  if (activePostId) {
+    await redis.del(incidentKey(activePostId as LinkId));
+    await redis.del(activeHighlightIncidentKey);
+  }
 }
 
 export async function notifyHighlightFailureIncident({
@@ -227,6 +246,13 @@ export async function notifyHighlightFailureIncident({
 }): Promise<Exclude<HighlightNotificationOutcome, "not_requested">> {
   const key = incidentKey(postId);
   const fingerprint = incidentFingerprint(result);
+  const activePostId = await redis.get(activeHighlightIncidentKey);
+  if (activePostId && activePostId !== postId) {
+    await redis.del(incidentKey(activePostId as LinkId));
+  }
+  await redis.set(activeHighlightIncidentKey, postId, {
+    expiration: new Date(nowMs + highlightIncidentRetentionSeconds * 1000),
+  });
   const existing = await redis.hGetAll(key);
   if (
     existing.fingerprint === fingerprint &&
@@ -266,6 +292,7 @@ export async function notifyHighlightFailureIncident({
             nextAttemptAt: String(nowMs + highlightIncidentRetryMs),
           }),
     });
+    await redis.expire(key, highlightIncidentRetentionSeconds);
     return outcome;
   } finally {
     if ((await redis.get(lockKey)) === token) await redis.del(lockKey);

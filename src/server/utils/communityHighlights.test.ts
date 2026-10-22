@@ -167,9 +167,9 @@ describe("Community Highlights manager", () => {
       "t3_other5",
     ];
     const harness = createHarness(ids);
-    harness.posts.get("t3_oldgoal")!.unhighlight.mockImplementationOnce(
-      async () => undefined,
-    );
+    harness.posts
+      .get("t3_oldgoal")!
+      .unhighlight.mockImplementationOnce(async () => undefined);
 
     const result = await highlightAndVerifyPost(
       harness.reddit as never,
@@ -219,12 +219,35 @@ describe("Community Highlights manager", () => {
     expect(harness.target.highlight).not.toHaveBeenCalled();
   });
 
-  it("rolls back the target and restores a concurrently displaced highlight", async () => {
+  it("does not undo a moderator removal when capacity was below five", async () => {
     const harness = createHarness(["t3_a", "t3_b"]);
     harness.target.highlight.mockImplementationOnce(async () => {
       const ids = harness.getIds();
       ids.splice(ids.indexOf("t3_a"), 1);
       ids.push("t3_target");
+    });
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      harness.target,
+      verification,
+    );
+
+    expect(result).toMatchObject({
+      status: "highlighted",
+      rollbackOutcome: "not_needed",
+    });
+    expect(harness.getIds()).toEqual(["t3_target", "t3_b"]);
+  });
+
+  it("rolls back a plausible concurrent seventh-post eviction", async () => {
+    const original = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e"];
+    const harness = createHarness(original);
+    harness.target.highlight.mockImplementationOnce(async () => {
+      const ids = harness.getIds();
+      ids.splice(ids.indexOf("t3_a"), 1);
+      ids.push("t3_moderator", "t3_target");
     });
 
     const result = await highlightAndVerifyPost(
@@ -242,14 +265,62 @@ describe("Community Highlights manager", () => {
     expect(result.issues.map(({ category }) => category)).toContain(
       "concurrency",
     );
-    expect(harness.getIds()).toEqual(["t3_a", "t3_b"]);
+    expect(harness.getIds()).toEqual([...original, "t3_moderator"]);
+  });
+
+  it("reports the final state when the target disappears during reordering", async () => {
+    const harness = createHarness(["t3_a"]);
+    harness.subreddit.reorderHighlightedPosts.mockImplementation(async () => {
+      const ids = harness.getIds();
+      ids.splice(ids.indexOf("t3_target"), 1);
+    });
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      harness.target,
+      verification,
+    );
+
+    expect(result).toMatchObject({
+      status: "not_highlighted",
+      verifiedHighlighted: false,
+      reorderOutcome: "failed",
+    });
+    expect(result.issues.map(({ category }) => category)).toEqual(
+      expect.arrayContaining(["reorder", "concurrency"]),
+    );
+  });
+
+  it("does not mutate highlights when isHighlighted is unavailable", async () => {
+    const harness = createHarness(["t3_a"]);
+    const targetWithoutVerification = {
+      id: harness.target.id,
+      highlight: harness.target.highlight,
+      unhighlight: harness.target.unhighlight,
+    };
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      targetWithoutVerification,
+      verification,
+    );
+
+    expect(result).toMatchObject({
+      status: "not_highlighted",
+      verifiedHighlighted: false,
+      failureCategory: "verification",
+    });
+    expect(harness.target.highlight).not.toHaveBeenCalled();
+    expect(harness.target.unhighlight).not.toHaveBeenCalled();
   });
 
   it("reports degraded cleanup when an obsolete removal is not confirmed", async () => {
     const harness = createHarness(["t3_target", "t3_oldgoal"]);
-    harness.posts.get("t3_oldgoal")!.unhighlight.mockImplementationOnce(
-      async () => undefined,
-    );
+    harness.posts
+      .get("t3_oldgoal")!
+      .unhighlight.mockImplementationOnce(async () => undefined);
 
     const result = await highlightAndVerifyPost(
       harness.reddit as never,

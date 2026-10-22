@@ -135,22 +135,32 @@ async function pollForState(
   options: HighlightVerificationOptions,
 ): Promise<{
   matches: boolean;
+  listed: boolean;
   snapshot: HighlightedPostInfo[];
   errorMessage?: string;
 }> {
+  if (typeof post.isHighlighted !== "function") {
+    const snapshot = await subreddit.getHighlightedPosts();
+    return {
+      matches: false,
+      listed: snapshot.some(({ postId }) => postId === post.id),
+      snapshot,
+      errorMessage:
+        "Reddit did not provide post.isHighlighted(), so the Community Highlight state could not be independently verified.",
+    };
+  }
   const startedAt = Date.now();
   let lastSnapshot: HighlightedPostInfo[] = [];
+  let lastListed = false;
   let lastError: string | undefined;
   while (true) {
     try {
       lastSnapshot = await subreddit.getHighlightedPosts();
       const listed = lastSnapshot.some(({ postId }) => postId === post.id);
-      const postState =
-        typeof post.isHighlighted === "function"
-          ? await post.isHighlighted()
-          : listed;
+      lastListed = listed;
+      const postState = await post.isHighlighted();
       if (listed === expectedHighlighted && postState === expectedHighlighted) {
-        return { matches: true, snapshot: lastSnapshot };
+        return { matches: true, listed, snapshot: lastSnapshot };
       }
     } catch (error) {
       lastError = toErrorMessage(error);
@@ -171,6 +181,7 @@ async function pollForState(
   }
   return {
     matches: false,
+    listed: lastListed,
     snapshot: lastSnapshot,
     ...(lastError ? { errorMessage: lastError } : {}),
   };
@@ -238,6 +249,7 @@ async function restoreRemovedHighlights(
       const current = await subreddit.getHighlightedPosts();
       if (current.some(({ postId }) => postId === info.postId)) continue;
       if (current.length >= communityHighlightLimit) return "failed";
+      if (typeof post.isHighlighted !== "function") return "failed";
       await post.highlight({
         ...(info.highlightedUntil
           ? { highlightUntil: info.highlightedUntil }
@@ -291,6 +303,7 @@ export async function highlightAndVerifyPost(
 ): Promise<HighlightResult> {
   const initial = await subreddit.getHighlightedPosts();
   const originalOrder = idsOf(initial);
+  let rollbackOrder = originalOrder;
   const removableIds = new Set(options.removableManagedPostIds ?? []);
   const removed: RemovedHighlight[] = [];
   const issues: HighlightIssue[] = [];
@@ -300,6 +313,29 @@ export async function highlightAndVerifyPost(
 
   let current = await subreddit.getHighlightedPosts();
   let targetPresent = current.some(({ postId }) => postId === post.id);
+
+  if (typeof post.isHighlighted !== "function") {
+    issues.push({
+      category: "verification",
+      postId: post.id,
+      message:
+        "Reddit did not provide post.isHighlighted(), so no Community Highlight changes were attempted.",
+    });
+    return resultWithIssues({
+      status: targetPresent ? "highlighted" : "not_highlighted",
+      selectedPostId: post.id,
+      verifiedHighlighted: false,
+      issues,
+      capacityOutcome,
+      cleanupOutcome,
+      removedManagedHighlightIds: [],
+      preservedHighlightIds: idsOf(current).filter(
+        (postId) => postId !== post.id,
+      ),
+      rollbackOutcome,
+      reorderOutcome: "not_attempted",
+    });
+  }
 
   if (!targetPresent) {
     capacityOutcome =
@@ -330,13 +366,17 @@ export async function highlightAndVerifyPost(
       }
 
       try {
+        rollbackOrder = idsOf(current);
         const removablePost = await fetchHighlightablePost(
           reddit,
           removableInfo.postId as LinkId,
         );
-        if (typeof removablePost.unhighlight !== "function") {
+        if (
+          typeof removablePost.unhighlight !== "function" ||
+          typeof removablePost.isHighlighted !== "function"
+        ) {
           throw new Error(
-            `Unable to safely remove obsolete Community Highlight ${removableInfo.postId}.`,
+            `Unable to safely remove and verify obsolete Community Highlight ${removableInfo.postId}.`,
           );
         }
         await removablePost.unhighlight();
@@ -366,6 +406,16 @@ export async function highlightAndVerifyPost(
         current = removal.snapshot;
         capacityOutcome = "managed_slot_freed";
       } catch (error) {
+        logDiagnostic(
+          "warn",
+          "highlight_operation_failed",
+          {
+            workflow: "community_highlights",
+            phase: "capacity_cleanup",
+            postId: removableInfo.postId,
+          },
+          error,
+        );
         issues.push({
           category: "cleanup",
           postId: removableInfo.postId as LinkId,
@@ -374,7 +424,7 @@ export async function highlightAndVerifyPost(
         rollbackOutcome = await restoreRemovedHighlights(
           subreddit,
           removed,
-          originalOrder,
+          rollbackOrder,
           options,
         );
         if (rollbackOutcome === "failed") {
@@ -414,7 +464,7 @@ export async function highlightAndVerifyPost(
       rollbackOutcome = await restoreRemovedHighlights(
         subreddit,
         removed,
-        originalOrder,
+        rollbackOrder,
         options,
       );
       if (rollbackOutcome === "failed") {
@@ -440,6 +490,8 @@ export async function highlightAndVerifyPost(
       });
     }
 
+    // Use only the snapshot immediately before the write as the displacement
+    // baseline. A moderator may legitimately have changed any earlier snapshot.
     const preWrite = current;
     let writeError: string | undefined;
     try {
@@ -467,10 +519,28 @@ export async function highlightAndVerifyPost(
             "Reddit did not confirm the Community Highlight write.",
         });
       }
+      if (verification.listed) {
+        return resultWithIssues({
+          status: "highlighted",
+          selectedPostId: post.id,
+          verifiedHighlighted: false,
+          issues,
+          capacityOutcome,
+          cleanupOutcome,
+          removedManagedHighlightIds: removed.map(
+            ({ info }) => info.postId as LinkId,
+          ),
+          preservedHighlightIds: idsOf(verification.snapshot).filter(
+            (postId) => postId !== post.id,
+          ),
+          rollbackOutcome,
+          reorderOutcome: "not_attempted",
+        });
+      }
       rollbackOutcome = await restoreRemovedHighlights(
         subreddit,
         removed,
-        originalOrder,
+        rollbackOrder,
         options,
       );
       if (rollbackOutcome === "failed") {
@@ -503,7 +573,16 @@ export async function highlightAndVerifyPost(
     const displaced = preWrite.filter(
       ({ postId }) => !afterWriteIds.has(postId),
     );
-    if (displaced.length > 0) {
+    const preWriteIds = new Set(idsOf(preWrite));
+    const unexpected = afterWrite.filter(
+      ({ postId }) => postId !== post.id && !preWriteIds.has(postId as LinkId),
+    );
+    const plausibleCapacityEviction =
+      preWrite.length === communityHighlightLimit - 1 &&
+      afterWrite.length === communityHighlightLimit &&
+      displaced.length > 0 &&
+      unexpected.length > 0;
+    if (plausibleCapacityEviction) {
       capacityOutcome = "concurrent_change";
       issues.push({
         category: "concurrency",
@@ -522,6 +601,12 @@ export async function highlightAndVerifyPost(
         if (!(await pollForState(subreddit, post, false, options)).matches) {
           throw new Error("Reddit did not confirm Subscriber Goal rollback.");
         }
+        const rollbackSnapshot = await subreddit.getHighlightedPosts();
+        if (rollbackSnapshot.length >= communityHighlightLimit) {
+          throw new Error(
+            "Community Highlight capacity became full during rollback.",
+          );
+        }
         for (const info of displaced) {
           displacedPosts.push({
             info,
@@ -531,7 +616,7 @@ export async function highlightAndVerifyPost(
         rollbackOutcome = await restoreRemovedHighlights(
           subreddit,
           [...removed, ...displacedPosts],
-          originalOrder,
+          rollbackOrder,
           options,
         );
       } catch (error) {
@@ -554,10 +639,25 @@ export async function highlightAndVerifyPost(
       const finalTargetPresent = finalSnapshot.some(
         ({ postId }) => postId === post.id,
       );
+      let finalPostState = false;
+      try {
+        finalPostState = await post.isHighlighted();
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "highlight_operation_failed",
+          {
+            workflow: "community_highlights",
+            phase: "rollback_verification",
+            postId: post.id,
+          },
+          error,
+        );
+      }
       return resultWithIssues({
         status: finalTargetPresent ? "highlighted" : "not_highlighted",
         selectedPostId: post.id,
-        verifiedHighlighted: finalTargetPresent,
+        verifiedHighlighted: finalTargetPresent && finalPostState,
         issues,
         capacityOutcome,
         cleanupOutcome,
@@ -580,7 +680,7 @@ export async function highlightAndVerifyPost(
         message: "Reddit did not confirm the existing Community Highlight.",
       });
       return resultWithIssues({
-        status: "not_highlighted",
+        status: verification.listed ? "highlighted" : "not_highlighted",
         selectedPostId: post.id,
         verifiedHighlighted: false,
         issues,
@@ -605,9 +705,12 @@ export async function highlightAndVerifyPost(
         reddit,
         info.postId as LinkId,
       );
-      if (typeof obsoletePost.unhighlight !== "function") {
+      if (
+        typeof obsoletePost.unhighlight !== "function" ||
+        typeof obsoletePost.isHighlighted !== "function"
+      ) {
         throw new Error(
-          `Unable to remove obsolete Community Highlight ${info.postId}.`,
+          `Unable to remove and verify obsolete Community Highlight ${info.postId}.`,
         );
       }
       await obsoletePost.unhighlight();
@@ -641,11 +744,22 @@ export async function highlightAndVerifyPost(
 
   const reorder = await reorderTargetFirst(subreddit, post.id);
   if (reorder.issue) issues.push(reorder.issue);
-  const finalSnapshot = await subreddit.getHighlightedPosts();
+  const finalVerification = await pollForState(subreddit, post, true, options);
+  const finalSnapshot = finalVerification.snapshot;
+  if (!finalVerification.matches) {
+    issues.push({
+      category: finalVerification.listed ? "verification" : "concurrency",
+      postId: post.id,
+      message: finalVerification.listed
+        ? (finalVerification.errorMessage ??
+          "Reddit did not independently confirm the final Community Highlight state.")
+        : "The selected Subscriber Goal disappeared from Community Highlights during reconciliation.",
+    });
+  }
   return resultWithIssues({
-    status: "highlighted",
+    status: finalVerification.listed ? "highlighted" : "not_highlighted",
     selectedPostId: post.id,
-    verifiedHighlighted: true,
+    verifiedHighlighted: finalVerification.matches,
     issues,
     capacityOutcome,
     cleanupOutcome,

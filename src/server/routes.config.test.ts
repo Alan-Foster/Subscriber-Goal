@@ -119,9 +119,13 @@ describe("devvit.json route alignment", () => {
       forUserType: "moderator",
     });
     expect(selfEraseItem).toMatchObject({
-      label: "Sub Goal - Erase My User Data",
+      label: "Sub Goal - Remove My Own Data",
+      description: "Remove your own Sub Goal user data",
+      location: "subreddit",
+      forUserType: "user",
     });
-    expect(selfEraseItem).not.toHaveProperty("forUserType");
+    expect(selfEraseItem).not.toHaveProperty("postFilter");
+    expect(selfEraseItem).not.toHaveProperty("nsfw");
   });
 
   it("does not expose subreddit installation settings", () => {

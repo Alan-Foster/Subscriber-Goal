@@ -285,7 +285,7 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
 
-  it("creates and pins without flair when the app has Posts but not Flair permission", async () => {
+  it("creates and highlights without flair when the app has Posts but not Flair permission", async () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
     hoisted.getModPermissionsForSubreddit.mockResolvedValue(["posts"]);
@@ -364,6 +364,9 @@ describe("createSubscriberGoal highlight handling", () => {
     const oldClassic = {
       id: "t3_tracked",
       subredditId: "t5_example",
+      isHighlighted: vi.fn(async () =>
+        hoisted.highlightedIds.has("t3_tracked"),
+      ),
       unhighlight: vi.fn(async () => {
         hoisted.highlightedIds.delete("t3_tracked");
       }),
@@ -405,6 +408,7 @@ describe("createSubscriberGoal highlight handling", () => {
     const oldClassic = {
       id: "t3_old",
       subredditId: "t5_example",
+      isHighlighted: vi.fn(async () => true),
       unhighlight: vi.fn(async () => {
         throw new Error("moderator action required");
       }),
@@ -584,8 +588,8 @@ describe("createSubscriberGoal highlight handling", () => {
   it("returns highlighted when delayed highlight verification later confirms the post", async () => {
     const isHighlighted = vi
       .fn()
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+      .mockResolvedValue(true)
+      .mockResolvedValueOnce(false);
     const post = createPost({ isHighlighted });
     hoisted.createGoalPost.mockResolvedValue(post);
 
@@ -595,7 +599,7 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(post.highlight).toHaveBeenCalledTimes(1);
     expect(post.highlight).toHaveBeenCalledWith();
-    expect(isHighlighted).toHaveBeenCalledTimes(2);
+    expect(isHighlighted.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.post).toBe(post);
     expect(result.highlightResult).toMatchObject({
       status: "highlighted",
@@ -603,7 +607,7 @@ describe("createSubscriberGoal highlight handling", () => {
     });
   });
 
-  it("returns highlighted when highlight throws but delayed verification confirms the post", async () => {
+  it("requires list confirmation when highlight throws but post verification becomes true", async () => {
     const post = createPost({
       highlight: vi.fn(async () => {
         throw new Error("highlight slots full");
@@ -621,8 +625,8 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(result.post).toBe(post);
     expect(result.highlightResult).toMatchObject({
-      status: "highlighted",
-      verifiedHighlighted: true,
+      status: "not_highlighted",
+      verifiedHighlighted: false,
     });
   });
 
@@ -648,7 +652,7 @@ describe("createSubscriberGoal highlight handling", () => {
     });
   });
 
-  it("returns not_highlighted when highlight does not throw but verification returns false", async () => {
+  it("reports an unverified highlight when the list and post state disagree", async () => {
     const post = createPost({
       isHighlighted: vi.fn(() => false),
     });
@@ -658,12 +662,12 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(result.post).toBe(post);
     expect(result.highlightResult).toMatchObject({
-      status: "not_highlighted",
+      status: "highlighted",
       verifiedHighlighted: false,
     });
   });
 
-  it("returns not_highlighted when highlight verification throws", async () => {
+  it("reports an unverified highlight when post verification throws", async () => {
     const post = createPost({
       isHighlighted: vi.fn(() => {
         throw new Error("verification unavailable");
@@ -675,7 +679,7 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(result.post).toBe(post);
     expect(result.highlightResult).toMatchObject({
-      status: "not_highlighted",
+      status: "highlighted",
       errorMessage: "verification unavailable",
     });
   });

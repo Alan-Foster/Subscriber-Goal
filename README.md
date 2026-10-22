@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.2.1 - Integrated post.highlight functionality of 0.14.7 to better track pinned goals. Devvit 0.15.0
+- 2.2.1 - Integrated post.highlight (0.14.7) to better track pinned goals. Remove My Own Data fixed. NSFW Most Recent Post fixed. Devvit 0.15.0
 - 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update. Devvit 0.14.5
 - 2.1.5 - Auto-goal system now attempts to re-pin existing goals. Fixed eternal completed lockout.
 - 2.1.3 - Automatic goals now require public, SFW communities. Corrected NSFW crosspost and username-sharing safeguards.
@@ -54,7 +54,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - 1.7.1 - Improved tiny subscriber post on desktop. Colored Borders on all posts. SubGoal post flairs. Auto-goals on subs above 1m members default to tiny.
 - 1 6.3 - Creation of SubGoal blacklist. Blacklisted subreddits can't create new goals or load existing goals. Devvit 0.14.2
 - 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Automatic 24h goal creation fallback. Devvit 0.14.1
-- 1.5.1 - Release of Small-Height Goals (goals without subreddit icons). Users can erase their own data. Devvit 0.13.8
+- 1.5.1 - Release of Small-Height Goals (goals without subreddit icons). Every logged-in user, including non-moderators in NSFW communities, can remove their own data from the subreddit menu. Devvit 0.13.8
 - 1.4.4 - Fixed a bug with sticky not replacing completed goals. Devvit 0.13.6. Updated Overrides.
 - 1.4.3 - Added more developer special code commands.
 - 1.4.1 - Subscriber Goal provides a warning via Modmail and DM when it cannot pin a post. Menu item developer special-code field. Devvit 0.13.2

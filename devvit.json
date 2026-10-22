@@ -69,9 +69,10 @@
         "endpoint": "/internal/menu/erase-data"
       },
       {
-        "label": "Sub Goal - Erase My User Data",
-        "description": "Erase your own Sub Goal user data",
+        "label": "Sub Goal - Remove My Own Data",
+        "description": "Remove your own Sub Goal user data",
         "location": "subreddit",
+        "forUserType": "user",
         "endpoint": "/internal/menu/erase-my-data"
       }
     ]

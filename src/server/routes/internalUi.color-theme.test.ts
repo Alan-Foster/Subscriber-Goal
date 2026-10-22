@@ -5,6 +5,7 @@ import { formNames, internalRoutes } from "../../shared/routes";
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
+  highlightedPostIds: [] as string[],
   context: {
     postId: "t3_post",
     subredditName: "ExampleSub",
@@ -210,6 +211,7 @@ describe("internalUi color theme create goal routes", () => {
     vi.resetAllMocks();
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
+    hoisted.highlightedPostIds.splice(0);
     hoisted.redis.set.mockImplementation(async (key, value, options) => {
       if (options?.nx && hoisted.redisValues.has(key)) return undefined;
       hoisted.redisValues.set(key, value);
@@ -242,8 +244,12 @@ describe("internalUi color theme create goal routes", () => {
       numberOfSubscribers: 100,
       type: "public",
       nsfw: false,
-      getHighlightedPosts: vi.fn(async () => []),
-      reorderHighlightedPosts: vi.fn(async () => undefined),
+      getHighlightedPosts: vi.fn(async () =>
+        hoisted.highlightedPostIds.map((postId) => ({ postId })),
+      ),
+      reorderHighlightedPosts: vi.fn(async (postIds: readonly string[]) => {
+        hoisted.highlightedPostIds.splice(0, Infinity, ...postIds);
+      }),
     });
     hoisted.reddit.getAppUser.mockResolvedValue({
       username: "subscriber-goal",
@@ -304,8 +310,18 @@ describe("internalUi color theme create goal routes", () => {
       title: "Welcome!",
       permalink: "/r/ExampleSub/comments/newpost/welcome/",
       approve: vi.fn(),
-      highlight: vi.fn(),
-      isHighlighted: vi.fn(() => true),
+      highlight: vi.fn(async () => {
+        if (!hoisted.highlightedPostIds.includes("t3_newpost")) {
+          hoisted.highlightedPostIds.push("t3_newpost");
+        }
+      }),
+      unhighlight: vi.fn(async () => {
+        const index = hoisted.highlightedPostIds.indexOf("t3_newpost");
+        if (index >= 0) hoisted.highlightedPostIds.splice(index, 1);
+      }),
+      isHighlighted: vi.fn(async () =>
+        hoisted.highlightedPostIds.includes("t3_newpost"),
+      ),
     });
     hoisted.registerNewSubGoalPost.mockResolvedValue({ status: "skipped" });
     hoisted.registerNewSubscribeOnlyPost.mockResolvedValue({
@@ -350,7 +366,7 @@ describe("internalUi color theme create goal routes", () => {
       };
     };
     expect(response.showForm.name).toBe(formNames.eraseMyData);
-    expect(response.showForm.form.title).toBe("Sub Goal - Erase My User Data");
+    expect(response.showForm.form.title).toBe("Sub Goal - Remove My Own Data");
     expect(response.showForm.form.fields).toEqual([
       expect.objectContaining({
         name: "confirm",
@@ -502,7 +518,7 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(json).toHaveBeenCalledWith({
       showToast:
-        "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+        "You did not confirm removal. Please enable the confirmation toggle before proceeding.",
     });
     expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
   });
@@ -519,7 +535,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      showToast: "Please log in to erase your Sub Goal user data.",
+      showToast: "Please log in to remove your Sub Goal user data.",
     });
     expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
   });
@@ -544,7 +560,7 @@ describe("internalUi color theme create goal routes", () => {
       "ExampleMod",
     );
     expect(json).toHaveBeenCalledWith({
-      showToast: "Your Sub Goal user data has been erased.",
+      showToast: "Your Sub Goal user data has been removed.",
     });
   });
 
@@ -2209,7 +2225,7 @@ describe("internalUi color theme create goal routes", () => {
     });
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "Subscriber Goal post created, but it could not be highlighted. Manual moderator action is required.",
+        "Subscriber Goal post created. The goal was created, but Reddit did not confirm it as a Community Highlight.",
       navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
     });
   });
@@ -2263,7 +2279,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.reddit.sendPrivateMessage).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "Subscriber Goal post created, but it could not be highlighted. Manual moderator action is required.",
+        "Subscriber Goal post created. The goal was created, but Reddit did not confirm it as a Community Highlight.",
       navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
     });
   });

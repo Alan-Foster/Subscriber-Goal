@@ -49,6 +49,8 @@ class InMemoryRedis {
     this.hashes.delete(key);
   }
 
+  async expire(): Promise<void> {}
+
   async hGetAll(key: string): Promise<Record<string, string>> {
     return Object.fromEntries(this.hashes.get(key) ?? []);
   }
@@ -124,6 +126,8 @@ function createReddit({
     createdAt: new Date(nowMs - 60_000),
     postData: { postKind: "subscriber-goal-v1" },
     isHighlighted: () => true,
+    highlight: vi.fn(async () => undefined),
+    unhighlight: vi.fn(async () => undefined),
   };
   const availablePosts = posts ?? (highlighted ? [highlightedPost] : []);
   const getHighlightedPosts = vi.fn(async () => {
