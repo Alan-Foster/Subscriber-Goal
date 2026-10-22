@@ -30,7 +30,6 @@ const hoisted = vi.hoisted(() => ({
   rememberAppInstaller: vi.fn(),
   checkAppAccountHealth: vi.fn(),
   scheduleAppRepair: vi.fn(),
-  ensureInviteNewSubsWikiPages: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -148,13 +147,6 @@ vi.mock("../core/appRepair", () => ({
   scheduleAppRepair: hoisted.scheduleAppRepair,
 }));
 
-vi.mock("../core/inviteNewSubs", () => ({
-  ensureInviteNewSubsWikiPages: hoisted.ensureInviteNewSubsWikiPages,
-  isInviteNewSubsHost: (subredditName: string | undefined): boolean =>
-    subredditName?.trim().replace(/^r\//i, "").toLowerCase() ===
-    "subscriber_goal_dev",
-}));
-
 import { onAppChanged, shouldInitializeReleaseOnboarding } from "./appChanged";
 
 describe("onAppChanged", () => {
@@ -198,12 +190,10 @@ describe("onAppChanged", () => {
     hoisted.rememberAppInstaller.mockReset();
     hoisted.checkAppAccountHealth.mockReset();
     hoisted.scheduleAppRepair.mockReset();
-    hoisted.ensureInviteNewSubsWikiPages.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockResolvedValue(undefined);
     hoisted.rememberAppInstaller.mockResolvedValue(undefined);
     hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: true });
     hoisted.scheduleAppRepair.mockResolvedValue(undefined);
-    hoisted.ensureInviteNewSubsWikiPages.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
     hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
@@ -284,7 +274,6 @@ describe("onAppChanged", () => {
       hoisted.initializeRecentSubscriberIndexMigration,
     ).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
-    expect(hoisted.ensureInviteNewSubsWikiPages).not.toHaveBeenCalled();
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,
@@ -292,30 +281,6 @@ describe("onAppChanged", () => {
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).not.toHaveBeenCalled();
-  });
-
-  it("runs hidden-feature wiki setup for the development installation", async () => {
-    hoisted.context.subredditName = "Subscriber_Goal_Dev";
-
-    await onAppChanged({ lifecycleSource: "upgrade" });
-
-    expect(hoisted.ensureInviteNewSubsWikiPages).toHaveBeenCalledWith(
-      expect.anything(),
-      "Subscriber_Goal_Dev",
-    );
-  });
-
-  it("requests a lifecycle retry when hidden-feature wiki setup fails", async () => {
-    hoisted.context.subredditName = "subscriber_goal_dev";
-    hoisted.ensureInviteNewSubsWikiPages.mockRejectedValue(
-      new Error("wiki unavailable"),
-    );
-
-    await expect(onAppChanged({ lifecycleSource: "upgrade" })).rejects.toThrow(
-      "wiki unavailable",
-    );
-
-    expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
   });
 
   it("initializes onboarding for installations", async () => {

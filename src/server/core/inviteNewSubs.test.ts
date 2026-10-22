@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedditClient, RedisClient } from "../types";
 import {
-  ensureInviteNewSubsWikiPages,
-  inviteNewSubsControlDefault,
   inviteNewSubsDeliveryJobName,
-  inviteNewSubsMessageDefault,
   inviteNewSubsRecipient,
   inviteNewSubsRetentionSeconds,
   inviteNewSubsSubject,
@@ -12,6 +9,12 @@ import {
   processInviteNewSubsPoll,
   renderInviteNewSubsMessage,
 } from "./inviteNewSubs";
+
+const inviteNewSubsMessageTemplate = `Detected a newly created public subreddit.
+
+- Subreddit: r/{{subredditName}}
+- Top moderator: u/{{topModerator}}
+- NSFW: {{isNsfw}}`;
 
 class FakeRedis {
   readonly values = new Map<string, string>();
@@ -62,7 +65,7 @@ const listingFetch = (...names: string[]) =>
 
 const wikiReddit = (
   control = "enabled",
-  template = inviteNewSubsMessageDefault,
+  template = inviteNewSubsMessageTemplate,
 ) => ({
   getWikiPage: vi.fn(async (_subredditName: string, page: string) => ({
     content: page === "invite-new-subs" ? control : template,
@@ -70,47 +73,6 @@ const wikiReddit = (
   getSubredditByName: vi.fn(),
   getModerators: vi.fn(),
   sendPrivateMessage: vi.fn(),
-});
-
-describe("invite-new-subreddit wiki setup", () => {
-  it("creates only missing pages on the hidden feature host", async () => {
-    const reddit = {
-      getWikiPages: vi.fn().mockResolvedValue(["invite-new-subs"]),
-      createWikiPage: vi.fn().mockResolvedValue({}),
-    };
-
-    await ensureInviteNewSubsWikiPages(
-      reddit as unknown as RedditClient,
-      "Subscriber_Goal_Dev",
-    );
-
-    expect(reddit.createWikiPage).toHaveBeenCalledOnce();
-    expect(reddit.createWikiPage).toHaveBeenCalledWith({
-      subredditName: "Subscriber_Goal_Dev",
-      page: "invite-new-subs-message",
-      content: inviteNewSubsMessageDefault,
-      reason: "Initialize hidden new-subreddit invitation feature",
-    });
-  });
-
-  it("does nothing outside the hidden feature host", async () => {
-    const reddit = {
-      getWikiPages: vi.fn(),
-      createWikiPage: vi.fn(),
-    };
-
-    await ensureInviteNewSubsWikiPages(
-      reddit as unknown as RedditClient,
-      "another_subreddit",
-    );
-
-    expect(reddit.getWikiPages).not.toHaveBeenCalled();
-    expect(reddit.createWikiPage).not.toHaveBeenCalled();
-  });
-
-  it("uses disabled as the initial control value", () => {
-    expect(inviteNewSubsControlDefault).toBe("disabled");
-  });
 });
 
 describe("processInviteNewSubsPoll", () => {

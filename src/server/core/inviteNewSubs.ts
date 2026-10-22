@@ -4,12 +4,6 @@ import type { RedditClient, RedisClient } from "../types";
 export const inviteNewSubsHostSubreddit = "subscriber_goal_dev";
 export const inviteNewSubsControlWikiPage = "invite-new-subs";
 export const inviteNewSubsMessageWikiPage = "invite-new-subs-message";
-export const inviteNewSubsControlDefault = "disabled";
-export const inviteNewSubsMessageDefault = `Detected a newly created public subreddit.
-
-- Subreddit: r/{{subredditName}}
-- Top moderator: u/{{topModerator}}
-- NSFW: {{isNsfw}}`;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
 export const inviteNewSubsRecipient = "Alan-Foster";
 export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
@@ -92,45 +86,6 @@ export const isInviteNewSubsHost = (
   subredditName: string | undefined,
 ): boolean =>
   normalizeSubredditName(subredditName ?? "") === inviteNewSubsHostSubreddit;
-
-export async function ensureInviteNewSubsWikiPages(
-  reddit: RedditClient,
-  subredditName: string,
-): Promise<void> {
-  if (!isInviteNewSubsHost(subredditName)) return;
-
-  const existingPages = new Set(
-    (await reddit.getWikiPages(subredditName)).map((page) =>
-      page.toLowerCase(),
-    ),
-  );
-  const pages = [
-    {
-      page: inviteNewSubsControlWikiPage,
-      content: inviteNewSubsControlDefault,
-    },
-    {
-      page: inviteNewSubsMessageWikiPage,
-      content: inviteNewSubsMessageDefault,
-    },
-  ];
-
-  for (const definition of pages) {
-    if (existingPages.has(definition.page)) continue;
-    await reddit.createWikiPage({
-      subredditName,
-      page: definition.page,
-      content: definition.content,
-      reason: "Initialize hidden new-subreddit invitation feature",
-    });
-    logDiagnostic("info", "invite_new_subs_wiki_created", {
-      workflow: "invite_new_subs",
-      phase: "lifecycle_setup",
-      subredditName,
-      wikiPage: definition.page,
-    });
-  }
-}
 
 export async function processInviteNewSubsPoll({
   reddit,
