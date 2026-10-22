@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RedditClient, RedisClient } from "../types";
 import {
+  inviteNewSubsControlWikiPage,
   inviteNewSubsDeliveryJobName,
+  inviteNewSubsHostSubreddit,
+  inviteNewSubsListingUrl,
+  inviteNewSubsMessageWikiPage,
   inviteNewSubsRecipient,
   inviteNewSubsRetentionSeconds,
   inviteNewSubsSubject,
+  inviteNewSubsWikiVersion,
   processInviteNewSubsDelivery,
   processInviteNewSubsPoll,
   renderInviteNewSubsMessage,
@@ -15,6 +20,10 @@ const inviteNewSubsMessageTemplate = `Detected a newly created public subreddit.
 - Subreddit: r/{{subredditName}}
 - Top moderator: u/{{topModerator}}
 - NSFW: {{isNsfw}}`;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 class FakeRedis {
   readonly values = new Map<string, string>();
@@ -67,15 +76,109 @@ const wikiReddit = (
   control = "enabled",
   template = inviteNewSubsMessageTemplate,
 ) => ({
-  getWikiPage: vi.fn(async (_subredditName: string, page: string) => ({
-    content: page === "invite-new-subs" ? control : template,
-  })),
+  getWikiPage: vi.fn(
+    async (
+      _subredditName: string,
+      page: string,
+      _options?: { wikiVersion?: "v1" | "v2" },
+    ) => ({
+      content: page === inviteNewSubsControlWikiPage ? control : template,
+      wikiVersion: inviteNewSubsWikiVersion,
+      revisionId: "11111111-1111-1111-1111-111111111111",
+      revisionDate: new Date("2026-10-22T11:55:00.000Z"),
+    }),
+  ),
   getSubredditByName: vi.fn(),
   getModerators: vi.fn(),
   sendPrivateMessage: vi.fn(),
 });
 
 describe("processInviteNewSubsPoll", () => {
+  it("reads the current V2 pages and logs the evaluated gate and listing", async () => {
+    const redis = new FakeRedis();
+    const fetchClient = listingFetch("NewOne");
+    const reddit = wikiReddit("  enabled\n");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const result = await processInviteNewSubsPoll({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      scheduler: { runJob: vi.fn() },
+      subredditName: inviteNewSubsHostSubreddit,
+      fetchClient,
+    });
+
+    expect(result.status).toBe("baseline");
+    expect(reddit.getWikiPage).toHaveBeenNthCalledWith(
+      1,
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsControlWikiPage,
+      { wikiVersion: "v2" },
+    );
+    expect(reddit.getWikiPage).toHaveBeenNthCalledWith(
+      2,
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsMessageWikiPage,
+      { wikiVersion: "v2" },
+    );
+    expect(diagnosticPayload(info, "invite_new_subs_gate_evaluated")).toEqual({
+      event: "invite_new_subs_gate_evaluated",
+      workflow: "invite_new_subs",
+      phase: "gate_read",
+      subredditName: inviteNewSubsHostSubreddit,
+      pageName: inviteNewSubsControlWikiPage,
+      wikiVersion: "v2",
+      extractedContent: "  enabled\n",
+      normalizedValue: "enabled",
+      enabled: true,
+      revisionId: "11111111-1111-1111-1111-111111111111",
+      revisionDate: "2026-10-22T11:55:00.000Z",
+    });
+    expect(diagnosticPayload(info, "invite_new_subs_listing_fetched")).toEqual({
+      event: "invite_new_subs_listing_fetched",
+      workflow: "invite_new_subs",
+      phase: "listing_fetch",
+      listingUrl: inviteNewSubsListingUrl,
+      normalizedResultCount: 1,
+    });
+    expect(
+      diagnosticPayload(info, "invite_new_subs_baseline_created"),
+    ).toMatchObject({ baselineCount: 1 });
+  });
+
+  it("uses V2 content when the independent V1 page is disabled", async () => {
+    const redis = new FakeRedis();
+    const fetchClient = listingFetch("NewOne");
+    const reddit = wikiReddit();
+    reddit.getWikiPage.mockImplementation(
+      async (_subredditName, page, options) => ({
+        content:
+          page === inviteNewSubsControlWikiPage
+            ? options?.wikiVersion === "v2"
+              ? "enabled"
+              : "disabled"
+            : inviteNewSubsMessageTemplate,
+        wikiVersion: options?.wikiVersion ?? "v1",
+        revisionId: "22222222-2222-2222-2222-222222222222",
+        revisionDate: new Date("2026-10-22T11:55:00.000Z"),
+      }),
+    );
+
+    const result = await processInviteNewSubsPoll({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      scheduler: { runJob: vi.fn() },
+      subredditName: inviteNewSubsHostSubreddit,
+      fetchClient,
+    });
+
+    expect(result.status).toBe("baseline");
+    expect(fetchClient).toHaveBeenCalledWith(inviteNewSubsListingUrl, {
+      method: "GET",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
   it("does not fetch while the exact gate value is not enabled", async () => {
     const redis = new FakeRedis();
     const reddit = wikiReddit("Enabled");
@@ -265,6 +368,7 @@ describe("processInviteNewSubsPoll", () => {
     const reddit = wikiReddit();
     reddit.getWikiPage.mockRejectedValue(new Error("wiki unavailable"));
     const fetchClient = listingFetch("Ignored");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     const result = await processInviteNewSubsPoll({
       reddit: reddit as unknown as RedditClient,
@@ -277,6 +381,34 @@ describe("processInviteNewSubsPoll", () => {
     expect(result.status).toBe("gate_unavailable");
     expect(fetchClient).not.toHaveBeenCalled();
     expect(redis.values.get("invite_new_subs:gate_state:v1")).toBe("enabled");
+    expect(diagnosticPayload(info, "invite_new_subs_disabled")).toBeUndefined();
+  });
+
+  it("treats a malformed gate response as unavailable, not disabled", async () => {
+    const redis = new FakeRedis();
+    await redis.set("invite_new_subs:gate_state:v1", "enabled");
+    const reddit = wikiReddit();
+    reddit.getWikiPage.mockResolvedValueOnce({
+      content: undefined,
+      wikiVersion: "v2",
+      revisionId: "33333333-3333-3333-3333-333333333333",
+      revisionDate: new Date("2026-10-22T11:55:00.000Z"),
+    } as never);
+    const fetchClient = listingFetch("Ignored");
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const result = await processInviteNewSubsPoll({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      scheduler: { runJob: vi.fn() },
+      subredditName: inviteNewSubsHostSubreddit,
+      fetchClient,
+    });
+
+    expect(result.status).toBe("gate_unavailable");
+    expect(fetchClient).not.toHaveBeenCalled();
+    expect(redis.values.get("invite_new_subs:gate_state:v1")).toBe("enabled");
+    expect(diagnosticPayload(info, "invite_new_subs_disabled")).toBeUndefined();
   });
 
   it("aborts before discovery when the message template is empty", async () => {
@@ -390,6 +522,23 @@ describe("processInviteNewSubsPoll", () => {
     ).toBe(false);
   });
 });
+
+function diagnosticPayload(
+  spy: { mock: { calls: unknown[][] } },
+  event: string,
+): Record<string, unknown> | undefined {
+  const prefix = "[diagnostic] ";
+  for (const [line] of spy.mock.calls) {
+    const text = String(line);
+    if (!text.startsWith(prefix)) continue;
+    const payload = JSON.parse(text.slice(prefix.length)) as Record<
+      string,
+      unknown
+    >;
+    if (payload.event === event) return payload;
+  }
+  return undefined;
+}
 
 describe("processInviteNewSubsDelivery", () => {
   const job = {

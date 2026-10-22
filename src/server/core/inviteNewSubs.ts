@@ -4,6 +4,7 @@ import type { RedditClient, RedisClient } from "../types";
 export const inviteNewSubsHostSubreddit = "subscriber_goal_dev";
 export const inviteNewSubsControlWikiPage = "invite-new-subs";
 export const inviteNewSubsMessageWikiPage = "invite-new-subs-message";
+export const inviteNewSubsWikiVersion = "v2" as const;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
 export const inviteNewSubsRecipient = "Alan-Foster";
 export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
@@ -107,25 +108,48 @@ export async function processInviteNewSubsPoll({
     return { status: "wrong_subreddit", ...emptyResult };
   }
 
-  let controlContent: string;
+  let controlPage: Awaited<ReturnType<RedditClient["getWikiPage"]>>;
   try {
-    controlContent = (
-      await reddit.getWikiPage(
-        inviteNewSubsHostSubreddit,
-        inviteNewSubsControlWikiPage,
-      )
-    ).content;
+    controlPage = await reddit.getWikiPage(
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsControlWikiPage,
+      { wikiVersion: inviteNewSubsWikiVersion },
+    );
+    if (typeof controlPage.content !== "string") {
+      throw new Error("Invitation control wiki page returned no content.");
+    }
   } catch (error) {
     logDiagnostic(
       "warn",
       "invite_new_subs_gate_unavailable",
-      { workflow: "invite_new_subs", phase: "gate_read" },
+      {
+        workflow: "invite_new_subs",
+        phase: "gate_read",
+        subredditName: inviteNewSubsHostSubreddit,
+        pageName: inviteNewSubsControlWikiPage,
+        wikiVersion: inviteNewSubsWikiVersion,
+      },
       error,
     );
     return { status: "gate_unavailable", ...emptyResult };
   }
 
-  if (controlContent.trim() !== "enabled") {
+  const normalizedControlContent = controlPage.content.trim();
+  const enabled = normalizedControlContent === "enabled";
+  logDiagnostic("info", "invite_new_subs_gate_evaluated", {
+    workflow: "invite_new_subs",
+    phase: "gate_read",
+    subredditName: inviteNewSubsHostSubreddit,
+    pageName: inviteNewSubsControlWikiPage,
+    wikiVersion: controlPage.wikiVersion,
+    extractedContent: controlPage.content,
+    normalizedValue: normalizedControlContent,
+    enabled,
+    revisionId: controlPage.revisionId,
+    revisionDate: controlPage.revisionDate.toISOString(),
+  });
+
+  if (!enabled) {
     await redis.set(inviteNewSubsGateStateKey, "disabled");
     logDiagnostic("info", "invite_new_subs_disabled", {
       workflow: "invite_new_subs",
@@ -140,6 +164,7 @@ export async function processInviteNewSubsPoll({
       await reddit.getWikiPage(
         inviteNewSubsHostSubreddit,
         inviteNewSubsMessageWikiPage,
+        { wikiVersion: inviteNewSubsWikiVersion },
       )
     ).content.trim();
     if (!template) throw new Error("Invitation message template is empty.");
@@ -147,7 +172,13 @@ export async function processInviteNewSubsPoll({
     logDiagnostic(
       "warn",
       "invite_new_subs_template_unavailable",
-      { workflow: "invite_new_subs", phase: "template_read" },
+      {
+        workflow: "invite_new_subs",
+        phase: "template_read",
+        subredditName: inviteNewSubsHostSubreddit,
+        pageName: inviteNewSubsMessageWikiPage,
+        wikiVersion: inviteNewSubsWikiVersion,
+      },
       error,
     );
     return { status: "template_unavailable", ...emptyResult };
@@ -156,11 +187,21 @@ export async function processInviteNewSubsPoll({
   let discoveredNames: string[];
   try {
     discoveredNames = await fetchNewestSubredditNames(fetchClient);
+    logDiagnostic("info", "invite_new_subs_listing_fetched", {
+      workflow: "invite_new_subs",
+      phase: "listing_fetch",
+      listingUrl: inviteNewSubsListingUrl,
+      normalizedResultCount: discoveredNames.length,
+    });
   } catch (error) {
     logDiagnostic(
       "warn",
       "invite_new_subs_listing_unavailable",
-      { workflow: "invite_new_subs", phase: "listing_fetch" },
+      {
+        workflow: "invite_new_subs",
+        phase: "listing_fetch",
+        listingUrl: inviteNewSubsListingUrl,
+      },
       error,
     );
     return { status: "listing_unavailable", ...emptyResult };
