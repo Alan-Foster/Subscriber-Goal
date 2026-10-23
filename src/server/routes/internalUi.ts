@@ -18,10 +18,7 @@ import {
   resolveSubGoalColorTheme,
   subGoalColorThemes,
 } from "../../shared/subGoalColorTheme";
-import {
-  defaultSubGoalPostHeight,
-  subGoalPostHeights,
-} from "../../shared/subGoalPostHeight";
+import { subGoalPostHeights } from "../../shared/subGoalPostHeight";
 import {
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
@@ -64,6 +61,7 @@ import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
   createDefaultAfterSubscribeAction,
+  createDefaultCreatePostAction,
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
   isAfterSubscribePreset,
@@ -85,9 +83,11 @@ function stableDraftFingerprint(value: unknown): string {
 }
 
 export function registerInternalUiRoutes(router: Router): void {
-  router.post(
-    internalRoutes.menu.createGoal,
-    async (_req, res: Response<UiResponse>) => {
+  const registerCreateGoalMenuRoute = (
+    route: string,
+    defaultPostHeight: "regular" | "cta",
+  ): void => {
+    router.post(route, async (_req, res: Response<UiResponse>) => {
       if (context.userId) {
         try {
           await deleteCreateGoalDraft(redis, context.userId);
@@ -101,7 +101,9 @@ export function registerInternalUiRoutes(router: Router): void {
         }
       }
       try {
-        res.json({ showForm: await buildCreateGoalSetupForm() });
+        res.json({
+          showForm: await buildCreateGoalSetupForm(defaultPostHeight),
+        });
       } catch (error) {
         logDiagnostic(
           "error",
@@ -111,8 +113,11 @@ export function registerInternalUiRoutes(router: Router): void {
         );
         res.json({ showToast: "Error preparing the create-post form." });
       }
-    },
-  );
+    });
+  };
+
+  registerCreateGoalMenuRoute(internalRoutes.menu.createGoal, "regular");
+  registerCreateGoalMenuRoute(internalRoutes.menu.createCta, "cta");
 
   router.post(
     internalRoutes.forms.createGoalSetup,
@@ -650,9 +655,9 @@ type CreateGoalFollowUpValues =
   | CreateSubscribeOnlyFollowUpFormValues
   | CreateCtaOnlyFollowUpFormValues;
 
-async function buildCreateGoalSetupForm(): Promise<
-  NonNullable<UiResponse["showForm"]>
-> {
+async function buildCreateGoalSetupForm(
+  initialPostHeight: "regular" | "cta" = "regular",
+): Promise<NonNullable<UiResponse["showForm"]>> {
   const subreddit = await reddit.getCurrentSubreddit();
   const defaultLanguage = resolveSubGoalLanguage(subreddit.language);
   const savedDisplayName = await getSavedSubredditDisplayName(redis);
@@ -690,7 +695,7 @@ async function buildCreateGoalSetupForm(): Promise<
           name: "postHeight",
           label: "Post Height",
           type: "select",
-          defaultValue: [defaultSubGoalPostHeight],
+          defaultValue: [initialPostHeight],
           options: [
             { label: "Full Height Subscriber Goal", value: "regular" },
             { label: "Short Subscriber Goal (No Logo)", value: "short" },
@@ -760,7 +765,11 @@ function buildCreateGoalDetailsForm(
               "This controls the subscribe button and button glow color.",
             required: true,
           },
-          getAfterSubscribeActionField(subreddit.type),
+          getAfterSubscribeActionField(
+            subreddit.type,
+            "after-subscribe",
+            getCurrentSubredditNsfw(subreddit) === true,
+          ),
         ],
       },
     };
@@ -776,7 +785,11 @@ function buildCreateGoalDetailsForm(
         cancelLabel: "Cancel",
         fields: [
           commonFields.postTitle,
-          getAfterSubscribeActionField(subreddit.type, "cta"),
+          getAfterSubscribeActionField(
+            subreddit.type,
+            "cta",
+            getCurrentSubredditNsfw(subreddit) === true,
+          ),
         ],
       },
     };
@@ -822,7 +835,11 @@ function buildCreateGoalDetailsForm(
             "This controls the subscribe button, progress bar, and button glow color.",
           required: true,
         },
-        getAfterSubscribeActionField(subreddit.type),
+        getAfterSubscribeActionField(
+          subreddit.type,
+          "after-subscribe",
+          sourceSubredditIsNsfw,
+        ),
         {
           name: "autoCreateNextGoal",
           label: "Create a New Subscriber Goal 24 Hours after Goal Success",
@@ -948,7 +965,26 @@ function getColorOptions(): Array<{ label: string; value: string }> {
 function getAfterSubscribeActionField(
   subredditType: unknown,
   context: "after-subscribe" | "cta" = "after-subscribe",
+  isNsfw = false,
 ) {
+  const options = [
+    { label: "Link to the Top Post Today", value: "top-post-day" },
+    {
+      label: "Link to the Most Recent Post Today",
+      value: "newest-post",
+    },
+    { label: "Link to Create a New Text Post", value: "create-post" },
+    {
+      label: "Link to Create a New Image Post",
+      value: "share-picture",
+    },
+    { label: "Link to a Discord Server", value: "discord" },
+    { label: "Link to a Webpage URL", value: "web-link" },
+    { label: "Link to the Subreddit Wiki", value: "wiki" },
+  ].filter(
+    ({ value }) =>
+      !isNsfw || (value !== "top-post-day" && value !== "newest-post"),
+  );
   return {
     name: "afterSubscribePreset",
     label:
@@ -956,28 +992,25 @@ function getAfterSubscribeActionField(
         ? "What Should the CTA Button Do?"
         : "What Should the Button Do After Subscription?",
     type: "select" as const,
-    defaultValue: [getDefaultAfterSubscribePreset(subredditType)],
-    options: [
-      { label: "Link to the Top Post Today", value: "top-post-day" },
-      {
-        label: "Link to the Most Recent Post Today",
-        value: "newest-post",
-      },
-      { label: "Link to Create a New Text Post", value: "create-post" },
-      {
-        label: "Link to Create a New Image Post",
-        value: "share-picture",
-      },
-      { label: "Link to a Discord Server", value: "discord" },
-      { label: "Link to a Webpage URL", value: "web-link" },
-      { label: "Link to the Subreddit Wiki", value: "wiki" },
+    defaultValue: [
+      isNsfw ? "create-post" : getDefaultAfterSubscribePreset(subredditType),
     ],
+    options,
     helpText:
       context === "cta"
         ? "Choose what every viewer can do from the post."
         : "Choose what subscribed users can do from the post.",
     required: true,
   };
+}
+
+function normalizeAfterSubscribePresetForNsfw(
+  preset: AfterSubscribePreset,
+  isNsfw: boolean,
+): AfterSubscribePreset {
+  return isNsfw && (preset === "top-post-day" || preset === "newest-post")
+    ? "create-post"
+    : preset;
 }
 
 function getAfterSubscribePresetDefaults(
@@ -1074,9 +1107,13 @@ async function submitCreateGoalStepTwo(
       "colorTheme" in values ? values.colorTheme?.[0] : undefined,
     );
     const requestedPreset = values.afterSubscribePreset?.[0];
-    const afterSubscribePreset = isAfterSubscribePreset(requestedPreset)
+    const selectedPreset = isAfterSubscribePreset(requestedPreset)
       ? requestedPreset
       : getDefaultAfterSubscribePreset(subreddit.type);
+    const afterSubscribePreset = normalizeAfterSubscribePresetForNsfw(
+      selectedPreset,
+      getCurrentSubredditNsfw(subreddit) === true,
+    );
     let details: CreateGoalDraftDetails;
     if (expectedKind === "subscribe-only") {
       details = {
@@ -1210,26 +1247,41 @@ async function submitCreateGoalFollowUp(
       return;
     }
 
-    const presetDefaults = getAfterSubscribePresetDefaults(
+    const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
+    const normalizedPreset = normalizeAfterSubscribePresetForNsfw(
       draft.details.afterSubscribePreset,
+      isNsfw,
+    );
+    const replacedNsfwDynamicPreset =
+      normalizedPreset !== draft.details.afterSubscribePreset;
+    const presetDefaults = getAfterSubscribePresetDefaults(
+      normalizedPreset,
       draft.language,
     );
     const resolvedActionInput = resolvePresetActionInput(
-      draft.details.afterSubscribePreset,
+      normalizedPreset,
       subreddit.name,
       values.afterSubscribeUrl,
     );
-    const invalidConfigurationFallback = createDefaultAfterSubscribeAction({
-      language: draft.language,
-      subredditName: subreddit.name,
-      subredditType: subreddit.type,
-    });
+    const invalidConfigurationFallback = isNsfw
+      ? createDefaultCreatePostAction({
+          language: draft.language,
+          subredditName: subreddit.name,
+        })
+      : createDefaultAfterSubscribeAction({
+          language: draft.language,
+          subredditName: subreddit.name,
+          subredditType: subreddit.type,
+        });
     const afterSubscribeResult = resolveAfterSubscribeAction({
       type: resolvedActionInput.type,
-      buttonText: values.afterSubscribeButtonText ?? presetDefaults.buttonText,
+      buttonText: replacedNsfwDynamicPreset
+        ? presetDefaults.buttonText
+        : (values.afterSubscribeButtonText ?? presetDefaults.buttonText),
       url: resolvedActionInput.url,
-      colorTheme:
-        values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme,
+      colorTheme: replacedNsfwDynamicPreset
+        ? presetDefaults.colorTheme
+        : (values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme),
       fallbackColorTheme:
         draft.details.kind === "cta-only"
           ? defaultAfterSubscribeColorTheme
@@ -1238,8 +1290,10 @@ async function submitCreateGoalFollowUp(
     });
     const persistedAfterSubscribePreset =
       afterSubscribeResult.invalidConfiguration
-        ? getDefaultAfterSubscribePreset(subreddit.type)
-        : draft.details.afterSubscribePreset;
+        ? isNsfw
+          ? "create-post"
+          : getDefaultAfterSubscribePreset(subreddit.type)
+        : normalizedPreset;
     const appSettings = getAppSettings();
     const autoCreateNextGoal =
       draft.details.kind === "subscriber-goal"

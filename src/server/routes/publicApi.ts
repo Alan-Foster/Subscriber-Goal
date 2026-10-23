@@ -393,6 +393,14 @@ export function registerPublicApiRoutes(router: Router): void {
           return;
         }
         const subreddit = await reddit.getCurrentSubreddit();
+        if (getCurrentSubredditNsfw(subreddit) === true) {
+          res.json({
+            target: {
+              url: `https://www.reddit.com/r/${subreddit.name}/submit/`,
+            },
+          } satisfies AfterSubscribeTargetResponse);
+          return;
+        }
         let target: NavigationTarget | undefined;
         if (action.type === "top-post-day") {
           const promoSubreddit = getPublicAppSettings().promoSubreddit;

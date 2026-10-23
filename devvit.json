@@ -58,6 +58,13 @@
         "endpoint": "/internal/menu/create-goal"
       },
       {
+        "label": "Sub Goal - Create a CTA Button",
+        "description": "Create a new CTA button post",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/create-cta"
+      },
+      {
         "label": "Sub Goal - Delete This Goal",
         "description": "Delete the current subscriber goal post",
         "location": "post",

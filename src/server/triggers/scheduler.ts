@@ -22,6 +22,7 @@ import { countPendingCrossposts } from "../data/crosspostData";
 import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
+import { processNsfwAfterSubscribeActionMigrationBatch } from "../data/nsfwAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
 import { processDueOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
 import { processDueOnboardingReminder } from "../core/onboardingReminder";
@@ -60,13 +61,23 @@ export async function onPostsUpdaterJob(): Promise<void> {
     subreddit = await reddit.getCurrentSubreddit();
     await observeDailySubscriberCount(redis, subreddit.numberOfSubscribers);
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "subscriber_daily_stats" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "subscriber_daily_stats" },
+      error,
+    );
   }
   if (subreddit) {
     try {
       await ensureCommunityPostActivityBackfill(reddit, redis, subreddit.name);
     } catch (error) {
-      logDiagnostic("error", "scheduler_task_failed", { workflow: "community_post_activity_backfill" }, error);
+      logDiagnostic(
+        "error",
+        "scheduler_task_failed",
+        { workflow: "community_post_activity_backfill" },
+        error,
+      );
     }
   }
   try {
@@ -82,7 +93,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
   try {
     await processDueAppRepair({ reddit, redis });
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "app_repair" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "app_repair" },
+      error,
+    );
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
   if (
@@ -122,7 +138,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
   try {
     await processPostKindMigrationBatch(reddit, redis);
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "post_kind_migration" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "post_kind_migration" },
+      error,
+    );
   }
   try {
     if (subreddit) {
@@ -132,22 +153,57 @@ export async function onPostsUpdaterJob(): Promise<void> {
       });
     }
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "after_subscribe_action_migration" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "after_subscribe_action_migration" },
+      error,
+    );
+  }
+  try {
+    if (subreddit) {
+      await processNsfwAfterSubscribeActionMigrationBatch(redis, {
+        name: subreddit.name,
+        nsfw: subreddit.nsfw,
+      });
+    }
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "nsfw_after_subscribe_action_migration" },
+      error,
+    );
   }
   try {
     await processSubscriberStatsMigrationBatch(redis);
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "subscriber_stats_migration" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "subscriber_stats_migration" },
+      error,
+    );
   }
   try {
     await processRecentSubscriberIndexMigrationBatch(redis);
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "recent_subscriber_migration" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "recent_subscriber_migration" },
+      error,
+    );
   }
   try {
     await processDueOnboardingReminder({ reddit, redis });
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "onboarding_reminder" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "onboarding_reminder" },
+      error,
+    );
   }
   try {
     await processDueOnboardingSubscriberGoal({
@@ -156,7 +212,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
       appSettings,
     });
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "onboarding_subscriber_goal" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "onboarding_subscriber_goal" },
+      error,
+    );
   }
   try {
     const autoCreateSummary = await processDueAutoCreateNextGoals({
@@ -177,7 +238,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
       );
     }
   } catch (error) {
-    logDiagnostic("error", "scheduler_task_failed", { workflow: "auto_create_next_goal" }, error);
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "auto_create_next_goal" },
+      error,
+    );
   }
 
   const postIds = await getQueuedUpdates(redis);
@@ -188,7 +254,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     try {
       subreddit = await reddit.getCurrentSubreddit();
     } catch (error) {
-      logDiagnostic("error", "scheduler_task_failed", { workflow: "subreddit_lookup" }, error);
+      logDiagnostic(
+        "error",
+        "scheduler_task_failed",
+        { workflow: "subreddit_lookup" },
+        error,
+      );
       return;
     }
   }
@@ -259,7 +330,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
         await cleanupInactivePost(postId, "missing_post");
         continue;
       }
-      logDiagnostic("error", "scheduler_post_update_failed", { workflow: "post_update", postId }, e);
+      logDiagnostic(
+        "error",
+        "scheduler_post_update_failed",
+        { workflow: "post_update", postId },
+        e,
+      );
     }
   }
 }

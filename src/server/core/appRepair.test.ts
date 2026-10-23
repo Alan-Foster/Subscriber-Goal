@@ -6,6 +6,7 @@ const hoisted = vi.hoisted(() => ({
   backfillSubscriberGoalPostFlair: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   initializeLegacyAfterSubscribeActionMigration: vi.fn(),
+  initializeNsfwAfterSubscribeActionMigration: vi.fn(),
   initializePostKindMigration: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   getTrackedPosts: vi.fn(),
@@ -27,6 +28,10 @@ vi.mock("../data/ctaActivity", () => ({
 vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   initializeLegacyAfterSubscribeActionMigration:
     hoisted.initializeLegacyAfterSubscribeActionMigration,
+}));
+vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
+  initializeNsfwAfterSubscribeActionMigration:
+    hoisted.initializeNsfwAfterSubscribeActionMigration,
 }));
 vi.mock("../data/postKindMigration", () => ({
   initializePostKindMigration: hoisted.initializePostKindMigration,
@@ -95,6 +100,7 @@ describe("scheduled app repair", () => {
       id: "t5_example",
       name: "ExampleSub",
       type: "public",
+      nsfw: false,
     });
     hoisted.checkAppAccountHealth.mockResolvedValue({ status: "healthy" });
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({ id: "flair_1" });
@@ -127,6 +133,12 @@ describe("scheduled app repair", () => {
     ).toHaveBeenCalledWith(expect.anything(), ["t3_registered"], {
       name: "ExampleSub",
       type: "public",
+    });
+    expect(
+      hoisted.initializeNsfwAfterSubscribeActionMigration,
+    ).toHaveBeenCalledWith(expect.anything(), ["t3_registered"], {
+      name: "ExampleSub",
+      nsfw: false,
     });
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "complete",

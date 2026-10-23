@@ -47,6 +47,7 @@ const hoisted = vi.hoisted(() => ({
   processSubscriberStatsMigrationBatch: vi.fn(),
   processPostKindMigrationBatch: vi.fn(),
   processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
+  processNsfwAfterSubscribeActionMigrationBatch: vi.fn(),
   processRecentSubscriberIndexMigrationBatch: vi.fn(),
   processDueAutoCreateNextGoals: vi.fn(),
   processDueOnboardingSubscriberGoal: vi.fn(),
@@ -116,6 +117,10 @@ vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   processLegacyAfterSubscribeActionMigrationBatch:
     hoisted.processLegacyAfterSubscribeActionMigrationBatch,
 }));
+vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
+  processNsfwAfterSubscribeActionMigrationBatch:
+    hoisted.processNsfwAfterSubscribeActionMigrationBatch,
+}));
 
 vi.mock("../data/subGoalData", () => ({
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
@@ -179,6 +184,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processSubscriberStatsMigrationBatch.mockReset();
     hoisted.processPostKindMigrationBatch.mockReset();
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
+    hoisted.processNsfwAfterSubscribeActionMigrationBatch.mockReset();
     hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.processDueAutoCreateNextGoals.mockReset();
     hoisted.processDueOnboardingSubscriberGoal.mockReset();
@@ -204,6 +210,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockResolvedValue(
       {},
     );
+    hoisted.processNsfwAfterSubscribeActionMigrationBatch.mockResolvedValue({});
     hoisted.countPendingCrossposts.mockResolvedValue(0);
     hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);
     hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(

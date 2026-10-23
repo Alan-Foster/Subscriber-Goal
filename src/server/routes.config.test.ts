@@ -110,12 +110,16 @@ describe("devvit.json route alignment", () => {
     );
 
     expect(endpoints.has(internalRoutes.menu.createGoal)).toBe(true);
+    expect(endpoints.has(internalRoutes.menu.createCta)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.deleteGoal)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.eraseData)).toBe(true);
     expect(endpoints.has(internalRoutes.menu.eraseMyData)).toBe(true);
   });
 
   it("keeps moderator and self-erasure menu visibility distinct", () => {
+    const createCtaItem = devvitConfig.menu.items.find(
+      (item) => item.endpoint === internalRoutes.menu.createCta,
+    );
     const moderatorEraseItem = devvitConfig.menu.items.find(
       (item) => item.endpoint === internalRoutes.menu.eraseData,
     );
@@ -123,6 +127,10 @@ describe("devvit.json route alignment", () => {
       (item) => item.endpoint === internalRoutes.menu.eraseMyData,
     );
 
+    expect(createCtaItem).toMatchObject({
+      label: "Sub Goal - Create a CTA Button",
+      forUserType: "moderator",
+    });
     expect(moderatorEraseItem).toMatchObject({
       label: "Sub Goal - Erase Another User's Data",
       forUserType: "moderator",

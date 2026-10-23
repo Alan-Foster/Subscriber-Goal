@@ -724,6 +724,24 @@ describe("internalUi color theme create goal routes", () => {
     });
   });
 
+  it("opens the CTA shortcut with CTA selected by default", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.menu.createCta)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+      name: string;
+      defaultValue?: unknown;
+    }>;
+    expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
+      defaultValue: ["cta"],
+    });
+  });
+
   it("falls back to English for an unsupported subreddit language", async () => {
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -967,6 +985,46 @@ describe("internalUi color theme create goal routes", () => {
       expect(
         fields.find((field) => field.name === "afterSubscribePreset"),
       ).toMatchObject({ defaultValue: ["top-post-day"] });
+    }
+  });
+
+  it("removes dynamic post choices and defaults every NSFW post type to Create Post", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      nsfw: true,
+    });
+
+    for (const postHeight of ["regular", "short", "tiny", "cta"] as const) {
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      await routes.get(internalRoutes.forms.createGoalSetup)?.(
+        {
+          body: {
+            language: ["en"],
+            subredditDisplayName: "ExampleSub",
+            postHeight: [postHeight],
+          },
+        } as Request,
+        { json } as unknown as Response,
+      );
+      const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+        name: string;
+        defaultValue?: unknown;
+        options?: Array<{ value: string }>;
+      }>;
+      const actionField = fields.find(
+        (field) => field.name === "afterSubscribePreset",
+      );
+      expect(actionField?.defaultValue).toEqual(["create-post"]);
+      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
+        "top-post-day",
+      );
+      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
+        "newest-post",
+      );
     }
   });
 
@@ -1712,6 +1770,53 @@ describe("internalUi color theme create goal routes", () => {
       );
     },
   );
+
+  it("normalizes a stale NSFW dynamic-action draft to default Create Post settings", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      nsfw: true,
+    });
+    seedCreateGoalDraft("regular", "es", {
+      colorTheme: "green",
+      afterSubscribePreset: "newest-post",
+    });
+    const routes = createRouteHarness();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      {
+        body: {
+          afterSubscribeButtonText: "Keep this forged text",
+          afterSubscribeColorTheme: ["pink"],
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      expect.anything(),
+      expect.objectContaining({ id: "t3_newpost" }),
+      200,
+      false,
+      "ExampleSub",
+      "green",
+      true,
+      "es",
+      undefined,
+      "regular",
+      {
+        type: "link",
+        buttonText: "Crear una publicación",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        colorTheme: "blue",
+      },
+      "create-post",
+    );
+  });
 
   it("creates tiny posts without requiring or registering a subscriber goal", async () => {
     seedCreateGoalDraft("tiny", "en");

@@ -7,6 +7,7 @@ import {
 } from "./subscriberGoalPostFlair";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAfterSubscribeActionMigration";
+import { initializeNsfwAfterSubscribeActionMigration } from "../data/nsfwAfterSubscribeActionMigration";
 import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
@@ -14,7 +15,7 @@ import { ensureExistingSubscriberGoalHighlighted } from "./onboardingSubscriberG
 
 export const appRepairStateKey = "app_repair_community_highlights_v1_state";
 export const appRepairLockKey = "app_repair_community_highlights_v1_lock";
-export const appRepairVersion = "app_repair_community_highlights_v1";
+export const appRepairVersion = "app_repair_nsfw_cta_actions_v2";
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
 
@@ -117,6 +118,12 @@ export async function processDueAppRepair({
           candidatePostIds!,
           { name: subreddit.name, type: subreddit.type },
         ),
+      );
+      await runPhase("nsfw_after_subscribe_action_migration", () =>
+        initializeNsfwAfterSubscribeActionMigration(redis, candidatePostIds!, {
+          name: subreddit.name,
+          nsfw: subreddit.nsfw,
+        }),
       );
       if (trackedPosts.length > 0) {
         await runPhase("update_queue", () =>

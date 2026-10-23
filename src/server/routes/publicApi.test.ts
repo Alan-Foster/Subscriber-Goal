@@ -1416,6 +1416,37 @@ describe("publicApi routes", () => {
     });
   });
 
+  it("returns Create Post without loading dynamic listings in NSFW communities", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      nsfw: true,
+    });
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "blue",
+      },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+    });
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+  });
+
   it("records external CTA clicks without requiring authentication", async () => {
     hoisted.getSubGoalData.mockResolvedValue({
       afterSubscribePreset: "discord",

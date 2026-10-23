@@ -23,6 +23,7 @@ export const internalRoutes = {
   },
   menu: {
     createGoal: "/internal/menu/create-goal",
+    createCta: "/internal/menu/create-cta",
     deleteGoal: "/internal/menu/delete-goal",
     eraseData: "/internal/menu/erase-data",
     eraseMyData: "/internal/menu/erase-my-data",

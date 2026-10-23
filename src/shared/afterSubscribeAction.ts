@@ -89,6 +89,21 @@ export function createDefaultAfterSubscribeAction({
   });
 }
 
+export function createDefaultCreatePostAction({
+  language,
+  subredditName,
+}: {
+  language: SubGoalLanguage;
+  subredditName: string;
+}): Extract<AfterSubscribeAction, { type: "link" }> {
+  return {
+    type: "link",
+    buttonText: getAfterSubscribePresetMessages(language).createNewPost,
+    url: `https://www.reddit.com/r/${subredditName}/submit/`,
+    colorTheme: defaultAfterSubscribeColorTheme,
+  };
+}
+
 export function resolveAfterSubscribeAction({
   type,
   buttonText,
