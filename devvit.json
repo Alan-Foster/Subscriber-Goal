@@ -110,7 +110,7 @@
       },
       "invite-new-subs-poll-job": {
         "endpoint": "/internal/scheduler/invite-new-subs-poll-job",
-        "cron": "*/5 * * * *"
+        "cron": "*/1 * * * *"
       },
       "invite-new-subs-delivery-job": {
         "endpoint": "/internal/scheduler/invite-new-subs-delivery-job"

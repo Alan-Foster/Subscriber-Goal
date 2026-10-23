@@ -97,7 +97,7 @@ describe("devvit.json route alignment", () => {
     ).toBe(internalRoutes.scheduler.milestoneNotificationJob);
     expect(devvitConfig.scheduler.tasks["invite-new-subs-poll-job"]).toEqual({
       endpoint: internalRoutes.scheduler.inviteNewSubsPollJob,
-      cron: "*/5 * * * *",
+      cron: "*/1 * * * *",
     });
     expect(
       devvitConfig.scheduler.tasks["invite-new-subs-delivery-job"].endpoint,

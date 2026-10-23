@@ -1,25 +1,49 @@
 import { logDiagnostic } from "../../shared/diagnostics";
-import type { RedditClient, RedisClient } from "../types";
+import type { RedditClient, RedisClient, SubredditId } from "../types";
 
 export const inviteNewSubsHostSubreddit = "subscriber_goal_dev";
 export const inviteNewSubsControlWikiPage = "invite-new-subs";
 export const inviteNewSubsMessageWikiPage = "invite-new-subs-message";
+export const inviteNewSubsDataWikiPage = "invite-new-subs-data";
 export const inviteNewSubsWikiVersion = "v2" as const;
+export const inviteNewSubsDataWikiVersion = "v1" as const;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
 export const inviteNewSubsRecipient = "Alan-Foster";
 export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
 export const inviteNewSubsRetentionSeconds = 7 * 24 * 60 * 60;
 export const inviteNewSubsDeliverySpacingMs = 60_000;
-export const inviteNewSubsFetchTimeoutMs = 10_000;
-export const inviteNewSubsListingUrl =
-  "https://www.reddit.com/subreddits/new.json?limit=100&raw_json=1";
+export const inviteNewSubsSchemaVersion = 1;
+export const inviteNewSubsSource = "reddit/subreddits/new";
+export const inviteNewSubsMaximumBatchSize = 10;
 
 const inviteNewSubsGateStateKey = "invite_new_subs:gate_state:v1";
-const inviteNewSubsSeenKeyPrefix = "invite_new_subs:seen:v1";
-const inviteNewSubsDeliveryClaimKeyPrefix = "invite_new_subs:delivery_claim:v1";
+const inviteNewSubsBatchIdentityKey = "invite_new_subs:batch_identity:v1";
+const inviteNewSubsSeenKeyPrefix = "invite_new_subs:seen:v2";
+const inviteNewSubsDeliveryClaimKeyPrefix = "invite_new_subs:delivery_claim:v2";
+const subredditIdPattern = /^t5_[a-z0-9]+$/i;
+const displayNamePattern = /^[a-z0-9_]+$/i;
+const utcIsoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+export type InviteNewSubsDiscoveryRecord = {
+  id: SubredditId;
+  displayName: string;
+  subredditType: string;
+  over18: boolean;
+  subscribers: number;
+  createdUtc: number;
+  url: string;
+};
+
+export type InviteNewSubsDiscoveryBatch = {
+  schemaVersion: 1;
+  source: typeof inviteNewSubsSource;
+  generatedAt: string;
+  subreddits: InviteNewSubsDiscoveryRecord[];
+};
 
 export type InviteNewSubsStatus =
   | "baseline"
+  | "processing"
   | "lookup_failed"
   | "not_public"
   | "no_moderator"
@@ -29,6 +53,7 @@ export type InviteNewSubsStatus =
   | "dm_failed";
 
 export type InviteNewSubsDeliveryJob = {
+  subredditId: SubredditId;
   subredditName: string;
   topModerator: string;
   isNsfw: boolean;
@@ -37,23 +62,13 @@ export type InviteNewSubsDeliveryJob = {
 
 type InviteNewSubsRecord = {
   status: InviteNewSubsStatus;
+  subredditId: SubredditId;
   subredditName: string;
   updatedAt: number;
   topModerator?: string;
   isNsfw?: boolean;
   error?: string;
 };
-
-type FetchResponse = {
-  ok: boolean;
-  status: number;
-  json(): Promise<unknown>;
-};
-
-type FetchClient = (
-  input: string,
-  init?: RequestInit,
-) => Promise<FetchResponse>;
 
 type SchedulerRunClient = {
   runJob(job: {
@@ -69,8 +84,10 @@ export type InviteNewSubsPollResult = {
     | "disabled"
     | "gate_unavailable"
     | "template_unavailable"
-    | "listing_unavailable"
+    | "data_unavailable"
+    | "invalid_data"
     | "baseline"
+    | "unchanged"
     | "processed";
   discovered: number;
   queued: number;
@@ -93,14 +110,12 @@ export async function processInviteNewSubsPoll({
   redis,
   scheduler,
   subredditName,
-  fetchClient = globalThis.fetch,
   now = Date.now,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   scheduler: SchedulerRunClient;
   subredditName: string | undefined;
-  fetchClient?: FetchClient;
   now?: () => number;
 }): Promise<InviteNewSubsPollResult> {
   const emptyResult = { discovered: 0, queued: 0, skipped: 0 };
@@ -142,7 +157,6 @@ export async function processInviteNewSubsPoll({
     subredditName: inviteNewSubsHostSubreddit,
     pageName: inviteNewSubsControlWikiPage,
     wikiVersion: controlPage.wikiVersion,
-    extractedContent: controlPage.content,
     normalizedValue: normalizedControlContent,
     enabled,
     revisionId: controlPage.revisionId,
@@ -181,76 +195,156 @@ export async function processInviteNewSubsPoll({
       },
       error,
     );
-    return { status: "template_unavailable", ...emptyResult };
+    return completeInviteNewSubsPoll({
+      status: "template_unavailable",
+      ...emptyResult,
+    });
   }
 
-  let discoveredNames: string[];
+  let dataContent: string;
   try {
-    discoveredNames = await fetchNewestSubredditNames(fetchClient);
-    logDiagnostic("info", "invite_new_subs_listing_fetched", {
+    const dataPage = await reddit.getWikiPage(
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsDataWikiPage,
+      { wikiVersion: inviteNewSubsDataWikiVersion },
+    );
+    if (typeof dataPage.content !== "string") {
+      throw new Error("Invitation data wiki page returned no content.");
+    }
+    dataContent = dataPage.content;
+    logDiagnostic("info", "invite_new_subs_data_fetched", {
       workflow: "invite_new_subs",
-      phase: "listing_fetch",
-      listingUrl: inviteNewSubsListingUrl,
-      normalizedResultCount: discoveredNames.length,
+      phase: "data_read",
+      subredditName: inviteNewSubsHostSubreddit,
+      pageName: inviteNewSubsDataWikiPage,
+      wikiVersion: dataPage.wikiVersion,
+      revisionId: dataPage.revisionId,
+      revisionDate: dataPage.revisionDate.toISOString(),
     });
   } catch (error) {
     logDiagnostic(
       "warn",
-      "invite_new_subs_listing_unavailable",
+      "invite_new_subs_data_unavailable",
       {
         workflow: "invite_new_subs",
-        phase: "listing_fetch",
-        listingUrl: inviteNewSubsListingUrl,
+        phase: "data_read",
+        subredditName: inviteNewSubsHostSubreddit,
+        pageName: inviteNewSubsDataWikiPage,
+        wikiVersion: inviteNewSubsDataWikiVersion,
       },
       error,
     );
-    return { status: "listing_unavailable", ...emptyResult };
+    return completeInviteNewSubsPoll({
+      status: "data_unavailable",
+      ...emptyResult,
+    });
+  }
+
+  let batch: InviteNewSubsDiscoveryBatch;
+  try {
+    batch = parseInviteNewSubsDiscoveryBatch(dataContent);
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "invite_new_subs_data_invalid",
+      {
+        workflow: "invite_new_subs",
+        phase: "data_validation",
+        pageName: inviteNewSubsDataWikiPage,
+        wikiVersion: inviteNewSubsDataWikiVersion,
+      },
+      error,
+    );
+    return completeInviteNewSubsPoll({
+      status: "invalid_data",
+      ...emptyResult,
+    });
   }
 
   const nowMs = now();
+  const batchIdentity = createBatchIdentity(batch);
   const previousGateState = await redis.get(inviteNewSubsGateStateKey);
-  if (previousGateState !== "enabled") {
+  const previousBatchIdentity = await redis.get(inviteNewSubsBatchIdentityKey);
+
+  if (
+    previousGateState === "enabled" &&
+    previousBatchIdentity === batchIdentity
+  ) {
+    return completeInviteNewSubsPoll(
+      { status: "unchanged", ...emptyResult },
+      batch,
+    );
+  }
+
+  const existingRecords = await Promise.all(
+    batch.subreddits.map((candidate) =>
+      redis.get(inviteNewSubsSeenKey(candidate.id)),
+    ),
+  );
+  const allIdsAreAbsent = existingRecords.every(
+    (record) => record === undefined,
+  );
+  const requiresBaseline = previousGateState !== "enabled" || allIdsAreAbsent;
+
+  if (requiresBaseline) {
     await Promise.all(
-      discoveredNames.map((name) =>
+      batch.subreddits.map((candidate) =>
         writeInviteNewSubsRecord(
           redis,
           {
             status: "baseline",
-            subredditName: name,
+            subredditId: candidate.id,
+            subredditName: candidate.displayName,
             updatedAt: nowMs,
+            isNsfw: candidate.over18,
           },
           nowMs,
         ),
       ),
     );
+    await writeBatchIdentity(redis, batchIdentity, nowMs);
     await redis.set(inviteNewSubsGateStateKey, "enabled");
     logDiagnostic("info", "invite_new_subs_baseline_created", {
       workflow: "invite_new_subs",
       phase: "baseline",
-      baselineCount: discoveredNames.length,
+      baselineCount: batch.subreddits.length,
+      generatedAt: batch.generatedAt,
     });
-    return {
-      status: "baseline",
-      discovered: discoveredNames.length,
-      queued: 0,
-      skipped: discoveredNames.length,
-    };
+    return completeInviteNewSubsPoll(
+      {
+        status: "baseline",
+        discovered: batch.subreddits.length,
+        queued: 0,
+        skipped: batch.subreddits.length,
+      },
+      batch,
+    );
   }
 
   let discovered = 0;
   let queued = 0;
   let skipped = 0;
-  for (const name of [...discoveredNames].reverse()) {
-    const reserved = await reserveInviteNewSubsRecord(redis, name, nowMs);
+  for (const candidate of [...batch.subreddits].reverse()) {
+    const reserved = await reserveInviteNewSubsRecord(redis, candidate, nowMs);
     if (!reserved) continue;
     discovered += 1;
 
+    if (candidate.subredditType !== "public") {
+      skipped += 1;
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
+        status: "not_public",
+        isNsfw: candidate.over18,
+      });
+      logInviteNewSubsSkip(candidate, "not_public");
+      continue;
+    }
+
     let subreddit: Awaited<ReturnType<RedditClient["getSubredditByName"]>>;
     try {
-      subreddit = await reddit.getSubredditByName(name);
+      subreddit = await reddit.getSubredditByName(candidate.displayName);
     } catch (error) {
       skipped += 1;
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "lookup_failed",
         error: errorMessage(error),
       });
@@ -260,7 +354,8 @@ export async function processInviteNewSubsPoll({
         {
           workflow: "invite_new_subs",
           phase: "enrichment",
-          subredditName: name,
+          subredditId: candidate.id,
+          subredditName: candidate.displayName,
           reason: "lookup_failed",
         },
         error,
@@ -270,11 +365,11 @@ export async function processInviteNewSubsPoll({
 
     if (subreddit.type !== "public") {
       skipped += 1;
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "not_public",
         isNsfw: subreddit.nsfw,
       });
-      logInviteNewSubsSkip(name, "not_public");
+      logInviteNewSubsSkip(candidate, "not_public");
       continue;
     }
 
@@ -286,7 +381,7 @@ export async function processInviteNewSubsPoll({
       topModerator = moderators[0]?.username?.trim();
     } catch (error) {
       skipped += 1;
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "lookup_failed",
         isNsfw: subreddit.nsfw,
         error: errorMessage(error),
@@ -297,7 +392,8 @@ export async function processInviteNewSubsPoll({
         {
           workflow: "invite_new_subs",
           phase: "enrichment",
-          subredditName: name,
+          subredditId: candidate.id,
+          subredditName: candidate.displayName,
           reason: "moderator_lookup_failed",
         },
         error,
@@ -306,15 +402,16 @@ export async function processInviteNewSubsPoll({
     }
     if (!topModerator) {
       skipped += 1;
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "no_moderator",
         isNsfw: subreddit.nsfw,
       });
-      logInviteNewSubsSkip(name, "no_moderator");
+      logInviteNewSubsSkip(candidate, "no_moderator");
       continue;
     }
 
     const job: InviteNewSubsDeliveryJob = {
+      subredditId: candidate.id,
       subredditName: subreddit.name,
       topModerator,
       isNsfw: subreddit.nsfw,
@@ -332,7 +429,7 @@ export async function processInviteNewSubsPoll({
       });
     } catch (error) {
       skipped += 1;
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "schedule_failed",
         topModerator,
         isNsfw: subreddit.nsfw,
@@ -344,7 +441,8 @@ export async function processInviteNewSubsPoll({
         {
           workflow: "invite_new_subs",
           phase: "schedule",
-          subredditName: name,
+          subredditId: candidate.id,
+          subredditName: candidate.displayName,
           reason: "schedule_failed",
         },
         error,
@@ -354,7 +452,7 @@ export async function processInviteNewSubsPoll({
 
     queued += 1;
     try {
-      await updateInviteNewSubsRecord(redis, name, nowMs, {
+      await updateInviteNewSubsRecord(redis, candidate.id, nowMs, {
         status: "queued",
         topModerator,
         isNsfw: subreddit.nsfw,
@@ -366,7 +464,8 @@ export async function processInviteNewSubsPoll({
         {
           workflow: "invite_new_subs",
           phase: "queue_persistence",
-          subredditName: name,
+          subredditId: candidate.id,
+          subredditName: candidate.displayName,
         },
         error,
       );
@@ -375,12 +474,18 @@ export async function processInviteNewSubsPoll({
     logDiagnostic("info", "invite_new_subs_delivery_queued", {
       workflow: "invite_new_subs",
       phase: "schedule",
+      subredditId: candidate.id,
       subredditName: subreddit.name,
       queuePosition: queued,
     });
   }
 
-  return { status: "processed", discovered, queued, skipped };
+  await writeBatchIdentity(redis, batchIdentity, nowMs);
+  await redis.set(inviteNewSubsGateStateKey, "enabled");
+  return completeInviteNewSubsPoll(
+    { status: "processed", discovered, queued, skipped },
+    batch,
+  );
 }
 
 export async function processInviteNewSubsDelivery({
@@ -396,9 +501,8 @@ export async function processInviteNewSubsDelivery({
 }): Promise<InviteNewSubsDeliveryResult> {
   if (!isInviteNewSubsDeliveryJob(job)) return "invalid";
 
-  const normalizedName = normalizeSubredditName(job.subredditName);
   const nowMs = now();
-  const claimKey = `${inviteNewSubsDeliveryClaimKeyPrefix}:${normalizedName}`;
+  const claimKey = `${inviteNewSubsDeliveryClaimKeyPrefix}:${job.subredditId.toLowerCase()}`;
   const claimToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(claimKey, claimToken, {
     nx: true,
@@ -412,7 +516,7 @@ export async function processInviteNewSubsDelivery({
       subject: inviteNewSubsSubject,
       text: job.renderedMessage,
     });
-    await updateInviteNewSubsRecord(redis, normalizedName, nowMs, {
+    await updateInviteNewSubsRecord(redis, job.subredditId, nowMs, {
       status: "messaged",
       topModerator: job.topModerator,
       isNsfw: job.isNsfw,
@@ -420,11 +524,12 @@ export async function processInviteNewSubsDelivery({
     logDiagnostic("info", "invite_new_subs_dm_sent", {
       workflow: "invite_new_subs",
       phase: "delivery",
+      subredditId: job.subredditId,
       subredditName: job.subredditName,
     });
     return "messaged";
   } catch (error) {
-    await updateInviteNewSubsRecord(redis, normalizedName, nowMs, {
+    await updateInviteNewSubsRecord(redis, job.subredditId, nowMs, {
       status: "dm_failed",
       topModerator: job.topModerator,
       isNsfw: job.isNsfw,
@@ -436,6 +541,7 @@ export async function processInviteNewSubsDelivery({
       {
         workflow: "invite_new_subs",
         phase: "delivery",
+        subredditId: job.subredditId,
         subredditName: job.subredditName,
       },
       error,
@@ -444,19 +550,116 @@ export async function processInviteNewSubsDelivery({
   }
 }
 
+export function parseInviteNewSubsDiscoveryBatch(
+  content: string,
+): InviteNewSubsDiscoveryBatch {
+  let value: unknown;
+  try {
+    value = JSON.parse(content);
+  } catch {
+    // diagnostic-allow-silent: the caller reports this validation failure with page context.
+    throw new Error("Discovery wiki content is not valid JSON.");
+  }
+  if (!isRecord(value)) throw new Error("Discovery data must be an object.");
+  if (value.schemaVersion !== inviteNewSubsSchemaVersion) {
+    throw new Error("Discovery data has an unsupported schema version.");
+  }
+  if (value.source !== inviteNewSubsSource) {
+    throw new Error("Discovery data has an unsupported source.");
+  }
+  if (
+    typeof value.generatedAt !== "string" ||
+    !utcIsoPattern.test(value.generatedAt) ||
+    !Number.isFinite(Date.parse(value.generatedAt))
+  ) {
+    throw new Error("Discovery data has an invalid generatedAt timestamp.");
+  }
+  if (
+    !Array.isArray(value.subreddits) ||
+    value.subreddits.length === 0 ||
+    value.subreddits.length > inviteNewSubsMaximumBatchSize
+  ) {
+    throw new Error("Discovery data must contain between 1 and 10 subreddits.");
+  }
+
+  const seenIds = new Set<string>();
+  const subreddits = value.subreddits.map((candidate, index) => {
+    if (!isRecord(candidate)) {
+      throw new Error(`Discovery subreddit ${index} must be an object.`);
+    }
+    const id = candidate.id;
+    const displayName = candidate.displayName;
+    const subredditType = candidate.subredditType;
+    const over18 = candidate.over18;
+    const subscribers = candidate.subscribers;
+    const createdUtc = candidate.createdUtc;
+    const url = candidate.url;
+    if (typeof id !== "string" || !subredditIdPattern.test(id)) {
+      throw new Error(`Discovery subreddit ${index} has an invalid ID.`);
+    }
+    const normalizedId = id.toLowerCase();
+    if (seenIds.has(normalizedId)) {
+      throw new Error("Discovery data contains duplicate subreddit IDs.");
+    }
+    seenIds.add(normalizedId);
+    if (
+      typeof displayName !== "string" ||
+      !displayNamePattern.test(displayName)
+    ) {
+      throw new Error(`Discovery subreddit ${id} has an invalid display name.`);
+    }
+    if (typeof subredditType !== "string" || !subredditType.trim()) {
+      throw new Error(`Discovery subreddit ${id} has an invalid type.`);
+    }
+    if (typeof over18 !== "boolean") {
+      throw new Error(`Discovery subreddit ${id} has an invalid over18 value.`);
+    }
+    if (!Number.isInteger(subscribers) || (subscribers as number) < 0) {
+      throw new Error(`Discovery subreddit ${id} has invalid subscribers.`);
+    }
+    if (
+      typeof createdUtc !== "number" ||
+      !Number.isFinite(createdUtc) ||
+      createdUtc < 0
+    ) {
+      throw new Error(`Discovery subreddit ${id} has an invalid createdUtc.`);
+    }
+    if (url !== `/r/${displayName}/`) {
+      throw new Error(`Discovery subreddit ${id} has an invalid URL.`);
+    }
+    return {
+      id: id as SubredditId,
+      displayName,
+      subredditType: subredditType.trim(),
+      over18,
+      subscribers: subscribers as number,
+      createdUtc,
+      url,
+    };
+  });
+
+  return {
+    schemaVersion: 1,
+    source: inviteNewSubsSource,
+    generatedAt: value.generatedAt,
+    subreddits,
+  };
+}
+
 export function isInviteNewSubsDeliveryJob(
   value: unknown,
 ): value is InviteNewSubsDeliveryJob {
-  if (!value || typeof value !== "object") return false;
-  const job = value as Partial<InviteNewSubsDeliveryJob>;
+  if (!isRecord(value)) return false;
   return (
-    typeof job.subredditName === "string" &&
-    normalizeSubredditName(job.subredditName).length > 0 &&
-    typeof job.topModerator === "string" &&
-    job.topModerator.trim().length > 0 &&
-    typeof job.isNsfw === "boolean" &&
-    typeof job.renderedMessage === "string" &&
-    job.renderedMessage.trim().length > 0
+    typeof value.subredditId === "string" &&
+    subredditIdPattern.test(value.subredditId) &&
+    typeof value.subredditName === "string" &&
+    normalizeSubredditName(value.subredditName).length > 0 &&
+    typeof value.topModerator === "string" &&
+    value.topModerator.trim().length > 0 &&
+    typeof value.isNsfw === "boolean" &&
+    typeof value.renderedMessage === "string" &&
+    value.renderedMessage.trim().length > 0
   );
 }
 
@@ -473,47 +676,19 @@ export function renderInviteNewSubsMessage(
     .replaceAll("{{isNsfw}}", data.isNsfw ? "yes" : "no");
 }
 
-export async function fetchNewestSubredditNames(
-  fetchClient: FetchClient = globalThis.fetch,
-): Promise<string[]> {
-  const response = await fetchClient(inviteNewSubsListingUrl, {
-    method: "GET",
-    signal: AbortSignal.timeout(inviteNewSubsFetchTimeoutMs),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Newest subreddits request failed with ${response.status}.`,
-    );
-  }
-  const payload = await response.json();
-  if (!isRecord(payload) || !isRecord(payload.data)) {
-    throw new Error("Newest subreddits response is not a listing.");
-  }
-  const children = payload.data.children;
-  if (!Array.isArray(children)) {
-    throw new Error("Newest subreddits listing has no children array.");
-  }
-
-  const names: string[] = [];
-  const seen = new Set<string>();
-  for (const child of children) {
-    if (!isRecord(child) || !isRecord(child.data)) continue;
-    const displayName = child.data.display_name;
-    if (typeof displayName !== "string") continue;
-    const normalized = normalizeSubredditName(displayName);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    names.push(displayName.trim().replace(/^r\//i, ""));
-  }
-  return names;
+function createBatchIdentity(batch: InviteNewSubsDiscoveryBatch): string {
+  return JSON.stringify([
+    batch.generatedAt,
+    ...batch.subreddits.map((candidate) => candidate.id.toLowerCase()),
+  ]);
 }
 
 function normalizeSubredditName(value: string): string {
   return value.trim().replace(/^r\//i, "").toLowerCase();
 }
 
-function inviteNewSubsSeenKey(subredditName: string): string {
-  return `${inviteNewSubsSeenKeyPrefix}:${normalizeSubredditName(subredditName)}`;
+function inviteNewSubsSeenKey(subredditId: SubredditId): string {
+  return `${inviteNewSubsSeenKeyPrefix}:${subredditId.toLowerCase()}`;
 }
 
 function expirationDate(nowMs: number): Date {
@@ -522,15 +697,17 @@ function expirationDate(nowMs: number): Date {
 
 async function reserveInviteNewSubsRecord(
   redis: RedisClient,
-  subredditName: string,
+  candidate: InviteNewSubsDiscoveryRecord,
   nowMs: number,
 ): Promise<boolean> {
-  const key = inviteNewSubsSeenKey(subredditName);
+  const key = inviteNewSubsSeenKey(candidate.id);
   const reservationToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   const record: InviteNewSubsRecord & { reservationToken: string } = {
-    status: "lookup_failed",
-    subredditName,
+    status: "processing",
+    subredditId: candidate.id,
+    subredditName: candidate.displayName,
     updatedAt: nowMs,
+    isNsfw: candidate.over18,
     reservationToken,
   };
   const serialized = JSON.stringify(record);
@@ -547,26 +724,32 @@ async function writeInviteNewSubsRecord(
   nowMs: number,
 ): Promise<void> {
   await redis.set(
-    inviteNewSubsSeenKey(record.subredditName),
+    inviteNewSubsSeenKey(record.subredditId),
     JSON.stringify(record),
-    { expiration: expirationDate(nowMs) },
+    {
+      expiration: expirationDate(nowMs),
+    },
   );
 }
 
 async function updateInviteNewSubsRecord(
   redis: RedisClient,
-  subredditName: string,
+  subredditId: SubredditId,
   nowMs: number,
   update: Pick<InviteNewSubsRecord, "status"> &
     Partial<Pick<InviteNewSubsRecord, "topModerator" | "isNsfw" | "error">>,
 ): Promise<void> {
-  const key = inviteNewSubsSeenKey(subredditName);
+  const key = inviteNewSubsSeenKey(subredditId);
   const current = parseInviteNewSubsRecord(await redis.get(key));
+  if (!current) {
+    throw new Error(`Missing invite-new-subs record for ${subredditId}.`);
+  }
   await writeInviteNewSubsRecord(
     redis,
     {
       status: update.status,
-      subredditName: current?.subredditName ?? subredditName,
+      subredditId,
+      subredditName: current.subredditName,
       updatedAt: nowMs,
       ...(update.topModerator ? { topModerator: update.topModerator } : {}),
       ...(update.isNsfw !== undefined ? { isNsfw: update.isNsfw } : {}),
@@ -574,6 +757,16 @@ async function updateInviteNewSubsRecord(
     },
     nowMs,
   );
+}
+
+async function writeBatchIdentity(
+  redis: RedisClient,
+  identity: string,
+  nowMs: number,
+): Promise<void> {
+  await redis.set(inviteNewSubsBatchIdentityKey, identity, {
+    expiration: expirationDate(nowMs),
+  });
 }
 
 function parseInviteNewSubsRecord(
@@ -585,6 +778,8 @@ function parseInviteNewSubsRecord(
     if (!isRecord(parsed)) return undefined;
     if (
       typeof parsed.status !== "string" ||
+      typeof parsed.subredditId !== "string" ||
+      !subredditIdPattern.test(parsed.subredditId) ||
       typeof parsed.subredditName !== "string" ||
       typeof parsed.updatedAt !== "number"
     ) {
@@ -597,28 +792,46 @@ function parseInviteNewSubsRecord(
   }
 }
 
+function completeInviteNewSubsPoll(
+  result: InviteNewSubsPollResult,
+  batch?: InviteNewSubsDiscoveryBatch,
+): InviteNewSubsPollResult {
+  logDiagnostic("info", "invite_new_subs_poll_completed", {
+    workflow: "invite_new_subs",
+    resultStatus: result.status,
+    fetched: batch?.subreddits.length ?? 0,
+    new: result.discovered,
+    queued: result.queued,
+    skipped: result.skipped,
+    ...(batch ? { generatedAt: batch.generatedAt } : {}),
+  });
+  return result;
+}
+
 function logInviteNewSubsSkip(
-  subredditName: string,
+  candidate: InviteNewSubsDiscoveryRecord,
   reason: string,
   error?: unknown,
+  phase = "enrichment",
 ): void {
   logDiagnostic(
     error ? "warn" : "info",
     "invite_new_subs_candidate_skipped",
     {
       workflow: "invite_new_subs",
-      phase: "enrichment",
-      subredditName,
+      phase,
+      subredditId: candidate.id,
+      subredditName: candidate.displayName,
       reason,
     },
     error,
   );
 }
 
-function errorMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 300);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function errorMessage(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 300);
 }
