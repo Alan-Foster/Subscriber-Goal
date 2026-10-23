@@ -29,6 +29,7 @@ import {
 import { formNames, internalRoutes } from "../../shared/routes";
 import {
   createSubscriberGoal,
+  SubscriberGoalCreationInProgressError,
   SubscriberGoalModeratorPermissionError,
 } from "../core/createSubscriberGoal";
 import {
@@ -45,8 +46,6 @@ import {
   untrackSubscriberById,
   untrackSubscriberByUsername,
 } from "../data/subscriberStats";
-import { cancelUpdates, untrackPost } from "../data/updaterData";
-import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
@@ -59,6 +58,7 @@ import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
+import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
   createDefaultAfterSubscribeAction,
   createDefaultCreatePostAction,
@@ -372,14 +372,8 @@ export function registerInternalUiRoutes(router: Router): void {
             );
           }
         };
-        await runCleanupPhase("update_cancellation", () =>
-          cancelUpdates(redis, postId),
-        );
-        await runCleanupPhase("post_untracking", () =>
-          untrackPost(redis, postId),
-        );
-        await runCleanupPhase("registry_cleanup", () =>
-          removeSubscriberGoalPost(redis, postId),
+        await runCleanupPhase("post_retirement", () =>
+          retireSubscriberGoalPost(redis, postId, "app_menu_deletion"),
         );
         phase = "response_completion";
         if (cleanupFailures.length > 0) {
@@ -1409,7 +1403,8 @@ async function submitCreateGoalFollowUp(
     res.json({
       showToast:
         error instanceof ProhibitedSubredditError ||
-        error instanceof SubscriberGoalModeratorPermissionError
+        error instanceof SubscriberGoalModeratorPermissionError ||
+        error instanceof SubscriberGoalCreationInProgressError
           ? error.message
           : "An error occurred while creating the post.",
     });

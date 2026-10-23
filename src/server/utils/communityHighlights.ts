@@ -7,6 +7,7 @@ export const highlightVerificationMaxWaitMs = 30_000;
 export const highlightVerificationIntervalMs = 5_000;
 
 export type HighlightFailureCategory =
+  | "permission"
   | "capacity"
   | "write"
   | "verification"
@@ -771,5 +772,127 @@ export async function highlightAndVerifyPost(
     ),
     rollbackOutcome,
     reorderOutcome: reorder.outcome,
+  });
+}
+
+/** Removes only explicitly managed obsolete highlights without changing the
+ * selected post's highlighted state or position. Used when moderator intent
+ * has been observed after an app-managed baseline was established. */
+export async function cleanupManagedHighlightsPreservingTarget(
+  reddit: RedditClient,
+  subreddit: HighlightableSubreddit,
+  post: HighlightablePost,
+  options: HighlightVerificationOptions & {
+    removableManagedPostIds: readonly LinkId[];
+  },
+): Promise<HighlightResult> {
+  const removableIds = new Set(options.removableManagedPostIds);
+  const removed: RemovedHighlight[] = [];
+  const issues: HighlightIssue[] = [];
+  let cleanupOutcome: HighlightResult["cleanupOutcome"] = "not_needed";
+  const initial = await subreddit.getHighlightedPosts();
+  const targets = initial.filter(
+    ({ postId }) => postId !== post.id && removableIds.has(postId as LinkId),
+  );
+  if (targets.length > 0) cleanupOutcome = "completed";
+  for (const info of targets) {
+    try {
+      const obsoletePost = await fetchHighlightablePost(
+        reddit,
+        info.postId as LinkId,
+      );
+      if (
+        typeof obsoletePost.unhighlight !== "function" ||
+        typeof obsoletePost.isHighlighted !== "function"
+      ) {
+        throw new Error(
+          `Unable to remove and verify obsolete Community Highlight ${info.postId}.`,
+        );
+      }
+      await obsoletePost.unhighlight();
+      if (
+        !(await pollForState(subreddit, obsoletePost, false, options)).matches
+      ) {
+        throw new Error(
+          `Reddit did not confirm removal of obsolete Community Highlight ${info.postId}.`,
+        );
+      }
+      removed.push({ info, post: obsoletePost });
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "highlight_operation_failed",
+        {
+          workflow: "community_highlights",
+          phase: "moderator_intent_cleanup",
+          postId: info.postId,
+        },
+        error,
+      );
+      cleanupOutcome = "failed";
+      issues.push({
+        category: "cleanup",
+        postId: info.postId as LinkId,
+        message: toErrorMessage(error),
+      });
+    }
+  }
+
+  const finalSnapshot = await subreddit.getHighlightedPosts();
+  const listed = finalSnapshot.some(({ postId }) => postId === post.id);
+  let verifiedHighlighted = false;
+  if (typeof post.isHighlighted !== "function") {
+    issues.push({
+      category: "verification",
+      postId: post.id,
+      message:
+        "Reddit did not provide post.isHighlighted(), so moderator intent could not be verified.",
+    });
+  } else {
+    try {
+      const postState = await post.isHighlighted();
+      verifiedHighlighted = listed && postState;
+      if (listed !== postState) {
+        issues.push({
+          category: "verification",
+          postId: post.id,
+          message:
+            "Reddit reported contradictory Community Highlight state while preserving moderator intent.",
+        });
+      }
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "highlight_operation_failed",
+        {
+          workflow: "community_highlights",
+          phase: "moderator_intent_verification",
+          postId: post.id,
+        },
+        error,
+      );
+      issues.push({
+        category: "verification",
+        postId: post.id,
+        message: toErrorMessage(error),
+      });
+    }
+  }
+
+  return resultWithIssues({
+    status: listed ? "highlighted" : "not_highlighted",
+    selectedPostId: post.id,
+    verifiedHighlighted,
+    issues,
+    capacityOutcome: "not_needed",
+    cleanupOutcome,
+    removedManagedHighlightIds: removed.map(
+      ({ info }) => info.postId as LinkId,
+    ),
+    preservedHighlightIds: idsOf(finalSnapshot).filter(
+      (postId) => postId !== post.id,
+    ),
+    rollbackOutcome: "not_needed",
+    reorderOutcome: "not_attempted",
   });
 }

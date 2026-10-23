@@ -1,12 +1,16 @@
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import {
+  autoCreateNextGoalSuccessorsKey,
   cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   markAutoCreateNextGoalExhausted,
   recordAutoCreateNextGoalFailure,
+  postHeightSuffix,
+  postKindSuffix,
+  subscriberGoalsKey,
 } from "../data/subGoalData";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import { createSubscriberGoal } from "./createSubscriberGoal";
@@ -22,6 +26,13 @@ import {
 } from "../utils/highlightFailureNotifications";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
+import {
+  acquireCommunityGoalMutationLease,
+  releaseCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "./communityGoalMutation";
+import { retireSubscriberGoalPost } from "./postRetirement";
+import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -33,8 +44,7 @@ export type AutoCreateNextGoalSummary = {
 };
 
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
-export const autoCreateNextGoalSuccessorsKey =
-  "auto_create_next_goal_v1_successors";
+export { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
 
 export async function processDueAutoCreateNextGoals({
@@ -42,11 +52,13 @@ export async function processDueAutoCreateNextGoals({
   redis,
   appSettings,
   nowMs = Date.now(),
+  mutationLease: existingMutationLease,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   appSettings: ServerAppSettings;
   nowMs?: number;
+  mutationLease?: CommunityGoalMutationLease;
 }): Promise<AutoCreateNextGoalSummary> {
   const duePostIds = await getDueAutoCreateNextGoalPostIds(redis, nowMs);
   const summary: AutoCreateNextGoalSummary = {
@@ -62,6 +74,8 @@ export async function processDueAutoCreateNextGoals({
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
     const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     let acquired = false;
+    let mutationLease: CommunityGoalMutationLease | undefined;
+    let acquiredMutationLease = false;
     try {
       if (!isLinkId(sourcePostId)) {
         summary.skipped += 1;
@@ -71,6 +85,16 @@ export async function processDueAutoCreateNextGoals({
         );
         continue;
       }
+
+      mutationLease =
+        existingMutationLease ??
+        (await acquireCommunityGoalMutationLease(redis, nowMs));
+      if (!mutationLease) {
+        // Leave scheduler state untouched so the same due work is retried.
+        summary.skipped += 1;
+        continue;
+      }
+      acquiredMutationLease = existingMutationLease === undefined;
 
       await redis.set(lockKey, lockToken, {
         nx: true,
@@ -103,27 +127,54 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
 
+      let sourceCreatedAtMs = 0;
       try {
         const sourcePost = await reddit.getPostById(sourcePostId);
+        sourceCreatedAtMs = new Date(sourcePost.createdAt).getTime() || 0;
         const removedByCategory = getTerminalRemovedByCategory(sourcePost);
         if (removedByCategory) {
           summary.skipped += 1;
-          await cancelAutoCreateNextGoal(redis, sourcePostId);
+          await retireSubscriberGoalPost(
+            redis,
+            sourcePostId,
+            `removedByCategory:${removedByCategory}`,
+            nowMs,
+          );
           console.info(
             `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=removedByCategory:${removedByCategory}`,
           );
           continue;
         }
       } catch (sourcePostError) {
-        if (isMissingPostError(sourcePostError)) {
+        if (isMissingPostError(sourcePostError, sourcePostId)) {
           summary.skipped += 1;
-          await cancelAutoCreateNextGoal(redis, sourcePostId);
+          await retireSubscriberGoalPost(
+            redis,
+            sourcePostId,
+            "confirmed_missing_auto_successor_source",
+            nowMs,
+          );
           console.info(
             `[autoCreateNextGoal] skipping inactive source post: sourcePostId=${sourcePostId} reason=missing_post`,
           );
           continue;
         }
         throw sourcePostError;
+      }
+
+      const newerActiveGoal = await findNewerActiveClassicGoal({
+        reddit,
+        redis,
+        sourcePostId,
+        sourceCreatedAtMs,
+      });
+      if (newerActiveGoal) {
+        await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+          [sourcePostId]: newerActiveGoal,
+        });
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        continue;
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
@@ -170,6 +221,8 @@ export async function processDueAutoCreateNextGoals({
             : {}),
           cancelPendingAutoCreateGoals: false,
           operationId: `auto-next:${sourcePostId}`,
+          reconciliationContext: "automatic_successor",
+          mutationLease,
         },
       });
       if (highlightResult.issues.length > 0) {
@@ -281,8 +334,55 @@ export async function processDueAutoCreateNextGoals({
       if (acquired && (await redis.get(lockKey)) === lockToken) {
         await redis.del(lockKey);
       }
+      if (mutationLease && acquiredMutationLease) {
+        await releaseCommunityGoalMutationLease(redis, mutationLease);
+      }
     }
   }
 
   return summary;
+}
+
+async function findNewerActiveClassicGoal({
+  reddit,
+  redis,
+  sourcePostId,
+  sourceCreatedAtMs,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  sourcePostId: `t3_${string}`;
+  sourceCreatedAtMs: number;
+}): Promise<`t3_${string}` | undefined> {
+  let newest: { postId: `t3_${string}`; createdAtMs: number } | undefined;
+  for (const candidateId of await getSubscriberGoalCandidatePostIds(redis)) {
+    if (!isLinkId(candidateId) || candidateId === sourcePostId) continue;
+    const [kind, height] = await redis.hMGet(subscriberGoalsKey, [
+      `${candidateId}${postKindSuffix}`,
+      `${candidateId}${postHeightSuffix}`,
+    ]);
+    if (
+      kind !== "subscriber-goal-v1" ||
+      (height !== "regular" && height !== "short")
+    ) {
+      continue;
+    }
+    const data = await getSubGoalData(redis, candidateId);
+    if (!data.goal || data.completedTime) continue;
+    try {
+      const post = await reddit.getPostById(candidateId);
+      if (getTerminalRemovedByCategory(post)) continue;
+      const createdAtMs = new Date(post.createdAt).getTime() || 0;
+      if (
+        createdAtMs > sourceCreatedAtMs &&
+        (!newest || createdAtMs > newest.createdAtMs)
+      ) {
+        newest = { postId: candidateId, createdAtMs };
+      }
+    } catch (error) {
+      // A transient lookup must not authorize creation of another goal.
+      if (!isMissingPostError(error, candidateId)) throw error;
+    }
+  }
+  return newest?.postId;
 }

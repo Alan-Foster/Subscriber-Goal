@@ -153,7 +153,10 @@ function createReddit({
       getHighlightedPosts,
       reorderHighlightedPosts,
     })),
-    getAppUser: vi.fn(async () => ({ username: "subscriber-goal-app" })),
+    getAppUser: vi.fn(async () => ({
+      username: "subscriber-goal-app",
+      getModPermissionsForSubreddit: vi.fn(async () => ["posts"]),
+    })),
     getPostById: vi.fn(async (postId: string) =>
       availablePosts.find((post) => post.id === postId),
     ),
@@ -889,7 +892,10 @@ describe("existing goal highlight ensurance", () => {
         getHighlightedPosts,
         reorderHighlightedPosts: vi.fn(async () => undefined),
       })),
-      getAppUser: vi.fn(async () => ({ username: "subscriber-goal-app" })),
+      getAppUser: vi.fn(async () => ({
+        username: "subscriber-goal-app",
+        getModPermissionsForSubreddit: vi.fn(async () => ["posts"]),
+      })),
       getPostById: vi.fn(async (postId: string) =>
         posts.find((post) => post.id === postId),
       ),
@@ -899,7 +905,7 @@ describe("existing goal highlight ensurance", () => {
     };
   };
 
-  it("highlights the newest candidate when every valid goal is unhighlighted", async () => {
+  it("does not auto-highlight a protected Tiny post", async () => {
     const older = makePost({
       id: "t3_older",
       createdAt: "2026-09-15T00:00:00Z",
@@ -919,12 +925,12 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({
-      status: "existing",
+      status: "existing_not_highlighted",
       postId: "t3_newer",
       classification: "tiny",
       selectedWasAlreadyHighlighted: false,
     });
-    expect(newer.highlight).toHaveBeenCalledOnce();
+    expect(newer.highlight).not.toHaveBeenCalled();
     expect(older.highlight).not.toHaveBeenCalled();
   });
 
@@ -989,7 +995,11 @@ describe("existing goal highlight ensurance", () => {
       highlighted: true,
     });
     const redis = new InMemoryRedis();
-    await redis.hSet("subscriber_goals", { t3_legacy_goal: "100" });
+    await redis.hSet("subscriber_goals", {
+      t3_oldclassic_goal: "1000",
+      t3_newclassic_goal: "2000",
+      t3_legacy_goal: "100",
+    });
 
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([
@@ -1012,6 +1022,90 @@ describe("existing goal highlight ensurance", () => {
     expect(ambiguous.unhighlight).not.toHaveBeenCalled();
   });
 
+  it("keeps the only active goal and removes two completed legacy classics", async () => {
+    const firstCompleted = makePost({
+      id: "t3_completed_one",
+      createdAt: "2026-09-13T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+    });
+    const secondCompleted = makePost({
+      id: "t3_completed_two",
+      createdAt: "2026-09-14T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+    });
+    const active = makePost({
+      id: "t3_active_goal",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+    });
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", {
+      t3_completed_one_goal: "1000",
+      t3_completed_one_completed_time: String(nowMs - 20_000),
+      t3_completed_two_goal: "2000",
+      t3_completed_two_completed_time: String(nowMs - 10_000),
+      t3_active_goal_goal: "3000",
+    });
+
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([firstCompleted, secondCompleted, active]) as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "legacy_upgrade",
+    });
+
+    expect(result).toMatchObject({ status: "existing", postId: active.id });
+    expect(result.classicPostsUnhighlighted).toEqual([
+      firstCompleted.id,
+      secondCompleted.id,
+    ]);
+    expect(firstCompleted.unhighlight).toHaveBeenCalledOnce();
+    expect(secondCompleted.unhighlight).toHaveBeenCalledOnce();
+    expect(active.unhighlight).not.toHaveBeenCalled();
+  });
+
+  it("preserves a moderator unhighlight after establishing the baseline", async () => {
+    const active = makePost({
+      id: "t3_moderator_override",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+    });
+    const reddit = makeReddit([active]);
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", {
+      t3_moderator_override_goal: "3000",
+    });
+    await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "legacy_upgrade",
+    });
+    expect(active.highlight).toHaveBeenCalledOnce();
+    await active.unhighlight();
+    active.highlight.mockClear();
+
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: nowMs + 60_000,
+      reconciliationContext: "repair",
+    });
+
+    expect(result).toMatchObject({
+      status: "existing_not_highlighted",
+      moderatorOverride: "unhighlighted",
+    });
+    expect(active.highlight).not.toHaveBeenCalled();
+  });
+
   it("records a failed existing-goal highlight and sends one accurate modmail", async () => {
     const existing = makePost({
       id: "t3_existing",
@@ -1021,9 +1115,11 @@ describe("existing goal highlight ensurance", () => {
       highlightFails: true,
     });
     const reddit = makeReddit([existing]);
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", { t3_existing_goal: "3000" });
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: reddit as never,
-      redis: new InMemoryRedis() as never,
+      redis: redis as never,
       nowMs,
       notifyOnFailure: true,
       highlightVerification: { maxWaitMs: 0, intervalMs: 0 },

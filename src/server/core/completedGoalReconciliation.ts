@@ -10,6 +10,7 @@ import {
   processDueAutoCreateNextGoals,
 } from "./autoCreateNextGoal";
 import type { OnboardingLifecycleSource } from "./onboardingSubscriberGoal";
+import type { CommunityGoalMutationLease } from "./communityGoalMutation";
 
 export type CompletedGoalReconciliationOutcome =
   | "completed_no_recovery"
@@ -35,6 +36,7 @@ export async function reconcileCompletedGoal({
   autoCreateNextGoal,
   nowMs,
   appSettings = getAppSettings(),
+  mutationLease,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
@@ -44,6 +46,7 @@ export async function reconcileCompletedGoal({
   autoCreateNextGoal: boolean;
   nowMs: number;
   appSettings?: ServerAppSettings;
+  mutationLease?: CommunityGoalMutationLease;
 }): Promise<CompletedGoalReconciliationResult> {
   if (lifecycleSource !== "upgrade") {
     return { outcome: "completed_no_recovery", sourcePostId };
@@ -101,6 +104,7 @@ export async function reconcileCompletedGoal({
     redis,
     appSettings,
     nowMs,
+    ...(mutationLease ? { mutationLease } : {}),
   });
   const mappedSuccessor = await redis.hGet(
     autoCreateNextGoalSuccessorsKey,

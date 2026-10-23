@@ -99,12 +99,35 @@ export async function processPostKindMigrationBatch(
         });
         continue;
       }
-      const rawHeight = await redis.hGet(
-        subscriberGoalsKey,
+      const [rawKind, rawHeight] = await redis.hMGet(subscriberGoalsKey, [
+        `${postId}${postKindSuffix}`,
         `${postId}${postHeightSuffix}`,
-      );
+      ]);
       const data = await getSubGoalData(redis, postId);
       const post = await reddit.getPostById(postId);
+
+      const kindHeightConflict =
+        (rawKind === subscriberGoalPostKind &&
+          (rawHeight === "tiny" || rawHeight === "cta")) ||
+        (rawKind === subscribeOnlyPostKind && rawHeight !== "tiny") ||
+        (rawKind === ctaOnlyPostKind && rawHeight !== "cta") ||
+        (rawHeight === "tiny" && rawKind !== subscribeOnlyPostKind) ||
+        (rawHeight === "cta" && rawKind !== ctaOnlyPostKind);
+      if (kindHeightConflict) {
+        summary.conflicting += 1;
+        await redis.hSet(postKindMigrationTerminalKey, {
+          [postId]: JSON.stringify({ rawKind, rawHeight }),
+        });
+        await redis.zRem(postKindMigrationQueueKey, [postId]);
+        logDiagnostic("warn", "post_kind_metadata_conflict_preserved", {
+          workflow: "post_kind_migration",
+          phase: "classification",
+          postId,
+          rawKind: rawKind ?? "missing",
+          rawHeight: rawHeight ?? "missing",
+        });
+        continue;
+      }
 
       if (
         data.postKind === subscribeOnlyPostKind ||
@@ -120,12 +143,7 @@ export async function processPostKindMigrationBatch(
         await post.mergePostData({ postKind: subscriberGoalPostKind });
         const normalizedHeight =
           data.postHeight === "short" ? "short" : "regular";
-        if (rawHeight === "tiny" || rawHeight === "cta") {
-          summary.conflicting += 1;
-          await post.setCustomPostStyles(undefined);
-          await post.setCustomPostStyles({ height: EntrypointHeight.REGULAR });
-          summary.repaired += 1;
-        } else if (normalizedHeight === "short") {
+        if (normalizedHeight === "short") {
           await post.setCustomPostStyles({
             height: EntrypointHeight.HEIGHT_UNSPECIFIED,
             heightPixels: shortSubGoalPostHeightPixels,

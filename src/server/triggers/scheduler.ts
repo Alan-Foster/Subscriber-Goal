@@ -37,6 +37,7 @@ import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
+import { retireSubscriberGoalPost } from "../core/postRetirement";
 
 async function cleanupInactivePost(
   postId: string,
@@ -304,9 +305,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const post = await reddit.getPostById(postId);
       const removedByCategory = getTerminalRemovedByCategory(post);
       if (removedByCategory) {
-        await cleanupInactivePost(
+        await retireSubscriberGoalPost(
+          redis,
           postId,
           `removedByCategory:${removedByCategory}`,
+        );
+        console.info(
+          `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
         );
         continue;
       }
@@ -326,8 +331,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
 
       await queueUpdate(redis, postId, new Date());
     } catch (e) {
-      if (isLinkId(postId) && isMissingPostError(e)) {
-        await cleanupInactivePost(postId, "missing_post");
+      if (isLinkId(postId) && isMissingPostError(e, postId)) {
+        await retireSubscriberGoalPost(redis, postId, "confirmed_missing_post");
+        console.info(
+          `[updater] cleaned up inactive post: postId=${postId} reason=confirmed_missing_post`,
+        );
         continue;
       }
       logDiagnostic(

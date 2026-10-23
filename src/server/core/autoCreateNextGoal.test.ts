@@ -38,6 +38,8 @@ const hoisted = vi.hoisted(() => ({
   recordAutoCreateNextGoalFailure: vi.fn(),
   createSubscriberGoal: vi.fn(),
   notifyHighlightFailure: vi.fn(),
+  retireSubscriberGoalPost: vi.fn(),
+  getSubscriberGoalCandidatePostIds: vi.fn(),
   reddit: {
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn(),
@@ -65,16 +67,32 @@ const hoisted = vi.hoisted(() => ({
       );
       hoisted.redisHashes.set(key, hash);
     }),
+    hMGet: vi.fn(async (key: string, fields: string[]) =>
+      fields.map((field) => hoisted.redisHashes.get(key)?.get(field)),
+    ),
   },
 }));
 
 vi.mock("../data/subGoalData", () => ({
+  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
+  subscriberGoalsKey: "subscriber_goals",
+  postKindSuffix: "_post_kind",
+  postHeightSuffix: "_post_height",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
   getSubGoalData: hoisted.getSubGoalData,
   markAutoCreateNextGoalExhausted: hoisted.markAutoCreateNextGoalExhausted,
   recordAutoCreateNextGoalFailure: hoisted.recordAutoCreateNextGoalFailure,
+}));
+
+vi.mock("../data/subscriberGoalCandidates", () => ({
+  getSubscriberGoalCandidatePostIds: hoisted.getSubscriberGoalCandidatePostIds,
+}));
+
+vi.mock("./postRetirement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./postRetirement")>()),
+  retireSubscriberGoalPost: hoisted.retireSubscriberGoalPost,
 }));
 
 vi.mock("./createSubscriberGoal", () => ({
@@ -94,6 +112,7 @@ describe("processDueAutoCreateNextGoals", () => {
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
       failureCount: 1,
       retryAt: 301_000,
@@ -207,6 +226,10 @@ describe("processDueAutoCreateNextGoals", () => {
         afterSubscribePreset: "discord",
         cancelPendingAutoCreateGoals: false,
         operationId: "auto-next:t3_source",
+        reconciliationContext: "automatic_successor",
+        mutationLease: expect.objectContaining({
+          key: "subscriber_goal_community_mutation_v1_lock",
+        }),
       },
     });
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
@@ -490,9 +513,11 @@ describe("processDueAutoCreateNextGoals", () => {
     });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+    expect(hoisted.retireSubscriberGoalPost).toHaveBeenCalledWith(
       hoisted.redis,
       "t3_source",
+      "removedByCategory:moderator",
+      expect.any(Number),
     );
     expect(infoSpy).toHaveBeenCalledWith(
       "[autoCreateNextGoal] skipping inactive source post: sourcePostId=t3_source reason=removedByCategory:moderator",
@@ -502,7 +527,7 @@ describe("processDueAutoCreateNextGoals", () => {
   it("skips due jobs whose source post is missing", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getPostById.mockRejectedValue(
-      new Error("post has been deleted"),
+      Object.assign(new Error("post has been deleted"), { status: 404 }),
     );
 
     await expect(
@@ -525,9 +550,11 @@ describe("processDueAutoCreateNextGoals", () => {
     });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+    expect(hoisted.retireSubscriberGoalPost).toHaveBeenCalledWith(
       hoisted.redis,
       "t3_source",
+      "confirmed_missing_auto_successor_source",
+      expect.any(Number),
     );
   });
 

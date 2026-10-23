@@ -78,7 +78,7 @@ describe("post kind compatibility migration", () => {
     expect(await redis.zRange(postKindMigrationQueueKey, 0, -1)).toEqual([]);
   });
 
-  it("repairs a legacy positive goal misclassified as Tiny without replacing it", async () => {
+  it("preserves conflicting legacy Tiny evidence for manual review", async () => {
     const redis = new TestRedis();
     await redis.hSet(subscriberGoalsKey, {
       t3_legacy_goal: "250",
@@ -100,24 +100,21 @@ describe("post kind compatibility migration", () => {
 
     expect(summary).toEqual({
       scanned: 1,
-      repaired: 1,
+      repaired: 0,
       preservedShort: 0,
       recognizedTiny: 0,
       conflicting: 1,
       failed: 0,
     });
     expect(reddit.getPostById).toHaveBeenCalledWith("t3_legacy");
-    expect(post.mergePostData).toHaveBeenCalledWith({
-      postKind: subscriberGoalPostKind,
-    });
-    expect(post.setCustomPostStyles).toHaveBeenNthCalledWith(1, undefined);
-    expect(post.setCustomPostStyles).toHaveBeenNthCalledWith(2, { height: 1 });
+    expect(post.mergePostData).not.toHaveBeenCalled();
+    expect(post.setCustomPostStyles).not.toHaveBeenCalled();
     await expect(
       redis.hGet(subscriberGoalsKey, `t3_legacy${postKindSuffix}`),
-    ).resolves.toBe(subscriberGoalPostKind);
+    ).resolves.toBeUndefined();
     await expect(
       redis.hGet(subscriberGoalsKey, `t3_legacy${postHeightSuffix}`),
-    ).resolves.toBe("regular");
+    ).resolves.toBe("tiny");
     await expect(
       redis.hGet(subscriberGoalsKey, "t3_legacy_goal"),
     ).resolves.toBe("250");

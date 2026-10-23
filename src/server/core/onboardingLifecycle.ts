@@ -28,6 +28,11 @@ import {
   selectOnboardingReminderStaggerMinutes,
   type OnboardingReminderState,
 } from "./onboardingReminder";
+import {
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "./communityGoalMutation";
 
 export type OnboardingLifecycleReconciliation =
   | { status: "unchanged"; reason: string }
@@ -64,6 +69,38 @@ export async function reconcileOnboardingForLifecycle(
     lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">;
     nowMs?: number;
     appSettings?: ServerAppSettings;
+  },
+): Promise<OnboardingLifecycleReconciliation> {
+  try {
+    return await withCommunityGoalMutationLease(redis, (mutationLease) =>
+      reconcileOnboardingForLifecycleUnderLease(reddit, redis, {
+        lifecycleSource,
+        nowMs,
+        appSettings,
+        mutationLease,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof CommunityGoalMutationInProgressError) {
+      return { status: "unchanged", reason: "community_mutation_in_progress" };
+    }
+    throw error;
+  }
+}
+
+async function reconcileOnboardingForLifecycleUnderLease(
+  reddit: RedditClient,
+  redis: RedisClient,
+  {
+    lifecycleSource,
+    nowMs,
+    appSettings,
+    mutationLease,
+  }: {
+    lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">;
+    nowMs: number;
+    appSettings: ServerAppSettings;
+    mutationLease: CommunityGoalMutationLease;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
   const goalLockToken = await acquireLock(
@@ -107,6 +144,9 @@ export async function reconcileOnboardingForLifecycle(
         redis,
         nowMs,
         notifyOnFailure: true,
+        reconciliationContext:
+          lifecycleSource === "upgrade" ? "legacy_upgrade" : "onboarding",
+        mutationLease,
       });
       logDiagnostic("info", "onboarding_lifecycle_highlighted_goal_checked", {
         workflow: "onboarding_lifecycle",
@@ -145,6 +185,7 @@ export async function reconcileOnboardingForLifecycle(
           completedTime: highlighted.completedTime,
           autoCreateNextGoal: highlighted.autoCreateNextGoal ?? false,
           nowMs,
+          mutationLease,
         });
         const { outcome, successorPostId } = completed;
 

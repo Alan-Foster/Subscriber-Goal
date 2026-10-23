@@ -66,6 +66,7 @@ const hoisted = vi.hoisted(() => ({
   ensureCommunityPostActivityBackfill: vi.fn(),
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppRepair: vi.fn(),
+  retireSubscriberGoalPost: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -153,6 +154,10 @@ vi.mock("../core/onboardingSubscriberGoal", () => ({
   processDueOnboardingSubscriberGoal:
     hoisted.processDueOnboardingSubscriberGoal,
 }));
+vi.mock("../core/postRetirement", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../core/postRetirement")>()),
+  retireSubscriberGoalPost: hoisted.retireSubscriberGoalPost,
+}));
 
 vi.mock("../core/onboardingReminder", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
@@ -202,6 +207,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.observeDailySubscriberCount.mockReset();
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppRepair.mockReset();
+    hoisted.retireSubscriberGoalPost.mockReset();
+    hoisted.retireSubscriberGoalPost.mockImplementation(
+      async (_redis: unknown, postId: string) => {
+        await hoisted.cancelUpdates(_redis, postId);
+        await hoisted.untrackPost(_redis, postId);
+        await hoisted.cancelAutoCreateNextGoal(_redis, postId);
+        await hoisted.removeSubscriberGoalPost(_redis, postId);
+      },
+    );
     hoisted.getAppSettings.mockReturnValue(baseSettings);
     hoisted.processCrosspostDispatchQueue.mockResolvedValue(
       emptyCrosspostSummary,
@@ -485,7 +499,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
   it("cleans up missing posts returned as deleted/not-found errors", async () => {
     hoisted.context.subredditName = "CorporateGifts";
     hoisted.getQueuedUpdates.mockResolvedValue(["t3_missing"]);
-    hoisted.reddit.getPostById.mockRejectedValue(new Error("post not found"));
+    hoisted.reddit.getPostById.mockRejectedValue(
+      Object.assign(new Error("post not found"), { status: 404 }),
+    );
 
     await onPostsUpdaterJob();
 

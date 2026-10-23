@@ -37,6 +37,11 @@ import {
 } from "../../shared/afterSubscribeAction";
 import { registerSubscriberGoalPost } from "./subscriberGoalPostRegistry";
 import { maybeScheduleMilestoneNotification } from "../core/milestoneNotifications";
+import {
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "../core/communityGoalMutation";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -57,6 +62,8 @@ export const postAfterSubscribeColorThemeSuffix =
   "_after_subscribe_color_theme";
 export const postAfterSubscribePresetSuffix = "_after_subscribe_preset";
 export const autoCreateNextGoalQueueKey = "auto_create_next_goal_queue";
+export const autoCreateNextGoalSuccessorsKey =
+  "auto_create_next_goal_v1_successors";
 export const completionTransitionLockKeyPrefix =
   "subscriber_goal_completion_transition_lock_v1";
 export const completionTransitionLockTtlMs = 30_000;
@@ -78,6 +85,24 @@ export const recentSubscriberIndexMigrationStateKey =
 export const recentSubscriberIndexMigrationVersion =
   "recent_subscriber_index_v1";
 export const autoCreateNextGoalDelayMs = 24 * 60 * 60 * 1000;
+
+export const subscriberGoalPostFieldSuffixes = [
+  postGoalSuffix,
+  postRecentSubscriberSuffix,
+  postCompletedTimeSuffix,
+  postSubredditDisplayNameSuffix,
+  postHeaderTextSuffix,
+  postColorThemeSuffix,
+  postAutoCreateNextGoalSuffix,
+  postLanguageSuffix,
+  postHeightSuffix,
+  postKindSuffix,
+  postAfterSubscribeActionSuffix,
+  postAfterSubscribeButtonTextSuffix,
+  postAfterSubscribeUrlSuffix,
+  postAfterSubscribeColorThemeSuffix,
+  postAfterSubscribePresetSuffix,
+] as const;
 
 const recentSubscriberIndexBatchSize = 25;
 const recentSubscriberIndexCooldownMinMs = 5 * 60 * 1000;
@@ -713,7 +738,47 @@ export async function checkCompletionStatus(
     wait?: (delayMs: number) => Promise<void>;
     scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
     scheduleAutomaticSuccessor?: boolean;
+    mutationLease?: CommunityGoalMutationLease;
   } = {},
+): Promise<number> {
+  try {
+    return await withCommunityGoalMutationLease(
+      redis,
+      (mutationLease) =>
+        checkCompletionStatusUnderLease(reddit, redis, postId, {
+          ...options,
+          mutationLease,
+        }),
+      options.mutationLease,
+    );
+  } catch (error) {
+    if (!(error instanceof CommunityGoalMutationInProgressError)) throw error;
+    const wait =
+      options.wait ??
+      ((delayMs: number) =>
+        new Promise<void>((resolve) =>
+          globalThis.setTimeout(resolve, delayMs),
+        ));
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const latest = await getSubGoalData(redis, postId);
+      if (latest.completedTime) return latest.completedTime;
+      await wait(25 * (attempt + 1));
+    }
+    throw error;
+  }
+}
+
+async function checkCompletionStatusUnderLease(
+  reddit: RedditClient,
+  redis: RedisClient,
+  postId: string,
+  options: {
+    now?: () => number;
+    wait?: (delayMs: number) => Promise<void>;
+    scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
+    scheduleAutomaticSuccessor?: boolean;
+    mutationLease: CommunityGoalMutationLease;
+  },
 ): Promise<number> {
   const subGoalData = await getSubGoalData(redis, postId);
   if (subGoalData.completedTime) {
@@ -794,11 +859,17 @@ export async function checkCompletionStatus(
       options.scheduleAutomaticSuccessor !== false
     ) {
       try {
-        await scheduleAutoCreateNextGoal(
-          redis,
+        const supersedingSuccessor = await redis.hGet(
+          autoCreateNextGoalSuccessorsKey,
           postId,
-          lockedSubGoalData.completedTime,
         );
+        if (!supersedingSuccessor) {
+          await scheduleAutoCreateNextGoal(
+            redis,
+            postId,
+            lockedSubGoalData.completedTime,
+          );
+        }
       } catch (error) {
         logDiagnostic(
           "warn",

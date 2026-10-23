@@ -44,6 +44,7 @@ const hoisted = vi.hoisted(() => ({
   setSubredditDisplayNameForPost: vi.fn(),
   setSavedSubredditDisplayName: vi.fn(),
   cancelAllAutoCreateNextGoals: vi.fn(),
+  cancelAutoCreateNextGoal: vi.fn(),
   getTrackedPosts: vi.fn(),
   getQueuedUpdates: vi.fn(),
   queueUpdate: vi.fn(),
@@ -60,10 +61,12 @@ vi.mock("./post", () => ({
 }));
 
 vi.mock("../data/subGoalData", () => ({
+  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
   subscriberGoalsKey: "subscriber_goals",
   postKindSuffix: "_post_kind",
   postHeightSuffix: "_post_height",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
+  cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
   registerNewCtaOnlyPost: hoisted.registerNewCtaOnlyPost,

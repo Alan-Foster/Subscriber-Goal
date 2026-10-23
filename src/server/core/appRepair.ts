@@ -12,10 +12,21 @@ import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
 import { ensureExistingSubscriberGoalHighlighted } from "./onboardingSubscriberGoal";
+import {
+  appRepairLockKey,
+  appRepairStateKey,
+  appRepairVersion,
+  scheduleHighlightRepair,
+} from "../data/highlightRepair";
+import {
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "./communityGoalMutation";
+import { isSubscriberGoalPostRetired } from "./postRetirement";
+import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 
-export const appRepairStateKey = "app_repair_community_highlights_v1_state";
-export const appRepairLockKey = "app_repair_community_highlights_v1_lock";
-export const appRepairVersion = "app_repair_nsfw_cta_actions_v2";
+export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
 
@@ -23,16 +34,13 @@ export async function scheduleAppRepair(
   redis: RedisClient,
   nowMs = Date.now(),
   jitterMs = Math.floor(Math.random() * 60_000),
+  options: { force?: boolean; reason?: string } = {},
 ): Promise<void> {
-  const current = await redis.hGetAll(appRepairStateKey);
-  if (current.version === appRepairVersion) return;
-  await redis.hSet(appRepairStateKey, {
-    version: appRepairVersion,
-    status: "pending",
-    attempts: "0",
-    nextRunAt: String(nowMs + Math.max(0, jitterMs)),
-    scheduledAt: String(nowMs),
-    lastError: "",
+  await scheduleHighlightRepair(redis, {
+    nowMs,
+    delayMs: jitterMs,
+    force: options.force ?? false,
+    reason: options.reason ?? "lifecycle",
   });
 }
 
@@ -44,6 +52,27 @@ export async function processDueAppRepair({
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
+}): Promise<"not_due" | "complete" | "retry"> {
+  try {
+    return await withCommunityGoalMutationLease(redis, (mutationLease) =>
+      processDueAppRepairUnderLease({ reddit, redis, nowMs, mutationLease }),
+    );
+  } catch (error) {
+    if (error instanceof CommunityGoalMutationInProgressError) return "retry";
+    throw error;
+  }
+}
+
+async function processDueAppRepairUnderLease({
+  reddit,
+  redis,
+  nowMs = Date.now(),
+  mutationLease,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  nowMs?: number;
+  mutationLease: CommunityGoalMutationLease;
 }): Promise<"not_due" | "complete" | "retry"> {
   const state = await redis.hGetAll(appRepairStateKey);
   if (
@@ -147,16 +176,29 @@ export async function processDueAppRepair({
         );
       }
       await runPhase("highlight_reconciliation", async () => {
+        const targetStopped = state.targetPostId
+          ? (await isSubscriberGoalPostRetired(redis, state.targetPostId)) ||
+            Boolean(
+              await redis.hGet(
+                autoCreateNextGoalSuccessorsKey,
+                state.targetPostId,
+              ),
+            )
+          : false;
         const result = await ensureExistingSubscriberGoalHighlighted({
           reddit,
           redis,
           nowMs,
           notifyOnFailure: true,
+          reconciliationContext: "repair",
+          mutationLease,
         });
         if (
-          result.status === "existing_not_highlighted" ||
-          result.reconciliationOutcome === "degraded" ||
-          result.reconciliationOutcome === "failed"
+          !targetStopped &&
+          !result.moderatorOverride &&
+          (result.status === "existing_not_highlighted" ||
+            result.reconciliationOutcome === "degraded" ||
+            result.reconciliationOutcome === "failed")
         ) {
           throw new Error(
             result.errorMessage ??

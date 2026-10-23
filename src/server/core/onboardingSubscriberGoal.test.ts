@@ -481,7 +481,6 @@ describe("onboarding subscriber goal", () => {
     });
     const upgradeState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
     reddit = createReddit();
-    await redis.hSet("subscriber_goals", { t3_legacy_goal: "100" });
     reddit.getNewPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
         {
@@ -490,6 +489,10 @@ describe("onboarding subscriber goal", () => {
           subredditId: "t5_example",
           stickied: true,
           createdAt: new Date(Number(upgradeState.nextRunAt) - 10_000),
+          postData: {
+            postKind: "subscriber-goal-v1",
+            postHeight: "regular",
+          },
         },
       ]),
     });

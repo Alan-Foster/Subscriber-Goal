@@ -1,5 +1,6 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedditClient, RedisClient } from "../types";
+import { scheduleHighlightRepair } from "../data/highlightRepair";
 
 export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
@@ -107,6 +108,10 @@ export async function checkAppAccountHealth({
     };
   }
 
+  const [previousHealth, previousRetry] = await Promise.all([
+    redis.hGetAll(appAccountHealthStateKey),
+    redis.hGetAll(appAccountHealthRetryStateKey),
+  ]);
   await redis.del(appAccountHealthRetryStateKey);
   const healthy = permissions.includes("all") || permissions.includes("posts");
   const fingerprint = "missing_posts";
@@ -121,6 +126,17 @@ export async function checkAppAccountHealth({
       incidentToken: "",
       notification: "not_needed",
     });
+    if (
+      previousHealth.status === "unhealthy" ||
+      previousRetry.status === "pending"
+    ) {
+      await scheduleHighlightRepair(redis, {
+        nowMs,
+        delayMs: 0,
+        force: true,
+        reason: "permissions_restored",
+      });
+    }
     return {
       status: "healthy",
       healthy: true,
@@ -129,6 +145,21 @@ export async function checkAppAccountHealth({
       notification: "not_needed",
     };
   }
+
+  const healthRetryAttempts =
+    (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+  const healthRetryDelayMs = Math.min(
+    60 * 60 * 1000,
+    60_000 * 2 ** (healthRetryAttempts - 1),
+  );
+  await redis.hSet(appAccountHealthRetryStateKey, {
+    status: "pending",
+    attempts: String(healthRetryAttempts),
+    nextRunAt: String(nowMs + healthRetryDelayMs),
+    subredditName,
+    subredditId: subredditId ?? "",
+    lastError: "missing_posts_permission",
+  });
 
   let notificationLockToken: string | undefined;
   if (notify) {

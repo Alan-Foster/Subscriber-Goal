@@ -463,7 +463,7 @@ describe("internalUi color theme create goal routes", () => {
       expect(hoisted.removeSubscriberGoalPost).toHaveBeenCalledOnce();
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringMatching(
-          new RegExp(`delete_goal_cleanup_failed.*"phase":"${phase}"`),
+          /delete_goal_cleanup_failed.*"phase":"post_retirement"/,
         ),
       );
       expect(json).toHaveBeenCalledWith({

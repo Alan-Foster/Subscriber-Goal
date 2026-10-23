@@ -6,6 +6,8 @@ import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { applyGoalPostFrameStyle, createGoalPost } from "./post";
 import {
   cancelAllAutoCreateNextGoals,
+  cancelAutoCreateNextGoal,
+  autoCreateNextGoalSuccessorsKey,
   postHeightSuffix,
   postKindSuffix,
   registerNewCtaOnlyPost,
@@ -49,6 +51,16 @@ import {
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { ensureSubscriberGoalPostFlair } from "./subscriberGoalPostFlair";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import {
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "./communityGoalMutation";
+import {
+  saveHighlightManagementBaseline,
+  type HighlightReconciliationContext,
+} from "../data/highlightManagement";
+import { scheduleHighlightRepair } from "../data/highlightRepair";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -67,6 +79,8 @@ type CreateSubscriberGoalOptions = {
   operationId?: string;
   automaticPermissionCheck?: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
+  reconciliationContext?: HighlightReconciliationContext;
+  mutationLease?: CommunityGoalMutationLease;
 };
 
 export type CreateSubscriberGoalResult = {
@@ -123,6 +137,39 @@ export async function createSubscriberGoal({
   redis: RedisClient;
   appSettings: ServerAppSettings;
   options: CreateSubscriberGoalOptions;
+}): Promise<CreateSubscriberGoalResult> {
+  try {
+    return await withCommunityGoalMutationLease(
+      redis,
+      (mutationLease) =>
+        createSubscriberGoalUnderCommunityLease({
+          reddit,
+          redis,
+          appSettings,
+          options: { ...options, mutationLease },
+        }),
+      options.mutationLease,
+    );
+  } catch (error) {
+    if (error instanceof CommunityGoalMutationInProgressError) {
+      throw new SubscriberGoalCreationInProgressError();
+    }
+    throw error;
+  }
+}
+
+async function createSubscriberGoalUnderCommunityLease({
+  reddit,
+  redis,
+  appSettings,
+  options,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  appSettings: ServerAppSettings;
+  options: CreateSubscriberGoalOptions & {
+    mutationLease: CommunityGoalMutationLease;
+  };
 }): Promise<CreateSubscriberGoalResult> {
   const operationId = options.operationId?.trim();
   if (!operationId) {
@@ -407,6 +454,16 @@ async function createSubscriberGoalInternal(
           ...afterSubscribePresetArgs,
         );
 
+  if (!isCompactActionPost) {
+    for (const olderPostId of existingClassicGoalPostIds) {
+      if (olderPostId === post.id) continue;
+      await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+        [olderPostId]: post.id,
+      });
+      await cancelAutoCreateNextGoal(redis, olderPostId);
+    }
+  }
+
   const trackedPosts = await getTrackedPosts(redis);
   const queuedPosts = await getQueuedUpdates(redis);
   const activePostIds = [...new Set([...trackedPosts, ...queuedPosts])];
@@ -442,17 +499,31 @@ async function createSubscriberGoalInternal(
   await post.approve();
   let highlightResult: HighlightResult;
   try {
-    highlightResult = await highlightAndVerifyPost(reddit, subreddit, post, {
-      maxWaitMs:
-        options.highlightVerification?.maxWaitMs ??
-        highlightVerificationMaxWaitMs,
-      intervalMs:
-        options.highlightVerification?.intervalMs ??
-        highlightVerificationIntervalMs,
-      ...(!isCompactActionPost
-        ? { removableManagedPostIds: existingClassicGoalPostIds }
-        : {}),
+    const highlightHealth = await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      notify: false,
     });
+    highlightResult =
+      highlightHealth.healthy && highlightHealth.status === "healthy"
+        ? await highlightAndVerifyPost(reddit, subreddit, post, {
+            maxWaitMs:
+              options.highlightVerification?.maxWaitMs ??
+              highlightVerificationMaxWaitMs,
+            intervalMs:
+              options.highlightVerification?.intervalMs ??
+              highlightVerificationIntervalMs,
+            ...(!isCompactActionPost
+              ? { removableManagedPostIds: existingClassicGoalPostIds }
+              : {}),
+          })
+        : createFailedHighlightResult(
+            post.id,
+            "permission",
+            "Manage Posts permission could not be verified, so no Community Highlight changes were attempted.",
+          );
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     logDiagnostic(
@@ -470,6 +541,23 @@ async function createSubscriberGoalInternal(
       "write",
       errorMessage,
     );
+  }
+
+  if (!isCompactActionPost && highlightResult.issues.length === 0) {
+    await saveHighlightManagementBaseline(redis, {
+      canonicalPostId: post.id,
+      highlighted: true,
+      position: 0,
+      moderatorOverride: "none",
+      reconciledAt: Date.now(),
+    });
+  } else if (highlightResult.issues.length > 0) {
+    await scheduleHighlightRepair(redis, {
+      delayMs: 5 * 60 * 1000,
+      force: true,
+      reason: `${options.reconciliationContext ?? "manual_creation"}_highlight_degraded`,
+      targetPostId: post.id,
+    });
   }
 
   if (options.cancelPendingAutoCreateGoals) {
