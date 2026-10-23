@@ -121,6 +121,10 @@
       },
       "invite-new-subs-delivery-job": {
         "endpoint": "/internal/scheduler/invite-new-subs-delivery-job"
+      },
+      "invite-new-subs-report-job": {
+        "endpoint": "/internal/scheduler/invite-new-subs-report-job",
+        "cron": "0 */12 * * *"
       }
     }
   },

@@ -8,12 +8,16 @@ import {
   inviteNewSubsHostSubreddit,
   inviteNewSubsMessageWikiPage,
   inviteNewSubsRecipientCooldownSeconds,
+  inviteNewSubsReportRecipient,
+  inviteNewSubsReportSubject,
+  inviteNewSubsReportWindowMs,
   inviteNewSubsRetentionSeconds,
   inviteNewSubsSubject,
   inviteNewSubsWikiVersion,
   parseInviteNewSubsDiscoveryBatch,
   processInviteNewSubsDelivery,
   processInviteNewSubsPoll,
+  processInviteNewSubsReport,
   renderInviteNewSubsMessage,
   type InviteNewSubsDeliveryJob,
   type InviteNewSubsDiscoveryRecord,
@@ -32,7 +36,9 @@ afterEach(() => {
 class FakeRedis {
   readonly values = new Map<string, string>();
   readonly expirations = new Map<string, Date>();
+  readonly sortedSets = new Map<string, Map<string, number>>();
   failNextRecordStatus: string | undefined;
+  failMetricWrites = false;
   nowMs: number | undefined;
 
   async get(key: string): Promise<string | undefined> {
@@ -48,6 +54,7 @@ class FakeRedis {
       expiration.getTime() <= this.nowMs
     ) {
       this.values.delete(key);
+      this.sortedSets.delete(key);
       this.expirations.delete(key);
     }
   }
@@ -74,6 +81,47 @@ class FakeRedis {
     this.values.set(key, value);
     if (options?.expiration) this.expirations.set(key, options.expiration);
     return "OK";
+  }
+
+  async del(key: string): Promise<void> {
+    this.values.delete(key);
+    this.sortedSets.delete(key);
+    this.expirations.delete(key);
+  }
+
+  async expire(key: string, seconds: number): Promise<void> {
+    if (this.failMetricWrites) throw new Error("metric storage unavailable");
+    const base = this.nowMs ?? Date.now();
+    this.expirations.set(key, new Date(base + seconds * 1000));
+  }
+
+  async zAdd(
+    key: string,
+    ...entries: Array<{ member: string; score: number }>
+  ): Promise<void> {
+    if (this.failMetricWrites) throw new Error("metric storage unavailable");
+    this.expireIfNeeded(key);
+    const values = this.sortedSets.get(key) ?? new Map<string, number>();
+    for (const entry of entries) values.set(entry.member, entry.score);
+    this.sortedSets.set(key, values);
+  }
+
+  async zRange(
+    key: string,
+    start: number,
+    end: number,
+  ): Promise<Array<{ member: string; score: number }>> {
+    this.expireIfNeeded(key);
+    const values = [...(this.sortedSets.get(key) ?? new Map()).entries()]
+      .map(([member, score]) => ({ member, score }))
+      .sort((left, right) => left.score - right.score);
+    const normalizedEnd = end < 0 ? values.length + end : end;
+    return values.slice(start, normalizedEnd + 1);
+  }
+
+  async zRem(key: string, members: string[]): Promise<void> {
+    const values = this.sortedSets.get(key);
+    for (const member of members) values?.delete(member);
   }
 }
 
@@ -844,6 +892,76 @@ describe("processInviteNewSubsDelivery", () => {
     expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
   });
 
+  it("records successful and failed delivery metrics without counting suppression", async () => {
+    const now = Date.parse("2026-10-23T11:00:00Z");
+    const redis = new FakeRedis();
+    const failedJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_failedcommunity",
+      subredditName: "FailedCommunity",
+      topModerator: "AnotherMod",
+    };
+    const suppressedJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_suppressedcommunity",
+      subredditName: "SuppressedCommunity",
+    };
+    seedQueuedRecord(redis);
+    seedQueuedRecord(redis, failedJob);
+    seedQueuedRecord(redis, suppressedJob);
+    const reddit = {
+      sendPrivateMessage: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("blocked")),
+    };
+
+    await processInviteNewSubsDelivery({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      job,
+      now: () => now,
+    });
+    await processInviteNewSubsDelivery({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      job: failedJob,
+      now: () => now + 1,
+    });
+    await processInviteNewSubsDelivery({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      job: suppressedJob,
+      now: () => now + 2,
+    });
+
+    const metrics = [
+      ...(redis.sortedSets.get("invite_new_subs:delivery_metrics:v1")?.keys() ??
+        []),
+    ].map((value) => JSON.parse(value) as { outcome: string });
+    expect(metrics.map((metric) => metric.outcome).sort()).toEqual([
+      "failure",
+      "success",
+    ]);
+  });
+
+  it("keeps delivery outcomes independent from metrics and state persistence", async () => {
+    const redis = new FakeRedis();
+    seedQueuedRecord(redis);
+    redis.failMetricWrites = true;
+    redis.failNextRecordStatus = "messaged";
+    const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(
+      processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job,
+      }),
+    ).resolves.toBe("messaged");
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+  });
+
   it("rejects delivery data without a full subreddit ID", async () => {
     const reddit = { sendPrivateMessage: vi.fn() };
     expect(
@@ -863,5 +981,200 @@ describe("processInviteNewSubsDelivery", () => {
         job,
       ),
     ).toBe("NewCommunity NewCommunity FoundingMod no");
+  });
+});
+
+describe("processInviteNewSubsReport", () => {
+  const reportNow = Date.parse("2026-10-23T12:05:00Z");
+  const windowEnd = Date.parse("2026-10-23T12:00:00Z");
+  const windowStart = windowEnd - inviteNewSubsReportWindowMs;
+
+  const reportReddit = (control = "enabled") => ({
+    getWikiPage: vi.fn().mockResolvedValue({ content: control }),
+    sendPrivateMessage: vi.fn().mockResolvedValue(undefined),
+  });
+
+  const addMetric = (
+    redis: FakeRedis,
+    eventId: string,
+    outcome: "success" | "failure",
+    completedAt: number,
+  ) => {
+    const metrics =
+      redis.sortedSets.get("invite_new_subs:delivery_metrics:v1") ??
+      new Map<string, number>();
+    metrics.set(JSON.stringify({ eventId, outcome }), completedAt);
+    redis.sortedSets.set("invite_new_subs:delivery_metrics:v1", metrics);
+  };
+
+  it("does not report from installations outside the host subreddit", async () => {
+    const redis = new FakeRedis();
+    const reddit = reportReddit();
+
+    await expect(
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        subredditName: "another_subreddit",
+        now: () => reportNow,
+      }),
+    ).resolves.toMatchObject({ status: "disabled" });
+    expect(reddit.getWikiPage).not.toHaveBeenCalled();
+    expect(reddit.sendPrivateMessage).not.toHaveBeenCalled();
+  });
+
+  it("reports the previous completed UTC window with exact boundaries", async () => {
+    const redis = new FakeRedis();
+    addMetric(redis, "before", "failure", windowStart - 1);
+    addMetric(redis, "start", "success", windowStart);
+    addMetric(redis, "inside", "failure", windowEnd - 1);
+    addMetric(redis, "end", "success", windowEnd);
+    const reddit = reportReddit();
+
+    await expect(
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+    ).resolves.toEqual({
+      status: "sent",
+      windowStart,
+      windowEnd,
+      total: 2,
+      successful: 1,
+      failed: 1,
+    });
+    expect(reddit.getWikiPage).toHaveBeenCalledWith(
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsControlWikiPage,
+      { wikiVersion: inviteNewSubsWikiVersion },
+    );
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledWith({
+      to: inviteNewSubsReportRecipient,
+      subject: inviteNewSubsReportSubject,
+      text: expect.stringContaining("Total attempted: 2"),
+    });
+    expect(reddit.sendPrivateMessage.mock.calls[0]?.[0].text).toContain(
+      `Window start: ${new Date(windowStart).toISOString()}`,
+    );
+    expect(reddit.sendPrivateMessage.mock.calls[0]?.[0].text).toContain(
+      `Window end: ${new Date(windowEnd).toISOString()}`,
+    );
+  });
+
+  it("sends a zero-count report when enabled", async () => {
+    const redis = new FakeRedis();
+    const reddit = reportReddit(" enabled ");
+
+    const result = await processInviteNewSubsReport({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      now: () => reportNow,
+    });
+
+    expect(result).toMatchObject({
+      status: "sent",
+      total: 0,
+      successful: 0,
+      failed: 0,
+    });
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+  });
+
+  it.each(["disabled", "Enabled", "ENABLED"])(
+    "does not report when the normalized gate value is %s",
+    async (control) => {
+      const redis = new FakeRedis();
+      const reddit = reportReddit(control);
+
+      await expect(
+        processInviteNewSubsReport({
+          reddit: reddit as unknown as RedditClient,
+          redis: asRedis(redis),
+          now: () => reportNow,
+        }),
+      ).resolves.toMatchObject({ status: "disabled" });
+      expect(reddit.sendPrivateMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when the gate cannot be read", async () => {
+    const redis = new FakeRedis();
+    const reddit = reportReddit();
+    reddit.getWikiPage.mockRejectedValue(new Error("wiki unavailable"));
+
+    await expect(
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+    ).rejects.toThrow("wiki unavailable");
+    expect(reddit.sendPrivateMessage).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates concurrent and later executions for the same window", async () => {
+    const redis = new FakeRedis();
+    const reddit = reportReddit();
+
+    const concurrent = await Promise.all([
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+    ]);
+    const later = await processInviteNewSubsReport({
+      reddit: reddit as unknown as RedditClient,
+      redis: asRedis(redis),
+      now: () => reportNow,
+    });
+
+    expect(concurrent.map((result) => result.status).sort()).toEqual([
+      "already_sent",
+      "sent",
+    ]);
+    expect(later.status).toBe("already_sent");
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+    expect(
+      redis.expirations
+        .get(`invite_new_subs:report_sent:v1:${windowEnd}`)
+        ?.getTime(),
+    ).toBe(reportNow + 30 * 24 * 60 * 60 * 1000);
+  });
+
+  it("releases the report lock and leaves no marker after delivery failure", async () => {
+    const redis = new FakeRedis();
+    const reddit = reportReddit();
+    reddit.sendPrivateMessage.mockRejectedValueOnce(new Error("blocked"));
+
+    await expect(
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+    ).rejects.toThrow("blocked");
+    expect(
+      redis.values.has(`invite_new_subs:report_lock:v1:${windowEnd}`),
+    ).toBe(false);
+    expect(
+      redis.values.has(`invite_new_subs:report_sent:v1:${windowEnd}`),
+    ).toBe(false);
+
+    await expect(
+      processInviteNewSubsReport({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        now: () => reportNow,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledTimes(2);
   });
 });

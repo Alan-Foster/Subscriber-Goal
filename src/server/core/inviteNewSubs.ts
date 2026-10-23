@@ -8,9 +8,13 @@ export const inviteNewSubsDataWikiPage = "invite-new-subs-data";
 export const inviteNewSubsWikiVersion = "v2" as const;
 export const inviteNewSubsDataWikiVersion = "v1" as const;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
+export const inviteNewSubsReportJobName = "invite-new-subs-report-job";
 export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
+export const inviteNewSubsReportRecipient = "Alan-Foster";
+export const inviteNewSubsReportSubject = "New Subreddit DM Report — 12 Hours";
 export const inviteNewSubsRetentionSeconds = 7 * 24 * 60 * 60;
 export const inviteNewSubsRecipientCooldownSeconds = 30 * 24 * 60 * 60;
+export const inviteNewSubsReportWindowMs = 12 * 60 * 60 * 1000;
 export const inviteNewSubsDeliverySpacingMs = 60_000;
 export const inviteNewSubsSchemaVersion = 1;
 export const inviteNewSubsSource = "reddit/subreddits/new";
@@ -22,6 +26,11 @@ const inviteNewSubsSeenKeyPrefix = "invite_new_subs:seen:v2";
 const inviteNewSubsDeliveryClaimKeyPrefix = "invite_new_subs:delivery_claim:v2";
 const inviteNewSubsRecipientCooldownKeyPrefix =
   "invite_new_subs:recipient_cooldown:v1";
+const inviteNewSubsDeliveryMetricsKey = "invite_new_subs:delivery_metrics:v1";
+const inviteNewSubsReportLockKeyPrefix = "invite_new_subs:report_lock:v1";
+const inviteNewSubsReportSentKeyPrefix = "invite_new_subs:report_sent:v1";
+const inviteNewSubsReportLockMs = 5 * 60 * 1000;
+const inviteNewSubsReportSentRetentionSeconds = 30 * 24 * 60 * 60;
 const subredditIdPattern = /^t5_[a-z0-9]+$/i;
 const displayNamePattern = /^[a-z0-9_]+$/i;
 const utcIsoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
@@ -103,6 +112,22 @@ export type InviteNewSubsDeliveryResult =
   | "recipient_cooldown"
   | "messaged"
   | "dm_failed";
+
+type InviteNewSubsDeliveryOutcome = "success" | "failure";
+
+type InviteNewSubsDeliveryMetric = {
+  eventId: string;
+  outcome: InviteNewSubsDeliveryOutcome;
+};
+
+export type InviteNewSubsReportResult = {
+  status: "sent" | "already_sent" | "disabled";
+  windowStart: number;
+  windowEnd: number;
+  total: number;
+  successful: number;
+  failed: number;
+};
 
 export const isInviteNewSubsHost = (
   subredditName: string | undefined,
@@ -542,17 +567,47 @@ export async function processInviteNewSubsDelivery({
     return "recipient_cooldown";
   }
 
+  let deliveryError: unknown;
   try {
     await reddit.sendPrivateMessage({
       to: recipient,
       subject: inviteNewSubsSubject,
       text: job.renderedMessage,
     });
-    await updateInviteNewSubsRecord(redis, job.subredditId, nowMs, {
-      status: "messaged",
-      topModerator: job.topModerator,
-      isNsfw: job.isNsfw,
-    });
+  } catch (error) {
+    // diagnostic-allow-silent: the failure is persisted and reported after metrics recording below.
+    deliveryError = error;
+  }
+
+  const completedAt = now();
+  await recordInviteNewSubsDeliveryMetric({
+    redis,
+    eventId: claimToken,
+    outcome: deliveryError === undefined ? "success" : "failure",
+    completedAt,
+  });
+
+  if (deliveryError === undefined) {
+    try {
+      await updateInviteNewSubsRecord(redis, job.subredditId, completedAt, {
+        status: "messaged",
+        topModerator: job.topModerator,
+        isNsfw: job.isNsfw,
+      });
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "invite_new_subs_delivery_state_write_failed",
+        {
+          workflow: "invite_new_subs",
+          phase: "delivery_persistence",
+          subredditId: job.subredditId,
+          subredditName: job.subredditName,
+          deliveryOutcome: "success",
+        },
+        error,
+      );
+    }
     logDiagnostic("info", "invite_new_subs_dm_sent", {
       workflow: "invite_new_subs",
       phase: "delivery",
@@ -560,25 +615,192 @@ export async function processInviteNewSubsDelivery({
       subredditName: job.subredditName,
     });
     return "messaged";
-  } catch (error) {
-    await updateInviteNewSubsRecord(redis, job.subredditId, nowMs, {
+  }
+
+  try {
+    await updateInviteNewSubsRecord(redis, job.subredditId, completedAt, {
       status: "dm_failed",
       topModerator: job.topModerator,
       isNsfw: job.isNsfw,
-      error: errorMessage(error),
+      error: errorMessage(deliveryError),
     });
+  } catch (error) {
     logDiagnostic(
       "warn",
-      "invite_new_subs_dm_failed",
+      "invite_new_subs_delivery_state_write_failed",
       {
         workflow: "invite_new_subs",
-        phase: "delivery",
+        phase: "delivery_persistence",
         subredditId: job.subredditId,
         subredditName: job.subredditName,
+        deliveryOutcome: "failure",
       },
       error,
     );
-    return "dm_failed";
+  }
+  logDiagnostic(
+    "warn",
+    "invite_new_subs_dm_failed",
+    {
+      workflow: "invite_new_subs",
+      phase: "delivery",
+      subredditId: job.subredditId,
+      subredditName: job.subredditName,
+    },
+    deliveryError,
+  );
+  return "dm_failed";
+}
+
+export async function processInviteNewSubsReport({
+  reddit,
+  redis,
+  subredditName = inviteNewSubsHostSubreddit,
+  now = Date.now,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  subredditName?: string;
+  now?: () => number;
+}): Promise<InviteNewSubsReportResult> {
+  const nowMs = now();
+  const windowEnd =
+    Math.floor(nowMs / inviteNewSubsReportWindowMs) *
+    inviteNewSubsReportWindowMs;
+  const windowStart = windowEnd - inviteNewSubsReportWindowMs;
+  const emptyCounts = { total: 0, successful: 0, failed: 0 };
+
+  if (!isInviteNewSubsHost(subredditName)) {
+    logDiagnostic("info", "invite_new_subs_report_wrong_subreddit", {
+      workflow: "invite_new_subs_report",
+      phase: "host_validation",
+      windowStart,
+      windowEnd,
+      subredditName: subredditName ?? "unknown",
+    });
+    return { status: "disabled", windowStart, windowEnd, ...emptyCounts };
+  }
+
+  let gateContent: string;
+  try {
+    const gatePage = await reddit.getWikiPage(
+      inviteNewSubsHostSubreddit,
+      inviteNewSubsControlWikiPage,
+      { wikiVersion: inviteNewSubsWikiVersion },
+    );
+    if (typeof gatePage.content !== "string") {
+      throw new Error("Invitation control wiki page returned no content.");
+    }
+    gateContent = gatePage.content.trim();
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "invite_new_subs_report_gate_unavailable",
+      {
+        workflow: "invite_new_subs_report",
+        phase: "gate_read",
+        windowStart,
+        windowEnd,
+        pageName: inviteNewSubsControlWikiPage,
+        wikiVersion: inviteNewSubsWikiVersion,
+      },
+      error,
+    );
+    throw error;
+  }
+
+  if (gateContent !== "enabled") {
+    logDiagnostic("info", "invite_new_subs_report_disabled", {
+      workflow: "invite_new_subs_report",
+      phase: "gate_read",
+      windowStart,
+      windowEnd,
+      normalizedValue: gateContent,
+    });
+    return { status: "disabled", windowStart, windowEnd, ...emptyCounts };
+  }
+
+  const sentKey = inviteNewSubsReportSentKey(windowEnd);
+  if (await redis.get(sentKey)) {
+    logInviteNewSubsReportDuplicate(windowStart, windowEnd, "sent_marker");
+    return { status: "already_sent", windowStart, windowEnd, ...emptyCounts };
+  }
+
+  const lockKey = inviteNewSubsReportLockKey(windowEnd);
+  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+  await redis.set(lockKey, lockToken, {
+    nx: true,
+    expiration: new Date(nowMs + inviteNewSubsReportLockMs),
+  });
+  if ((await redis.get(lockKey)) !== lockToken) {
+    logInviteNewSubsReportDuplicate(windowStart, windowEnd, "lock_busy");
+    return { status: "already_sent", windowStart, windowEnd, ...emptyCounts };
+  }
+
+  try {
+    if (await redis.get(sentKey)) {
+      logInviteNewSubsReportDuplicate(windowStart, windowEnd, "sent_marker");
+      return {
+        status: "already_sent",
+        windowStart,
+        windowEnd,
+        ...emptyCounts,
+      };
+    }
+
+    const counts = await getInviteNewSubsDeliveryCounts(
+      redis,
+      windowStart,
+      windowEnd,
+      nowMs,
+    );
+    await reddit.sendPrivateMessage({
+      to: inviteNewSubsReportRecipient,
+      subject: inviteNewSubsReportSubject,
+      text: renderInviteNewSubsReport({ windowStart, windowEnd, ...counts }),
+    });
+    await redis.set(sentKey, String(nowMs), {
+      expiration: new Date(
+        nowMs + inviteNewSubsReportSentRetentionSeconds * 1000,
+      ),
+    });
+    logDiagnostic("info", "invite_new_subs_report_sent", {
+      workflow: "invite_new_subs_report",
+      phase: "delivery",
+      windowStart,
+      windowEnd,
+      ...counts,
+    });
+    return { status: "sent", windowStart, windowEnd, ...counts };
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "invite_new_subs_report_failed",
+      {
+        workflow: "invite_new_subs_report",
+        phase: "delivery",
+        windowStart,
+        windowEnd,
+      },
+      error,
+    );
+    throw error;
+  } finally {
+    try {
+      if ((await redis.get(lockKey)) === lockToken) await redis.del(lockKey);
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "invite_new_subs_report_lock_release_failed",
+        {
+          workflow: "invite_new_subs_report",
+          phase: "lock_release",
+          windowStart,
+          windowEnd,
+        },
+        error,
+      );
+    }
   }
 }
 
@@ -737,6 +959,153 @@ function inviteNewSubsRecipientCooldownKey(username: string): string {
 
 function recipientCooldownExpirationDate(nowMs: number): Date {
   return new Date(nowMs + inviteNewSubsRecipientCooldownSeconds * 1000);
+}
+
+function inviteNewSubsReportLockKey(windowEnd: number): string {
+  return `${inviteNewSubsReportLockKeyPrefix}:${windowEnd}`;
+}
+
+function inviteNewSubsReportSentKey(windowEnd: number): string {
+  return `${inviteNewSubsReportSentKeyPrefix}:${windowEnd}`;
+}
+
+async function recordInviteNewSubsDeliveryMetric({
+  redis,
+  eventId,
+  outcome,
+  completedAt,
+}: {
+  redis: RedisClient;
+  eventId: string;
+  outcome: InviteNewSubsDeliveryOutcome;
+  completedAt: number;
+}): Promise<void> {
+  const metric: InviteNewSubsDeliveryMetric = { eventId, outcome };
+  try {
+    await redis.zAdd(inviteNewSubsDeliveryMetricsKey, {
+      member: JSON.stringify(metric),
+      score: completedAt,
+    });
+    await redis.expire(
+      inviteNewSubsDeliveryMetricsKey,
+      inviteNewSubsRetentionSeconds,
+    );
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "invite_new_subs_metric_persistence_failed",
+      {
+        workflow: "invite_new_subs",
+        phase: "delivery_metrics",
+        eventId,
+        outcome,
+        completedAt,
+      },
+      error,
+    );
+  }
+}
+
+async function getInviteNewSubsDeliveryCounts(
+  redis: RedisClient,
+  windowStart: number,
+  windowEnd: number,
+  nowMs: number,
+): Promise<{ total: number; successful: number; failed: number }> {
+  const entries = await redis.zRange(inviteNewSubsDeliveryMetricsKey, 0, -1);
+  let successful = 0;
+  let failed = 0;
+  const staleMembers: string[] = [];
+  const retentionCutoff = nowMs - inviteNewSubsRetentionSeconds * 1000;
+
+  for (const entry of entries) {
+    const score = Number(entry.score);
+    if (!Number.isFinite(score)) continue;
+    if (score < retentionCutoff) staleMembers.push(entry.member);
+    if (score < windowStart || score >= windowEnd) continue;
+    const metric = parseInviteNewSubsDeliveryMetric(entry.member);
+    if (metric?.outcome === "success") successful += 1;
+    else if (metric?.outcome === "failure") failed += 1;
+  }
+
+  if (staleMembers.length > 0) {
+    try {
+      await redis.zRem(inviteNewSubsDeliveryMetricsKey, staleMembers);
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "invite_new_subs_metric_cleanup_failed",
+        {
+          workflow: "invite_new_subs_report",
+          phase: "metric_cleanup",
+          staleCount: staleMembers.length,
+        },
+        error,
+      );
+    }
+  }
+
+  return { total: successful + failed, successful, failed };
+}
+
+function parseInviteNewSubsDeliveryMetric(
+  value: string,
+): InviteNewSubsDeliveryMetric | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!isRecord(parsed)) return undefined;
+    if (
+      typeof parsed.eventId !== "string" ||
+      (parsed.outcome !== "success" && parsed.outcome !== "failure")
+    ) {
+      return undefined;
+    }
+    return {
+      eventId: parsed.eventId,
+      outcome: parsed.outcome,
+    };
+  } catch {
+    // diagnostic-allow-silent: malformed metrics are ignored by reporting.
+    return undefined;
+  }
+}
+
+function renderInviteNewSubsReport({
+  windowStart,
+  windowEnd,
+  total,
+  successful,
+  failed,
+}: {
+  windowStart: number;
+  windowEnd: number;
+  total: number;
+  successful: number;
+  failed: number;
+}): string {
+  return [
+    "New-subreddit DM report",
+    "",
+    `Window start: ${new Date(windowStart).toISOString()}`,
+    `Window end: ${new Date(windowEnd).toISOString()}`,
+    `Total attempted: ${total}`,
+    `Successful: ${successful}`,
+    `Failed: ${failed}`,
+  ].join("\n");
+}
+
+function logInviteNewSubsReportDuplicate(
+  windowStart: number,
+  windowEnd: number,
+  reason: "sent_marker" | "lock_busy",
+): void {
+  logDiagnostic("info", "invite_new_subs_report_duplicate_suppressed", {
+    workflow: "invite_new_subs_report",
+    phase: "idempotency",
+    windowStart,
+    windowEnd,
+    reason,
+  });
 }
 
 async function reserveInviteNewSubsRecord(

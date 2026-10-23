@@ -16,6 +16,7 @@ import {
   isInviteNewSubsDeliveryJob,
   processInviteNewSubsDelivery,
   processInviteNewSubsPoll,
+  processInviteNewSubsReport,
 } from "../core/inviteNewSubs";
 
 export function registerInternalSystemRoutes(router: Router): void {
@@ -279,6 +280,36 @@ export function registerInternalSystemRoutes(router: Router): void {
           error,
         );
         res.json({ status: "dm_failed" });
+      }
+    },
+  );
+
+  router.post(
+    internalRoutes.scheduler.inviteNewSubsReportJob,
+    async (_req, res): Promise<void> => {
+      try {
+        const subredditName =
+          context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
+        const result = await processInviteNewSubsReport({
+          reddit,
+          redis,
+          subredditName,
+        });
+        res.json(result);
+      } catch (error) {
+        logDiagnostic(
+          "error",
+          "scheduler_route_failed",
+          {
+            route: internalRoutes.scheduler.inviteNewSubsReportJob,
+            workflow: "invite_new_subs_report",
+          },
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: "Failed to send new-subreddit DM report",
+        });
       }
     },
   );

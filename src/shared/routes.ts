@@ -20,6 +20,7 @@ export const internalRoutes = {
     inviteNewSubsPollJob: "/internal/scheduler/invite-new-subs-poll-job",
     inviteNewSubsDeliveryJob:
       "/internal/scheduler/invite-new-subs-delivery-job",
+    inviteNewSubsReportJob: "/internal/scheduler/invite-new-subs-report-job",
   },
   menu: {
     createGoal: "/internal/menu/create-goal",
