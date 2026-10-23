@@ -67,6 +67,10 @@ const hoisted = vi.hoisted(() => ({
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppRepair: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
+  getPostOperationalState: vi.fn(),
+  savePostOperationalState: vi.fn(),
+  clearPostOperationalState: vi.fn(),
+  scheduleHighlightRepair: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -158,6 +162,14 @@ vi.mock("../core/postRetirement", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../core/postRetirement")>()),
   retireSubscriberGoalPost: hoisted.retireSubscriberGoalPost,
 }));
+vi.mock("../data/postOperationalState", () => ({
+  getPostOperationalState: hoisted.getPostOperationalState,
+  savePostOperationalState: hoisted.savePostOperationalState,
+  clearPostOperationalState: hoisted.clearPostOperationalState,
+}));
+vi.mock("../data/highlightRepair", () => ({
+  scheduleHighlightRepair: hoisted.scheduleHighlightRepair,
+}));
 
 vi.mock("../core/onboardingReminder", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
@@ -208,6 +220,11 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppRepair.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
+    hoisted.getPostOperationalState.mockReset();
+    hoisted.savePostOperationalState.mockReset();
+    hoisted.clearPostOperationalState.mockReset();
+    hoisted.scheduleHighlightRepair.mockReset();
+    hoisted.getPostOperationalState.mockResolvedValue(undefined);
     hoisted.retireSubscriberGoalPost.mockImplementation(
       async (_redis: unknown, postId: string) => {
         await hoisted.cancelUpdates(_redis, postId);
@@ -463,6 +480,62 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.untrackPost).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+  });
+
+  it("skips rendering an archived goal while preserving completion checks", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      name: "CorporateGifts",
+      type: "public",
+      numberOfSubscribers: 20,
+    });
+    hoisted.checkCompletionStatus.mockResolvedValue(1_000);
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_archived"]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_archived",
+      archived: true,
+      locked: false,
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.checkCompletionStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "t3_archived",
+    );
+    expect(hoisted.applyTextFallback).not.toHaveBeenCalled();
+    expect(hoisted.applyGoalPostFrameStyle).not.toHaveBeenCalled();
+    expect(hoisted.savePostOperationalState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        postId: "t3_archived",
+        archived: true,
+      }),
+    );
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_archived",
+    );
+  });
+
+  it("continues rendering a locked goal without unlocking it", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_locked"]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_locked",
+      archived: false,
+      locked: true,
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.applyTextFallback).toHaveBeenCalled();
+    expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalled();
+    expect(hoisted.savePostOperationalState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ locked: true, archived: false }),
+    );
   });
 
   it("repairs short post frame styles for active queued posts", async () => {

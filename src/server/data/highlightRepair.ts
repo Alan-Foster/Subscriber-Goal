@@ -1,8 +1,8 @@
 import type { RedisClient } from "../types";
 
-export const appRepairStateKey = "app_repair_community_highlights_v2_state";
-export const appRepairLockKey = "app_repair_community_highlights_v2_lock";
-export const appRepairVersion = "app_repair_community_highlights_v2";
+export const appRepairStateKey = "app_repair_community_highlights_v3_state";
+export const appRepairLockKey = "app_repair_community_highlights_v3_lock";
+export const appRepairVersion = "app_repair_community_highlights_v3";
 
 export async function scheduleHighlightRepair(
   redis: RedisClient,

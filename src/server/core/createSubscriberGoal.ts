@@ -61,6 +61,7 @@ import {
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
+import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -548,9 +549,12 @@ async function createSubscriberGoalInternal(
       canonicalPostId: post.id,
       highlighted: true,
       position: 0,
+      highlightLabel: null,
+      highlightedUntil: null,
       moderatorOverride: "none",
       reconciledAt: Date.now(),
     });
+    await clearHighlightContradictionIncident(redis);
   } else if (highlightResult.issues.length > 0) {
     await scheduleHighlightRepair(redis, {
       delayMs: 5 * 60 * 1000,

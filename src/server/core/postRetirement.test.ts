@@ -105,6 +105,8 @@ describe("subscriber goal post retirement", () => {
       canonicalPostId: postId,
       highlighted: true,
       position: 0,
+      highlightLabel: null,
+      highlightedUntil: null,
       moderatorOverride: "none",
       reconciledAt: 100,
     });

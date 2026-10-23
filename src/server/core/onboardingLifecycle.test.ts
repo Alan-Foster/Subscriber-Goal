@@ -15,6 +15,13 @@ import {
   onboardingReminderStateKey,
 } from "./onboardingReminder";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
+import {
+  highlightManagementStateKey,
+  legacyHighlightManagementStateKey,
+  saveHighlightManagementBaseline,
+} from "../data/highlightManagement";
+import { highlightContradictionKey } from "../data/highlightContradiction";
+import { postOperationalStateKeyPrefix } from "../data/postOperationalState";
 
 const lifecycleHoisted = vi.hoisted(() => ({
   processDueAutoCreateNextGoals: vi.fn(),
@@ -86,6 +93,11 @@ class InMemoryRedis {
     const set = this.sortedSets.get(key) ?? new Map<string, number>();
     set.set(entry.member, entry.score);
     this.sortedSets.set(key, set);
+  }
+
+  async zRem(key: string, members: string[]): Promise<void> {
+    const set = this.sortedSets.get(key);
+    for (const member of members) set?.delete(member);
   }
 
   async hScan(key: string): Promise<{
@@ -737,11 +749,19 @@ describe("onboarding lifecycle reconciliation", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("does not highlight or recover a completed goal during install reconciliation", async () => {
+  it("recovers a due automatic successor during reinstall reconciliation", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
       completedTime: nowMs - 48 * 60 * 60 * 1000,
+    });
+    lifecycleHoisted.processDueAutoCreateNextGoals.mockResolvedValue({
+      due: 1,
+      created: 1,
+      skipped: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
     });
 
     await expect(
@@ -751,18 +771,17 @@ describe("onboarding lifecycle reconciliation", () => {
         { lifecycleSource: "install", nowMs },
       ),
     ).resolves.toMatchObject({
-      status: "completed_no_recovery",
+      status: "replacement_created",
       sourcePostId: post.id,
     });
 
     expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
-    ).not.toHaveBeenCalled();
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    ).toHaveBeenCalledOnce();
   });
 
-  it("records newly detected completion during install without scheduling recovery", async () => {
+  it("records newly detected completion during install and schedules its delay", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_install_met" });
     await seedGoalData(redis, post.id, { goal: 1_500 });
 
@@ -772,13 +791,37 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "install", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "completed_no_recovery" });
+    ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
     expect(post.highlight).not.toHaveBeenCalled();
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs + 24 * 60 * 60 * 1000 },
+    ]);
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
     ).resolves.toBe(String(nowMs));
+  });
+
+  it("preserves successor opt-out during reinstall", async () => {
+    const post = makeLifecycleGoalPost({ id: "t3_install_opted_out" });
+    await seedGoalData(redis, post.id, {
+      goal: 1_500,
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+      autoCreateNextGoal: false,
+    });
+
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit({ posts: [post] }) as never,
+        redis as never,
+        { lifecycleSource: "install", nowMs },
+      ),
+    ).resolves.toMatchObject({ status: "completed_auto_disabled" });
+
+    expect(
+      lifecycleHoisted.processDueAutoCreateNextGoals,
+    ).not.toHaveBeenCalled();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
   });
 
   it("preserves an existing replacement retry and its backoff", async () => {
@@ -844,6 +887,12 @@ describe("existing goal highlight ensurance", () => {
     postHeight,
     highlighted = false,
     highlightFails = false,
+    highlightError,
+    archived = false,
+    locked = false,
+    listed,
+    highlightLabel,
+    highlightedUntil,
   }: {
     id: `t3_${string}`;
     createdAt: string;
@@ -851,9 +900,15 @@ describe("existing goal highlight ensurance", () => {
     postHeight?: string;
     highlighted?: boolean;
     highlightFails?: boolean;
+    highlightError?: string;
+    archived?: boolean;
+    locked?: boolean;
+    listed?: boolean;
+    highlightLabel?: "ANNOUNCEMENT" | "EVENT";
+    highlightedUntil?: Date;
   }) => {
     let isHighlighted = highlighted;
-    return {
+    const post = {
       id,
       title: id,
       authorName: "subscriber-goal-app",
@@ -864,23 +919,48 @@ describe("existing goal highlight ensurance", () => {
         ...(postKind ? { postKind } : {}),
         ...(postHeight ? { postHeight } : {}),
       },
+      listed,
+      highlightLabel,
+      highlightedUntil,
+      archived,
+      locked,
       isHighlighted: vi.fn(() => isHighlighted),
-      highlight: vi.fn(async () => {
-        if (highlightFails) throw new Error("highlight slots full");
-        isHighlighted = true;
-      }),
+      highlight: vi.fn(
+        async (options?: {
+          highlightUntil?: Date;
+          highlightLabelType?: "ANNOUNCEMENT" | "EVENT";
+        }) => {
+          if (highlightFails || highlightError)
+            throw new Error(highlightError ?? "highlight slots full");
+          isHighlighted = true;
+          void options;
+        },
+      ),
       unhighlight: vi.fn(async () => {
         isHighlighted = false;
       }),
     };
+    return post;
   };
 
   const makeReddit = (posts: ReturnType<typeof makePost>[]) => {
     const getHighlightedPosts = vi.fn(async () => {
-      const highlightedPosts = [] as { postId: `t3_${string}` }[];
+      const highlightedPosts = [] as {
+        postId: `t3_${string}`;
+        highlightLabel?: "ANNOUNCEMENT" | "EVENT";
+        highlightedUntil?: Date;
+      }[];
       for (const post of posts) {
-        if (await post.isHighlighted()) {
-          highlightedPosts.push({ postId: post.id as `t3_${string}` });
+        if (post.listed ?? (await post.isHighlighted())) {
+          highlightedPosts.push({
+            postId: post.id as `t3_${string}`,
+            ...(post.highlightLabel
+              ? { highlightLabel: post.highlightLabel }
+              : {}),
+            ...(post.highlightedUntil
+              ? { highlightedUntil: post.highlightedUntil }
+              : {}),
+          });
         }
       }
       return highlightedPosts;
@@ -1068,6 +1148,12 @@ describe("existing goal highlight ensurance", () => {
     expect(firstCompleted.unhighlight).toHaveBeenCalledOnce();
     expect(secondCompleted.unhighlight).toHaveBeenCalledOnce();
     expect(active.unhighlight).not.toHaveBeenCalled();
+    await expect(
+      redis.hGet(autoCreateNextGoalSuccessorsKey, firstCompleted.id),
+    ).resolves.toBe(active.id);
+    await expect(
+      redis.hGet(autoCreateNextGoalSuccessorsKey, secondCompleted.id),
+    ).resolves.toBe(active.id);
   });
 
   it("preserves a moderator unhighlight after establishing the baseline", async () => {
@@ -1089,6 +1175,15 @@ describe("existing goal highlight ensurance", () => {
       reconciliationContext: "legacy_upgrade",
     });
     expect(active.highlight).toHaveBeenCalledOnce();
+    await saveHighlightManagementBaseline(redis as never, {
+      canonicalPostId: active.id,
+      highlighted: true,
+      position: 0,
+      highlightLabel: "EVENT",
+      highlightedUntil: nowMs + 60 * 60 * 1000,
+      moderatorOverride: "none",
+      reconciledAt: nowMs,
+    });
     await active.unhighlight();
     active.highlight.mockClear();
 
@@ -1104,6 +1199,214 @@ describe("existing goal highlight ensurance", () => {
       moderatorOverride: "unhighlighted",
     });
     expect(active.highlight).not.toHaveBeenCalled();
+    await expect(
+      redis.hGetAll(highlightManagementStateKey),
+    ).resolves.toMatchObject({
+      moderatorOverride: "unhighlighted",
+      highlightedUntil: String(nowMs + 60 * 60 * 1000),
+    });
+  });
+
+  it("records an elapsed highlight expiration without making it permanent", async () => {
+    const active = makePost({
+      id: "t3_expired",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: false,
+      highlightedUntil: new Date(nowMs - 1_000),
+    });
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", { t3_expired_goal: "3000" });
+    await saveHighlightManagementBaseline(redis as never, {
+      canonicalPostId: active.id,
+      highlighted: true,
+      position: 0,
+      highlightLabel: "ANNOUNCEMENT",
+      highlightedUntil: nowMs - 1_000,
+      moderatorOverride: "none",
+      reconciledAt: nowMs - 60_000,
+    });
+
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([active]) as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "repair",
+    });
+
+    expect(result).toMatchObject({
+      status: "existing_not_highlighted",
+      moderatorOverride: "expired",
+    });
+    expect(active.highlight).not.toHaveBeenCalled();
+    await expect(
+      redis.hGetAll(highlightManagementStateKey),
+    ).resolves.toMatchObject({ moderatorOverride: "expired" });
+  });
+
+  it("adopts moderator-edited label and expiration metadata", async () => {
+    const newExpiration = new Date(nowMs + 2 * 60 * 60 * 1000);
+    const active = makePost({
+      id: "t3_metadata",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+      highlightLabel: "EVENT",
+      highlightedUntil: newExpiration,
+    });
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", { t3_metadata_goal: "3000" });
+    await saveHighlightManagementBaseline(redis as never, {
+      canonicalPostId: active.id,
+      highlighted: true,
+      position: 0,
+      highlightLabel: "ANNOUNCEMENT",
+      highlightedUntil: nowMs + 60 * 60 * 1000,
+      moderatorOverride: "none",
+      reconciledAt: nowMs - 60_000,
+    });
+
+    await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([active]) as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "repair",
+    });
+
+    await expect(
+      redis.hGetAll(highlightManagementStateKey),
+    ).resolves.toMatchObject({
+      highlightLabel: "EVENT",
+      highlightedUntil: String(newExpiration.getTime()),
+    });
+  });
+
+  it("migrates a v1 baseline from live metadata without rehighlighting", async () => {
+    const expiration = new Date(nowMs + 2 * 60 * 60 * 1000);
+    const active = makePost({
+      id: "t3_v1_baseline",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+      highlightLabel: "EVENT",
+      highlightedUntil: expiration,
+    });
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", { t3_v1_baseline_goal: "3000" });
+    await redis.hSet(legacyHighlightManagementStateKey, {
+      version: "highlight_management_v1",
+      canonicalPostId: active.id,
+      highlighted: "true",
+      position: "0",
+      moderatorOverride: "none",
+      reconciledAt: String(nowMs - 60_000),
+    });
+
+    await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([active]) as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "repair",
+    });
+
+    expect(active.highlight).not.toHaveBeenCalled();
+    await expect(
+      redis.hGetAll(highlightManagementStateKey),
+    ).resolves.toMatchObject({
+      version: "highlight_management_v2",
+      highlightLabel: "EVENT",
+      highlightedUntil: String(expiration.getTime()),
+    });
+  });
+
+  it("persists contradictory observations and notifies once after three", async () => {
+    const active = makePost({
+      id: "t3_contradiction",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: false,
+      listed: true,
+    });
+    const reddit = makeReddit([active]);
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", {
+      t3_contradiction_goal: "3000",
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await ensureExistingSubscriberGoalHighlighted({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + attempt * 5 * 60 * 1000,
+        notifyOnFailure: true,
+        reconciliationContext: "repair",
+      });
+    }
+
+    await expect(
+      redis.hGetAll(highlightContradictionKey),
+    ).resolves.toMatchObject({ postId: active.id, consecutiveCount: "3" });
+    expect(active.highlight).not.toHaveBeenCalled();
+    expect(active.unhighlight).not.toHaveBeenCalled();
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+
+    active.isHighlighted.mockReturnValue(true);
+    await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: nowMs + 60 * 60 * 1000,
+      notifyOnFailure: true,
+      reconciliationContext: "repair",
+    });
+    await expect(redis.hGetAll(highlightContradictionKey)).resolves.toEqual({});
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+  });
+
+  it("stops retrying a narrowly recognized archived-post highlight rejection", async () => {
+    const active = makePost({
+      id: "t3_archived_blocked",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      archived: true,
+      highlightError: "This post is archived and cannot be highlighted",
+    });
+    const reddit = makeReddit([active]);
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", {
+      t3_archived_blocked_goal: "3000",
+    });
+
+    const first = await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs,
+      notifyOnFailure: true,
+      highlightVerification: { maxWaitMs: 0, intervalMs: 0 },
+      reconciliationContext: "repair",
+    });
+    const second = await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs: nowMs + 60_000,
+      notifyOnFailure: true,
+      reconciliationContext: "repair",
+    });
+
+    expect(first.failureCategories).toContain("post_state");
+    expect(second.failureCategories).toContain("post_state");
+    expect(active.highlight).toHaveBeenCalledOnce();
+    await expect(
+      redis.hGetAll(`${postOperationalStateKeyPrefix}:${active.id}`),
+    ).resolves.toMatchObject({
+      archived: "true",
+      highlightBlocked: "true",
+    });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
   it("records a failed existing-goal highlight and sends one accurate modmail", async () => {

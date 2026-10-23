@@ -8,6 +8,7 @@ export const highlightVerificationIntervalMs = 5_000;
 
 export type HighlightFailureCategory =
   | "permission"
+  | "post_state"
   | "capacity"
   | "write"
   | "verification"
@@ -38,7 +39,7 @@ export type HighlightResult = {
   cleanupOutcome: "not_needed" | "completed" | "failed";
   removedManagedHighlightIds: LinkId[];
   preservedHighlightIds: LinkId[];
-  rollbackOutcome: "not_needed" | "restored" | "failed";
+  rollbackOutcome: "not_needed" | "restored" | "expired" | "failed";
   reorderOutcome: "not_attempted" | "reordered" | "failed";
 };
 
@@ -49,6 +50,8 @@ export type HighlightVerificationOptions = {
 
 type HighlightablePost = {
   id: LinkId;
+  archived?: boolean;
+  locked?: boolean;
   highlight: (options?: {
     highlightUntil?: Date;
     highlightLabelType?: HighlightLabelType;
@@ -86,6 +89,37 @@ function sameOrder(
   return (
     actual.length === expected.length &&
     actual.every((postId, index) => postId === expected[index])
+  );
+}
+
+function highlightMetadata(info: HighlightedPostInfo | undefined): {
+  highlightLabel?: HighlightLabelType;
+  highlightedUntil?: number;
+} {
+  return {
+    ...(info?.highlightLabel ? { highlightLabel: info.highlightLabel } : {}),
+    ...(info?.highlightedUntil
+      ? { highlightedUntil: info.highlightedUntil.getTime() }
+      : {}),
+  };
+}
+
+function sameHighlightMetadata(
+  expected: HighlightedPostInfo | undefined,
+  actual: HighlightedPostInfo | undefined,
+): boolean {
+  const expectedMetadata = highlightMetadata(expected);
+  const actualMetadata = highlightMetadata(actual);
+  return (
+    expectedMetadata.highlightLabel === actualMetadata.highlightLabel &&
+    expectedMetadata.highlightedUntil === actualMetadata.highlightedUntil
+  );
+}
+
+export function isArchivedPostMutationError(error: unknown): boolean {
+  const message = toErrorMessage(error);
+  return /(?:post|thing).*(?:is|was) archived|archived posts? (?:cannot|can(?:not|'t))|cannot .* archived post/i.test(
+    message,
   );
 }
 
@@ -195,7 +229,10 @@ async function reorderTargetFirst(
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       const current = await subreddit.getHighlightedPosts();
-      if (!current.some(({ postId }) => postId === targetPostId)) {
+      const targetBefore = current.find(
+        ({ postId }) => postId === targetPostId,
+      );
+      if (!targetBefore) {
         throw new Error(
           "The selected Subscriber Goal is no longer highlighted.",
         );
@@ -205,9 +242,28 @@ async function reorderTargetFirst(
         ...idsOf(current).filter((postId) => postId !== targetPostId),
       ];
       await subreddit.reorderHighlightedPosts(intendedOrder);
-      const verifiedOrder = idsOf(await subreddit.getHighlightedPosts());
-      if (sameOrder(verifiedOrder, intendedOrder)) {
+      const verifiedSnapshot = await subreddit.getHighlightedPosts();
+      const verifiedOrder = idsOf(verifiedSnapshot);
+      const targetAfter = verifiedSnapshot.find(
+        ({ postId }) => postId === targetPostId,
+      );
+      if (
+        sameOrder(verifiedOrder, intendedOrder) &&
+        sameHighlightMetadata(targetBefore, targetAfter)
+      ) {
         return { outcome: "reordered" };
+      }
+      if (!sameHighlightMetadata(targetBefore, targetAfter)) {
+        logDiagnostic("warn", "highlight_metadata_changed", {
+          workflow: "community_highlights",
+          phase: "reorder_verification",
+          postId: targetPostId,
+          expected: JSON.stringify(highlightMetadata(targetBefore)),
+          actual: JSON.stringify(highlightMetadata(targetAfter)),
+        });
+        throw new Error(
+          "Reddit changed the Community Highlight label or expiration while reordering.",
+        );
       }
       throw new Error("Reddit did not confirm the requested highlight order.");
     } catch (error) {
@@ -243,12 +299,20 @@ async function restoreRemovedHighlights(
   removed: RemovedHighlight[],
   originalOrder: LinkId[],
   options: HighlightVerificationOptions,
-): Promise<"not_needed" | "restored" | "failed"> {
+): Promise<"not_needed" | "restored" | "expired" | "failed"> {
   if (removed.length === 0) return "not_needed";
+  let expired = false;
   try {
     for (const { info, post } of removed) {
       const current = await subreddit.getHighlightedPosts();
       if (current.some(({ postId }) => postId === info.postId)) continue;
+      if (
+        info.highlightedUntil &&
+        info.highlightedUntil.getTime() <= Date.now()
+      ) {
+        expired = true;
+        continue;
+      }
       if (current.length >= communityHighlightLimit) return "failed";
       if (typeof post.isHighlighted !== "function") return "failed";
       await post.highlight({
@@ -260,6 +324,19 @@ async function restoreRemovedHighlights(
           : {}),
       });
       if (!(await pollForState(subreddit, post, true, options)).matches) {
+        return "failed";
+      }
+      const restored = (await subreddit.getHighlightedPosts()).find(
+        ({ postId }) => postId === info.postId,
+      );
+      if (!sameHighlightMetadata(info, restored)) {
+        logDiagnostic("warn", "highlight_metadata_changed", {
+          workflow: "community_highlights",
+          phase: "rollback_verification",
+          postId: info.postId,
+          expected: JSON.stringify(highlightMetadata(info)),
+          actual: JSON.stringify(highlightMetadata(restored)),
+        });
         return "failed";
       }
     }
@@ -274,7 +351,9 @@ async function restoreRemovedHighlights(
       idsOf(await subreddit.getHighlightedPosts()),
       restoredOrder,
     )
-      ? "restored"
+      ? expired
+        ? "expired"
+        : "restored"
       : "failed";
   } catch (error) {
     logDiagnostic(
@@ -499,7 +578,14 @@ export async function highlightAndVerifyPost(
       await post.highlight();
     } catch (error) {
       writeError = toErrorMessage(error);
-      issues.push({ category: "write", postId: post.id, message: writeError });
+      issues.push({
+        category:
+          post.archived && isArchivedPostMutationError(error)
+            ? "post_state"
+            : "write",
+        postId: post.id,
+        message: writeError,
+      });
       logDiagnostic(
         "warn",
         "highlight_operation_failed",

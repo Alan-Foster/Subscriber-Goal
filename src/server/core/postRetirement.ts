@@ -15,6 +15,8 @@ import {
 } from "../data/highlightManagement";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
 import { clearHighlightFailureIncident } from "../utils/highlightFailureNotifications";
+import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
+import { clearPostOperationalState } from "../data/postOperationalState";
 import type { LinkId, RedisClient } from "../types";
 
 export const retiredSubscriberGoalKeyPrefix = "retired_subscriber_goal_v1";
@@ -144,6 +146,12 @@ export async function retireSubscriberGoalPost(
   );
   await attempt("highlight_incident", () =>
     clearHighlightFailureIncident(redis, postId),
+  );
+  await attempt("highlight_contradiction", () =>
+    clearHighlightContradictionIncident(redis, postId),
+  );
+  await attempt("post_operational_state", () =>
+    clearPostOperationalState(redis, postId),
   );
   await attempt("highlight_baseline", () =>
     clearHighlightManagementBaselineForPost(redis, postId),

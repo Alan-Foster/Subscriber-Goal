@@ -119,6 +119,18 @@ describe("Community Highlights manager", () => {
       "t3_other5",
     ];
     const harness = createHarness(ids);
+    const expiration = new Date(Date.now() + 60 * 60 * 1000);
+    harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
+      harness.getIds().map((postId) => ({
+        postId: postId as `t3_${string}`,
+        ...(postId === "t3_oldgoal"
+          ? {
+              highlightLabel: "EVENT" as const,
+              highlightedUntil: expiration,
+            }
+          : {}),
+      })),
+    );
     harness.target.highlight.mockRejectedValueOnce(new Error("write failed"));
 
     const result = await highlightAndVerifyPost(
@@ -134,6 +146,40 @@ describe("Community Highlights manager", () => {
       rollbackOutcome: "restored",
     });
     expect(harness.getIds()).toEqual(ids);
+    expect(harness.posts.get("t3_oldgoal")?.highlight).toHaveBeenCalledWith({
+      highlightUntil: expiration,
+      highlightLabelType: "EVENT",
+    });
+  });
+
+  it("does not restore a managed highlight whose expiration passed during rollback", async () => {
+    const ids = [
+      "t3_oldgoal",
+      "t3_other1",
+      "t3_other2",
+      "t3_other3",
+      "t3_other4",
+      "t3_other5",
+    ];
+    const harness = createHarness(ids);
+    const expiration = new Date(Date.now() - 1_000);
+    harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
+      harness.getIds().map((postId) => ({
+        postId: postId as `t3_${string}`,
+        ...(postId === "t3_oldgoal" ? { highlightedUntil: expiration } : {}),
+      })),
+    );
+    harness.target.highlight.mockRejectedValueOnce(new Error("write failed"));
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      harness.target,
+      { ...verification, removableManagedPostIds: ["t3_oldgoal"] },
+    );
+
+    expect(result.rollbackOutcome).toBe("expired");
+    expect(harness.posts.get("t3_oldgoal")?.highlight).not.toHaveBeenCalled();
   });
 
   it("refetches and retries once when reordering races with another moderator", async () => {
@@ -155,6 +201,35 @@ describe("Community Highlights manager", () => {
 
     expect(result.reorderOutcome).toBe("reordered");
     expect(harness.subreddit.reorderHighlightedPosts).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves target label and expiration while reordering", async () => {
+    const harness = createHarness(["t3_a"]);
+    const expiration = new Date(Date.now() + 60 * 60 * 1000);
+    harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
+      harness.getIds().map((postId) => ({
+        postId: postId as `t3_${string}`,
+        ...(postId === "t3_target"
+          ? {
+              highlightLabel: "MEGATHREAD" as const,
+              highlightedUntil: expiration,
+            }
+          : {}),
+      })),
+    );
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      harness.target,
+      verification,
+    );
+
+    expect(result).toMatchObject({
+      status: "highlighted",
+      reorderOutcome: "reordered",
+      issues: [],
+    });
   });
 
   it("does not highlight when a full-capacity removal is a silent no-op", async () => {

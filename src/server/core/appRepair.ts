@@ -196,6 +196,7 @@ async function processDueAppRepairUnderLease({
         if (
           !targetStopped &&
           !result.moderatorOverride &&
+          !result.failureCategories?.includes("post_state") &&
           (result.status === "existing_not_highlighted" ||
             result.reconciliationOutcome === "degraded" ||
             result.reconciliationOutcome === "failed")

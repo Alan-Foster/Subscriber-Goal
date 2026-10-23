@@ -8,9 +8,9 @@ export const inviteNewSubsDataWikiPage = "invite-new-subs-data";
 export const inviteNewSubsWikiVersion = "v2" as const;
 export const inviteNewSubsDataWikiVersion = "v1" as const;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
-export const inviteNewSubsRecipient = "Alan-Foster";
 export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
 export const inviteNewSubsRetentionSeconds = 7 * 24 * 60 * 60;
+export const inviteNewSubsRecipientCooldownSeconds = 30 * 24 * 60 * 60;
 export const inviteNewSubsDeliverySpacingMs = 60_000;
 export const inviteNewSubsSchemaVersion = 1;
 export const inviteNewSubsSource = "reddit/subreddits/new";
@@ -20,6 +20,8 @@ const inviteNewSubsGateStateKey = "invite_new_subs:gate_state:v1";
 const inviteNewSubsBatchIdentityKey = "invite_new_subs:batch_identity:v1";
 const inviteNewSubsSeenKeyPrefix = "invite_new_subs:seen:v2";
 const inviteNewSubsDeliveryClaimKeyPrefix = "invite_new_subs:delivery_claim:v2";
+const inviteNewSubsRecipientCooldownKeyPrefix =
+  "invite_new_subs:recipient_cooldown:v1";
 const subredditIdPattern = /^t5_[a-z0-9]+$/i;
 const displayNamePattern = /^[a-z0-9_]+$/i;
 const utcIsoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
@@ -49,6 +51,7 @@ export type InviteNewSubsStatus =
   | "no_moderator"
   | "queued"
   | "schedule_failed"
+  | "cooldown_suppressed"
   | "messaged"
   | "dm_failed";
 
@@ -97,6 +100,7 @@ export type InviteNewSubsPollResult = {
 export type InviteNewSubsDeliveryResult =
   | "invalid"
   | "duplicate"
+  | "recipient_cooldown"
   | "messaged"
   | "dm_failed";
 
@@ -510,9 +514,37 @@ export async function processInviteNewSubsDelivery({
   });
   if ((await redis.get(claimKey)) !== claimToken) return "duplicate";
 
+  const recipient = normalizeRedditUsername(job.topModerator);
+  const recipientCooldownKey = inviteNewSubsRecipientCooldownKey(recipient);
+  const recipientClaim = JSON.stringify({
+    token: `${nowMs}:${Math.random().toString(36).slice(2)}`,
+    username: recipient.toLowerCase(),
+    subredditId: job.subredditId,
+    claimedAt: nowMs,
+  });
+  await redis.set(recipientCooldownKey, recipientClaim, {
+    nx: true,
+    expiration: recipientCooldownExpirationDate(nowMs),
+  });
+  if ((await redis.get(recipientCooldownKey)) !== recipientClaim) {
+    await updateInviteNewSubsRecord(redis, job.subredditId, nowMs, {
+      status: "cooldown_suppressed",
+      topModerator: job.topModerator,
+      isNsfw: job.isNsfw,
+    });
+    logDiagnostic("info", "invite_new_subs_recipient_cooldown_suppressed", {
+      workflow: "invite_new_subs",
+      phase: "delivery",
+      subredditId: job.subredditId,
+      subredditName: job.subredditName,
+      recipientUsername: recipient.toLowerCase(),
+    });
+    return "recipient_cooldown";
+  }
+
   try {
     await reddit.sendPrivateMessage({
-      to: inviteNewSubsRecipient,
+      to: recipient,
       subject: inviteNewSubsSubject,
       text: job.renderedMessage,
     });
@@ -656,7 +688,7 @@ export function isInviteNewSubsDeliveryJob(
     typeof value.subredditName === "string" &&
     normalizeSubredditName(value.subredditName).length > 0 &&
     typeof value.topModerator === "string" &&
-    value.topModerator.trim().length > 0 &&
+    normalizeRedditUsername(value.topModerator).length > 0 &&
     typeof value.isNsfw === "boolean" &&
     typeof value.renderedMessage === "string" &&
     value.renderedMessage.trim().length > 0
@@ -687,12 +719,24 @@ function normalizeSubredditName(value: string): string {
   return value.trim().replace(/^r\//i, "").toLowerCase();
 }
 
+function normalizeRedditUsername(value: string): string {
+  return value.trim().replace(/^u\//i, "");
+}
+
 function inviteNewSubsSeenKey(subredditId: SubredditId): string {
   return `${inviteNewSubsSeenKeyPrefix}:${subredditId.toLowerCase()}`;
 }
 
 function expirationDate(nowMs: number): Date {
   return new Date(nowMs + inviteNewSubsRetentionSeconds * 1000);
+}
+
+function inviteNewSubsRecipientCooldownKey(username: string): string {
+  return `${inviteNewSubsRecipientCooldownKeyPrefix}:${encodeURIComponent(username.toLowerCase())}`;
+}
+
+function recipientCooldownExpirationDate(nowMs: number): Date {
+  return new Date(nowMs + inviteNewSubsRecipientCooldownSeconds * 1000);
 }
 
 async function reserveInviteNewSubsRecord(

@@ -38,6 +38,12 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
+import {
+  clearPostOperationalState,
+  getPostOperationalState,
+  savePostOperationalState,
+} from "../data/postOperationalState";
+import { scheduleHighlightRepair } from "../data/highlightRepair";
 
 async function cleanupInactivePost(
   postId: string,
@@ -314,6 +320,53 @@ export async function onPostsUpdaterJob(): Promise<void> {
           `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
         );
         continue;
+      }
+      const archived = post.archived === true;
+      const locked = post.locked === true;
+      const previousOperationalState = await getPostOperationalState(
+        redis,
+        postId,
+      );
+      if (archived) {
+        await savePostOperationalState(redis, {
+          postId,
+          archived: true,
+          locked,
+          highlightBlocked: previousOperationalState?.highlightBlocked ?? false,
+          updatedAt: Date.now(),
+        });
+        logDiagnostic("info", "subscriber_goal_post_archived", {
+          workflow: "post_update",
+          phase: "render_skipped",
+          postId,
+          locked,
+        });
+        if (subGoalData.completedTime) await cancelUpdates(redis, postId);
+        continue;
+      }
+      if (previousOperationalState?.archived) {
+        await clearPostOperationalState(redis, postId);
+        await scheduleHighlightRepair(redis, {
+          delayMs: 0,
+          force: true,
+          reason: "post_unarchived",
+          targetPostId: postId,
+        });
+      } else if (locked) {
+        await savePostOperationalState(redis, {
+          postId,
+          archived: false,
+          locked: true,
+          highlightBlocked: false,
+          updatedAt: Date.now(),
+        });
+        logDiagnostic("info", "subscriber_goal_post_locked", {
+          workflow: "post_update",
+          phase: "render_continues",
+          postId,
+        });
+      } else {
+        await clearPostOperationalState(redis, postId);
       }
       await applyTextFallback(post, {
         goal: subGoalData.goal,

@@ -7,7 +7,7 @@ import {
   inviteNewSubsDeliveryJobName,
   inviteNewSubsHostSubreddit,
   inviteNewSubsMessageWikiPage,
-  inviteNewSubsRecipient,
+  inviteNewSubsRecipientCooldownSeconds,
   inviteNewSubsRetentionSeconds,
   inviteNewSubsSubject,
   inviteNewSubsWikiVersion,
@@ -33,9 +33,23 @@ class FakeRedis {
   readonly values = new Map<string, string>();
   readonly expirations = new Map<string, Date>();
   failNextRecordStatus: string | undefined;
+  nowMs: number | undefined;
 
   async get(key: string): Promise<string | undefined> {
+    this.expireIfNeeded(key);
     return this.values.get(key);
+  }
+
+  private expireIfNeeded(key: string): void {
+    const expiration = this.expirations.get(key);
+    if (
+      this.nowMs !== undefined &&
+      expiration !== undefined &&
+      expiration.getTime() <= this.nowMs
+    ) {
+      this.values.delete(key);
+      this.expirations.delete(key);
+    }
   }
 
   async set(
@@ -43,6 +57,7 @@ class FakeRedis {
     value: string,
     options?: { nx?: boolean; expiration?: Date },
   ): Promise<string> {
+    this.expireIfNeeded(key);
     if (options?.nx && this.values.has(key)) return "";
     if (this.failNextRecordStatus) {
       let status: unknown;
@@ -608,21 +623,24 @@ describe("processInviteNewSubsDelivery", () => {
     renderedMessage: "Detected r/NewCommunity for u/FoundingMod.",
   };
 
-  const seedQueuedRecord = (redis: FakeRedis) => {
+  const seedQueuedRecord = (
+    redis: FakeRedis,
+    deliveryJob: InviteNewSubsDeliveryJob = job,
+  ) => {
     redis.values.set(
-      "invite_new_subs:seen:v2:t5_newcommunity",
+      `invite_new_subs:seen:v2:${deliveryJob.subredditId.toLowerCase()}`,
       JSON.stringify({
         status: "queued",
-        subredditId: job.subredditId,
-        subredditName: job.subredditName,
+        subredditId: deliveryJob.subredditId,
+        subredditName: deliveryJob.subredditName,
         updatedAt: Date.now(),
-        topModerator: job.topModerator,
-        isNsfw: job.isNsfw,
+        topModerator: deliveryJob.topModerator,
+        isNsfw: deliveryJob.isNsfw,
       }),
     );
   };
 
-  it("sends to the fixed test recipient only once", async () => {
+  it("sends to the top moderator only once for the same subreddit", async () => {
     const redis = new FakeRedis();
     seedQueuedRecord(redis);
     const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
@@ -642,15 +660,158 @@ describe("processInviteNewSubsDelivery", () => {
     expect(second).toBe("duplicate");
     expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
     expect(reddit.sendPrivateMessage).toHaveBeenCalledWith({
-      to: inviteNewSubsRecipient,
+      to: job.topModerator,
       subject: inviteNewSubsSubject,
       text: job.renderedMessage,
     });
   });
 
+  it("suppresses another subreddit for the same moderator for 30 days", async () => {
+    const now = Date.parse("2026-10-23T12:00:00Z");
+    const redis = new FakeRedis();
+    const secondJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_secondcommunity",
+      subredditName: "SecondCommunity",
+      renderedMessage: "Detected r/SecondCommunity for u/FoundingMod.",
+    };
+    seedQueuedRecord(redis);
+    seedQueuedRecord(redis, secondJob);
+    const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
+
+    expect(
+      await processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job,
+        now: () => now,
+      }),
+    ).toBe("messaged");
+    const cooldownKey = "invite_new_subs:recipient_cooldown:v1:foundingmod";
+    const originalExpiration = redis.expirations.get(cooldownKey);
+
+    expect(
+      await processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job: secondJob,
+        now: () => now + 24 * 60 * 60 * 1000,
+      }),
+    ).toBe("recipient_cooldown");
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+    expect(redis.expirations.get(cooldownKey)).toEqual(originalExpiration);
+    expect(originalExpiration?.getTime()).toBe(
+      now + inviteNewSubsRecipientCooldownSeconds * 1000,
+    );
+    expect(
+      JSON.parse(
+        redis.values.get("invite_new_subs:seen:v2:t5_secondcommunity") ?? "{}",
+      ),
+    ).toMatchObject({ status: "cooldown_suppressed" });
+  });
+
+  it("normalizes case, whitespace, and u/ prefixes for recipient cooldowns", async () => {
+    const redis = new FakeRedis();
+    const secondJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_secondcommunity",
+      subredditName: "SecondCommunity",
+      topModerator: "  u/fOuNdInGmOd  ",
+    };
+    seedQueuedRecord(redis);
+    seedQueuedRecord(redis, secondJob);
+    const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
+
+    const results = await Promise.all([
+      processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job,
+      }),
+      processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job: secondJob,
+      }),
+    ]);
+
+    expect(results.sort()).toEqual(["messaged", "recipient_cooldown"]);
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+  });
+
+  it("allows different moderators to receive messages", async () => {
+    const redis = new FakeRedis();
+    const secondJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_secondcommunity",
+      subredditName: "SecondCommunity",
+      topModerator: "AnotherMod",
+    };
+    seedQueuedRecord(redis);
+    seedQueuedRecord(redis, secondJob);
+    const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
+
+    expect(
+      await Promise.all([
+        processInviteNewSubsDelivery({
+          reddit: reddit as unknown as RedditClient,
+          redis: asRedis(redis),
+          job,
+        }),
+        processInviteNewSubsDelivery({
+          reddit: reddit as unknown as RedditClient,
+          redis: asRedis(redis),
+          job: secondJob,
+        }),
+      ]),
+    ).toEqual(["messaged", "messaged"]);
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows another message after the recipient cooldown expires", async () => {
+    const now = Date.parse("2026-10-23T12:00:00Z");
+    const redis = new FakeRedis();
+    redis.nowMs = now;
+    const secondJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_secondcommunity",
+      subredditName: "SecondCommunity",
+    };
+    seedQueuedRecord(redis);
+    seedQueuedRecord(redis, secondJob);
+    const reddit = { sendPrivateMessage: vi.fn().mockResolvedValue(undefined) };
+
+    expect(
+      await processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job,
+        now: () => now,
+      }),
+    ).toBe("messaged");
+    const afterCooldown = now + inviteNewSubsRecipientCooldownSeconds * 1000;
+    redis.nowMs = afterCooldown;
+
+    expect(
+      await processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job: secondJob,
+        now: () => afterCooldown,
+      }),
+    ).toBe("messaged");
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("records a failed DM and never retries it", async () => {
     const redis = new FakeRedis();
     seedQueuedRecord(redis);
+    const secondJob: InviteNewSubsDeliveryJob = {
+      ...job,
+      subredditId: "t5_secondcommunity",
+      subredditName: "SecondCommunity",
+    };
+    seedQueuedRecord(redis, secondJob);
     const reddit = {
       sendPrivateMessage: vi.fn().mockRejectedValue(new Error("blocked")),
     };
@@ -669,6 +830,17 @@ describe("processInviteNewSubsDelivery", () => {
         job,
       }),
     ).toBe("duplicate");
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+    expect(
+      redis.values.has("invite_new_subs:recipient_cooldown:v1:foundingmod"),
+    ).toBe(true);
+    expect(
+      await processInviteNewSubsDelivery({
+        reddit: reddit as unknown as RedditClient,
+        redis: asRedis(redis),
+        job: secondJob,
+      }),
+    ).toBe("recipient_cooldown");
     expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
   });
 

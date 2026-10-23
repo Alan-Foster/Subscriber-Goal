@@ -48,7 +48,7 @@ export async function reconcileCompletedGoal({
   appSettings?: ServerAppSettings;
   mutationLease?: CommunityGoalMutationLease;
 }): Promise<CompletedGoalReconciliationResult> {
-  if (lifecycleSource !== "upgrade") {
+  if (lifecycleSource !== "upgrade" && lifecycleSource !== "install") {
     return { outcome: "completed_no_recovery", sourcePostId };
   }
   if (!autoCreateNextGoal) {

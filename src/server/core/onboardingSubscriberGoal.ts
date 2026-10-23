@@ -29,6 +29,8 @@ import {
 } from "../utils/highlightFailureNotifications";
 import { getQueuedUpdates, getTrackedPosts } from "../data/updaterData";
 import {
+  autoCreateNextGoalSuccessorsKey,
+  cancelAutoCreateNextGoal,
   checkCompletionStatus,
   getSubGoalData,
   postGoalSuffix,
@@ -72,8 +74,13 @@ import {
 import {
   getHighlightManagementBaseline,
   saveHighlightManagementBaseline,
+  type HighlightModeratorOverride,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
+import {
+  clearHighlightContradictionIncident,
+  recordHighlightContradiction,
+} from "../data/highlightContradiction";
 import {
   appRepairStateKey,
   scheduleHighlightRepair,
@@ -87,6 +94,11 @@ import {
   isSubscriberGoalPostRetired,
   retireSubscriberGoalPost,
 } from "./postRetirement";
+import {
+  clearPostOperationalState,
+  getPostOperationalState,
+  savePostOperationalState,
+} from "../data/postOperationalState";
 
 export {
   onboardingGoalBaseDelayMs,
@@ -244,8 +256,17 @@ type CandidatePost = {
   postData?: unknown;
   customPostData?: unknown;
   removedByCategory?: string;
+  archived?: boolean;
+  locked?: boolean;
   isHighlighted?: () => Promise<boolean>;
-  highlight?: () => Promise<void>;
+  highlight?: (options?: {
+    highlightUntil?: Date;
+    highlightLabelType?:
+      | "ANNOUNCEMENT"
+      | "EVENT"
+      | "MEGATHREAD"
+      | "SHOW_POST_FLAIR";
+  }) => Promise<void>;
   unhighlight?: () => Promise<void>;
   title?: string;
   permalink?: string;
@@ -276,7 +297,7 @@ export type OnboardingHighlightEnsuranceResult =
     source?: OnboardingExistingSource;
     classification?: OnboardingGoalClassification;
     classificationConfidence?: GoalClassificationConfidence;
-    moderatorOverride?: "unhighlighted" | "reordered";
+    moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
     selectedWasAlreadyHighlighted?: boolean;
     candidateCount: number;
     highlightedClassicCount: number;
@@ -1557,6 +1578,20 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       // This lets legacy communities converge when an older completed or active
       // post happens to be the only custom post Reddit renders.
       const selected = newestGoalCandidate(activeGoals);
+      for (const olderClassic of candidates.filter(
+        (candidate) =>
+          candidate.postId !== selected.postId &&
+          candidate.classification === "classic" &&
+          candidate.classificationConfidence !== "ambiguous" &&
+          (selected.createdAtMs === undefined ||
+            candidate.createdAtMs === undefined ||
+            candidate.createdAtMs <= selected.createdAtMs),
+      )) {
+        await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+          [olderClassic.postId]: selected.postId,
+        });
+        await cancelAutoCreateNextGoal(redis, olderClassic.postId);
+      }
       const selectedWasAlreadyHighlighted = selected.isHighlighted;
       const reconciliation = await reconcileCanonicalClassicGoal({
         reddit,
@@ -1785,7 +1820,7 @@ async function reconcileCanonicalClassicGoal({
 }): Promise<{
   highlightResult: HighlightResult;
   notificationOutcome: HighlightNotificationOutcome;
-  moderatorOverride?: "unhighlighted" | "reordered";
+  moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
 }> {
   const baseline = await getHighlightManagementBaseline(redis);
   const sameCanonical = baseline?.canonicalPostId === selected.postId;
@@ -1817,41 +1852,66 @@ async function reconcileCanonicalClassicGoal({
   }
 
   if (
-    sameCanonical &&
     liveListed !== undefined &&
     livePostState !== undefined &&
     liveListed !== livePostState
   ) {
+    const contradiction = await recordHighlightContradiction(redis, {
+      postId: selected.postId,
+      listed: liveListed,
+      postState: livePostState,
+      nowMs,
+    });
     const result = createFailedHighlightResult(
       selected.postId,
       "verification",
       "Reddit reported contradictory Community Highlight state; moderator intent was not recorded.",
     );
     await scheduleHighlightRepair(redis, {
-      delayMs: 5 * 60 * 1000,
+      delayMs: Math.min(
+        60 * 60 * 1000,
+        5 * 60 * 1000 * 2 ** (contradiction.consecutiveCount - 1),
+      ),
       force: true,
       reason: "contradictory_highlight_state",
       nowMs,
     });
-    return { highlightResult: result, notificationOutcome: "not_requested" };
+    let notificationOutcome: HighlightNotificationOutcome = "not_requested";
+    if (notifyOnFailure && contradiction.consecutiveCount >= 3) {
+      notificationOutcome = await notifyHighlightFailureIncident({
+        reddit,
+        redis,
+        postId: selected.postId,
+        result,
+        subredditId: subreddit.id,
+        subredditName: subreddit.name,
+        postTitle: selected.post.title ?? "Subscriber Goal",
+        postUrl: getPostUrl(selected.post),
+        errorMessage: result.errorMessage,
+        postOrigin: "existing",
+        nowMs,
+      });
+    }
+    return { highlightResult: result, notificationOutcome };
   }
 
-  let moderatorOverride: "unhighlighted" | "reordered" | undefined;
-  if (sameCanonical && baseline) {
-    moderatorOverride =
-      baseline.moderatorOverride !== "none"
-        ? baseline.moderatorOverride
-        : liveListed === false && livePostState === false
-          ? "unhighlighted"
-          : liveListed === true &&
-              livePostState === true &&
-              baseline.position !== null &&
-              livePosition !== baseline.position
-            ? "reordered"
-            : undefined;
+  if (
+    liveListed !== undefined &&
+    livePostState !== undefined &&
+    liveListed === livePostState
+  ) {
+    await clearHighlightContradictionIncident(
+      redis,
+      sameCanonical ? selected.postId : undefined,
+    );
   }
 
-  if (moderatorOverride) {
+  if (
+    sameCanonical &&
+    baseline?.migratedFromVersion === "highlight_management_v1" &&
+    liveListed === true &&
+    livePostState === true
+  ) {
     const health = await checkAppAccountHealth({
       reddit,
       redis,
@@ -1867,7 +1927,7 @@ async function reconcileCanonicalClassicGoal({
             subreddit,
             {
               id: selected.postId,
-              highlight: () => selected.post.highlight!(),
+              highlight: (options) => selected.post.highlight!(options),
               ...(selected.post.isHighlighted
                 ? { isHighlighted: () => selected.post.isHighlighted!() }
                 : {}),
@@ -1892,10 +1952,105 @@ async function reconcileCanonicalClassicGoal({
       const position = finalSnapshot.findIndex(
         ({ postId }) => postId === selected.postId,
       );
+      const finalInfo = position >= 0 ? finalSnapshot[position] : undefined;
+      await saveHighlightManagementBaseline(redis, {
+        canonicalPostId: selected.postId,
+        highlighted: true,
+        position,
+        highlightLabel:
+          finalInfo?.highlightLabel ?? baseline?.highlightLabel ?? null,
+        highlightedUntil:
+          finalInfo?.highlightedUntil?.getTime() ??
+          baseline?.highlightedUntil ??
+          null,
+        moderatorOverride: baseline.moderatorOverride,
+        reconciledAt: nowMs,
+      });
+    }
+    return {
+      highlightResult,
+      notificationOutcome: "not_requested",
+      ...(baseline.moderatorOverride === "none"
+        ? {}
+        : { moderatorOverride: baseline.moderatorOverride }),
+    };
+  }
+
+  let moderatorOverride:
+    | Exclude<HighlightModeratorOverride, "none">
+    | undefined;
+  if (sameCanonical && baseline) {
+    moderatorOverride =
+      baseline.moderatorOverride !== "none"
+        ? baseline.moderatorOverride
+        : liveListed === false && livePostState === false
+          ? baseline.highlightedUntil !== null &&
+            nowMs >= baseline.highlightedUntil
+            ? "expired"
+            : "unhighlighted"
+          : liveListed === true &&
+              livePostState === true &&
+              baseline.position !== null &&
+              livePosition !== baseline.position
+            ? "reordered"
+            : undefined;
+  }
+
+  if (moderatorOverride) {
+    const health = await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      notify: false,
+      nowMs,
+    });
+    const highlightResult =
+      health.healthy && health.status === "healthy"
+        ? await cleanupManagedHighlightsPreservingTarget(
+            reddit,
+            subreddit,
+            {
+              id: selected.postId,
+              ...(selected.post.archived === undefined
+                ? {}
+                : { archived: selected.post.archived }),
+              ...(selected.post.locked === undefined
+                ? {}
+                : { locked: selected.post.locked }),
+              highlight: (options) => selected.post.highlight!(options),
+              ...(selected.post.isHighlighted
+                ? { isHighlighted: () => selected.post.isHighlighted!() }
+                : {}),
+            },
+            {
+              maxWaitMs:
+                highlightVerification?.maxWaitMs ??
+                highlightVerificationMaxWaitMs,
+              intervalMs:
+                highlightVerification?.intervalMs ??
+                highlightVerificationIntervalMs,
+              removableManagedPostIds,
+            },
+          )
+        : createFailedHighlightResult(
+            selected.postId,
+            "permission",
+            "Manage Posts permission could not be verified, so no Community Highlight changes were attempted.",
+          );
+    if (highlightResult.issues.length === 0) {
+      const finalSnapshot = await subreddit.getHighlightedPosts();
+      const position = finalSnapshot.findIndex(
+        ({ postId }) => postId === selected.postId,
+      );
+      const finalInfo = position >= 0 ? finalSnapshot[position] : undefined;
       await saveHighlightManagementBaseline(redis, {
         canonicalPostId: selected.postId,
         highlighted: position >= 0,
         position: position >= 0 ? position : null,
+        highlightLabel: finalInfo?.highlightLabel ?? baseline!.highlightLabel,
+        highlightedUntil:
+          finalInfo?.highlightedUntil?.getTime() ?? baseline!.highlightedUntil,
         moderatorOverride,
         reconciledAt: nowMs,
       });
@@ -1906,6 +2061,14 @@ async function reconcileCanonicalClassicGoal({
         force: true,
         reason: "moderator_intent_cleanup_degraded",
         nowMs,
+      });
+    }
+    for (const obsoletePostId of highlightResult.removedManagedHighlightIds) {
+      logDiagnostic("info", "obsolete_classic_rehighlight_removed", {
+        workflow: "onboarding_highlight_ensurance",
+        phase: "obsolete_cleanup",
+        canonicalPostId: selected.postId,
+        obsoletePostId,
       });
     }
     return {
@@ -1928,13 +2091,30 @@ async function reconcileCanonicalClassicGoal({
     reconciliation.highlightResult.status === "highlighted" &&
     reconciliation.highlightResult.issues.length === 0
   ) {
+    const finalSnapshot = await subreddit.getHighlightedPosts();
+    const finalInfo = finalSnapshot.find(
+      ({ postId }) => postId === selected.postId,
+    );
     await saveHighlightManagementBaseline(redis, {
       canonicalPostId: selected.postId,
       highlighted: true,
       position: 0,
+      highlightLabel: finalInfo?.highlightLabel ?? null,
+      highlightedUntil: finalInfo?.highlightedUntil?.getTime() ?? null,
       moderatorOverride: "none",
       reconciledAt: nowMs,
     });
+  }
+  if (sameCanonical) {
+    for (const obsoletePostId of reconciliation.highlightResult
+      .removedManagedHighlightIds) {
+      logDiagnostic("info", "obsolete_classic_rehighlight_removed", {
+        workflow: "onboarding_highlight_ensurance",
+        phase: "obsolete_cleanup",
+        canonicalPostId: selected.postId,
+        obsoletePostId,
+      });
+    }
   }
   void reconciliationContext;
   return reconciliation;
@@ -1961,6 +2141,21 @@ async function highlightExistingGoal({
   notificationOutcome: HighlightNotificationOutcome;
 }> {
   const subreddit = await reddit.getCurrentSubreddit();
+  const operationalState = await getPostOperationalState(
+    redis,
+    selected.postId,
+  );
+  if (selected.post.archived && operationalState?.highlightBlocked) {
+    const highlightResult = createFailedHighlightResult(
+      selected.postId,
+      "post_state",
+      "The archived Subscriber Goal cannot be highlighted until Reddit reports that it is eligible again.",
+    );
+    return { highlightResult, notificationOutcome: "not_requested" };
+  }
+  if (!selected.post.archived && operationalState?.highlightBlocked) {
+    await clearPostOperationalState(redis, selected.postId);
+  }
   const health = await checkAppAccountHealth({
     reddit,
     redis,
@@ -1987,7 +2182,13 @@ async function highlightExistingGoal({
             subreddit,
             {
               id: selected.postId,
-              highlight: () => selected.post.highlight!(),
+              ...(selected.post.archived === undefined
+                ? {}
+                : { archived: selected.post.archived }),
+              ...(selected.post.locked === undefined
+                ? {}
+                : { locked: selected.post.locked }),
+              highlight: (options) => selected.post.highlight!(options),
               ...(selected.post.unhighlight
                 ? { unhighlight: () => selected.post.unhighlight!() }
                 : {}),
@@ -2005,6 +2206,18 @@ async function highlightExistingGoal({
               ...(removableManagedPostIds ? { removableManagedPostIds } : {}),
             },
           );
+  if (
+    selected.post.archived &&
+    highlightResult.issues.some(({ category }) => category === "post_state")
+  ) {
+    await savePostOperationalState(redis, {
+      postId: selected.postId,
+      archived: true,
+      locked: selected.post.locked === true,
+      highlightBlocked: true,
+      updatedAt: nowMs,
+    });
+  }
   if (highlightResult.issues.length === 0) {
     await clearHighlightFailureIncident(redis, selected.postId);
     return { highlightResult, notificationOutcome: "not_requested" };
