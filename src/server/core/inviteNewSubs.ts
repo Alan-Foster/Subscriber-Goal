@@ -1038,20 +1038,18 @@ export async function processInviteNewSubsPoll({
   const unchanged =
     previousGateState === "enabled" && previousBatchMatch.matches;
   let baselineReason: InviteNewSubsBaselineReason = "none";
-  if (!initialIneligibleBatch) {
-    if (fullBatchAllUnseen) {
-      baselineReason = "full_batch_all_unseen";
-    } else if (previousGateState === "disabled") {
-      baselineReason = "gate_reenabled";
-    } else if (initialPublisherBatch) {
-      baselineReason = "publisher_startup";
-    } else if (previousGateState !== "enabled") {
-      baselineReason = "gate_reenabled";
-    } else if (allIdsAreAbsent && unchanged) {
-      baselineReason = "same_batch_state_loss";
-    } else if (batch.schemaVersion === 1 && allIdsAreAbsent) {
-      baselineReason = "legacy_all_unseen";
-    }
+  if (fullBatchAllUnseen) {
+    baselineReason = "full_batch_all_unseen";
+  } else if (previousGateState === "disabled") {
+    baselineReason = "gate_reenabled";
+  } else if (initialPublisherBatch) {
+    baselineReason = "publisher_startup";
+  } else if (allIdsAreAbsent && unchanged) {
+    baselineReason = "same_batch_state_loss";
+  } else if (batch.schemaVersion === 1 && allIdsAreAbsent) {
+    baselineReason = "legacy_all_unseen";
+  } else if (previousGateState !== "enabled" && !initialIneligibleBatch) {
+    baselineReason = "gate_reenabled";
   }
   const requiresBaseline = baselineReason !== "none";
   const classification: InviteNewSubsBatchClassification = {

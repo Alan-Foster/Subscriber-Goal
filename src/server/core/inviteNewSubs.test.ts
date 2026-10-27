@@ -988,6 +988,207 @@ describe("processInviteNewSubsPoll", () => {
     expect(runJob).toHaveBeenCalledTimes(11);
   });
 
+  it("baselines an initially ineligible session when its gate is re-enabled", async () => {
+    const records = [discoveryRecord("t5_gateineligible", "GateIneligible")];
+    const reddit = wikiReddit({ data: discoveryV2Json(records) });
+    reddit.getSubredditByName.mockResolvedValue({
+      id: records[0]!.id,
+      name: records[0]!.displayName,
+      type: "public",
+      nsfw: false,
+    });
+    reddit.getModerators.mockReturnValue({
+      get: vi.fn().mockResolvedValue([{ username: "GateOwner" }]),
+    });
+    const redis = new FakeRedis();
+    const runJob = vi.fn().mockResolvedValue("standard-job");
+
+    expect(await runPoll(reddit, redis, runJob)).toMatchObject({
+      status: "processed",
+      discovered: 1,
+      queued: 1,
+    });
+
+    reddit.getWikiPage.mockImplementation(async (_subreddit, page) => ({
+      content:
+        page === inviteNewSubsControlWikiPage
+          ? "disabled"
+          : page === inviteNewSubsMessageWikiPage
+            ? inviteNewSubsMessageTemplate
+            : discoveryV2Json(records),
+      wikiVersion: "v1",
+      revisionId: "disabled",
+      revisionDate: new Date("2026-10-22T19:00:30Z"),
+    }));
+    expect(await runPoll(reddit, redis, runJob)).toMatchObject({
+      status: "disabled",
+    });
+
+    reddit.getWikiPage.mockImplementation(async (_subreddit, page) => ({
+      content:
+        page === inviteNewSubsControlWikiPage
+          ? "enabled"
+          : page === inviteNewSubsMessageWikiPage
+            ? inviteNewSubsMessageTemplate
+            : discoveryV2Json(records, "2026-10-22T19:01:00Z"),
+      wikiVersion: "v1",
+      revisionId: "re-enabled",
+      revisionDate: new Date("2026-10-22T19:01:00Z"),
+    }));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    expect(
+      await runPoll(reddit, redis, runJob, Date.parse("2026-10-22T19:01:00Z")),
+    ).toEqual({
+      status: "baseline",
+      discovered: 1,
+      queued: 0,
+      skipped: 1,
+    });
+    expect(
+      diagnosticPayload(info, "invite_new_subs_batch_classified"),
+    ).toMatchObject({
+      requiresBaseline: true,
+      baselineReason: "gate_reenabled",
+      publisherSessionStatus: "not_eligible",
+    });
+  });
+
+  it("baselines state loss for an initially ineligible session", async () => {
+    const records = [discoveryRecord("t5_lostineligible", "LostIneligible")];
+    const reddit = wikiReddit({ data: discoveryV2Json(records) });
+    reddit.getSubredditByName.mockResolvedValue({
+      id: records[0]!.id,
+      name: records[0]!.displayName,
+      type: "public",
+      nsfw: false,
+    });
+    reddit.getModerators.mockReturnValue({
+      get: vi.fn().mockResolvedValue([{ username: "LostOwner" }]),
+    });
+    const redis = new FakeRedis();
+    const runJob = vi.fn().mockResolvedValue("standard-job");
+
+    expect(await runPoll(reddit, redis, runJob)).toMatchObject({
+      status: "processed",
+      discovered: 1,
+      queued: 1,
+    });
+    redis.values.delete("invite_new_subs:seen:v2:t5_lostineligible");
+    reddit.getWikiPage.mockImplementation(async (_subreddit, page) => ({
+      content:
+        page === inviteNewSubsControlWikiPage
+          ? "enabled"
+          : page === inviteNewSubsMessageWikiPage
+            ? inviteNewSubsMessageTemplate
+            : discoveryV2Json(records, "2026-10-22T19:01:00Z"),
+      wikiVersion: "v1",
+      revisionId: "state-loss",
+      revisionDate: new Date("2026-10-22T19:01:00Z"),
+    }));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    expect(
+      await runPoll(reddit, redis, runJob, Date.parse("2026-10-22T19:01:00Z")),
+    ).toEqual({
+      status: "baseline",
+      discovered: 1,
+      queued: 0,
+      skipped: 1,
+    });
+    expect(
+      diagnosticPayload(info, "invite_new_subs_batch_classified"),
+    ).toMatchObject({
+      allIdsAreAbsent: true,
+      requiresBaseline: true,
+      baselineReason: "same_batch_state_loss",
+      publisherSessionStatus: "not_eligible",
+    });
+  });
+
+  it("baselines a 25-of-25 batch even when its session was initially ineligible", async () => {
+    const records = Array.from({ length: 25 }, (_, index) =>
+      discoveryRecord(`t5_ineligiblefull${index}`, `IneligibleFull${index}`),
+    );
+    const reddit = wikiReddit({ data: discoveryV2Json(records) });
+    reddit.getSubredditByName.mockImplementation(async (name) =>
+      name === "SubGoal"
+        ? {
+            id: "t5_subgoal",
+            name: "SubGoal",
+            type: "restricted",
+            nsfw: false,
+          }
+        : {
+            id: records.find((record) => record.displayName === name)!.id,
+            name,
+            type: "public",
+            nsfw: false,
+          },
+    );
+    reddit.getModerators.mockReturnValue({
+      get: vi.fn().mockResolvedValue([{ username: "Alan-Foster" }]),
+    });
+    const redis = new FakeRedis();
+    redis.values.set(
+      "invite_new_subs:seen:v2:t5_ineligiblefull0",
+      JSON.stringify({
+        status: "messaged",
+        subredditId: records[0]!.id,
+        subredditName: records[0]!.displayName,
+        updatedAt: Date.parse("2026-10-22T18:59:00Z"),
+        isNsfw: false,
+      }),
+    );
+    const runJob = vi.fn().mockResolvedValue("delivery-job");
+
+    expect(await runPoll(reddit, redis, runJob)).toMatchObject({
+      status: "processed",
+      discovered: 24,
+      queued: 16,
+      skipped: 8,
+      rateLimited: 8,
+    });
+    for (const key of [...redis.values.keys()]) {
+      if (key.includes(":seen:v2:")) redis.values.delete(key);
+    }
+    redis.sortedSets.delete("invite_new_subs:delivery_queue:v1");
+    reddit.getWikiPage.mockImplementation(async (_subreddit, page) => ({
+      content:
+        page === inviteNewSubsControlWikiPage
+          ? "enabled"
+          : page === inviteNewSubsMessageWikiPage
+            ? inviteNewSubsMessageTemplate
+            : discoveryV2Json(records, "2026-10-22T19:01:00Z"),
+      wikiVersion: "v1",
+      revisionId: "full-state-loss",
+      revisionDate: new Date("2026-10-22T19:01:00Z"),
+    }));
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    expect(
+      await runPoll(reddit, redis, runJob, Date.parse("2026-10-22T19:01:00Z")),
+    ).toEqual({
+      status: "baseline",
+      discovered: 25,
+      queued: 1,
+      skipped: 25,
+    });
+    expect(runJob).toHaveBeenCalledTimes(17);
+    expect(runJob.mock.calls.at(-1)?.[0].data).toMatchObject({
+      deliveryKind: "full_batch_test",
+      subredditName: "SubGoal",
+    });
+    expect(
+      diagnosticPayload(info, "invite_new_subs_batch_classified"),
+    ).toMatchObject({
+      fullBatchAllUnseen: true,
+      requiresBaseline: true,
+      baselineReason: "full_batch_all_unseen",
+      publisherSessionStatus: "not_eligible",
+    });
+  });
+
   it("allows a second PRAW session to schedule its own startup test", async () => {
     const first = Array.from({ length: 10 }, (_, index) =>
       discoveryRecord(`t5_firstsession${index}`, `FirstSession${index}`),
