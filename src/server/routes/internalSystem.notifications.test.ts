@@ -11,6 +11,7 @@ const hoisted = vi.hoisted(() => ({
   incrBy: vi.fn(),
   expire: vi.fn(),
   onAppChanged: vi.fn(),
+  processInviteNewSubsDelivery: vi.fn(),
   processInviteNewSubsReport: vi.fn(),
 }));
 
@@ -38,8 +39,7 @@ vi.mock("../triggers/modAction", () => ({ onModAction: vi.fn() }));
 vi.mock("../triggers/scheduler", () => ({ onPostsUpdaterJob: vi.fn() }));
 vi.mock("../data/ctaActivity", () => ({ recordCommunityPostCreated: vi.fn() }));
 vi.mock("../core/inviteNewSubs", () => ({
-  isInviteNewSubsDeliveryJob: vi.fn(),
-  processInviteNewSubsDelivery: vi.fn(),
+  processInviteNewSubsDelivery: hoisted.processInviteNewSubsDelivery,
   processInviteNewSubsPoll: vi.fn(),
   processInviteNewSubsReport: hoisted.processInviteNewSubsReport,
 }));
@@ -176,6 +176,46 @@ describe("new-subreddit DM report scheduler route", () => {
     expect(json).toHaveBeenCalledWith({
       status: "error",
       message: "Failed to send new-subreddit DM report",
+    });
+  });
+});
+
+describe("new-subreddit DM delivery scheduler route", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const getHandler = (): Handler | undefined => {
+    let handler: Handler | undefined;
+    const router = {
+      post: (path: string, candidate: Handler) => {
+        if (path === internalRoutes.scheduler.inviteNewSubsDeliveryJob) {
+          handler = candidate;
+        }
+      },
+    } as unknown as Router;
+    registerInternalSystemRoutes(router);
+    return handler;
+  };
+
+  it("lets the delivery processor release malformed queue entries before returning 400", async () => {
+    const payload = { queueEntryId: "invalid-queue-entry" };
+    hoisted.processInviteNewSubsDelivery.mockResolvedValue("invalid");
+    const json = vi.fn();
+    const status = vi.fn().mockReturnValue({ json });
+
+    await getHandler()?.(
+      { body: { data: payload } } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(hoisted.processInviteNewSubsDelivery).toHaveBeenCalledWith({
+      reddit: expect.any(Object),
+      redis: expect.any(Object),
+      job: payload,
+    });
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "Invalid new-subreddit delivery job payload.",
     });
   });
 });

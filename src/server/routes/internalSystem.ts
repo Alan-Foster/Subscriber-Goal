@@ -13,7 +13,6 @@ import {
   processMilestoneNotificationBatch,
 } from "../core/milestoneNotifications";
 import {
-  isInviteNewSubsDeliveryJob,
   processInviteNewSubsDelivery,
   processInviteNewSubsPoll,
   processInviteNewSubsReport,
@@ -255,19 +254,19 @@ export function registerInternalSystemRoutes(router: Router): void {
     internalRoutes.scheduler.inviteNewSubsDeliveryJob,
     async (req, res): Promise<void> => {
       const payload = req.body?.data ?? req.body;
-      if (!isInviteNewSubsDeliveryJob(payload)) {
-        res.status(400).json({
-          status: "error",
-          message: "Invalid new-subreddit delivery job payload.",
-        });
-        return;
-      }
       try {
         const result = await processInviteNewSubsDelivery({
           reddit,
           redis,
           job: payload,
         });
+        if (result === "invalid") {
+          res.status(400).json({
+            status: "error",
+            message: "Invalid new-subreddit delivery job payload.",
+          });
+          return;
+        }
         res.json({ status: result });
       } catch (error) {
         logDiagnostic(
