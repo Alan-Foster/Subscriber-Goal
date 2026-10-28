@@ -41,6 +41,32 @@ const messageConfig = (body = inviteNewSubsMessageBody): string =>
 
 const inviteNewSubsMessageTemplate = messageConfig();
 
+const genericInviteNewSubsMessageTemplate = JSON.stringify({
+  schemaVersion: 1,
+  templates: [
+    {
+      id: "grow-quickly",
+      body: "To grow your subreddit quickly, use r/SubGoal and install the [official Subscriber Goal app](https://developers.reddit.com/apps/subscriber-goal). It adds a large pinned subscribe button at the top so users actually join the community. Hope that helps!",
+    },
+    {
+      id: "grow-faster",
+      body: "To grow your subreddit faster, check out r/SubGoal or install the [official Subscriber Goal app](https://developers.reddit.com/apps/subscriber-goal). It places a large pinned subscribe button near the top so new visitors actually join the subreddit. Good Luck!",
+    },
+    {
+      id: "turn-visitors-into-subscribers",
+      body: "To grow your sub faster, use r/SubGoal and install the [official Subscriber Goal app](https://developers.reddit.com/apps/subscriber-goal). It adds a big pinned subscribe button so people can join your community right from the top. GL!",
+    },
+    {
+      id: "clear-way-to-join",
+      body: "Use r/SubGoal and install the [official Subscriber Goal app](https://developers.reddit.com/apps/subscriber-goal). The app puts a large pinned subscribe button near the top, giving visitors a clear way to become members. Enjoy!",
+    },
+    {
+      id: "simple-growth-tool",
+      body: "You should use r/SubGoal and install the [official Subscriber Goal app](https://developers.reddit.com/apps/subscriber-goal). It adds a big pinned subscribe button at the top so visitors can join fast. Best of luck!",
+    },
+  ],
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -344,6 +370,31 @@ describe("parseInviteNewSubsMessageConfig", () => {
     ]);
   });
 
+  it("accepts the five generic wiki templates without placeholders", () => {
+    const parsed = parseInviteNewSubsMessageConfig(
+      genericInviteNewSubsMessageTemplate,
+    );
+
+    expect(parsed.templates).toHaveLength(5);
+    expect(parsed.templates[0]).toMatchObject({
+      id: "grow-quickly",
+      body: expect.stringContaining("To grow your subreddit quickly"),
+    });
+  });
+
+  it("accepts each supported placeholder as optional", () => {
+    for (const body of [
+      "Hello u/{{topModerator}}",
+      "Welcome to r/{{subredditName}}",
+      "NSFW: {{isNsfw}}",
+      "No personalization",
+    ]) {
+      expect(() =>
+        parseInviteNewSubsMessageConfig(messageConfig(body)),
+      ).not.toThrow();
+    }
+  });
+
   it.each([
     ["malformed JSON", "{", "valid JSON"],
     [
@@ -366,11 +417,6 @@ describe("parseInviteNewSubsMessageConfig", () => {
         ),
       }),
       "duplicated",
-    ],
-    [
-      "missing required placeholder",
-      messageConfig("Hello u/{{topModerator}}"),
-      "subredditName",
     ],
     [
       "unsupported placeholder",
@@ -1631,6 +1677,65 @@ describe("processInviteNewSubsPoll", () => {
         templateId: "template-2",
       }),
       runAt: new Date(now + 15_000),
+    });
+  });
+
+  it("queues a generic message unchanged with live recipient and subreddit metadata", async () => {
+    const now = Date.parse("2026-10-22T19:05:00Z");
+    const redis = new FakeRedis();
+    const reddit = wikiReddit({
+      template: genericInviteNewSubsMessageTemplate,
+    });
+    const runJob = vi.fn().mockResolvedValue("generic-job");
+    await runPoll(reddit, redis, runJob, now - 60_000);
+
+    const generic = discoveryRecord("t5_genericsub", "GenericSub");
+    reddit.getWikiPage.mockImplementation(async (_subreddit, page) => ({
+      content:
+        page === inviteNewSubsControlWikiPage
+          ? "enabled"
+          : page === inviteNewSubsMessageWikiPage
+            ? genericInviteNewSubsMessageTemplate
+            : discoveryJson(
+                [generic, discoveryRecord("t5_existing", "Existing")],
+                "2026-10-22T19:05:00Z",
+              ),
+      wikiVersion: "v1",
+      revisionId: "generic-message",
+      revisionDate: new Date(now),
+    }));
+    reddit.getSubredditByName.mockResolvedValue({
+      id: generic.id,
+      name: generic.displayName,
+      type: "public",
+      nsfw: false,
+    });
+    reddit.getModerators.mockReturnValue({
+      get: vi.fn().mockResolvedValue([{ username: "GenericOwner" }]),
+    });
+
+    expect(await runPoll(reddit, redis, runJob, now)).toMatchObject({
+      status: "processed",
+      discovered: 1,
+      queued: 1,
+      skipped: 0,
+    });
+    expect(reddit.getModerators).toHaveBeenCalledWith({
+      subredditName: "GenericSub",
+      limit: 1,
+    });
+    expect(runJob).toHaveBeenCalledOnce();
+    expect(runJob).toHaveBeenCalledWith({
+      name: inviteNewSubsDeliveryJobName,
+      data: expect.objectContaining({
+        subredditId: "t5_genericsub",
+        subredditName: "GenericSub",
+        topModerator: "GenericOwner",
+        templateId: "grow-quickly",
+        renderedMessage: JSON.parse(genericInviteNewSubsMessageTemplate)
+          .templates[0].body,
+      }),
+      runAt: new Date(now),
     });
   });
 

@@ -2447,14 +2447,6 @@ export function parseInviteNewSubsMessageConfig(
     if (!body) {
       throw new Error(`Invitation template ${id} has an empty body.`);
     }
-    if (!body.includes("{{topModerator}}")) {
-      throw new Error(`Invitation template ${id} is missing {{topModerator}}.`);
-    }
-    if (!body.includes("{{subredditName}}")) {
-      throw new Error(
-        `Invitation template ${id} is missing {{subredditName}}.`,
-      );
-    }
     const placeholders = body.match(/{{[^{}]*}}/g) ?? [];
     const unsupported = placeholders.find(
       (placeholder) => !supportedTemplatePlaceholders.has(placeholder),
