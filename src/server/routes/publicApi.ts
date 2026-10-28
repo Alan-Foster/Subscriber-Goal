@@ -69,6 +69,38 @@ const buildState = async (
   const username = context.userId ? await reddit.getCurrentUsername() : null;
   const user =
     context.userId && username ? { id: context.userId, username } : null;
+  let moderatorInstallPromoEligible = false;
+  if (user) {
+    try {
+      const currentUser = await reddit.getCurrentUser();
+      moderatorInstallPromoEligible = currentUser?.isModerator === true;
+      logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
+        workflow: "moderator_install_promo",
+        phase: "eligibility",
+        authenticated: true,
+        eligible: moderatorInstallPromoEligible,
+      });
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "moderator_install_promo_eligibility_failed",
+        {
+          workflow: "moderator_install_promo",
+          phase: "eligibility",
+          authenticated: true,
+          eligible: false,
+        },
+        error,
+      );
+    }
+  } else {
+    logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
+      workflow: "moderator_install_promo",
+      phase: "eligibility",
+      authenticated: false,
+      eligible: false,
+    });
+  }
   const subscribed = user?.id
     ? await isTrackedSubscriber(redis, user.id)
     : false;
@@ -88,6 +120,7 @@ const buildState = async (
     postHeight: subGoalData.postHeight === "short" ? "short" : "regular",
     language: subGoalData.language,
     subscribed,
+    moderatorInstallPromoEligible,
     user,
     appSettings,
     subreddit: {

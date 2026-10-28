@@ -51,7 +51,10 @@ export function getGoalJourneyContext(state: SubGoalState): GoalJourneyContext {
       : state.subscribed
         ? "subscribed"
         : "unsubscribed",
-    hasFollowupCta: state.afterSubscribeAction.type !== "disabled",
+    hasFollowupCta:
+      (state.postHeight !== "tiny" &&
+        state.moderatorInstallPromoEligible) ||
+      state.afterSubscribeAction.type !== "disabled",
   };
 }
 
@@ -148,6 +151,24 @@ export class GoalJourneyAnalytics {
       actionType: "promo",
       result: "success",
     });
+  }
+
+  moderatorInstallPromoViewed(context: GoalJourneyContext): void {
+    this.interaction("moderator_install_promo_viewed", context, {
+      actionType: "install_promo",
+    });
+  }
+
+  moderatorInstallPromoActivated(context: GoalJourneyContext): void {
+    this.interactionAndEnd(
+      "moderator_install_promo_activated",
+      context,
+      true,
+      {
+        actionType: "install_promo",
+        result: "success",
+      },
+    );
   }
 
   journeyHeaders(): Record<string, string> {

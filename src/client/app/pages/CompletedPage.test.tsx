@@ -20,6 +20,7 @@ const baseState: SubscriberGoalState = {
   language: "en",
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
+  moderatorInstallPromoEligible: false,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
     promoSubreddit: "SubGoal",

@@ -40,6 +40,9 @@ type PageName =
   | "notificationConfirmation"
   | "notifications";
 
+const subscriberGoalInstallUrl =
+  "https://developers.reddit.com/apps/subscriber-goal";
+
 export const App = () => {
   const {
     state,
@@ -62,6 +65,9 @@ export const App = () => {
   const returnNoticeTimeoutRef = useRef<number | null>(null);
   const subscribeAttemptRef = useRef(false);
   const [shareUsername, setShareUsername] = useState(true);
+  const [showModeratorInstallPromo, setShowModeratorInstallPromo] =
+    useState(false);
+  const moderatorPromoViewedRef = useRef(false);
   const messages = getSubGoalPostMessages(state?.language);
   const notificationMessages = getNotificationMessages(state?.language);
   const notificationSettings = useNotificationSettings(
@@ -128,6 +134,23 @@ export const App = () => {
     }
     goalJourneyAnalytics.promoSubgoalActivated(getGoalJourneyContext(state));
     navigateTo(`https://www.reddit.com/r/${promoSubreddit}/`);
+  };
+  const handleModeratorInstall = () => {
+    if (
+      !state ||
+      state.postHeight === "tiny" ||
+      state.postHeight === "cta"
+    ) {
+      return;
+    }
+    const analyticsContext = getGoalJourneyContext(state);
+    goalJourneyAnalytics.moderatorInstallPromoActivated(analyticsContext);
+    logDiagnostic("info", "moderator_install_promo_activated", {
+      workflow: "moderator_install_promo",
+      phase: "navigation",
+      postHeight: state.postHeight,
+    });
+    navigateTo(subscriberGoalInstallUrl);
   };
   const handleAfterSubscribeNavigate = (target: string | NavigationTarget) => {
     navigateTo(target);
@@ -223,6 +246,10 @@ export const App = () => {
       subscribeAttemptRef.current = false;
       return;
     }
+    const shouldShowModeratorInstallPromo =
+      updatedState.postHeight !== "tiny" &&
+      updatedState.moderatorInstallPromoEligible;
+    setShowModeratorInstallPromo(shouldShowModeratorInstallPromo);
     if (updatedState.postHeight !== "tiny" && updatedState.completedTime) {
       setPage("completed");
     } else if (updatedState.postHeight === "tiny") {
@@ -239,6 +266,28 @@ export const App = () => {
     }
     showToast({ text: messages.subscribeSuccessToast, appearance: "success" });
   };
+
+  useEffect(() => {
+    if (
+      moderatorPromoViewedRef.current ||
+      page !== "thanks" ||
+      !showModeratorInstallPromo ||
+      !state ||
+      state.postHeight === "tiny" ||
+      state.postHeight === "cta"
+    ) {
+      return;
+    }
+    moderatorPromoViewedRef.current = true;
+    goalJourneyAnalytics.moderatorInstallPromoViewed(
+      getGoalJourneyContext(state),
+    );
+    logDiagnostic("info", "moderator_install_promo_viewed", {
+      workflow: "moderator_install_promo",
+      phase: "render",
+      postHeight: state.postHeight,
+    });
+  }, [page, showModeratorInstallPromo, state]);
 
   const handleSubscribe = () => {
     void performSubscribe().catch((error: unknown) => {
@@ -334,6 +383,8 @@ export const App = () => {
           notificationSubmitting={notificationSettings.submitting}
           notificationError={notificationSettings.error}
           onNotificationOptIn={handleNotificationOptIn}
+          showModeratorInstallPromo={showModeratorInstallPromo}
+          onModeratorInstall={handleModeratorInstall}
         />
       );
     } else if (

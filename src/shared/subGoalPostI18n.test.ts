@@ -5,6 +5,7 @@ import {
   formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
   getAfterSubscribePresetMessages,
+  getModeratorInstallPromotionMessages,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
   subGoalLanguages,
@@ -12,6 +13,19 @@ import {
 } from "./subGoalPostI18n";
 
 describe("subGoalPostI18n", () => {
+  it("provides moderator install promotion copy for every language", () => {
+    for (const language of subGoalLanguages) {
+      const messages = getModeratorInstallPromotionMessages(language);
+      expect(messages.body.length, `${language}.body`).toBeGreaterThan(0);
+      expect(
+        messages.installButton.length,
+        `${language}.installButton`,
+      ).toBeGreaterThan(0);
+    }
+    expect(getModeratorInstallPromotionMessages("unknown")).toEqual(
+      getModeratorInstallPromotionMessages("en"),
+    );
+  });
   it("formats the desktop subscriber count in every supported language", () => {
     expect(formatLocalizedSubscriberCount("en", 15_100, "15.1k")).toBe(
       "15.1k subscribers",

@@ -17,7 +17,8 @@ export type GoalJourneyContext = {
 
 export type GoalJourneyActionType =
   | Exclude<AfterSubscribeActionType, "disabled">
-  | "promo";
+  | "promo"
+  | "install_promo";
 
 export type GoalJourneyFailureResult =
   | "login_required"

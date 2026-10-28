@@ -165,6 +165,27 @@ describe("GoalJourneyAnalytics", () => {
     expect(actionDetails).not.toContain("url");
   });
 
+  it("records dedicated moderator install promotion events", async () => {
+    analytics.moderatorInstallPromoViewed(context);
+    analytics.moderatorInstallPromoActivated(context);
+    await analytics.settled();
+
+    expect(client.interaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "moderator_install_promo_viewed",
+        actionDetails: expect.stringContaining(
+          '"action_type":"install_promo"',
+        ),
+      }),
+    );
+    expect(client.interaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "moderator_install_promo_activated",
+      }),
+    );
+    expect(client.endJourney).toHaveBeenCalledWith({ complete: true });
+  });
+
   it("exposes only an existing journey id to application routes", async () => {
     expect(analytics.journeyHeaders()).toEqual({});
     analytics.subscribeActivated(context);

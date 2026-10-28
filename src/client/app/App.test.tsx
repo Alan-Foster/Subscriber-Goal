@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
     language: "en",
     afterSubscribeAction: { type: "disabled" },
     subscribed: false,
+    moderatorInstallPromoEligible: false,
     user: { id: "t2_user", username: "alice" },
     appSettings: {
       promoSubreddit: "SubGoal",
@@ -425,6 +426,70 @@ describe("App", () => {
         .querySelector('[data-app-interaction-shell="true"]')
         ?.getAttribute("data-sg-theme"),
     ).toBe("pink");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows the moderator install promotion after a new subscription and opens the app page", async () => {
+    const subscribedState = {
+      ...hoisted.createState(),
+      subscribed: true,
+      moderatorInstallPromoEligible: true,
+      afterSubscribeAction: {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "pink",
+      },
+    } as SubGoalState;
+    hoisted.subscribe.mockImplementation(async () => {
+      hoisted.state = subscribedState;
+      return { state: subscribedState, error: null };
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    const subscribeButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    await act(async () => subscribeButton?.click());
+
+    expect(container.textContent).toContain("Install Subscriber Goal Now");
+    expect(container.textContent).toContain("grow membership 2x faster");
+    expect(container.textContent).not.toContain("Join the Discord");
+    expect(
+      container.querySelector('[data-goal-notification-action="true"]'),
+    ).toBeNull();
+
+    const installButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "Install Subscriber Goal Now");
+    await act(async () => installButton?.click());
+    expect(hoisted.navigateTo).toHaveBeenCalledWith(
+      "https://developers.reddit.com/apps/subscriber-goal",
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("does not show the promotion merely because an existing subscriber is a moderator", async () => {
+    hoisted.state = {
+      ...hoisted.createState(),
+      subscribed: true,
+      moderatorInstallPromoEligible: true,
+    } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<App />));
+
+    expect(container.textContent).not.toContain("Install Subscriber Goal Now");
+    expect(container.textContent).not.toContain("grow membership 2x faster");
 
     await act(async () => root.unmount());
     container.remove();

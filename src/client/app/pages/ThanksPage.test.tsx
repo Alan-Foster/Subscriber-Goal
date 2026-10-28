@@ -16,6 +16,7 @@ const baseState: SubscriberGoalState = {
   language: "en",
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
+  moderatorInstallPromoEligible: false,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
     promoSubreddit: "SubGoal",
@@ -231,6 +232,44 @@ describe("ThanksPage", () => {
     expect(html).not.toContain("data-goal-notification-action");
     expect(html).not.toContain("data-after-subscribe-action");
   });
+
+  it.each(["regular", "short"] as const)(
+    "replaces every follow-up action with the moderator install promotion on %s posts",
+    (postHeight) => {
+      const onModeratorInstall = vi.fn();
+      const html = renderToStaticMarkup(
+        <ThanksPage
+          state={{
+            ...baseState,
+            postHeight,
+            moderatorInstallPromoEligible: true,
+            afterSubscribeAction: {
+              type: "link",
+              buttonText: "Join the Discord",
+              url: "https://discord.com/invite/example",
+              colorTheme: "pink",
+            },
+          }}
+          {...commonProps}
+          notificationOptInEnabled
+          onNotificationOptIn={vi.fn()}
+          showModeratorInstallPromo
+          onModeratorInstall={onModeratorInstall}
+        />,
+      );
+
+      expect(html).toContain("Thanks for Subscribing!");
+      expect(html).toContain(
+        "You can install Subscriber Goal in your own subreddits to grow membership 2x faster.",
+      );
+      expect(html).toContain("Install Subscriber Goal Now");
+      expect(html).toContain('data-moderator-install-promo-action="true"');
+      expect(html).toContain(">Return</button>");
+      expect(html).not.toContain("Join the Discord");
+      expect(html).not.toContain("Get Notified");
+      expect(html).not.toContain('alt="Subreddit icon"');
+    },
+  );
 
   it("replaces the Tiny confirmation with its valid CTA", () => {
     const html = renderToStaticMarkup(

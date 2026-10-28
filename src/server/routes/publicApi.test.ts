@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   },
   reddit: {
     getCurrentSubreddit: vi.fn(),
+    getCurrentUser: vi.fn(),
     getCurrentUsername: vi.fn(),
     getTopPosts: vi.fn(),
     getNewPosts: vi.fn(),
@@ -143,6 +144,10 @@ describe("publicApi routes", () => {
     hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
     hoisted.storeSubscriptionAttemptReceipt.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      username: "TinyUser",
+      isModerator: false,
+    });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.getCtaActivityMetric.mockResolvedValue({
       kind: "posts",
@@ -240,6 +245,48 @@ describe("publicApi routes", () => {
       buttonText: "Join the Discord",
       url: "https://discord.com/invite/example",
       colorTheme: "pink",
+    });
+  });
+
+  it("marks an authenticated moderator as eligible for the install promotion", async () => {
+    hoisted.context.userId = "t2_moderator";
+    hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleModerator");
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      username: "ExampleModerator",
+      isModerator: true,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as InitResponse;
+    expect(response.state).toMatchObject({
+      moderatorInstallPromoEligible: true,
+      user: { id: "t2_moderator", username: "ExampleModerator" },
+    });
+  });
+
+  it("fails open when moderator promotion eligibility cannot be loaded", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentUser.mockRejectedValue(
+      new Error("moderator status unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    const response = json.mock.calls[0]?.[0] as InitResponse;
+    expect(response.state).toMatchObject({
+      moderatorInstallPromoEligible: false,
+      user: { id: "t2_user", username: "TinyUser" },
     });
   });
 

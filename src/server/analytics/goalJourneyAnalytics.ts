@@ -22,8 +22,11 @@ export function recordServerSubscribeSuccess(
   if (!journeyId) return false;
 
   const hasFollowupCta =
-    state.afterSubscribeAction !== undefined &&
-    state.afterSubscribeAction.type !== "disabled";
+    (state.postHeight !== "tiny" &&
+      state.postHeight !== "cta" &&
+      state.moderatorInstallPromoEligible) ||
+    (state.afterSubscribeAction !== undefined &&
+      state.afterSubscribeAction.type !== "disabled");
   const actionDetails = createGoalJourneyDetails(
     {
       goalSize: state.postHeight,

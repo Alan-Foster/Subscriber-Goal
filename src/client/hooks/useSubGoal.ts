@@ -290,6 +290,7 @@ export const isSubGoalState = (value: unknown): value is SubGoalState => {
     subreddit.subscribers >= 0 &&
     typeof subreddit.isNsfw === "boolean" &&
     typeof value.subscribed === "boolean" &&
+    typeof value.moderatorInstallPromoEligible === "boolean" &&
     isNullableFiniteNumber(value.goal) &&
     (value.goal === null || (value.goal as number) > 0) &&
     isNullableString(value.recentSubscriber) &&

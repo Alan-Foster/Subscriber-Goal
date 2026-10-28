@@ -35,6 +35,129 @@ export type SubGoalLanguage = (typeof subGoalLanguages)[number];
 
 export const defaultSubGoalLanguage: SubGoalLanguage = "en";
 
+export type ModeratorInstallPromotionMessages = {
+  body: string;
+  installButton: string;
+};
+
+const moderatorInstallPromotionMessages: Record<
+  SubGoalLanguage,
+  ModeratorInstallPromotionMessages
+> = {
+  id: {
+    body: "Anda dapat memasang Subscriber Goal di subreddit Anda sendiri untuk meningkatkan keanggotaan 2x lebih cepat.",
+    installButton: "Pasang Subscriber Goal Sekarang",
+  },
+  bs: {
+    body: "Možete instalirati Subscriber Goal na vlastite subreddite kako biste povećali članstvo 2x brže.",
+    installButton: "Instaliraj Subscriber Goal sada",
+  },
+  ca: {
+    body: "Pots instal·lar Subscriber Goal als teus propis subreddits per fer créixer els membres 2 vegades més ràpid.",
+    installButton: "Instal·la Subscriber Goal ara",
+  },
+  da: {
+    body: "Du kan installere Subscriber Goal i dine egne subreddits for at øge medlemstallet 2x hurtigere.",
+    installButton: "Installér Subscriber Goal nu",
+  },
+  de: {
+    body: "Du kannst Subscriber Goal in deinen eigenen Subreddits installieren, um die Mitgliederzahl 2x schneller zu steigern.",
+    installButton: "Subscriber Goal jetzt installieren",
+  },
+  en: {
+    body: "You can install Subscriber Goal in your own subreddits to grow membership 2x faster.",
+    installButton: "Install Subscriber Goal Now",
+  },
+  es: {
+    body: "Puedes instalar Subscriber Goal en tus propios subreddits para aumentar los miembros 2 veces más rápido.",
+    installButton: "Instalar Subscriber Goal ahora",
+  },
+  et: {
+    body: "Saad installida Subscriber Goali oma subreddititesse, et kasvatada liikmeskonda 2x kiiremini.",
+    installButton: "Installi Subscriber Goal kohe",
+  },
+  fr: {
+    body: "Vous pouvez installer Subscriber Goal dans vos propres subreddits pour augmenter le nombre de membres 2 fois plus vite.",
+    installButton: "Installer Subscriber Goal maintenant",
+  },
+  hr: {
+    body: "Možete instalirati Subscriber Goal na vlastite subreddite kako biste povećali članstvo 2x brže.",
+    installButton: "Instaliraj Subscriber Goal sada",
+  },
+  is: {
+    body: "Þú getur sett Subscriber Goal upp á þínum eigin subredditum til að fjölga meðlimum 2x hraðar.",
+    installButton: "Setja Subscriber Goal upp núna",
+  },
+  it: {
+    body: "Puoi installare Subscriber Goal nei tuoi subreddit per aumentare gli iscritti 2 volte più velocemente.",
+    installButton: "Installa Subscriber Goal ora",
+  },
+  lv: {
+    body: "Vari instalēt Subscriber Goal savos subredditos, lai palielinātu dalībnieku skaitu 2x ātrāk.",
+    installButton: "Instalēt Subscriber Goal tagad",
+  },
+  lt: {
+    body: "Galite įdiegti Subscriber Goal savo subreddituose ir auginti narių skaičių 2x greičiau.",
+    installButton: "Įdiegti Subscriber Goal dabar",
+  },
+  hu: {
+    body: "Telepítheted a Subscriber Goalt a saját subredditjeidbe, hogy 2x gyorsabban növeld a tagságot.",
+    installButton: "Subscriber Goal telepítése most",
+  },
+  nl: {
+    body: "Je kunt Subscriber Goal in je eigen subreddits installeren om het ledenaantal 2x sneller te laten groeien.",
+    installButton: "Subscriber Goal nu installeren",
+  },
+  nb: {
+    body: "Du kan installere Subscriber Goal i dine egne subredditer for å øke medlemstallet 2x raskere.",
+    installButton: "Installer Subscriber Goal nå",
+  },
+  pl: {
+    body: "Możesz zainstalować Subscriber Goal na swoich subredditach, aby zwiększać liczbę członków 2x szybciej.",
+    installButton: "Zainstaluj Subscriber Goal teraz",
+  },
+  pt: {
+    body: "Você pode instalar o Subscriber Goal nos seus próprios subreddits para aumentar o número de membros 2x mais rápido.",
+    installButton: "Instalar Subscriber Goal agora",
+  },
+  ro: {
+    body: "Poți instala Subscriber Goal în propriile subreddituri pentru a crește numărul de membri de 2 ori mai repede.",
+    installButton: "Instalează Subscriber Goal acum",
+  },
+  sq: {
+    body: "Mund ta instalosh Subscriber Goal në subreddit-et e tua për ta rritur anëtarësinë 2x më shpejt.",
+    installButton: "Instalo Subscriber Goal tani",
+  },
+  sk: {
+    body: "Subscriber Goal si môžete nainštalovať do vlastných subredditov a zvýšiť počet členov 2x rýchlejšie.",
+    installButton: "Nainštalovať Subscriber Goal teraz",
+  },
+  sl: {
+    body: "Subscriber Goal lahko namestite v svoje subreddite in povečate članstvo 2x hitreje.",
+    installButton: "Namesti Subscriber Goal zdaj",
+  },
+  fi: {
+    body: "Voit asentaa Subscriber Goalin omiin subredditeihisi ja kasvattaa jäsenmäärää 2x nopeammin.",
+    installButton: "Asenna Subscriber Goal nyt",
+  },
+  sv: {
+    body: "Du kan installera Subscriber Goal i dina egna subreddits för att öka medlemsantalet 2x snabbare.",
+    installButton: "Installera Subscriber Goal nu",
+  },
+  tl: {
+    body: "Maaari mong i-install ang Subscriber Goal sa sarili mong mga subreddit para mapalago ang membership nang 2x na mas mabilis.",
+    installButton: "I-install ang Subscriber Goal Ngayon",
+  },
+  tr: {
+    body: "Üyeliği 2 kat daha hızlı büyütmek için Subscriber Goal'u kendi subreddit'lerinize yükleyebilirsiniz.",
+    installButton: "Subscriber Goal'u Şimdi Yükle",
+  },
+  yo: {
+    body: "O lè fi Subscriber Goal sí àwọn subreddit tirẹ láti mú iye ọmọ ẹgbẹ́ pọ̀ sí i ní ìgbà 2 yiyára.",
+    installButton: "Fi Subscriber Goal sílẹ̀ báyìí",
+  },
+};
+
 type SubredditNameParams = {
   subredditName: string;
 };
@@ -1522,6 +1645,12 @@ export function resolveSubGoalLanguage(value: unknown): SubGoalLanguage {
     subGoalLanguages.includes(value as SubGoalLanguage)
     ? (value as SubGoalLanguage)
     : defaultSubGoalLanguage;
+}
+
+export function getModeratorInstallPromotionMessages(
+  language: unknown,
+): ModeratorInstallPromotionMessages {
+  return moderatorInstallPromotionMessages[resolveSubGoalLanguage(language)];
 }
 
 const escapeForRegex = (value: string): string =>

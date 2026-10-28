@@ -40,6 +40,7 @@ export type SubscriberGoalState = SharedPostState & {
   completedTime: number | null;
   headerText: string | null;
   subscribed: boolean;
+  moderatorInstallPromoEligible: boolean;
   user: BasicUserData | null;
   appSettings: PublicAppSettings;
   subreddit: BasicSubredditData;

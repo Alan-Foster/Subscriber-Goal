@@ -1,6 +1,9 @@
 import type { CtaOnlyState, SubGoalState } from "../../../shared/types/api";
 import { formatSubscriberCount } from "../../../shared/numberFormat";
-import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
+import {
+  getModeratorInstallPromotionMessages,
+  getSubGoalPostMessages,
+} from "../../../shared/subGoalPostI18n";
 import { SubredditIcon } from "../components/SubredditIcon";
 import { TopButtons } from "../components/TopButtons";
 import { AfterSubscribeButton } from "../components/AfterSubscribeButton";
@@ -20,6 +23,8 @@ type ThanksPageProps = {
   notificationSubmitting?: boolean;
   notificationError?: string | null;
   onNotificationOptIn?: () => Promise<boolean>;
+  showModeratorInstallPromo?: boolean;
+  onModeratorInstall?: () => void;
 };
 
 export const ThanksPage = ({
@@ -31,8 +36,13 @@ export const ThanksPage = ({
   notificationSubmitting = false,
   notificationError = null,
   onNotificationOptIn,
+  showModeratorInstallPromo = false,
+  onModeratorInstall,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
+  const moderatorPromoMessages = getModeratorInstallPromotionMessages(
+    state.language,
+  );
   const notificationMessages = getNotificationMessages(state.language);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
@@ -72,19 +82,34 @@ export const ThanksPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {isShort ? null : <SubredditIcon iconUrl={state.subreddit.icon} />}
+      {isShort || showModeratorInstallPromo ? null : (
+        <SubredditIcon iconUrl={state.subreddit.icon} />
+      )}
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
-        {messages.thanksBody({
-          subscribersCount: state.subreddit.subscribers,
-          subscribersText: formatSubscriberCount(state.subreddit.subscribers),
-        })}
+        {showModeratorInstallPromo
+          ? moderatorPromoMessages.body
+          : messages.thanksBody({
+              subscribersCount: state.subreddit.subscribers,
+              subscribersText: formatSubscriberCount(
+                state.subreddit.subscribers,
+              ),
+            })}
       </div>
       <div
         className={`flex w-full max-w-xl justify-center gap-3 ${isShort ? "flex-row items-center" : "flex-col items-stretch min-[380px]:flex-row min-[380px]:items-center"}`}
         data-thanks-actions-layout={isShort ? "short" : "regular"}
       >
-        {notificationOptInEnabled &&
+        {showModeratorInstallPromo && onModeratorInstall ? (
+          <div data-moderator-install-promo-action="true">
+            <SubscriptionButton
+              colorTheme={state.colorTheme}
+              label={moderatorPromoMessages.installButton}
+              mode="link"
+              onClick={onModeratorInstall}
+            />
+          </div>
+        ) : notificationOptInEnabled &&
         state.goal !== null &&
         onNotificationOptIn ? (
           <GoalNotificationButton
