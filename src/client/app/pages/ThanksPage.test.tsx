@@ -64,6 +64,39 @@ describe("ThanksPage", () => {
     expect(html).toContain(">Volver</button>");
   });
 
+  it("renders Hindi thanks text and an unambiguous notification goal", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, language: "hi" }}
+        {...commonProps}
+        notificationOptInEnabled
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("सब्सक्राइब करने के लिए धन्यवाद!");
+    expect(html).toContain("कम्यूनिटी में अब 10 सब्सक्राइबर हैं!");
+    expect(html).toContain("10 सब्सक्राइबर होने पर सूचना पाएँ");
+    expect(html).toContain('aria-label="पिछले पेज पर वापस जाएँ"');
+  });
+
+  it("renders the Hindi moderator install promotion", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, language: "hi" }}
+        {...commonProps}
+        showModeratorInstallPromo
+        onModeratorInstall={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("नमस्ते");
+    expect(html).toContain("u/alice</span>,");
+    expect(html).toContain("अभी अपने सबरेडिट्स में Subscriber Goal जोड़ें!");
+    expect(html).toContain("अभी SubGoal इंस्टॉल करें");
+    expect(html).toContain("अभी Subscriber Goal इंस्टॉल करें");
+  });
+
   it("hides the subreddit logo for short posts", () => {
     const html = renderToStaticMarkup(
       <ThanksPage
@@ -259,17 +292,61 @@ describe("ThanksPage", () => {
       );
 
       expect(html).toContain("Thanks for Subscribing!");
+      expect(html).toContain('class="text-green-500">u/alice</span>,');
+      expect(html).toContain("Hi ");
+      expect(html).toContain("Add Subscriber Goal to your own subreddits now!");
       expect(html).toContain(
-        "You can install Subscriber Goal in your own subreddits to grow membership 2x faster.",
+        '<span class="sm:hidden">Install SubGoal Now</span>',
       );
       expect(html).toContain("Install Subscriber Goal Now");
+      expect(html).toContain('class="hidden sm:inline"');
       expect(html).toContain('data-moderator-install-promo-action="true"');
+      expect(html).toContain('data-sg-theme="green"');
       expect(html).toContain(">Return</button>");
       expect(html).not.toContain("Join the Discord");
       expect(html).not.toContain("Get Notified");
       expect(html).not.toContain('alt="Subreddit icon"');
     },
   );
+
+  it.each(["red", "blue", "green", "purple", "pink"] as const)(
+    "keeps the moderator install action green on a %s post",
+    (colorTheme) => {
+      const html = renderToStaticMarkup(
+        <ThanksPage
+          state={{
+            ...baseState,
+            colorTheme,
+            moderatorInstallPromoEligible: true,
+          }}
+          {...commonProps}
+          showModeratorInstallPromo
+          onModeratorInstall={vi.fn()}
+        />,
+      );
+
+      expect(html).toContain('data-sg-theme="green"');
+    },
+  );
+
+  it("keeps the generic promotion when the username is unavailable", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{
+          ...baseState,
+          user: null,
+          moderatorInstallPromoEligible: true,
+        }}
+        {...commonProps}
+        showModeratorInstallPromo
+        onModeratorInstall={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("Add Subscriber Goal to your own subreddits now!");
+    expect(html).not.toContain("u/undefined");
+    expect(html).not.toContain("text-green-500");
+  });
 
   it("replaces the Tiny confirmation with its valid CTA", () => {
     const html = renderToStaticMarkup(

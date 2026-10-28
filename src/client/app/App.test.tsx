@@ -263,7 +263,7 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => {
       subscribeButton?.click();
       await Promise.resolve();
@@ -337,7 +337,7 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => subscribeButton?.click());
     await act(async () => {
       container
@@ -368,7 +368,7 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => subscribeButton?.click());
     const returnButton = Array.from(container.querySelectorAll("button")).find(
       (button) =>
@@ -412,7 +412,7 @@ describe("App", () => {
     ).toBeNull();
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => subscribeButton?.click());
 
     expect(container.textContent).toContain("Join the Discord");
@@ -454,19 +454,31 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => subscribeButton?.click());
 
+    expect(container.textContent).toContain("Hi u/alice,");
+    expect(container.textContent).toContain("Install SubGoal Now");
     expect(container.textContent).toContain("Install Subscriber Goal Now");
-    expect(container.textContent).toContain("grow membership 2x faster");
+    expect(container.textContent).toContain(
+      "Add Subscriber Goal to your own subreddits now!",
+    );
     expect(container.textContent).not.toContain("Join the Discord");
     expect(
       container.querySelector('[data-goal-notification-action="true"]'),
     ).toBeNull();
 
-    const installButton = Array.from(
-      container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Install Subscriber Goal Now");
+    const installButtons = container.querySelectorAll<HTMLButtonElement>(
+      '[data-moderator-install-promo-action="true"] button',
+    );
+    expect(installButtons).toHaveLength(1);
+    const installButton = installButtons.item(0);
+    expect(installButton?.getAttribute("data-sg-theme")).toBe("green");
+    expect(
+      container
+        .querySelector('[data-app-interaction-shell="true"]')
+        ?.getAttribute("data-sg-theme"),
+    ).toBe("red");
     await act(async () => installButton?.click());
     expect(hoisted.navigateTo).toHaveBeenCalledWith(
       "https://developers.reddit.com/apps/subscriber-goal",
@@ -489,7 +501,9 @@ describe("App", () => {
     await act(async () => root.render(<App />));
 
     expect(container.textContent).not.toContain("Install Subscriber Goal Now");
-    expect(container.textContent).not.toContain("grow membership 2x faster");
+    expect(container.textContent).not.toContain(
+      "Add Subscriber Goal to your own subreddits now!",
+    );
 
     await act(async () => root.unmount());
     container.remove();
@@ -512,7 +526,7 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => {
       subscribeButton?.click();
       await Promise.resolve();
@@ -893,7 +907,7 @@ describe("App", () => {
     await act(async () => root.render(<App />));
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => {
       subscribeButton?.dispatchEvent(
         new MouseEvent("click", { bubbles: true, cancelable: true }),
@@ -963,7 +977,7 @@ describe("App", () => {
 
     const subscribeButton = Array.from(
       container.querySelectorAll("button"),
-    ).find((button) => button.textContent === "Subscribe to r/ExampleSub");
+    ).find((button) => button.textContent === "Join r/ExampleSub");
     expect(subscribeButton).toBeDefined();
 
     await act(async () => {

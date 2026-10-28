@@ -8,6 +8,7 @@ export const subGoalLanguages = [
   "da",
   "de",
   "en",
+  "hi",
   "es",
   "et",
   "fr",
@@ -36,8 +37,10 @@ export type SubGoalLanguage = (typeof subGoalLanguages)[number];
 export const defaultSubGoalLanguage: SubGoalLanguage = "en";
 
 export type ModeratorInstallPromotionMessages = {
+  greeting: string;
   body: string;
   installButton: string;
+  mobileInstallButton: string;
 };
 
 const moderatorInstallPromotionMessages: Record<
@@ -45,116 +48,178 @@ const moderatorInstallPromotionMessages: Record<
   ModeratorInstallPromotionMessages
 > = {
   id: {
-    body: "Anda dapat memasang Subscriber Goal di subreddit Anda sendiri untuk meningkatkan keanggotaan 2x lebih cepat.",
+    greeting: "Hai",
+    body: "Tambahkan Subscriber Goal ke subreddit Anda sendiri sekarang!",
     installButton: "Pasang Subscriber Goal Sekarang",
+    mobileInstallButton: "Pasang SubGoal Sekarang",
   },
   bs: {
-    body: "Možete instalirati Subscriber Goal na vlastite subreddite kako biste povećali članstvo 2x brže.",
+    greeting: "Zdravo",
+    body: "Dodajte Subscriber Goal na svoje subreddite sada!",
     installButton: "Instaliraj Subscriber Goal sada",
+    mobileInstallButton: "Instaliraj SubGoal sada",
   },
   ca: {
-    body: "Pots instal·lar Subscriber Goal als teus propis subreddits per fer créixer els membres 2 vegades més ràpid.",
+    greeting: "Hola",
+    body: "Afegeix Subscriber Goal als teus subreddits ara!",
     installButton: "Instal·la Subscriber Goal ara",
+    mobileInstallButton: "Instal·la SubGoal ara",
   },
   da: {
-    body: "Du kan installere Subscriber Goal i dine egne subreddits for at øge medlemstallet 2x hurtigere.",
+    greeting: "Hej",
+    body: "Føj Subscriber Goal til dine egne subreddits nu!",
     installButton: "Installér Subscriber Goal nu",
+    mobileInstallButton: "Installér SubGoal nu",
   },
   de: {
-    body: "Du kannst Subscriber Goal in deinen eigenen Subreddits installieren, um die Mitgliederzahl 2x schneller zu steigern.",
+    greeting: "Hallo",
+    body: "Füge Subscriber Goal jetzt zu deinen eigenen Subreddits hinzu!",
     installButton: "Subscriber Goal jetzt installieren",
+    mobileInstallButton: "SubGoal jetzt installieren",
   },
   en: {
-    body: "You can install Subscriber Goal in your own subreddits to grow membership 2x faster.",
+    greeting: "Hi",
+    body: "Add Subscriber Goal to your own subreddits now!",
     installButton: "Install Subscriber Goal Now",
+    mobileInstallButton: "Install SubGoal Now",
+  },
+  hi: {
+    greeting: "नमस्ते",
+    body: "अभी अपने सबरेडिट्स में Subscriber Goal जोड़ें!",
+    installButton: "अभी Subscriber Goal इंस्टॉल करें",
+    mobileInstallButton: "अभी SubGoal इंस्टॉल करें",
   },
   es: {
-    body: "Puedes instalar Subscriber Goal en tus propios subreddits para aumentar los miembros 2 veces más rápido.",
+    greeting: "Hola",
+    body: "¡Añade Subscriber Goal a tus propios subreddits ahora!",
     installButton: "Instalar Subscriber Goal ahora",
+    mobileInstallButton: "Instalar SubGoal ahora",
   },
   et: {
-    body: "Saad installida Subscriber Goali oma subreddititesse, et kasvatada liikmeskonda 2x kiiremini.",
+    greeting: "Tere",
+    body: "Lisa Subscriber Goal kohe oma subreddititesse!",
     installButton: "Installi Subscriber Goal kohe",
+    mobileInstallButton: "Installi SubGoal kohe",
   },
   fr: {
-    body: "Vous pouvez installer Subscriber Goal dans vos propres subreddits pour augmenter le nombre de membres 2 fois plus vite.",
+    greeting: "Bonjour",
+    body: "Ajoutez Subscriber Goal à vos propres subreddits dès maintenant !",
     installButton: "Installer Subscriber Goal maintenant",
+    mobileInstallButton: "Installer SubGoal maintenant",
   },
   hr: {
-    body: "Možete instalirati Subscriber Goal na vlastite subreddite kako biste povećali članstvo 2x brže.",
+    greeting: "Bok",
+    body: "Dodajte Subscriber Goal na svoje subreddite sada!",
     installButton: "Instaliraj Subscriber Goal sada",
+    mobileInstallButton: "Instaliraj SubGoal sada",
   },
   is: {
-    body: "Þú getur sett Subscriber Goal upp á þínum eigin subredditum til að fjölga meðlimum 2x hraðar.",
+    greeting: "Hæ",
+    body: "Bættu Subscriber Goal við þín eigin subreddit núna!",
     installButton: "Setja Subscriber Goal upp núna",
+    mobileInstallButton: "Setja SubGoal upp núna",
   },
   it: {
-    body: "Puoi installare Subscriber Goal nei tuoi subreddit per aumentare gli iscritti 2 volte più velocemente.",
+    greeting: "Ciao",
+    body: "Aggiungi subito Subscriber Goal ai tuoi subreddit!",
     installButton: "Installa Subscriber Goal ora",
+    mobileInstallButton: "Installa SubGoal ora",
   },
   lv: {
-    body: "Vari instalēt Subscriber Goal savos subredditos, lai palielinātu dalībnieku skaitu 2x ātrāk.",
+    greeting: "Sveiki",
+    body: "Pievieno Subscriber Goal saviem subredditiem jau tagad!",
     installButton: "Instalēt Subscriber Goal tagad",
+    mobileInstallButton: "Instalēt SubGoal tagad",
   },
   lt: {
-    body: "Galite įdiegti Subscriber Goal savo subreddituose ir auginti narių skaičių 2x greičiau.",
+    greeting: "Sveiki",
+    body: "Pridėkite Subscriber Goal prie savo subredditų dabar!",
     installButton: "Įdiegti Subscriber Goal dabar",
+    mobileInstallButton: "Įdiegti SubGoal dabar",
   },
   hu: {
-    body: "Telepítheted a Subscriber Goalt a saját subredditjeidbe, hogy 2x gyorsabban növeld a tagságot.",
+    greeting: "Szia",
+    body: "Add hozzá a Subscriber Goalt a saját subredditjeidhez most!",
     installButton: "Subscriber Goal telepítése most",
+    mobileInstallButton: "SubGoal telepítése most",
   },
   nl: {
-    body: "Je kunt Subscriber Goal in je eigen subreddits installeren om het ledenaantal 2x sneller te laten groeien.",
+    greeting: "Hoi",
+    body: "Voeg Subscriber Goal nu toe aan je eigen subreddits!",
     installButton: "Subscriber Goal nu installeren",
+    mobileInstallButton: "SubGoal nu installeren",
   },
   nb: {
-    body: "Du kan installere Subscriber Goal i dine egne subredditer for å øke medlemstallet 2x raskere.",
+    greeting: "Hei",
+    body: "Legg til Subscriber Goal i dine egne subredditer nå!",
     installButton: "Installer Subscriber Goal nå",
+    mobileInstallButton: "Installer SubGoal nå",
   },
   pl: {
-    body: "Możesz zainstalować Subscriber Goal na swoich subredditach, aby zwiększać liczbę członków 2x szybciej.",
+    greeting: "Cześć",
+    body: "Dodaj Subscriber Goal do swoich subredditów już teraz!",
     installButton: "Zainstaluj Subscriber Goal teraz",
+    mobileInstallButton: "Zainstaluj SubGoal teraz",
   },
   pt: {
-    body: "Você pode instalar o Subscriber Goal nos seus próprios subreddits para aumentar o número de membros 2x mais rápido.",
+    greeting: "Olá",
+    body: "Adicione o Subscriber Goal aos seus próprios subreddits agora!",
     installButton: "Instalar Subscriber Goal agora",
+    mobileInstallButton: "Instalar SubGoal agora",
   },
   ro: {
-    body: "Poți instala Subscriber Goal în propriile subreddituri pentru a crește numărul de membri de 2 ori mai repede.",
+    greeting: "Salut",
+    body: "Adaugă Subscriber Goal în propriile subreddituri acum!",
     installButton: "Instalează Subscriber Goal acum",
+    mobileInstallButton: "Instalează SubGoal acum",
   },
   sq: {
-    body: "Mund ta instalosh Subscriber Goal në subreddit-et e tua për ta rritur anëtarësinë 2x më shpejt.",
+    greeting: "Përshëndetje",
+    body: "Shto Subscriber Goal në subreddit-et e tua tani!",
     installButton: "Instalo Subscriber Goal tani",
+    mobileInstallButton: "Instalo SubGoal tani",
   },
   sk: {
-    body: "Subscriber Goal si môžete nainštalovať do vlastných subredditov a zvýšiť počet členov 2x rýchlejšie.",
+    greeting: "Ahoj",
+    body: "Pridajte Subscriber Goal do svojich subredditov teraz!",
     installButton: "Nainštalovať Subscriber Goal teraz",
+    mobileInstallButton: "Nainštalovať SubGoal teraz",
   },
   sl: {
-    body: "Subscriber Goal lahko namestite v svoje subreddite in povečate članstvo 2x hitreje.",
+    greeting: "Živjo",
+    body: "Dodajte Subscriber Goal v svoje subreddite zdaj!",
     installButton: "Namesti Subscriber Goal zdaj",
+    mobileInstallButton: "Namesti SubGoal zdaj",
   },
   fi: {
-    body: "Voit asentaa Subscriber Goalin omiin subredditeihisi ja kasvattaa jäsenmäärää 2x nopeammin.",
+    greeting: "Hei",
+    body: "Lisää Subscriber Goal omiin subredditeihisi nyt!",
     installButton: "Asenna Subscriber Goal nyt",
+    mobileInstallButton: "Asenna SubGoal nyt",
   },
   sv: {
-    body: "Du kan installera Subscriber Goal i dina egna subreddits för att öka medlemsantalet 2x snabbare.",
+    greeting: "Hej",
+    body: "Lägg till Subscriber Goal i dina egna subreddits nu!",
     installButton: "Installera Subscriber Goal nu",
+    mobileInstallButton: "Installera SubGoal nu",
   },
   tl: {
-    body: "Maaari mong i-install ang Subscriber Goal sa sarili mong mga subreddit para mapalago ang membership nang 2x na mas mabilis.",
+    greeting: "Kumusta",
+    body: "Idagdag ang Subscriber Goal sa sarili mong mga subreddit ngayon!",
     installButton: "I-install ang Subscriber Goal Ngayon",
+    mobileInstallButton: "I-install ang SubGoal Ngayon",
   },
   tr: {
-    body: "Üyeliği 2 kat daha hızlı büyütmek için Subscriber Goal'u kendi subreddit'lerinize yükleyebilirsiniz.",
+    greeting: "Merhaba",
+    body: "Subscriber Goal'u şimdi kendi subreddit'lerinize ekleyin!",
     installButton: "Subscriber Goal'u Şimdi Yükle",
+    mobileInstallButton: "SubGoal'u Şimdi Yükle",
   },
   yo: {
-    body: "O lè fi Subscriber Goal sí àwọn subreddit tirẹ láti mú iye ọmọ ẹgbẹ́ pọ̀ sí i ní ìgbà 2 yiyára.",
+    greeting: "Báwo",
+    body: "Fi Subscriber Goal kún àwọn subreddit tirẹ báyìí!",
     installButton: "Fi Subscriber Goal sílẹ̀ báyìí",
+    mobileInstallButton: "Fi SubGoal sílẹ̀ báyìí",
   },
 };
 
@@ -227,6 +292,14 @@ const localizedCountMessages: Record<SubGoalLanguage, LocalizedCountMessages> =
         "{count, plural, one {{countText} new today} other {{countText} new today}}",
       newThisWeek:
         "{count, plural, one {{countText} new this week} other {{countText} new this week}}",
+    },
+    hi: {
+      subscribers:
+        "{count, plural, one {{countText} सब्सक्राइबर} other {{countText} सब्सक्राइबर}}",
+      newToday:
+        "{count, plural, one {आज {countText} नया} other {आज {countText} नए}}",
+      newThisWeek:
+        "{count, plural, one {इस सप्ताह {countText} नया} other {इस सप्ताह {countText} नए}}",
     },
     es: {
       subscribers:
@@ -476,6 +549,14 @@ const localizedActivityMessages: Record<
     clicksThisWeek:
       "{count, plural, one {{countText} click this week} other {{countText} clicks this week}}",
   },
+  hi: {
+    postsToday:
+      "{count, plural, one {आज {countText} नई पोस्ट} other {आज {countText} नई पोस्टें}}",
+    postsThisWeek:
+      "{count, plural, one {इस सप्ताह {countText} नई पोस्ट} other {इस सप्ताह {countText} नई पोस्टें}}",
+    clicksThisWeek:
+      "{count, plural, one {इस सप्ताह {countText} क्लिक} other {इस सप्ताह {countText} क्लिक}}",
+  },
   es: {
     postsToday: "{countText} publicaciones nuevas hoy",
     postsThisWeek: "{countText} publicaciones nuevas esta semana",
@@ -669,7 +750,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Selamat datang di r/${subredditName}!`,
       welcome: ({ subredditName }) => `Selamat datang di r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
-        `Berlangganan ke r/${subredditName}`,
+        `Bergabung dengan r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Sudah berlangganan ke r/${subredditName}`,
       shareUsernameLabel: "Tampilkan nama pengguna saya saat saya berlangganan",
@@ -704,8 +785,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Dobro došli u r/${subredditName}!`,
       welcome: ({ subredditName }) => `Dobro došli u r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Pretplati se na r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Pretplaćeni ste na r/${subredditName}`,
       shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
@@ -740,8 +820,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Benvingut a r/${subredditName}!`,
       welcome: ({ subredditName }) => `Benvingut a r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Subscriu-te a r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Uneix-te a r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Subscrit a r/${subredditName}`,
       shareUsernameLabel: "Mostra el meu nom d'usuari quan em subscrigui",
       thanksTitle: "Gràcies per subscriure't!",
@@ -775,7 +854,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Velkommen til r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Abonner på r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Deltag i r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Abonnerer på r/${subredditName}`,
       shareUsernameLabel: "Vis mit brugernavn, når jeg abonnerer",
@@ -810,7 +889,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Willkommen bei r/${subredditName}!`,
       welcome: ({ subredditName }) => `Willkommen bei r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `r/${subredditName} abonnieren`,
+      subscribeButton: ({ subredditName }) => `r/${subredditName} beitreten`,
       subscribedButton: ({ subredditName }) => `r/${subredditName} abonniert`,
       shareUsernameLabel: "Meinen Benutzernamen anzeigen, wenn ich abonniere",
       thanksTitle: "Danke fürs Abonnieren!",
@@ -843,7 +922,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       intlLocale: "en-US",
       defaultPostTitle: ({ subredditName }) => `Welcome to r/${subredditName}!`,
       welcome: ({ subredditName }) => `Welcome to r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Subscribe to r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Join r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Subscribed to r/${subredditName}`,
       shareUsernameLabel: "Show my username when I subscribe",
@@ -872,14 +951,49 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
         `r/${subredditName} reached ${goalText} subscribers!\n\nGoal reached at \`${completedIso}\`.`,
     },
+    hi: {
+      languageLabel: "हिन्दी",
+      intlLocale: "hi-IN",
+      defaultPostTitle: ({ subredditName }) =>
+        `r/${subredditName} में आपका स्वागत है!`,
+      welcome: ({ subredditName }) => `r/${subredditName} में आपका स्वागत है`,
+      subscribeButton: ({ subredditName }) =>
+        `r/${subredditName} में शामिल हों`,
+      subscribedButton: ({ subredditName }) =>
+        `r/${subredditName} को सब्सक्राइब कर लिया है`,
+      shareUsernameLabel: "सब्सक्राइब करते समय मेरा यूज़रनेम दिखाएँ",
+      thanksTitle: "सब्सक्राइब करने के लिए धन्यवाद!",
+      thanksBody: ({ subscribersText }) =>
+        `कम्यूनिटी में अब ${subscribersText} सब्सक्राइबर हैं!`,
+      thanksReturnButton: "पिछले पेज पर वापस जाएँ",
+      completedTitle: ({ subredditName, goalText }) =>
+        `r/${subredditName} ने ${goalText} सब्सक्राइबर पूरे कर लिए!`,
+      completedGoalFallback: "लक्ष्य",
+      completedReachedAt: ({ timeText, dateText }) =>
+        `लक्ष्य ${dateText} को ${timeText} पर पूरा हुआ`,
+      completedJustNow: "लक्ष्य अभी पूरा हुआ!",
+      promoAriaLabel: ({ promoSubreddit }) =>
+        `r/${promoSubreddit} में अन्य सब्सक्राइबर लक्ष्य देखें`,
+      subscriberNotice: ({ username }) =>
+        username
+          ? `u/${username} ने अभी-अभी सब्सक्राइब किया!`
+          : "एक नए सदस्य ने अभी-अभी सब्सक्राइब किया!",
+      subscribeSuccessToast: "सब्सक्राइब करने के लिए धन्यवाद!",
+      subscribeErrorToast: "सब्सक्रिप्शन विफल रहा।",
+      loginRequired: "सब्सक्राइब करने के लिए लॉग इन करें।",
+      loadError: "Subscriber Goal डेटा लोड नहीं हो सका।",
+      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
+        `r/${subredditName} में आपका स्वागत है\n\n${subscribersText} / ${goalText} सब्सक्राइबर।\n  लक्ष्य पूरा करने में हमारी मदद करें!\n\nइंटरैक्टिव सुविधाओं का उपयोग करने के लिए इस पोस्ट को Shreddit पर देखें।`,
+      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
+        `r/${subredditName} ने ${goalText} सब्सक्राइबर पूरे कर लिए!\n\nलक्ष्य पूरा होने का समय: \`${completedIso}\``,
+    },
     es: {
       languageLabel: "Español",
       intlLocale: "es-419",
       defaultPostTitle: ({ subredditName }) =>
         `¡Bienvenido a r/${subredditName}!`,
       welcome: ({ subredditName }) => `Bienvenido a r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Suscribirse a r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Unirse a r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Suscrito a r/${subredditName}`,
       shareUsernameLabel: "Mostrar mi nombre de usuario cuando me suscriba",
       thanksTitle: "¡Gracias por suscribirte!",
@@ -913,7 +1027,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Tere tulemast r/${subredditName}!`,
       welcome: ({ subredditName }) => `Tere tulemast r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Telli r/${subredditName}`,
+      subscribeButton: ({ subredditName }) =>
+        `Liitu kogukonnaga r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Tellitud r/${subredditName}`,
       shareUsernameLabel: "Näita minu kasutajanime, kui tellin",
       thanksTitle: "Täname tellimise eest!",
@@ -945,7 +1060,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Bienvenue sur r/${subredditName} !`,
       welcome: ({ subredditName }) => `Bienvenue sur r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `S'abonner à r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Rejoindre r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Abonné à r/${subredditName}`,
       shareUsernameLabel: "Afficher mon nom d'utilisateur quand je m'abonne",
       thanksTitle: "Merci de vous être abonné !",
@@ -979,8 +1094,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Dobro došli u r/${subredditName}!`,
       welcome: ({ subredditName }) => `Dobro došli u r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Pretplati se na r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Pretplaćeni ste na r/${subredditName}`,
       shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
@@ -1015,7 +1129,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) => `Velkomin í r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkomin í r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
-        `Gerast áskrifandi að r/${subredditName}`,
+        `Gakktu til liðs við r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Áskrifandi að r/${subredditName}`,
       shareUsernameLabel: "Sýna notandanafnið mitt þegar ég gerist áskrifandi",
@@ -1050,7 +1164,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Benvenuto in r/${subredditName}!`,
       welcome: ({ subredditName }) => `Benvenuto in r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Iscriviti a r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Unisciti a r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Iscritto a r/${subredditName}`,
       shareUsernameLabel: "Mostra il mio nome utente quando mi iscrivo",
       thanksTitle: "Grazie per esserti iscritto!",
@@ -1084,7 +1198,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Laipni lūdzam r/${subredditName}!`,
       welcome: ({ subredditName }) => `Laipni lūdzam r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Abonēt r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Pievienojies r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Abonēts r/${subredditName}`,
       shareUsernameLabel: "Rādīt manu lietotājvārdu, kad abonēju",
       thanksTitle: "Paldies par abonēšanu!",
@@ -1118,7 +1232,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Sveiki atvykę į r/${subredditName}!`,
       welcome: ({ subredditName }) => `Sveiki atvykę į r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Prenumeruoti r/${subredditName}`,
+      subscribeButton: ({ subredditName }) =>
+        `Prisijungti prie r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Prenumeruojate r/${subredditName}`,
       shareUsernameLabel: "Rodyti mano naudotojo vardą, kai prenumeruoju",
@@ -1155,7 +1270,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       welcome: ({ subredditName }) =>
         `Üdvözlünk az r/${subredditName} közösségben`,
       subscribeButton: ({ subredditName }) =>
-        `Feliratkozás erre: r/${subredditName}`,
+        `Csatlakozz ehhez: r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Feliratkozva erre: r/${subredditName}`,
       shareUsernameLabel: "Mutassa a felhasználónevemet, amikor feliratkozom",
@@ -1189,7 +1304,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       intlLocale: "nl-NL",
       defaultPostTitle: ({ subredditName }) => `Welkom bij r/${subredditName}!`,
       welcome: ({ subredditName }) => `Welkom bij r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Abonneer op r/${subredditName}`,
+      subscribeButton: ({ subredditName }) =>
+        `Lid worden van r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Geabonneerd op r/${subredditName}`,
       shareUsernameLabel: "Mijn gebruikersnaam tonen wanneer ik me abonneer",
@@ -1224,7 +1340,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Velkommen til r/${subredditName}!`,
       welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Abonner på r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Bli med i r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Abonnerer på r/${subredditName}`,
       shareUsernameLabel: "Vis brukernavnet mitt når jeg abonnerer",
@@ -1258,7 +1374,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       intlLocale: "pl-PL",
       defaultPostTitle: ({ subredditName }) => `Witamy w r/${subredditName}!`,
       welcome: ({ subredditName }) => `Witamy w r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Subskrybuj r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Dołącz do r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Subskrybujesz r/${subredditName}`,
       shareUsernameLabel: "Pokaż moją nazwę użytkownika, gdy subskrybuję",
@@ -1293,8 +1409,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Bem-vindo ao r/${subredditName}!`,
       welcome: ({ subredditName }) => `Bem-vindo ao r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Inscrever-se em r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Unir-se a r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Inscrito em r/${subredditName}`,
       shareUsernameLabel: "Mostrar meu nome de usuário quando eu me inscrever",
       thanksTitle: "Obrigado por se inscrever!",
@@ -1328,8 +1443,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Bun venit pe r/${subredditName}!`,
       welcome: ({ subredditName }) => `Bun venit pe r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Abonează-te la r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Alătură-te r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Abonat la r/${subredditName}`,
       shareUsernameLabel: "Afișează-mi numele de utilizator când mă abonez",
       thanksTitle: "Mulțumim pentru abonare!",
@@ -1363,7 +1477,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Mirë se vini në r/${subredditName}!`,
       welcome: ({ subredditName }) => `Mirë se vini në r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Abonohu te r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Bashkohu me r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `I abonuar te r/${subredditName}`,
       shareUsernameLabel: "Shfaq emrin tim të përdoruesit kur abonohem",
@@ -1398,7 +1512,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) => `Vitajte v r/${subredditName}!`,
       welcome: ({ subredditName }) => `Vitajte v r/${subredditName}`,
       subscribeButton: ({ subredditName }) =>
-        `Prihlásiť sa na odber r/${subredditName}`,
+        `Pripojiť sa k r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Prihlásené na odber r/${subredditName}`,
       shareUsernameLabel:
@@ -1434,7 +1548,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Dobrodošli v r/${subredditName}!`,
       welcome: ({ subredditName }) => `Dobrodošli v r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Naroči se na r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Naročen na r/${subredditName}`,
       shareUsernameLabel: "Prikaži moje uporabniško ime, ko se naročim",
       thanksTitle: "Hvala za naročnino!",
@@ -1467,7 +1581,8 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       intlLocale: "fi-FI",
       defaultPostTitle: ({ subredditName }) => `Tervetuloa r/${subredditName}!`,
       welcome: ({ subredditName }) => `Tervetuloa r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Tilaa r/${subredditName}`,
+      subscribeButton: ({ subredditName }) =>
+        `Liity yhteisöön r/${subredditName}`,
       subscribedButton: ({ subredditName }) => `Tilattu r/${subredditName}`,
       shareUsernameLabel: "Näytä käyttäjänimeni, kun tilaan",
       thanksTitle: "Kiitos tilauksesta!",
@@ -1499,8 +1614,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       defaultPostTitle: ({ subredditName }) =>
         `Välkommen till r/${subredditName}!`,
       welcome: ({ subredditName }) => `Välkommen till r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Prenumerera på r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Gå med i r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Prenumererar på r/${subredditName}`,
       shareUsernameLabel: "Visa mitt användarnamn när jag prenumererar",
@@ -1536,8 +1650,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
         `Maligayang pagdating sa r/${subredditName}!`,
       welcome: ({ subredditName }) =>
         `Maligayang pagdating sa r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Mag-subscribe sa r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Sumali sa r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `Naka-subscribe sa r/${subredditName}`,
       shareUsernameLabel: "Ipakita ang username ko kapag nag-subscribe ako",
@@ -1574,7 +1687,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       welcome: ({ subredditName }) =>
         `r/${subredditName} topluluğuna hoş geldiniz`,
       subscribeButton: ({ subredditName }) =>
-        `r/${subredditName} topluluğuna abone ol`,
+        `r/${subredditName} topluluğuna katıl`,
       subscribedButton: ({ subredditName }) =>
         `r/${subredditName} topluluğuna abone oldun`,
       shareUsernameLabel: "Abone olduğumda kullanıcı adımı göster",
@@ -1608,8 +1721,7 @@ export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
       intlLocale: "yo-NG",
       defaultPostTitle: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}!`,
       welcome: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Ṣe alabapin sí r/${subredditName}`,
+      subscribeButton: ({ subredditName }) => `Darapọ̀ mọ́ r/${subredditName}`,
       subscribedButton: ({ subredditName }) =>
         `O ti ṣe alabapin sí r/${subredditName}`,
       shareUsernameLabel: "Fi orúkọ olumulo mi hàn nígbà tí mo bá ṣe alabapin",
@@ -1833,6 +1945,16 @@ export const afterSubscribePresetMessages: Record<
     viewMostRecentPostToday: "View the Most Recent Post Today",
     dynamicPostUnavailable: "No post is currently available.",
     dynamicPostError: "The post could not be opened right now.",
+  },
+  hi: {
+    joinDiscord: "Discord से जुड़ें",
+    viewTopPostToday: "आज की शीर्ष पोस्ट देखें",
+    readWiki: "विकी पढ़ें",
+    createNewPost: "नई पोस्ट बनाएँ",
+    sharePicture: "एक तस्वीर शेयर करें",
+    viewMostRecentPostToday: "आज की सबसे हाल की पोस्ट देखें",
+    dynamicPostUnavailable: "अभी कोई पोस्ट उपलब्ध नहीं है।",
+    dynamicPostError: "अभी पोस्ट नहीं खोली जा सकी।",
   },
   es: {
     joinDiscord: "Únete al Discord",

@@ -665,6 +665,7 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Dansk", value: "da" },
         { label: "Deutsch", value: "de" },
         { label: "English", value: "en" },
+        { label: "हिन्दी", value: "hi" },
         { label: "Español", value: "es" },
         { label: "Eesti", value: "et" },
         { label: "Français", value: "fr" },
@@ -705,7 +706,7 @@ describe("internalUi color theme create goal routes", () => {
       numberOfSubscribers: 100,
       type: "public",
       nsfw: false,
-      language: "es",
+      language: "hi",
     });
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -720,7 +721,7 @@ describe("internalUi color theme create goal routes", () => {
       defaultValue?: unknown;
     }>;
     expect(fields.find((field) => field.name === "language")).toMatchObject({
-      defaultValue: ["es"],
+      defaultValue: ["hi"],
     });
   });
 

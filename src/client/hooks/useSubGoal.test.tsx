@@ -849,6 +849,7 @@ describe("requestSubscribeJson", () => {
 
   it("accepts complete state and rejects malformed variants", () => {
     expect(isSubGoalState(tinyState)).toBe(true);
+    expect(isSubGoalState({ ...tinyState, language: "hi" })).toBe(true);
     expect(isSubGoalState({ ...tinyState, language: "invalid" })).toBe(false);
     expect(
       isSubGoalState({

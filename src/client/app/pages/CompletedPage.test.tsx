@@ -64,6 +64,22 @@ describe("CompletedPage", () => {
     expect(html).toContain("Meta alcanzada");
   });
 
+  it("renders Hindi completed text and a localized Gregorian date", () => {
+    const html = renderCompletedPage("hi");
+    const expectedDateText = new Intl.DateTimeFormat("hi-IN-u-ca-gregory", {
+      timeZone: "America/New_York",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(baseState.completedTime ?? 0));
+
+    expect(html).toContain(
+      "r/indianActressClass ने 10 सब्सक्राइबर पूरे कर लिए!",
+    );
+    expect(html).toContain(expectedDateText);
+    expect(html).toContain("लक्ष्य");
+  });
+
   it.each([
     ["es", "abril"],
     ["fr", "avril"],

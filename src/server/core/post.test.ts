@@ -97,7 +97,7 @@ describe("createGoalPost", () => {
     await createGoalPost({
       title: "Subscribe",
       subredditName: "ExampleSub",
-      textFallback: "Subscribe to r/ExampleSub",
+      textFallback: "Join r/ExampleSub",
       postHeight: "tiny",
     });
 

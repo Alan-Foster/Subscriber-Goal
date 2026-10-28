@@ -70,8 +70,18 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain("Bienvenido a r/ExampleSub");
-    expect(html).toContain("Suscribirse a r/ExampleSub");
+    expect(html).toContain("Unirse a r/ExampleSub");
     expect(html).toContain("Mostrar mi nombre de usuario cuando me suscriba");
+  });
+
+  it("renders Hindi post text", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage state={{ ...baseState, language: "hi" }} {...commonProps} />,
+    );
+
+    expect(html).toContain("r/ExampleSub में आपका स्वागत है");
+    expect(html).toContain("r/ExampleSub में शामिल हों");
+    expect(html).toContain("सब्सक्राइब करते समय मेरा यूज़रनेम दिखाएँ");
   });
 
   it("renders custom header text when provided", () => {
@@ -132,7 +142,7 @@ describe("SubGoalPage", () => {
     expect(html.match(/h-4/g)).toHaveLength(3);
     expect(html).not.toContain("max-sm:pt-8");
     expect(html).toContain("Welcome to r/ExampleSub");
-    expect(html).toContain("Subscribe to r/ExampleSub");
+    expect(html).toContain("Join r/ExampleSub");
   });
 
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
@@ -144,7 +154,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("Subscribe to r/ExampleSub");
+    expect(html).toContain("Join r/ExampleSub");
     expect(html).not.toContain('alt="Subreddit icon"');
     expect(html).not.toContain("Welcome to r/ExampleSub");
     expect(html).not.toContain("123 / 500");
@@ -217,7 +227,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("Subscribe to r/ExampleSub");
+    expect(html).toContain("Join r/ExampleSub");
     expect(html).not.toContain("Join the Discord");
   });
 

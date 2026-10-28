@@ -8,6 +8,7 @@ export type SubscriptionButtonMode =
 
 type SubscriptionButtonProps = {
   label: string;
+  mobileLabel?: string | undefined;
   mode: SubscriptionButtonMode;
   onClick?: (() => void) | undefined;
   colorTheme?: SubGoalColorTheme | undefined;
@@ -15,6 +16,7 @@ type SubscriptionButtonProps = {
 
 export const SubscriptionButton = ({
   label,
+  mobileLabel,
   mode,
   onClick,
   colorTheme,
@@ -24,7 +26,7 @@ export const SubscriptionButton = ({
 
   return (
     <span
-      className="relative isolate inline-flex"
+      className="relative isolate inline-flex max-w-full"
       data-sg-theme={colorTheme}
       data-subscription-button-mode={mode}
     >
@@ -32,12 +34,19 @@ export const SubscriptionButton = ({
         <span aria-hidden="true" className="sg-subscribe-attention absolute" />
       ) : null}
       <button
-        className="relative z-10 cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-base font-semibold text-[color:var(--sg-button-text)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        className="relative z-10 max-w-full cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-center text-base font-semibold whitespace-normal text-[color:var(--sg-button-text)] [overflow-wrap:anywhere] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         data-sg-theme={colorTheme}
         disabled={disabled}
         onClick={disabled ? undefined : onClick}
       >
-        {label}
+        {mobileLabel ? (
+          <>
+            <span className="sm:hidden">{mobileLabel}</span>
+            <span className="hidden sm:inline">{label}</span>
+          </>
+        ) : (
+          label
+        )}
       </button>
     </span>
   );

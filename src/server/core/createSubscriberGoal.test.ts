@@ -530,7 +530,7 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(post, "tiny");
     expect(hoisted.createGoalPost).toHaveBeenCalledWith(
       expect.objectContaining({
-        textFallback: "Subscribe to r/ExampleSub",
+        textFallback: "Join r/ExampleSub",
       }),
     );
     expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledWith(

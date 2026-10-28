@@ -204,7 +204,7 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain("h-[100px]");
     expect(html).toContain("sg-goal-frame");
     expect(html).toContain("Subscribed to r/ExampleSub");
-    expect(html).not.toContain("Subscribe to r/ExampleSub");
+    expect(html).not.toContain("Join r/ExampleSub");
     expect(html).toContain('data-subscription-button-mode="subscribed"');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain("progress");
@@ -242,7 +242,7 @@ describe("SubscribeOnlyApp", () => {
     expect(container.textContent).toContain("123 subscribers");
     expect(container.textContent).toContain("4 new posts today");
     expect(container.textContent).toContain("r/SubGoal");
-    expect(container.textContent).not.toContain("Subscribe to r/ExampleSub");
+    expect(container.textContent).not.toContain("Join r/ExampleSub");
     expect(container.textContent).not.toContain("Subscribed to r/ExampleSub");
 
     await act(async () => {
@@ -398,7 +398,7 @@ describe("SubscribeOnlyApp", () => {
       );
     });
 
-    expect(container.textContent).toContain("Subscribe to r/ExampleSub");
+    expect(container.textContent).toContain("Join r/ExampleSub");
     expect(container.textContent).toContain("Subscribed to r/ExampleSub");
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
@@ -532,9 +532,7 @@ describe("SubscribeOnlyApp", () => {
       );
     });
 
-    expect(getActionButton(container)?.textContent).toBe(
-      "Subscribe to r/ExampleSub",
-    );
+    expect(getActionButton(container)?.textContent).toBe("Join r/ExampleSub");
     expect(
       container.querySelector<HTMLButtonElement>(
         "[data-subscription-button-mode] button",

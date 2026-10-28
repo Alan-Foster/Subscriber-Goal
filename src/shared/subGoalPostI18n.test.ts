@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterSubscribePresetMessages,
   defaultSubGoalLanguage,
+  formatLocalizedCtaActivity,
   formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
   getAfterSubscribePresetMessages,
@@ -11,19 +12,98 @@ import {
   subGoalLanguages,
   subGoalPostMessages,
 } from "./subGoalPostI18n";
+import type { SubGoalLanguage } from "./subGoalPostI18n";
+
+const expectedJoinButtons: Record<SubGoalLanguage, string> = {
+  id: "Bergabung dengan r/ExampleSub",
+  bs: "Pridruži se r/ExampleSub",
+  ca: "Uneix-te a r/ExampleSub",
+  da: "Deltag i r/ExampleSub",
+  de: "r/ExampleSub beitreten",
+  en: "Join r/ExampleSub",
+  hi: "r/ExampleSub में शामिल हों",
+  es: "Unirse a r/ExampleSub",
+  et: "Liitu kogukonnaga r/ExampleSub",
+  fr: "Rejoindre r/ExampleSub",
+  hr: "Pridruži se r/ExampleSub",
+  is: "Gakktu til liðs við r/ExampleSub",
+  it: "Unisciti a r/ExampleSub",
+  lv: "Pievienojies r/ExampleSub",
+  lt: "Prisijungti prie r/ExampleSub",
+  hu: "Csatlakozz ehhez: r/ExampleSub",
+  nl: "Lid worden van r/ExampleSub",
+  nb: "Bli med i r/ExampleSub",
+  pl: "Dołącz do r/ExampleSub",
+  pt: "Unir-se a r/ExampleSub",
+  ro: "Alătură-te r/ExampleSub",
+  sq: "Bashkohu me r/ExampleSub",
+  sk: "Pripojiť sa k r/ExampleSub",
+  sl: "Pridruži se r/ExampleSub",
+  fi: "Liity yhteisöön r/ExampleSub",
+  sv: "Gå med i r/ExampleSub",
+  tl: "Sumali sa r/ExampleSub",
+  tr: "r/ExampleSub topluluğuna katıl",
+  yo: "Darapọ̀ mọ́ r/ExampleSub",
+};
 
 describe("subGoalPostI18n", () => {
+  it("uses the approved Join CTA in every supported language", () => {
+    expect(Object.keys(expectedJoinButtons)).toHaveLength(
+      subGoalLanguages.length,
+    );
+
+    for (const language of subGoalLanguages) {
+      const actual = getSubGoalPostMessages(language).subscribeButton({
+        subredditName: "ExampleSub",
+      });
+      expect(actual, language).toBe(expectedJoinButtons[language]);
+      expect(actual.split("r/ExampleSub"), language).toHaveLength(2);
+    }
+
+    expect(
+      getSubGoalPostMessages("en").subscribedButton({
+        subredditName: "ExampleSub",
+      }),
+    ).toBe("Subscribed to r/ExampleSub");
+    expect(
+      getSubGoalPostMessages("hi").subscribedButton({
+        subredditName: "ExampleSub",
+      }),
+    ).toBe("r/ExampleSub को सब्सक्राइब कर लिया है");
+  });
+
   it("provides moderator install promotion copy for every language", () => {
     for (const language of subGoalLanguages) {
       const messages = getModeratorInstallPromotionMessages(language);
+      expect(messages.greeting.length, `${language}.greeting`).toBeGreaterThan(
+        0,
+      );
       expect(messages.body.length, `${language}.body`).toBeGreaterThan(0);
+      expect(messages.body, `${language}.body`).toContain("Subscriber Goal");
+      expect(messages.body, `${language}.body`).not.toContain("2x");
+      expect(messages.body, `${language}.body`).toMatch(/!$/);
       expect(
         messages.installButton.length,
         `${language}.installButton`,
       ).toBeGreaterThan(0);
+      expect(
+        messages.mobileInstallButton.length,
+        `${language}.mobileInstallButton`,
+      ).toBeGreaterThan(0);
+      expect(
+        messages.mobileInstallButton,
+        `${language}.mobileInstallButton`,
+      ).toContain("SubGoal");
     }
     expect(getModeratorInstallPromotionMessages("unknown")).toEqual(
       getModeratorInstallPromotionMessages("en"),
+    );
+    expect(getModeratorInstallPromotionMessages("en").greeting).toBe("Hi");
+    expect(getModeratorInstallPromotionMessages("en").body).toBe(
+      "Add Subscriber Goal to your own subreddits now!",
+    );
+    expect(getModeratorInstallPromotionMessages("en").mobileInstallButton).toBe(
+      "Install SubGoal Now",
     );
   });
   it("formats the desktop subscriber count in every supported language", () => {
@@ -156,6 +236,7 @@ describe("subGoalPostI18n", () => {
       "da",
       "de",
       "en",
+      "hi",
       "es",
       "et",
       "fr",
@@ -191,6 +272,7 @@ describe("subGoalPostI18n", () => {
       "Dansk",
       "Deutsch",
       "English",
+      "हिन्दी",
       "Español",
       "Eesti",
       "Français",
@@ -221,6 +303,78 @@ describe("subGoalPostI18n", () => {
     expect(resolveSubGoalLanguage("ja")).toBe(defaultSubGoalLanguage);
     expect(resolveSubGoalLanguage("es")).toBe("es");
     expect(resolveSubGoalLanguage("fr")).toBe("fr");
+    expect(resolveSubGoalLanguage("hi")).toBe("hi");
+  });
+
+  it("renders the reviewed Hindi catalog and terminology", () => {
+    const messages = getSubGoalPostMessages("hi");
+
+    expect(messages.languageLabel).toBe("हिन्दी");
+    expect(messages.intlLocale).toBe("hi-IN");
+    expect(messages.subscribedButton({ subredditName: "उदाहरण" })).toBe(
+      "r/उदाहरण को सब्सक्राइब कर लिया है",
+    );
+    expect(
+      messages.thanksBody({ subscribersCount: 15_000, subscribersText: "15k" }),
+    ).toBe("कम्यूनिटी में अब 15k सब्सक्राइबर हैं!");
+    expect(
+      messages.completedTitle({
+        subredditName: "उदाहरण",
+        goalCount: 15_000,
+        goalText: "15k",
+      }),
+    ).toBe("r/उदाहरण ने 15k सब्सक्राइबर पूरे कर लिए!");
+    expect(
+      messages.fallbackCompleted({
+        subredditName: "उदाहरण",
+        goalCount: 15_000,
+        goalText: "15k",
+        completedIso: "2026-10-28T12:00:00Z",
+      }),
+    ).toContain("लक्ष्य पूरा होने का समय: `2026-10-28T12:00:00Z`");
+    expect(messages.subscriberNotice({ username: "आशा" })).toBe(
+      "u/आशा ने अभी-अभी सब्सक्राइब किया!",
+    );
+  });
+
+  it("formats Hindi counts and activity with singular and plural forms", () => {
+    expect(formatLocalizedSubscriberCount("hi", 1, "1")).toBe("1 सब्सक्राइबर");
+    expect(formatLocalizedSubscriberCount("hi", 2, "2")).toBe("2 सब्सक्राइबर");
+    expect(
+      formatLocalizedSubscriberGrowth("hi", { count: 1, period: "today" }, "1"),
+    ).toBe("आज 1 नया");
+    expect(
+      formatLocalizedSubscriberGrowth("hi", { count: 2, period: "today" }, "2"),
+    ).toBe("आज 2 नए");
+    expect(
+      formatLocalizedCtaActivity(
+        "hi",
+        { kind: "posts", count: 1, period: "today" },
+        "1",
+      ),
+    ).toBe("आज 1 नई पोस्ट");
+    expect(
+      formatLocalizedCtaActivity(
+        "hi",
+        { kind: "posts", count: 2, period: "today" },
+        "2",
+      ),
+    ).toBe("आज 2 नई पोस्टें");
+  });
+
+  it("provides reviewed Hindi promotion and after-subscribe actions", () => {
+    expect(getModeratorInstallPromotionMessages("hi")).toMatchObject({
+      greeting: "नमस्ते",
+      body: "अभी अपने सबरेडिट्स में Subscriber Goal जोड़ें!",
+      installButton: "अभी Subscriber Goal इंस्टॉल करें",
+      mobileInstallButton: "अभी SubGoal इंस्टॉल करें",
+    });
+    expect(getAfterSubscribePresetMessages("hi")).toMatchObject({
+      joinDiscord: "Discord से जुड़ें",
+      readWiki: "विकी पढ़ें",
+      createNewPost: "नई पोस्ट बनाएँ",
+      dynamicPostUnavailable: "अभी कोई पोस्ट उपलब्ध नहीं है।",
+    });
   });
 
   it("renders Spanish dynamic post messages", () => {
@@ -311,7 +465,7 @@ describe("subGoalPostI18n", () => {
     const messages = getSubGoalPostMessages("id");
 
     expect(messages.subscribeButton({ subredditName: "Contoh" })).toBe(
-      "Berlangganan ke r/Contoh",
+      "Bergabung dengan r/Contoh",
     );
     expect(messages.subscribedButton({ subredditName: "Contoh" })).toBe(
       "Sudah berlangganan ke r/Contoh",

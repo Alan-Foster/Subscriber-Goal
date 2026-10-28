@@ -75,6 +75,8 @@ export const ThanksPage = ({
     );
   }
 
+  const moderatorUsername = state.user?.username.trim() ?? "";
+
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
@@ -87,14 +89,22 @@ export const ThanksPage = ({
       )}
       <div className="text-2xl font-bold">{messages.thanksTitle}</div>
       <div className="text-lg font-semibold text-[color:var(--sg-text-secondary)]">
-        {showModeratorInstallPromo
-          ? moderatorPromoMessages.body
-          : messages.thanksBody({
-              subscribersCount: state.subreddit.subscribers,
-              subscribersText: formatSubscriberCount(
-                state.subreddit.subscribers,
-              ),
-            })}
+        {showModeratorInstallPromo ? (
+          <>
+            {moderatorUsername ? (
+              <div className="mb-2">
+                {moderatorPromoMessages.greeting}{" "}
+                <span className="text-green-500">u/{moderatorUsername}</span>,
+              </div>
+            ) : null}
+            <div>{moderatorPromoMessages.body}</div>
+          </>
+        ) : (
+          messages.thanksBody({
+            subscribersCount: state.subreddit.subscribers,
+            subscribersText: formatSubscriberCount(state.subreddit.subscribers),
+          })
+        )}
       </div>
       <div
         className={`flex w-full max-w-xl justify-center gap-3 ${isShort ? "flex-row items-center" : "flex-col items-stretch min-[380px]:flex-row min-[380px]:items-center"}`}
@@ -103,15 +113,16 @@ export const ThanksPage = ({
         {showModeratorInstallPromo && onModeratorInstall ? (
           <div data-moderator-install-promo-action="true">
             <SubscriptionButton
-              colorTheme={state.colorTheme}
+              colorTheme="green"
               label={moderatorPromoMessages.installButton}
+              mobileLabel={moderatorPromoMessages.mobileInstallButton}
               mode="link"
               onClick={onModeratorInstall}
             />
           </div>
         ) : notificationOptInEnabled &&
-        state.goal !== null &&
-        onNotificationOptIn ? (
+          state.goal !== null &&
+          onNotificationOptIn ? (
           <GoalNotificationButton
             colorTheme={state.colorTheme}
             label={notificationMessages.goalPrompt({

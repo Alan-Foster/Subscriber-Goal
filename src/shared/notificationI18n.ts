@@ -119,6 +119,20 @@ const values: Record<SubGoalLanguage, MessageTuple> = {
     "Notifications enabled.",
     "Notifications disabled.",
   ],
+  hi: [
+    "नोटिफ़िकेशन",
+    "नोटिफ़िकेशन सेटिंग्स",
+    "सब्सक्राइबर लक्ष्य पूरा होने पर सूचना पाएँ",
+    "चालू",
+    "बंद",
+    "नोटिफ़िकेशन चालू करें",
+    "नोटिफ़िकेशन बंद करें",
+    "नोटिफ़िकेशन प्रबंधित करने के लिए लॉग इन करें।",
+    "नोटिफ़िकेशन सेटिंग्स लोड नहीं हो सकीं।",
+    "नोटिफ़िकेशन सेटिंग्स अपडेट नहीं हो सकीं।",
+    "नोटिफ़िकेशन चालू किए गए।",
+    "नोटिफ़िकेशन बंद किए गए।",
+  ],
   es: [
     "Notificaciones",
     "Configuración de notificaciones",
@@ -438,6 +452,7 @@ const compactValues: Record<SubGoalLanguage, CompactMessageTuple> = {
   da: ["Aktivér", "Deaktivér", "Tilbage", "Tilbage"],
   de: ["Aktivieren", "Deaktivieren", "Zurück", "Zurück"],
   en: ["Enable", "Disable", "Return", "Return to previous page"],
+  hi: ["चालू करें", "बंद करें", "वापस", "पिछले पेज पर वापस जाएँ"],
   es: ["Activar", "Desactivar", "Volver", "Volver a la página anterior"],
   et: ["Luba", "Keela", "Tagasi", "Tagasi"],
   fr: ["Activer", "Désactiver", "Retour", "Revenir à la page précédente"],
@@ -494,6 +509,11 @@ const goalValues: Record<SubGoalLanguage, GoalMessageTuple> = {
     "Goal completion alerts",
     "Get Notified at {{goalText}}",
     "You’ll be notified when the goal is met.",
+  ],
+  hi: [
+    "लक्ष्य पूरा होने के अलर्ट",
+    "{{goalText}} सब्सक्राइबर होने पर सूचना पाएँ",
+    "लक्ष्य पूरा होने पर आपको सूचना दी जाएगी।",
   ],
   es: [
     "Alertas de objetivo completado",
@@ -607,6 +627,10 @@ const goalValues: Record<SubGoalLanguage, GoalMessageTuple> = {
   ],
 };
 
+const enabledHeadingOverrides: Partial<Record<SubGoalLanguage, string>> = {
+  hi: "नोटिफ़िकेशन चालू हैं!",
+};
+
 export const getNotificationMessages = (
   language: SubGoalLanguage | undefined,
 ): NotificationMessages => {
@@ -629,9 +653,10 @@ export const getNotificationMessages = (
     backAriaLabel: compact[3],
     goalPrompt: ({ goalText }) => goal[1].replace("{{goalText}}", goalText),
     enabledHeading:
-      (language ?? "en") === "en"
+      enabledHeadingOverrides[language ?? "en"] ??
+      ((language ?? "en") === "en"
         ? "Notifications Enabled!"
-        : value[10].replace(/\.$/u, "!"),
+        : value[10].replace(/\.$/u, "!")),
     successBody: goal[2],
   };
 };

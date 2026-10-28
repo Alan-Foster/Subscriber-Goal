@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.3.1 - Invite Page for mods to install to their own subreddits. Nearly Removed Overrides. Devvit 0.15.1
+- 2.3.1 - Official Hindi Language Support, now 29 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
 - 2.2.1 - Integrated post.highlight (0.14.7) to better track pinned goals. Remove My Own Data fixed. NSFW Most Recent Post fixed. New Create a CTA Menu Item. Devvit 0.15.0
 - 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update. Devvit 0.14.5
 - 2.1.5 - Auto-goal system now attempts to re-pin existing goals. Fixed eternal completed lockout.

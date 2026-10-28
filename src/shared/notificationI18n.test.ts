@@ -21,4 +21,20 @@ describe("notification messages", () => {
       "Notification Settings",
     );
   });
+
+  it("uses the reviewed Hindi notification terminology", () => {
+    const messages = getNotificationMessages("hi");
+
+    expect(messages.title).toBe("नोटिफ़िकेशन सेटिंग्स");
+    expect(messages.description).toBe(
+      "सब्सक्राइबर लक्ष्य पूरा होने पर सूचना पाएँ",
+    );
+    expect(messages.goalPrompt({ goalText: "1,000" })).toBe(
+      "1,000 सब्सक्राइबर होने पर सूचना पाएँ",
+    );
+    expect(messages.enabledHeading).toBe("नोटिफ़िकेशन चालू हैं!");
+    expect(messages.successBody).toBe(
+      "लक्ष्य पूरा होने पर आपको सूचना दी जाएगी।",
+    );
+  });
 });

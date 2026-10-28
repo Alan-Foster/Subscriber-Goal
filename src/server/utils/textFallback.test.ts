@@ -45,7 +45,7 @@ describe("textFallbackMaker", () => {
       language: "es",
     });
 
-    expect(fallback).toBe("Suscribirse a r/PakStartups");
+    expect(fallback).toBe("Unirse a r/PakStartups");
     expect(fallback).not.toContain("subscriber");
   });
 });
