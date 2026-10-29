@@ -348,6 +348,7 @@ describe("ThanksPage", () => {
       expect(html).toContain('data-moderator-install-promo-action="true"');
       expect(html).toContain('data-sg-theme="green"');
       expect(html).toContain(">Return</button>");
+      expect(html).toContain("w-auto shrink-0 self-center");
       expect(html).not.toContain("Join the Discord");
       expect(html).not.toContain("Get Notified");
       expect(html).not.toContain('alt="Subreddit icon"');

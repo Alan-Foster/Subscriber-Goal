@@ -147,7 +147,7 @@ export const ThanksPage = ({
         <button
           type="button"
           aria-label={messages.thanksReturnButton}
-          className="min-h-10 shrink-0 cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold whitespace-nowrap text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
+          className="min-h-10 w-auto shrink-0 self-center cursor-pointer rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-4 py-2 text-sm font-semibold whitespace-nowrap text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)]"
           onClick={onReturn}
         >
           {notificationMessages.returnShort}

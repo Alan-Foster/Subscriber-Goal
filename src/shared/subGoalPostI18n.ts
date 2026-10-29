@@ -12,6 +12,7 @@ import {
 export const subGoalLanguages = appLanguages;
 export type SubGoalLanguage = AppLanguage;
 export const defaultSubGoalLanguage: SubGoalLanguage = defaultAppLanguage;
+export const subredditTitleEntitySeparator = "\u200B";
 
 type SubredditNameParams = { subredditName: string };
 type SubscribersParams = { subscribersCount: number; subscribersText: string };
@@ -86,8 +87,10 @@ const buildRawPostMessages = (
   return {
     languageLabel: metadata.label,
     intlLocale: metadata.locale,
-    defaultPostTitle: (values) =>
-      translate(language, "post.defaultTitle", values),
+    defaultPostTitle: ({ subredditName }) =>
+      translate(language, "post.defaultTitle", {
+        subredditName: `${subredditTitleEntitySeparator}${subredditName}`,
+      }),
     welcome: (values) => translate(language, "post.welcome", values),
     subscribeButton: (values) => translate(language, "post.joinButton", values),
     subscribedButton: (values) =>

@@ -9,10 +9,12 @@ import {
   getModeratorInstallPromotionMessages,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
+  subredditTitleEntitySeparator,
   subGoalLanguages,
   subGoalPostMessages,
 } from "./subGoalPostI18n";
 import type { SubGoalLanguage } from "./subGoalPostI18n";
+import { translate } from "./i18n/catalog";
 
 const expectedJoinButtons: Record<SubGoalLanguage, string> = {
   id: "Bergabung dengan r/ExampleSub",
@@ -49,6 +51,29 @@ const expectedJoinButtons: Record<SubGoalLanguage, string> = {
 };
 
 describe("subGoalPostI18n", () => {
+  it("protects generated titles from Reddit entity substitution without changing visible copy", () => {
+    for (const language of subGoalLanguages) {
+      const generated = getSubGoalPostMessages(language).defaultPostTitle({
+        subredditName: "ExampleSub",
+      });
+      const unprotected = translate(language, "post.defaultTitle", {
+        subredditName: "ExampleSub",
+      });
+
+      expect(generated, language).toContain(
+        `r/${subredditTitleEntitySeparator}ExampleSub`,
+      );
+      expect(
+        generated.split(subredditTitleEntitySeparator),
+        language,
+      ).toHaveLength(2);
+      expect(
+        generated.replaceAll(subredditTitleEntitySeparator, ""),
+        language,
+      ).toBe(unprotected);
+    }
+  });
+
   it("uses the approved Join CTA in every supported language", () => {
     expect(Object.keys(expectedJoinButtons)).toHaveLength(
       subGoalLanguages.length,
@@ -490,7 +515,7 @@ describe("subGoalPostI18n", () => {
     const messages = getSubGoalPostMessages("es");
 
     expect(messages.defaultPostTitle({ subredditName: "Ejemplo" })).toBe(
-      "¡Bienvenido a r/Ejemplo!",
+      `¡Bienvenido a r/${subredditTitleEntitySeparator}Ejemplo!`,
     );
     expect(
       messages.thanksBody({ subscribersCount: 15_000, subscribersText: "15k" }),
@@ -675,7 +700,9 @@ describe("subGoalPostI18n", () => {
       const messages = getSubGoalPostMessages(language);
 
       expect(
-        messages.defaultPostTitle({ subredditName: subredditNameByLanguage }),
+        messages
+          .defaultPostTitle({ subredditName: subredditNameByLanguage })
+          .replaceAll(subredditTitleEntitySeparator, ""),
       ).toBe(expectedTitle);
       expect(
         messages.completedTitle({

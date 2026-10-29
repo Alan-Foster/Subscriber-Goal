@@ -771,7 +771,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          title: "¡Bienvenido a r/ExampleSub!",
+          title: "¡Bienvenido a r/\u200BExampleSub!",
           language: "es",
           afterSubscribeAction: expect.objectContaining({
             type: "top-post-day",
@@ -807,7 +807,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          title: "Welcome to r/ExampleSub!",
+          title: "Welcome to r/\u200BExampleSub!",
           language: "en",
           afterSubscribeAction: expect.objectContaining({
             type: "top-post-day",

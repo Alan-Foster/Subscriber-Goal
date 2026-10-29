@@ -870,7 +870,7 @@ describe("internalUi color theme create goal routes", () => {
     ]);
     expect(
       response.showForm.form.fields.find((field) => field.name === "postTitle"),
-    ).toMatchObject({ defaultValue: "¡Bienvenido a r/EXAMPLEsub!" });
+    ).toMatchObject({ defaultValue: "¡Bienvenido a r/\u200BEXAMPLEsub!" });
     expect(
       response.showForm.form.fields.find(
         (field) => field.name === "subscriberGoal",

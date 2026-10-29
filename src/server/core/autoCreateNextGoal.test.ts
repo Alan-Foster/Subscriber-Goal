@@ -209,7 +209,7 @@ describe("processDueAutoCreateNextGoals", () => {
       redis: hoisted.redis,
       appSettings: baseSettings,
       options: {
-        title: "Welcome to r/ExampleSub!",
+        title: "Welcome to r/\u200BExampleSub!",
         goal: 15,
         subredditDisplayName: "ExampleSub",
         crosspost: true,
@@ -273,7 +273,7 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          title: "Bem-vindo ao r/ExampleSub!",
+          title: "Bem-vindo ao r/\u200BExampleSub!",
           language: "pt",
         }),
       }),
@@ -437,7 +437,7 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          title: "¡Bienvenido a r/ExampleSub!",
+          title: "¡Bienvenido a r/\u200BExampleSub!",
           language: "es",
         }),
       }),
