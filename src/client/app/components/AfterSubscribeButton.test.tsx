@@ -123,7 +123,10 @@ describe("AfterSubscribeButton", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledWith(apiRoutes.afterSubscribeTarget);
+    expect(fetchMock).toHaveBeenCalledWith(
+      apiRoutes.afterSubscribeTarget,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(container.querySelector("button")?.disabled).toBe(true);
     expect(
       container.querySelector('[data-subscription-button-mode="submitting"]'),
@@ -161,6 +164,7 @@ describe("AfterSubscribeButton", () => {
           JSON.stringify({
             status: "error",
             message: "No post is currently available.",
+            messageKey: "afterJoin.dynamicPostUnavailable",
           }),
           { status: 404, headers: { "content-type": "application/json" } },
         ),

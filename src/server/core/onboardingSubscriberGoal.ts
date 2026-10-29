@@ -920,6 +920,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       redis,
       subredditName: subreddit.name,
       subredditId: subreddit.id,
+      language: subreddit.language,
       notify: false,
       scheduleUnknownRetry: false,
       nowMs,
@@ -1136,6 +1137,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
           postUrl: getPostUrl(post),
           errorMessage: highlightResult.errorMessage,
           highlightResult,
+          language,
         });
       } catch (notificationError) {
         logDiagnostic(
@@ -1889,6 +1891,7 @@ async function reconcileCanonicalClassicGoal({
         postUrl: getPostUrl(selected.post),
         errorMessage: result.errorMessage,
         postOrigin: "existing",
+        language: subreddit.language,
         nowMs,
       });
     }
@@ -1917,6 +1920,7 @@ async function reconcileCanonicalClassicGoal({
       redis,
       subredditName: subreddit.name,
       subredditId: subreddit.id,
+      language: subreddit.language,
       notify: false,
       nowMs,
     });
@@ -2002,6 +2006,7 @@ async function reconcileCanonicalClassicGoal({
       redis,
       subredditName: subreddit.name,
       subredditId: subreddit.id,
+      language: subreddit.language,
       notify: false,
       nowMs,
     });
@@ -2161,6 +2166,7 @@ async function highlightExistingGoal({
     redis,
     subredditName: subreddit.name,
     subredditId: subreddit.id,
+    language: subreddit.language,
     notify: false,
     nowMs,
   });
@@ -2245,6 +2251,7 @@ async function highlightExistingGoal({
         postUrl: getPostUrl(selected.post),
         errorMessage: highlightResult.errorMessage,
         postOrigin: "existing",
+        language: subreddit.language,
       });
     } catch (error) {
       notificationOutcome = "failed";

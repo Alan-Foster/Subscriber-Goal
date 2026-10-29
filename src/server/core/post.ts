@@ -1,6 +1,7 @@
 import { EntrypointHeight, reddit } from "@devvit/web/server";
 import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import {
   resolveSubGoalPostHeight,
   shortSubGoalPostHeightPixels,
@@ -19,6 +20,7 @@ type CreateGoalPostParams = {
   postHeight?: SubGoalPostHeight;
   submitAsUser?: boolean;
   flairId?: string;
+  language?: unknown;
 };
 
 export const createGoalPost = async ({
@@ -28,6 +30,7 @@ export const createGoalPost = async ({
   postHeight = "regular",
   submitAsUser = false,
   flairId,
+  language,
 }: CreateGoalPostParams) => {
   const isCompactActionPost = postHeight === "tiny" || postHeight === "cta";
   return await reddit.submitCustomPost({
@@ -54,7 +57,7 @@ export const createGoalPost = async ({
       ? {
           runAs: "USER" as const,
           userGeneratedContent: {
-            text: `Subscriber Goal post: ${title}`,
+            text: translate(language, "post.fallback.title", { title }),
           },
         }
       : {}),

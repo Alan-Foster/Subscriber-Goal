@@ -317,28 +317,30 @@ describe("useSubGoal tiny behavior", () => {
 
   it("times out one hanging POST, reconciles for 30 seconds, and re-enables the button", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockImplementation((_input, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        return new Promise((_resolve, reject) => {
-          init.signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        });
-      }
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            type: "refresh",
-            postId: "t3_tiny",
-            state: tinyState,
-            subscriptionAttemptConfirmed: false,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      );
-    });
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((_input, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              type: "refresh",
+              postId: "t3_tiny",
+              state: tinyState,
+              subscriptionAttemptConfirmed: false,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      });
     vi.stubGlobal("fetch", fetchMock);
     hoisted.requestJsonWithRetry.mockResolvedValue({
       data: { type: "init", postId: "t3_tiny", state: tinyState },
@@ -466,7 +468,9 @@ describe("useSubGoal tiny behavior", () => {
       await vi.advanceTimersByTimeAsync(30000);
     });
 
-    expect(container.textContent).toBe("unsubscribed:Subscription failed.");
+    expect(container.textContent).toBe(
+      "unsubscribed:Couldn't join the community.",
+    );
     expect(container.querySelector("button")?.disabled).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(11);
     expect(
@@ -850,6 +854,10 @@ describe("requestSubscribeJson", () => {
   it("accepts complete state and rejects malformed variants", () => {
     expect(isSubGoalState(tinyState)).toBe(true);
     expect(isSubGoalState({ ...tinyState, language: "hi" })).toBe(true);
+    expect(isSubGoalState({ ...tinyState, language: "pa" })).toBe(true);
+    expect(isSubGoalState({ ...tinyState, language: "mr" })).toBe(true);
+    expect(isSubGoalState({ ...tinyState, language: "pt" })).toBe(true);
+    expect(isSubGoalState({ ...regularState, language: "pt" })).toBe(true);
     expect(isSubGoalState({ ...tinyState, language: "invalid" })).toBe(false);
     expect(
       isSubGoalState({
@@ -927,7 +935,7 @@ describe("requestSubscribeJson", () => {
       const result = await requestSubscribeJson("/api/subscribe");
       expect(result).toEqual({
         data: null,
-        error: "Subscription request could not be completed.",
+        error: "Could not join the community.",
         errorKind: kind,
         status: 503,
       });
@@ -945,7 +953,7 @@ describe("requestSubscribeJson", () => {
 
     await expect(requestSubscribeJson("/api/subscribe")).resolves.toEqual({
       data: null,
-      error: "Subscription request could not be completed.",
+      error: "Could not join the community.",
       errorKind: "network",
       status: null,
     });
@@ -956,14 +964,15 @@ describe("requestSubscribeJson", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((_input, init?: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        }),
+      vi.fn().mockImplementation(
+        (_input, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
       ),
     );
 
@@ -975,7 +984,7 @@ describe("requestSubscribeJson", () => {
     );
     await vi.advanceTimersByTimeAsync(10_000);
     await expect(request).resolves.toMatchObject({
-      error: "Subscription request could not be completed.",
+      error: "Could not join the community.",
       errorKind: "timeout",
       status: null,
     });
@@ -988,14 +997,15 @@ describe("requestSubscribeJson", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((_input, init?: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        }),
+      vi.fn().mockImplementation(
+        (_input, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
       ),
     );
 

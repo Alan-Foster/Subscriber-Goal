@@ -208,6 +208,31 @@ describe("NotificationSettingsPage", () => {
     expect(html).toContain("text-red-500");
   });
 
+  it("renders Marathi notification copy for the CTA experience", () => {
+    const compactState: CtaOnlyState = {
+      colorTheme: "blue",
+      postHeight: "cta",
+      promoSubreddit: "SubGoal",
+      language: "mr",
+      afterSubscribeAction: { type: "disabled" },
+      subreddit: {
+        name: "ExampleSub",
+        subscribers: 900,
+        growth: { count: 2, period: "today" },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <NotificationSettingsPage
+        state={compactState}
+        {...props}
+        enabled={false}
+      />,
+    );
+
+    expect(html).toContain('aria-label="नोटिफिकेशन्स: बंद"');
+    expect(html).toContain(">नोटिफिकेशन्स:</span>");
+  });
+
   it("intrinsically reserves state space in every language", () => {
     for (const language of subGoalLanguages) {
       const messages = getNotificationMessages(language);

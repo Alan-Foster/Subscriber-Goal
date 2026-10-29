@@ -1,4 +1,5 @@
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import type { RedditClient, RedisClient } from "../types";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
 
@@ -35,16 +36,19 @@ export async function rememberAppInstaller(
   }
 }
 
-export function buildAppAccountRecoveryMessage(subredditName: string): {
+export function buildAppAccountRecoveryMessage(
+  subredditName: string,
+  language?: unknown,
+): {
   subject: string;
   bodyMarkdown: string;
 } {
   return {
-    subject: `Subscriber Goal needs moderator access in r/${subredditName}`,
-    bodyMarkdown:
-      `Subscriber Goal cannot create or maintain goal posts in r/${subredditName} because u/${subscriberGoalAppUsername} is no longer a moderator with Manage Posts permission.\n\n` +
-      `Please restore u/${subscriberGoalAppUsername} with Manage Posts permission, or reinstall Subscriber Goal from https://developers.reddit.com/apps/subscriber-goal. Flair permission is optional but is needed to apply the Subscriber Goal post flair.\n\n` +
-      "The app will not add itself back or change its own moderator permissions.",
+    subject: translate(language, "outbound.health.subject", { subredditName }),
+    bodyMarkdown: translate(language, "outbound.health.body", {
+      subredditName,
+      appUsername: subscriberGoalAppUsername,
+    }),
   };
 }
 
@@ -55,6 +59,7 @@ export async function checkAppAccountHealth({
   subredditId,
   notify = true,
   scheduleUnknownRetry = true,
+  language,
   nowMs = Date.now(),
 }: {
   reddit: RedditClient;
@@ -63,6 +68,7 @@ export async function checkAppAccountHealth({
   subredditId?: string;
   notify?: boolean;
   scheduleUnknownRetry?: boolean;
+  language?: unknown;
   nowMs?: number;
 }): Promise<AppAccountHealthResult> {
   let appUsername: string | undefined;
@@ -86,6 +92,7 @@ export async function checkAppAccountHealth({
         nextRunAt: String(nowMs + retryDelayMs),
         subredditName,
         subredditId: subredditId ?? "",
+        language: typeof language === "string" ? language : "",
         lastError: error instanceof Error ? error.message : String(error),
       });
     }
@@ -207,7 +214,7 @@ export async function checkAppAccountHealth({
         incidentStartedAt: String(nowMs),
         notification: "notifying",
       });
-      const message = buildAppAccountRecoveryMessage(subredditName);
+      const message = buildAppAccountRecoveryMessage(subredditName, language);
       if (subredditId) {
         try {
           await reddit.modMail.createModNotification({
@@ -315,6 +322,7 @@ export async function processDueAppAccountHealthCheck({
     redis,
     subredditName: retry.subredditName,
     ...(retry.subredditId ? { subredditId: retry.subredditId } : {}),
+    ...(retry.language ? { language: retry.language } : {}),
     nowMs,
   });
 }

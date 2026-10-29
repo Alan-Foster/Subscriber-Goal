@@ -646,11 +646,11 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Full Height Subscriber Goal", value: "regular" },
         { label: "Short Subscriber Goal (No Logo)", value: "short" },
         {
-          label: "Subscribe Button and CTA Button (No Goal)",
+          label: "Join Button and CTA Button (No Goal)",
           value: "tiny",
         },
         {
-          label: "CTA Button (No Subscribing at all)",
+          label: "CTA Button (No Joining)",
           value: "cta",
         },
       ],
@@ -666,6 +666,8 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Deutsch", value: "de" },
         { label: "English", value: "en" },
         { label: "हिन्दी", value: "hi" },
+        { label: "ਪੰਜਾਬੀ", value: "pa" },
+        { label: "मराठी", value: "mr" },
         { label: "Español", value: "es" },
         { label: "Eesti", value: "et" },
         { label: "Français", value: "fr" },
@@ -678,7 +680,7 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Nederlands", value: "nl" },
         { label: "Norsk Bokmål", value: "nb" },
         { label: "Polski", value: "pl" },
-        { label: "Português", value: "pt" },
+        { label: "Português (Brasil)", value: "pt" },
         { label: "Română", value: "ro" },
         { label: "Shqip", value: "sq" },
         { label: "Slovenčina", value: "sk" },
@@ -724,6 +726,64 @@ describe("internalUi color theme create goal routes", () => {
       defaultValue: ["hi"],
     });
   });
+
+  it.each(["pa", "mr"] as const)(
+    "pre-selects the %s subreddit language in the setup form",
+    async (language) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        type: "public",
+        nsfw: false,
+        language,
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.menu.createGoal)?.(
+        {} as Request,
+        { json } as unknown as Response,
+      );
+
+      const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+        name: string;
+        defaultValue?: unknown;
+      }>;
+      expect(fields.find((field) => field.name === "language")).toMatchObject({
+        defaultValue: [language],
+      });
+    },
+  );
+
+  it.each(["pt-BR", "pt-br", "pt_BR"] as const)(
+    "normalizes the %s subreddit language to stored Portuguese",
+    async (language) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        type: "public",
+        nsfw: false,
+        language,
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.menu.createGoal)?.(
+        {} as Request,
+        { json } as unknown as Response,
+      );
+
+      const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+        name: string;
+        defaultValue?: unknown;
+      }>;
+      expect(fields.find((field) => field.name === "language")).toMatchObject({
+        defaultValue: ["pt"],
+      });
+    },
+  );
 
   it("opens the CTA shortcut with CTA selected by default", async () => {
     const routes = createRouteHarness();
@@ -1109,7 +1169,7 @@ describe("internalUi color theme create goal routes", () => {
     };
     expect(response.showForm.name).toBe(formNames.createSubscriberGoalFollowUp);
     expect(response.showForm.form.title).toBe(
-      "Sub Goal - Step 3/3 - Settings for After Subscribing",
+      "Sub Goal - Step 3/3 - Settings for After Joining",
     );
     expect(response.showForm.form.acceptLabel).toBe("Create");
     expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
@@ -1122,7 +1182,7 @@ describe("internalUi color theme create goal routes", () => {
         (field) => field.name === "afterSubscribeButtonText",
       ),
     ).toMatchObject({
-      label: "Button Text After a User Subscribes",
+      label: "Button Text After a User Joins",
       helpText: "Recommended: 6-24 characters. Accepted: 5-50 characters.",
     });
     expect(
@@ -1174,7 +1234,7 @@ describe("internalUi color theme create goal routes", () => {
     };
     expect(response.showForm.name).toBe(formNames.createSubscribeOnlyFollowUp);
     expect(response.showForm.form.title).toBe(
-      "Sub Goal - Step 3/3 - Settings for After Subscribing",
+      "Sub Goal - Step 3/3 - Settings for After Joining",
     );
     expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
       "afterSubscribeButtonText",
@@ -1932,6 +1992,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 suscriptores / 200 suscriptores.",
       ),
       postHeight: "regular",
+      language: "es",
       flairId: "flair_subgoal",
     });
   });
@@ -1966,6 +2027,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
       submitAsUser: true,
     });
@@ -2132,6 +2194,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
       submitAsUser: true,
     });
@@ -2185,6 +2248,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
     });
   });
@@ -2219,6 +2283,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
     });
   });
@@ -2253,6 +2318,7 @@ describe("internalUi color theme create goal routes", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(

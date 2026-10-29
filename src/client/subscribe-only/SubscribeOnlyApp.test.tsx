@@ -193,7 +193,7 @@ describe("SubscribeOnlyApp", () => {
         )
         ?.click();
     });
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(hoisted.navigateTo).not.toHaveBeenCalled();
     expect(container.querySelector(".confetti-piece")).toBeNull();
   });
@@ -203,7 +203,7 @@ describe("SubscribeOnlyApp", () => {
 
     expect(html).toContain("h-[100px]");
     expect(html).toContain("sg-goal-frame");
-    expect(html).toContain("Subscribed to r/ExampleSub");
+    expect(html).toContain("Joined r/ExampleSub");
     expect(html).not.toContain("Join r/ExampleSub");
     expect(html).toContain('data-subscription-button-mode="subscribed"');
     expect(html).toContain('disabled=""');
@@ -228,7 +228,7 @@ describe("SubscribeOnlyApp", () => {
 
     expect(html).toContain("Visit Website");
     expect(html).toContain('data-sg-theme="pink"');
-    expect(html).not.toContain("Subscribed to r/ExampleSub");
+    expect(html).not.toContain("Joined r/ExampleSub");
     expect(html).not.toContain("Return to Previous Page");
     expect(html).toContain("r/SubGoal");
   });
@@ -243,7 +243,7 @@ describe("SubscribeOnlyApp", () => {
     expect(container.textContent).toContain("4 new posts today");
     expect(container.textContent).toContain("r/SubGoal");
     expect(container.textContent).not.toContain("Join r/ExampleSub");
-    expect(container.textContent).not.toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).not.toContain("Joined r/ExampleSub");
 
     await act(async () => {
       getActionButton(container)?.dispatchEvent(
@@ -399,7 +399,7 @@ describe("SubscribeOnlyApp", () => {
     });
 
     expect(container.textContent).toContain("Join r/ExampleSub");
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
     ).not.toBeNull();
@@ -412,7 +412,7 @@ describe("SubscribeOnlyApp", () => {
     await act(async () => {
       vi.advanceTimersByTime(tinyViewTransitionDurationMs);
     });
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(container.textContent).toContain("r/SubGoal");
     expect(getActionButton(container)).toBeNull();
     expect(getPromoButton(container)).not.toBeNull();
@@ -428,7 +428,7 @@ describe("SubscribeOnlyApp", () => {
         '[data-subscription-button-mode="subscribed"] button',
       )?.disabled,
     ).toBe(true);
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(getPromoButton(container)).not.toBeNull();
 
     await act(async () => {
@@ -440,7 +440,7 @@ describe("SubscribeOnlyApp", () => {
     ).toBeNull();
     expect(container.textContent).toContain("123 subscribers");
     expect(container.textContent).toContain("4 new today");
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(
       tinySubscriptionConfirmationPhaseDurationMs +
         tinyViewTransitionDurationMs,
@@ -483,13 +483,13 @@ describe("SubscribeOnlyApp", () => {
         .querySelector('[data-app-interaction-shell="true"]')
         ?.getAttribute("data-sg-theme"),
     ).toBe("purple");
-    expect(container.textContent).toContain("Suscrito a r/ExampleSub");
+    expect(container.textContent).toContain("Te uniste a r/ExampleSub");
     expect(container.textContent).not.toContain("Visitar sitio");
 
     await act(async () => {
       vi.advanceTimersByTime(tinyViewTransitionDurationMs);
     });
-    expect(container.textContent).toContain("Suscrito a r/ExampleSub");
+    expect(container.textContent).toContain("Te uniste a r/ExampleSub");
     expect(container.textContent).toContain("r/SubGoal");
     expect(container.textContent).not.toContain("123 suscriptores");
 
@@ -522,7 +522,7 @@ describe("SubscribeOnlyApp", () => {
     hoisted.state = createTinyState({ subscribed: false });
     hoisted.subscribe.mockResolvedValue({
       state: null,
-      error: "Subscription failed.",
+      error: "Couldn't join the community.",
     });
     const container = await renderApp();
 

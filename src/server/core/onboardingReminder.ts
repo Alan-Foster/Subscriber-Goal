@@ -1,5 +1,6 @@
 import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import {
   AUTOMATIC_ONBOARDING_ENABLED,
   ensureExistingSubscriberGoalHighlighted,
@@ -125,21 +126,35 @@ const emptySummary = (): Omit<OnboardingReminderSummary, "status"> => ({
 export function buildOnboardingReminderMessage(
   subredditName: string,
   lifecycleSource: OnboardingLifecycleSource = "install",
+  language?: unknown,
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
-  const automaticCreationNotice =
-    `If a highlighted Subscriber Goal does not already exist, the ${formatDelay(onboardingGoalBaseDelayMs)} countdown begins when this message is sent. ` +
-    `If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add a goal to Community Highlights during the following ${onboardingGoalStaggerMaxMinutes.toLocaleString("en-US")} minutes. A subreddit can have at most six Community Highlights.`;
+  const automaticCreationNotice = translate(
+    language,
+    "outbound.onboarding.automation",
+    {
+      delay: formatDelay(onboardingGoalBaseDelayMs),
+      maxMinutes: onboardingGoalStaggerMaxMinutes.toLocaleString("en-US"),
+    },
+  );
   return {
     subject: isUpgrade
-      ? `Subscriber Goal automatic goal update for r/${subredditName}`
-      : `Welcome to Subscriber Goal in r/${subredditName}`,
+      ? translate(language, "outbound.onboarding.upgradeSubject", {
+          subredditName,
+        })
+      : translate(language, "outbound.onboarding.installSubject", {
+          subredditName,
+        }),
     bodyMarkdown:
       (isUpgrade
-        ? `Subscriber Goal has been updated in r/${subredditName}.\n\n`
-        : `Welcome to Subscriber Goal for r/${subredditName}!\n\n`) +
-      "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.\n\n" +
-      "If you have questions, please send a DM to u/Alan-Foster.\n\n" +
+        ? translate(language, "outbound.onboarding.upgradeIntro", {
+            subredditName,
+          })
+        : translate(language, "outbound.onboarding.installIntro", {
+            subredditName,
+          })) +
+      `\n\n${translate(language, "outbound.onboarding.info")}\n\n` +
+      `${translate(language, "outbound.onboarding.support")}\n\n` +
       automaticCreationNotice,
   };
 }
@@ -573,6 +588,7 @@ export async function processDueOnboardingReminder({
       redis,
       subredditName: subreddit.name,
       subredditId: subreddit.id,
+      language: subreddit.language,
       notify: false,
       scheduleUnknownRetry: false,
       nowMs,
@@ -614,6 +630,7 @@ export async function processDueOnboardingReminder({
     const message = buildOnboardingReminderMessage(
       subreddit.name,
       reloaded.lifecycleSource,
+      subreddit.language,
     );
     const dispatchToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     await saveOnboardingReminderState(redis, {

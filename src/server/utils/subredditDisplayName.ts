@@ -1,14 +1,17 @@
+import { translate } from "../../shared/i18n/catalog";
+
 export function validateSubredditDisplayName(
   input: string | undefined,
-  canonicalSubredditName: string
+  canonicalSubredditName: string,
+  language?: unknown,
 ): string | undefined {
   const trimmed = input?.trim();
   if (!trimmed) {
-    return 'Please provide a subreddit display name.';
+    return translate(language, "moderator.validation.displayNameRequired");
   }
 
   if (trimmed.toLowerCase() !== canonicalSubredditName.toLowerCase()) {
-    return 'Subreddit display name can only change capitalization; all other characters must match exactly.';
+    return translate(language, "moderator.validation.displayNameMismatch");
   }
 
   return undefined;

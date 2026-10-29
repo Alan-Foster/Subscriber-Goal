@@ -32,7 +32,7 @@ describe("NotificationConfirmationPage", () => {
     );
 
     expect(html).toContain('data-notification-confirmation="true"');
-    expect(html).toContain("Thanks for Subscribing!");
+    expect(html).toContain("Thanks for Joining!");
     expect(html).toContain("Notifications Enabled!");
     expect(html).toContain("You’ll be notified when the goal is met.");
     expect(html).toContain('data-notification-bell-state="enabled"');
@@ -49,7 +49,7 @@ describe("NotificationConfirmationPage", () => {
     );
 
     expect(html).toContain("gap-2 py-4");
-    expect(html).toContain("Thanks for Subscribing!");
+    expect(html).toContain("Thanks for Joining!");
     expect(html).not.toContain('alt="Subreddit icon"');
   });
 });

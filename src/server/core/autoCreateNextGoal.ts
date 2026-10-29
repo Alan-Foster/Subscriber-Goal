@@ -246,6 +246,7 @@ export async function processDueAutoCreateNextGoals({
           postUrl: getPostUrl(post),
           errorMessage: highlightResult.errorMessage,
           highlightResult,
+          language: sourceGoalData.language,
         });
       }
       await redis.hSet(autoCreateNextGoalSuccessorsKey, {

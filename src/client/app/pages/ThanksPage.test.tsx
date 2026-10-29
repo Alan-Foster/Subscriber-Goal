@@ -58,7 +58,7 @@ describe("ThanksPage", () => {
       <ThanksPage state={{ ...baseState, language: "es" }} {...commonProps} />,
     );
 
-    expect(html).toContain("¡Gracias por suscribirte!");
+    expect(html).toContain("¡Gracias por unirte!");
     expect(html).toContain("Ahora hay 10 suscriptores en la comunidad!");
     expect(html).toContain('aria-label="Volver a la página anterior"');
     expect(html).toContain(">Volver</button>");
@@ -74,7 +74,7 @@ describe("ThanksPage", () => {
       />,
     );
 
-    expect(html).toContain("सब्सक्राइब करने के लिए धन्यवाद!");
+    expect(html).toContain("शामिल होने के लिए धन्यवाद!");
     expect(html).toContain("कम्यूनिटी में अब 10 सब्सक्राइबर हैं!");
     expect(html).toContain("10 सब्सक्राइबर होने पर सूचना पाएँ");
     expect(html).toContain('aria-label="पिछले पेज पर वापस जाएँ"');
@@ -97,6 +97,39 @@ describe("ThanksPage", () => {
     expect(html).toContain("अभी Subscriber Goal इंस्टॉल करें");
   });
 
+  it.each([
+    ["pa", "ਸ਼ਾਮਲ ਹੋਣ ਲਈ ਧੰਨਵਾਦ!", "ਇਸ ਕਮਿਊਨਿਟੀ ਵਿੱਚ ਹੁਣ 10 ਸਬਸਕ੍ਰਾਈਬਰ ਹਨ!"],
+    [
+      "mr",
+      "सामील झाल्याबद्दल धन्यवाद!",
+      "या समुदायात आता 10 सबस्क्राइबर आहेत!",
+    ],
+  ] as const)("renders the %s Thanks experience", (language, title, body) => {
+    const html = renderToStaticMarkup(
+      <ThanksPage state={{ ...baseState, language }} {...commonProps} />,
+    );
+
+    expect(html).toContain(title);
+    expect(html).toContain(body);
+  });
+
+  it("renders the Punjabi moderator install promotion", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...baseState, language: "pa" }}
+        {...commonProps}
+        showModeratorInstallPromo
+        onModeratorInstall={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("ਸਤ ਸ੍ਰੀ ਅਕਾਲ");
+    expect(html).toContain(
+      "ਹੁਣੇ ਆਪਣੇ ਸਬਰੇਡਿਟਾਂ ਵਿੱਚ Subscriber Goal ਸ਼ਾਮਲ ਕਰੋ!",
+    );
+    expect(html).toContain("ਹੁਣੇ SubGoal ਇੰਸਟਾਲ ਕਰੋ");
+  });
+
   it("hides the subreddit logo for short posts", () => {
     const html = renderToStaticMarkup(
       <ThanksPage
@@ -112,7 +145,7 @@ describe("ThanksPage", () => {
     expect(html).not.toContain("max-sm:pt-8");
     expect(html).toContain("text-2xl font-bold");
     expect(html).toContain("text-lg font-semibold");
-    expect(html).toContain("Thanks for Subscribing!");
+    expect(html).toContain("Thanks for Joining!");
     expect(html).toContain("Get Notified at 10");
     expect(html).toContain("sg-subscribe-attention");
     expect(html).toContain('data-thanks-actions-layout="short"');
@@ -187,15 +220,27 @@ describe("ThanksPage", () => {
       />,
     );
 
-    expect(html).toContain("Subscribed to r/ExampleSub");
+    expect(html).toContain("Joined r/ExampleSub");
     expect(html).not.toContain("View other subscriber goals in r/SubGoal");
     expect(html).not.toContain('alt="Subreddit icon"');
-    expect(html).not.toContain("Thanks for Subscribing!");
+    expect(html).not.toContain("Thanks for Joining!");
     expect(html).not.toContain("subscribers in the community");
     expect(html).not.toContain("Return to Previous Page");
     expect(html).not.toContain("Get Notified");
     expect(html).not.toContain("data-goal-notification-action");
     expect(html).toContain("px-4 py-3");
+  });
+
+  it("renders the Punjabi tiny confirmation", () => {
+    const html = renderToStaticMarkup(
+      <ThanksPage
+        state={{ ...tinyState, language: "pa" }}
+        {...commonProps}
+        onNotificationOptIn={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("r/ExampleSub ਵਿੱਚ ਸ਼ਾਮਲ ਹੋ ਗਏ ਹੋ");
   });
 
   it("replaces the full-size after-subscribe CTA with notification opt-in", () => {
@@ -291,7 +336,7 @@ describe("ThanksPage", () => {
         />,
       );
 
-      expect(html).toContain("Thanks for Subscribing!");
+      expect(html).toContain("Thanks for Joining!");
       expect(html).toContain('class="text-green-500">u/alice</span>,');
       expect(html).toContain("Hi ");
       expect(html).toContain("Add Subscriber Goal to your own subreddits now!");
@@ -366,7 +411,7 @@ describe("ThanksPage", () => {
 
     expect(html).toContain("Visit Website");
     expect(html).toContain("sg-subscribe-attention");
-    expect(html).not.toContain("Subscribed to r/ExampleSub");
+    expect(html).not.toContain("Joined r/ExampleSub");
     expect(html).not.toContain("Return to Previous Page");
   });
 });

@@ -16,10 +16,19 @@ import { requestJsonWithRetry } from "../utils/fetchWithRetry";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { goalJourneyAnalytics } from "../analytics/goalJourneyAnalytics";
 import { logDiagnostic } from "../../shared/diagnostics";
+import {
+  isMessageKey,
+  translate,
+  type MessageKey,
+  type MessageValues,
+} from "../../shared/i18n/catalog";
+import { localizeError } from "../../shared/i18n/errors";
 
 type RequestResult<T> = {
   data: T | null;
   error: string | null;
+  errorMessageKey?: MessageKey;
+  errorMessageParams?: MessageValues;
   errorKind:
     | "api"
     | "gateway"
@@ -59,8 +68,7 @@ const subscriptionReconciliationOffsetsMs = [
   0, 1000, 2000, 3000, 4000, 5000, 10000, 15000, 20000, 25000,
 ] as const;
 
-const safeSubscribeRequestError =
-  "Subscription request could not be completed.";
+const safeSubscribeRequestError = translate("en", "errors.join.transport");
 
 const classifyNonJsonResponse = (body: string): "gateway" | "protocol" =>
   body.trimStart().toLowerCase().startsWith("failed to call devvit application")
@@ -87,7 +95,10 @@ export const requestSubscribeJson = async <T>(
           controller.abort();
         }, options.timeoutMs);
   try {
-    const res = await fetch(input, { ...(init ?? {}), signal: controller.signal });
+    const res = await fetch(input, {
+      ...(init ?? {}),
+      signal: controller.signal,
+    });
     const body = await res.text();
     let payload: T | ErrorResponse;
     try {
@@ -109,9 +120,10 @@ export const requestSubscribeJson = async <T>(
       };
     }
     if (!res.ok) {
+      const errorPayload = payload as ErrorResponse;
       const message =
-        typeof (payload as ErrorResponse).message === "string"
-          ? (payload as ErrorResponse).message
+        typeof errorPayload.message === "string"
+          ? errorPayload.message
           : `HTTP ${res.status}`;
       logDiagnostic("warn", "subscribe_api_error", {
         workflow: "subscribe",
@@ -123,6 +135,12 @@ export const requestSubscribeJson = async <T>(
         error: message,
         errorKind: "api",
         status: res.status,
+        ...(isMessageKey(errorPayload.messageKey)
+          ? {
+              errorMessageKey: errorPayload.messageKey,
+              errorMessageParams: errorPayload.messageParams ?? {},
+            }
+          : {}),
       };
     }
     if (validate && !validate(payload)) {
@@ -151,7 +169,11 @@ export const requestSubscribeJson = async <T>(
         logDiagnostic(
           "warn",
           "subscribe_request_timeout",
-          { workflow: "subscribe", phase: "mutation", timeoutMs: options.timeoutMs },
+          {
+            workflow: "subscribe",
+            phase: "mutation",
+            timeoutMs: options.timeoutMs,
+          },
           error,
         );
         return {
@@ -255,7 +277,9 @@ const isCompactSubreddit = (value: unknown): boolean =>
 
 const hasValidSharedState = (value: Record<string, unknown>): boolean =>
   isSubGoalColorTheme(value.colorTheme) &&
-  subGoalLanguages.includes(value.language as (typeof subGoalLanguages)[number]) &&
+  subGoalLanguages.includes(
+    value.language as (typeof subGoalLanguages)[number],
+  ) &&
   isAfterSubscribeAction(value.afterSubscribeAction) &&
   (value.trackCtaClicks === undefined ||
     typeof value.trackCtaClicks === "boolean");
@@ -596,13 +620,19 @@ export const useSubGoal = () => {
       return null;
     }
     if (result.error) {
-      setError(result.error);
+      setError(
+        localizeError(
+          state?.language,
+          result.errorResponse,
+          result.error ?? messages.loadError,
+        ),
+      );
       return null;
     }
     setState(result.data?.state ?? null);
     setError(null);
     return result.data?.state ?? null;
-  }, []);
+  }, [messages.loadError, state?.language]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -619,7 +649,7 @@ export const useSubGoal = () => {
         return;
       }
       if (result.error) {
-        setError(result.error);
+        setError(localizeError(undefined, result.errorResponse, result.error));
         setLoading(false);
         return;
       }
@@ -670,7 +700,7 @@ export const useSubGoal = () => {
         return;
       }
       if (result.error) {
-        setError(result.error);
+        setError(localizeError(undefined, result.errorResponse, result.error));
         const elapsed = Date.now() - startedAt;
         if (elapsed >= recoveryWindowMs) {
           return;
@@ -690,7 +720,7 @@ export const useSubGoal = () => {
 
       const nextState = result.data?.state ?? null;
       if (!nextState) {
-        setError("Initialization returned no state.");
+        setError(messages.loadError);
         const elapsed = Date.now() - startedAt;
         if (elapsed >= recoveryWindowMs) {
           return;
@@ -729,7 +759,7 @@ export const useSubGoal = () => {
         window.clearTimeout(timeoutId);
       }
     };
-  }, [loading, prohibited, state]);
+  }, [loading, messages.loadError, prohibited, state]);
 
   useEffect(() => {
     if (
@@ -849,10 +879,23 @@ export const useSubGoal = () => {
         }
         if (result.error) {
           if (result.status === 400 || result.status === 401) {
-            if (mountedRef.current) setError(result.error);
+            const localizedError = localizeError(
+              state?.language,
+              {
+                message: result.error,
+                ...(result.errorMessageKey
+                  ? {
+                      messageKey: result.errorMessageKey,
+                      messageParams: result.errorMessageParams ?? {},
+                    }
+                  : {}),
+              },
+              result.error,
+            );
+            if (mountedRef.current) setError(localizedError);
             return {
               state: null,
-              error: result.error,
+              error: localizedError,
               journeyTelemetryHandled: false,
             };
           }
@@ -906,7 +949,7 @@ export const useSubGoal = () => {
         if (mountedRef.current) setSubmitting(false);
       }
     },
-    [messages.subscribeErrorToast, submitting],
+    [messages.subscribeErrorToast, state?.language, submitting],
   );
 
   return {

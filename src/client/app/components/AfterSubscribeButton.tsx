@@ -5,7 +5,6 @@ import { getAfterSubscribePresetMessages } from "../../../shared/subGoalPostI18n
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import type {
   AfterSubscribeTargetResponse,
-  ErrorResponse,
   NavigationTarget,
 } from "../../../shared/types/api";
 import { apiRoutes } from "../../../shared/routes";
@@ -16,6 +15,8 @@ import {
 } from "../../analytics/goalJourneyAnalytics";
 import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 import { logDiagnostic } from "../../../shared/diagnostics";
+import { requestJsonWithRetry } from "../../utils/fetchWithRetry";
+import { localizeError } from "../../../shared/i18n/errors";
 
 type ActionableAfterSubscribeAction = Exclude<
   AfterSubscribeAction,
@@ -89,56 +90,44 @@ export const AfterSubscribeButton = ({
     }
     setResolving(true);
     try {
-      const response = await fetch(apiRoutes.afterSubscribeTarget);
-      const body = await response.text();
-      let payload: AfterSubscribeTargetResponse | ErrorResponse;
-      try {
-        payload = JSON.parse(body) as
-          | AfterSubscribeTargetResponse
-          | ErrorResponse;
-      } catch (error) {
-        const normalized = body.trimStart().toLowerCase();
-        logDiagnostic(
-          "error",
-          "dynamic_target_non_json_response",
-          {
-            workflow: "after_subscribe_cta",
-            phase: normalized.startsWith("failed to call devvit application")
-              ? "gateway"
-              : normalized.startsWith("<html") ||
-                  normalized.startsWith("<!doctype html")
-                ? "html"
-                : body.length === 0
-                  ? "empty"
-                  : "malformed_json",
-            status: response.status,
-            contentType: response.headers.get("content-type") ?? "unknown",
-            bodyLength: body.length,
-          },
-          error,
-        );
-        throw new Error("Dynamic target returned an invalid response.");
-      }
-      if (
-        !response.ok ||
-        !("target" in payload) ||
-        !hasUsableNavigationTarget(payload.target)
-      ) {
+      const result = await requestJsonWithRetry<AfterSubscribeTargetResponse>(
+        apiRoutes.afterSubscribeTarget,
+        undefined,
+        {
+          // Dynamic CTA resolution historically made one request. Keep that
+          // behavior while using the shared structured-error parser.
+          maxDurationMs: 0,
+          validate: (payload): payload is AfterSubscribeTargetResponse =>
+            Boolean(
+              payload &&
+              typeof payload === "object" &&
+              "target" in payload &&
+              hasUsableNavigationTarget(
+                (payload as AfterSubscribeTargetResponse).target,
+              ),
+            ),
+        },
+      );
+      if (result.error || !result.data) {
         logDiagnostic("warn", "dynamic_target_request_failed", {
           workflow: "after_subscribe_cta",
-          phase: !response.ok ? "http_error" : "invalid_payload",
-          status: response.status,
+          phase: result.errorResponse ? "http_error" : "invalid_payload",
+          status: result.status,
         });
         showToast(
-          response.status === 404
-            ? messages.dynamicPostUnavailable
-            : messages.dynamicPostError,
+          localizeError(
+            language,
+            result.errorResponse,
+            result.status === 404
+              ? messages.dynamicPostUnavailable
+              : messages.dynamicPostError,
+          ),
         );
         if (analyticsContext) {
           goalJourneyAnalytics.afterSubscribeCtaFailed(
             analyticsContext,
             actionType,
-            response.status === 404 ? "target_unavailable" : "target_error",
+            result.status === 404 ? "target_unavailable" : "target_error",
           );
         }
         return;
@@ -149,7 +138,7 @@ export const AfterSubscribeButton = ({
           actionType,
         );
       }
-      onNavigate(payload.target);
+      onNavigate(result.data.target);
     } catch (error) {
       logDiagnostic(
         "error",

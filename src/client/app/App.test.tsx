@@ -152,9 +152,7 @@ describe("App", () => {
       (button) => button.textContent?.includes("Return"),
     );
     await act(async () => returnButton?.click());
-    expect(container.textContent).toContain(
-      "Show my username when I subscribe",
-    );
+    expect(container.textContent).toContain("Show my username when I join");
     expect(container.querySelector(".confetti-piece")).toBeNull();
 
     await act(async () => {
@@ -170,9 +168,7 @@ describe("App", () => {
         )
         ?.click();
     });
-    expect(container.textContent).toContain(
-      "Show my username when I subscribe",
-    );
+    expect(container.textContent).toContain("Show my username when I join");
     expect(container.querySelector(".confetti-piece")).toBeNull();
 
     await act(async () => root.unmount());
@@ -227,9 +223,7 @@ describe("App", () => {
       (button) => button.textContent?.includes("Return"),
     );
     await act(async () => returnButton?.click());
-    expect(container.textContent).toContain(
-      "Show my username when I subscribe",
-    );
+    expect(container.textContent).toContain("Show my username when I join");
     expect(container.querySelector(".confetti-piece")).toBeNull();
 
     await act(async () => root.unmount());
@@ -287,7 +281,7 @@ describe("App", () => {
     expect(
       container.querySelector('[data-notification-confirmation="true"]'),
     ).not.toBeNull();
-    expect(container.textContent).toContain("Thanks for Subscribing!");
+    expect(container.textContent).toContain("Thanks for Joining!");
     expect(container.textContent).toContain("Notifications Enabled!");
     expect(container.textContent).toContain(
       "You’ll be notified when the goal is met.",
@@ -305,9 +299,7 @@ describe("App", () => {
     expect(
       container.querySelector('[data-notification-confirmation="true"]'),
     ).toBeNull();
-    expect(container.textContent).toContain(
-      "Show my username when I subscribe",
-    );
+    expect(container.textContent).toContain("Show my username when I join");
 
     await act(async () => root.unmount());
     container.remove();
@@ -378,9 +370,7 @@ describe("App", () => {
     await act(async () => returnButton?.click());
 
     expect(hoisted.requestSubscribeJson).not.toHaveBeenCalled();
-    expect(container.textContent).toContain(
-      "Show my username when I subscribe",
-    );
+    expect(container.textContent).toContain("Show my username when I join");
 
     await act(async () => root.unmount());
     container.remove();
@@ -569,7 +559,7 @@ describe("App", () => {
   it("defaults username sharing to enabled on SFW subreddits", () => {
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain("Show my username when I subscribe");
+    expect(html).toContain("Show my username when I join");
     expect(html).toContain('checked=""');
     expect(html).toContain("sg-goal-frame");
     expect(html).toContain('data-sg-theme="red"');
@@ -987,7 +977,7 @@ describe("App", () => {
     });
 
     expect(hoisted.subscribe).toHaveBeenCalledWith(undefined);
-    expect(container.textContent).toContain("Subscribed to r/ExampleSub");
+    expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(container.textContent).toContain("r/SubGoal");
     expect(
       container.querySelector('button[aria-label*="r/SubGoal"]'),

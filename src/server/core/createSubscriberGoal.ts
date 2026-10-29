@@ -39,6 +39,7 @@ import {
 } from "../utils/textFallback";
 import { toErrorMessage } from "../utils/crosspostLogs";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import {
   defaultAfterSubscribeAction,
   type AfterSubscribeAction,
@@ -99,30 +100,37 @@ export type SubscriberGoalFlairResult =
     };
 
 export class SubscriberGoalModeratorPermissionError extends Error {
-  constructor(appUsername: string | undefined, subredditName: string) {
+  constructor(
+    appUsername: string | undefined,
+    subredditName: string,
+    language?: SubGoalLanguage,
+  ) {
     const appAccount = appUsername
       ? `u/${appUsername}`
       : "the Subscriber Goal app account";
     super(
-      `${appAccount} must be a moderator of r/${subredditName} with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.`,
+      translate(language, "errors.create.moderatorPermission", {
+        appAccount,
+        subredditName,
+      }),
     );
     this.name = "SubscriberGoalModeratorPermissionError";
   }
 }
 
 export class SubscriberGoalCreationInProgressError extends Error {
-  constructor() {
-    super(
-      "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
-    );
+  constructor(language?: SubGoalLanguage) {
+    super(translate(language, "errors.create.inProgress"));
     this.name = "SubscriberGoalCreationInProgressError";
   }
 }
 
 export class SubscriberGoalPermissionVerificationError extends Error {
-  constructor(subredditName: string) {
+  constructor(subredditName: string, language?: SubGoalLanguage) {
     super(
-      `Reddit could not verify Subscriber Goal's moderator permissions in r/${subredditName}.`,
+      translate(language, "errors.create.permissionVerification", {
+        subredditName,
+      }),
     );
     this.name = "SubscriberGoalPermissionVerificationError";
   }
@@ -153,7 +161,7 @@ export async function createSubscriberGoal({
     );
   } catch (error) {
     if (error instanceof CommunityGoalMutationInProgressError) {
-      throw new SubscriberGoalCreationInProgressError();
+      throw new SubscriberGoalCreationInProgressError(options.language);
     }
     throw error;
   }
@@ -237,7 +245,7 @@ async function createSubscriberGoalUnderCommunityLease({
     expiration: new Date(nowMs + 15 * 60 * 1000),
   });
   if ((await redis.get(lockKey)) !== lockToken) {
-    throw new SubscriberGoalCreationInProgressError();
+    throw new SubscriberGoalCreationInProgressError(options.language);
   }
 
   try {
@@ -326,6 +334,7 @@ async function createSubscriberGoalInternal(
     redis,
     subredditName: subreddit.name,
     subredditId: subreddit.id,
+    language: options.language,
     ...(options.automaticPermissionCheck
       ? { notify: false, scheduleUnknownRetry: false }
       : {}),
@@ -334,10 +343,15 @@ async function createSubscriberGoalInternal(
   const hasAllPermissions = permissions.includes("all");
   if (health.status === "unknown") {
     if (options.automaticPermissionCheck) {
-      throw new SubscriberGoalPermissionVerificationError(subreddit.name);
+      throw new SubscriberGoalPermissionVerificationError(
+        subreddit.name,
+        options.language,
+      );
     }
     throw new Error(
-      `Reddit could not verify Subscriber Goal's moderator permissions in r/${subreddit.name}. Please try again shortly.`,
+      translate(options.language, "errors.create.permissionVerificationRetry", {
+        subredditName: subreddit.name,
+      }),
     );
   }
   if (!health.healthy) {
@@ -351,6 +365,7 @@ async function createSubscriberGoalInternal(
     throw new SubscriberGoalModeratorPermissionError(
       appUsername,
       subreddit.name,
+      options.language,
     );
   }
 
@@ -404,6 +419,7 @@ async function createSubscriberGoalInternal(
       subredditName: subreddit.name,
       textFallback,
       postHeight: options.postHeight,
+      language: options.language,
       ...(flairResult.status === "applied"
         ? { flairId: flairResult.flairId }
         : {}),
@@ -505,6 +521,7 @@ async function createSubscriberGoalInternal(
       redis,
       subredditName: subreddit.name,
       subredditId: subreddit.id,
+      language: options.language,
       notify: false,
     });
     highlightResult =

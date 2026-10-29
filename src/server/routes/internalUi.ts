@@ -22,9 +22,11 @@ import { subGoalPostHeights } from "../../shared/subGoalPostHeight";
 import {
   getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
+  defaultSubGoalLanguage,
   resolveSubGoalLanguage,
   subGoalLanguages,
   subGoalPostMessages,
+  type SubGoalLanguage,
 } from "../../shared/subGoalPostI18n";
 import { formNames, internalRoutes } from "../../shared/routes";
 import {
@@ -58,6 +60,7 @@ import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
+import { translate } from "../../shared/i18n/catalog";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
   createDefaultAfterSubscribeAction,
@@ -80,6 +83,17 @@ function stableDraftFingerprint(value: unknown): string {
     second = Math.imul(second ^ code, 0x85ebca6b);
   }
   return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
+}
+
+async function resolveCurrentSubredditLanguage(): Promise<SubGoalLanguage> {
+  try {
+    return resolveSubGoalLanguage(
+      (await reddit.getCurrentSubreddit()).language,
+    );
+  } catch {
+    // diagnostic-allow-silent: the default language is safe when subreddit metadata is unavailable.
+    return defaultSubGoalLanguage;
+  }
 }
 
 export function registerInternalUiRoutes(router: Router): void {
@@ -111,7 +125,12 @@ export function registerInternalUiRoutes(router: Router): void {
           { workflow: "create_goal", phase: "setup_form" },
           error,
         );
-        res.json({ showToast: "Error preparing the create-post form." });
+        res.json({
+          showToast: translate(
+            await resolveCurrentSubredditLanguage(),
+            "moderator.form.prepareSetupFailed",
+          ),
+        });
       }
     });
   };
@@ -138,12 +157,17 @@ export function registerInternalUiRoutes(router: Router): void {
         )
       ) {
         res.json({
-          showToast: "Please select a valid language and post height.",
+          showToast: translate(
+            await resolveCurrentSubredditLanguage(),
+            "moderator.form.invalidLanguageHeight",
+          ),
         });
         return;
       }
       if (!userId) {
-        res.json({ showToast: "Please log in to create a Sub Goal post." });
+        res.json({
+          showToast: translate(language, "moderator.form.loginRequired"),
+        });
         return;
       }
       try {
@@ -151,6 +175,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const displayNameError = validateSubredditDisplayName(
           subredditDisplayName,
           subreddit.name,
+          language,
         );
         if (displayNameError) {
           res.json({ showToast: displayNameError });
@@ -174,7 +199,9 @@ export function registerInternalUiRoutes(router: Router): void {
           { workflow: "create_goal", phase: "details_form" },
           error,
         );
-        res.json({ showToast: "Error preparing the post details form." });
+        res.json({
+          showToast: translate(language, "moderator.form.prepareDetailsFailed"),
+        });
       }
     },
   );
@@ -248,24 +275,24 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.menu.deleteGoal,
     async (_req, res: Response<UiResponse>) => {
+      const language = await resolveCurrentSubredditLanguage();
       res.json({
         showForm: {
           name: formNames.deleteGoal,
           form: {
-            title: "Sub Goal - Delete This Post",
-            description:
-              "This will permanently delete the Sub Goal post. If you wish to temporarily hide the post, you can remove it as a moderator and re-approve it later.",
+            title: translate(language, "moderator.delete.title"),
+            description: translate(language, "moderator.delete.description"),
             fields: [
               {
                 name: "confirm",
-                label: "Are you sure?",
+                label: translate(language, "moderator.delete.confirm"),
                 type: "boolean",
                 defaultValue: false,
-                helpText: "This action is irreversible.",
+                helpText: translate(language, "moderator.delete.irreversible"),
               },
             ],
-            acceptLabel: "Delete",
-            cancelLabel: "Cancel",
+            acceptLabel: translate(language, "moderator.delete.accept"),
+            cancelLabel: translate(language, "moderator.common.cancel"),
           },
         },
       });
@@ -277,6 +304,7 @@ export function registerInternalUiRoutes(router: Router): void {
     async (req, res: Response<UiResponse>) => {
       const operationId = createOperationId("delete-goal");
       const postId = context.postId;
+      const language = await resolveCurrentSubredditLanguage();
       let phase = "request_validation";
       logDiagnostic("info", "delete_goal_started", {
         operationId,
@@ -288,8 +316,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const { confirm } = (req.body ?? {}) as DeleteGoalFormValues;
         if (!confirm) {
           res.json({
-            showToast:
-              "You did not confirm the deletion. If that was a mistake, please try again and enable the confirmation toggle before hitting delete.",
+            showToast: translate(language, "moderator.delete.notConfirmed"),
           });
           return;
         }
@@ -300,7 +327,9 @@ export function registerInternalUiRoutes(router: Router): void {
             phase,
           });
           res.json({
-            showToast: `Deletion metadata was somehow lost. Please try again. Reference: ${operationId}`,
+            showToast: translate(language, "moderator.delete.metadataLost", {
+              operationId,
+            }),
           });
           return;
         }
@@ -385,11 +414,15 @@ export function registerInternalUiRoutes(router: Router): void {
             failedCleanupCount: cleanupFailures.length,
           });
           res.json({
-            showToast: `The post was deleted, but some cleanup is still pending. Reference: ${operationId}`,
+            showToast: translate(language, "moderator.delete.cleanupPending", {
+              operationId,
+            }),
           });
           return;
         }
-        res.json({ showToast: "Post deleted successfully!" });
+        res.json({
+          showToast: translate(language, "moderator.delete.success"),
+        });
         logDiagnostic("info", "delete_goal_completed", {
           operationId,
           workflow: "delete_goal",
@@ -404,7 +437,9 @@ export function registerInternalUiRoutes(router: Router): void {
           error,
         );
         res.json({
-          showToast: `Error deleting post. Please refresh the page and try again. Reference: ${operationId}`,
+          showToast: translate(language, "moderator.delete.failed", {
+            operationId,
+          }),
         });
       }
     },
@@ -413,40 +448,38 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.menu.eraseData,
     async (_req, res: Response<UiResponse>) => {
+      const language = await resolveCurrentSubredditLanguage();
       res.json({
         showForm: {
           name: formNames.eraseData,
           form: {
-            title: "Sub Goal - Erase Another User's Data",
-            description:
-              "This moderator action will erase all data stored by Sub Goal for the specified user.",
+            title: translate(language, "moderator.data.eraseTitle"),
+            description: translate(language, "moderator.data.eraseDescription"),
             fields: [
               {
                 name: "username",
-                label: "Username",
+                label: translate(language, "moderator.data.username"),
                 type: "string",
-                helpText:
-                  "Erase all data associated with this username. Please note that in some cases this may be case sensitive, so it should be entered exactly as it appears in their Reddit profile link.",
+                helpText: translate(language, "moderator.data.usernameHelp"),
                 required: false,
               },
               {
                 name: "userId",
-                label: "User ID",
+                label: translate(language, "moderator.data.userId"),
                 type: "string",
-                helpText:
-                  "Erase all data associated with this user ID. If left blank, this field will be fetched based on the specified username.",
+                helpText: translate(language, "moderator.data.userIdHelp"),
                 required: false,
               },
               {
                 name: "confirm",
-                label: "Are you sure?",
+                label: translate(language, "moderator.delete.confirm"),
                 type: "boolean",
                 defaultValue: false,
-                helpText: "This action is irreversible.",
+                helpText: translate(language, "moderator.delete.irreversible"),
               },
             ],
-            acceptLabel: "Erase",
-            cancelLabel: "Cancel",
+            acceptLabel: translate(language, "moderator.data.eraseAccept"),
+            cancelLabel: translate(language, "moderator.common.cancel"),
           },
         },
       });
@@ -456,24 +489,24 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.menu.eraseMyData,
     async (_req, res: Response<UiResponse>) => {
+      const language = await resolveCurrentSubredditLanguage();
       res.json({
         showForm: {
           name: formNames.eraseMyData,
           form: {
-            title: "Sub Goal - Remove My Own Data",
-            description:
-              "This will remove all data stored by Sub Goal for your Reddit account.",
+            title: translate(language, "moderator.data.selfTitle"),
+            description: translate(language, "moderator.data.selfDescription"),
             fields: [
               {
                 name: "confirm",
-                label: "Remove all of my Sub Goal user data",
+                label: translate(language, "moderator.data.selfConfirm"),
                 type: "boolean",
                 defaultValue: false,
-                helpText: "This action is irreversible.",
+                helpText: translate(language, "moderator.delete.irreversible"),
               },
             ],
-            acceptLabel: "Remove My Data",
-            cancelLabel: "Cancel",
+            acceptLabel: translate(language, "moderator.data.selfAccept"),
+            cancelLabel: translate(language, "moderator.common.cancel"),
           },
         },
       });
@@ -483,20 +516,19 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.forms.eraseData,
     async (req, res: Response<UiResponse>) => {
+      const language = await resolveCurrentSubredditLanguage();
       const { username, userId, confirm } = req.body as EraseDataFormValues;
 
       if (!confirm) {
         res.json({
-          showToast:
-            "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
+          showToast: translate(language, "moderator.data.eraseNotConfirmed"),
         });
         return;
       }
 
       if (!username && !userId) {
         res.json({
-          showToast:
-            "User details were not provided. Please enter a username, user ID, or both.",
+          showToast: translate(language, "moderator.data.detailsRequired"),
         });
         return;
       }
@@ -530,8 +562,10 @@ export function registerInternalUiRoutes(router: Router): void {
           { workflow: "erase_user_data", phase: "identity_lookup" },
           error,
         );
-        identityLookupWarning =
-          "Reddit identity lookup failed, so some associated data may remain. Please retry with the user ID if possible.";
+        identityLookupWarning = translate(
+          language,
+          "moderator.data.identityWarning",
+        );
       }
 
       try {
@@ -545,8 +579,7 @@ export function registerInternalUiRoutes(router: Router): void {
           if (result.status === "partial") {
             await eraseFromRecentSubscribers(redis, resolvedUsername);
             res.json({
-              showToast:
-                "Recent subscriber references were erased where indexed. Subscriber stats could not be fully erased by username; please try again with the user ID if possible.",
+              showToast: translate(language, "moderator.data.partial"),
             });
             return;
           }
@@ -558,12 +591,16 @@ export function registerInternalUiRoutes(router: Router): void {
 
         if (identityLookupWarning) {
           res.json({
-            showToast: `Available user data was erased. ${identityLookupWarning}`,
+            showToast: translate(language, "moderator.data.availableErased", {
+              warning: identityLookupWarning,
+            }),
           });
           return;
         }
 
-        res.json({ showToast: "User data has been erased successfully." });
+        res.json({
+          showToast: translate(language, "moderator.data.eraseSuccess"),
+        });
       } catch (error) {
         logDiagnostic(
           "error",
@@ -572,8 +609,7 @@ export function registerInternalUiRoutes(router: Router): void {
           error,
         );
         res.json({
-          showToast:
-            "User data could not be fully erased. Please try again with the user ID.",
+          showToast: translate(language, "moderator.data.eraseFailed"),
         });
       }
     },
@@ -583,13 +619,13 @@ export function registerInternalUiRoutes(router: Router): void {
     internalRoutes.forms.eraseMyData,
     async (req, res: Response<UiResponse>) => {
       const operationId = createOperationId("erase-self");
+      const language = await resolveCurrentSubredditLanguage();
       let phase = "request_validation";
       try {
         const { confirm } = (req.body ?? {}) as EraseMyDataFormValues;
         if (!confirm) {
           res.json({
-            showToast:
-              "You did not confirm removal. Please enable the confirmation toggle before proceeding.",
+            showToast: translate(language, "moderator.data.selfNotConfirmed"),
           });
           return;
         }
@@ -597,7 +633,7 @@ export function registerInternalUiRoutes(router: Router): void {
         const currentUserId = context.userId;
         if (!currentUserId) {
           res.json({
-            showToast: "Please log in to remove your Sub Goal user data.",
+            showToast: translate(language, "moderator.data.selfLoginRequired"),
           });
           return;
         }
@@ -623,7 +659,9 @@ export function registerInternalUiRoutes(router: Router): void {
         }
 
         phase = "response_completion";
-        res.json({ showToast: "Your Sub Goal user data has been removed." });
+        res.json({
+          showToast: translate(language, "moderator.data.selfSuccess"),
+        });
       } catch (error) {
         logDiagnostic(
           "error",
@@ -632,7 +670,9 @@ export function registerInternalUiRoutes(router: Router): void {
           error,
         );
         res.json({
-          showToast: `Your Sub Goal user data could not be fully removed. Reference: ${operationId}`,
+          showToast: translate(language, "moderator.data.selfFailed", {
+            operationId,
+          }),
         });
       }
     },
@@ -658,52 +698,58 @@ async function buildCreateGoalSetupForm(
   return {
     name: formNames.createGoalSetup,
     form: {
-      title: "Sub Goal - Step 1/3 - Choose Post Type",
-      description:
-        "Choose the shared post settings. You will customize the post on the next two pages.",
-      acceptLabel: "Next",
-      cancelLabel: "Cancel",
+      title: translate(defaultLanguage, "moderator.setup.title"),
+      description: translate(defaultLanguage, "moderator.setup.description"),
+      acceptLabel: translate(defaultLanguage, "moderator.common.next"),
+      cancelLabel: translate(defaultLanguage, "moderator.common.cancel"),
       fields: [
         {
           name: "language",
-          label: "Language",
+          label: translate(defaultLanguage, "moderator.setup.language"),
           type: "select",
           defaultValue: [defaultLanguage],
           options: subGoalLanguages.map((language) => ({
             label: subGoalPostMessages[language].languageLabel,
             value: language,
           })),
-          helpText: "This controls the language used in the post.",
+          helpText: translate(defaultLanguage, "moderator.setup.languageHelp"),
           required: true,
         },
         {
           name: "subredditDisplayName",
-          label: "Customize Subreddit Name Capitalization",
+          label: translate(defaultLanguage, "moderator.setup.displayName"),
           type: "string",
           defaultValue: savedDisplayName ?? subreddit.name,
-          helpText:
-            "Only capitalization may be changed. The customized name is used in the default post title.",
+          helpText: translate(
+            defaultLanguage,
+            "moderator.setup.displayNameHelp",
+          ),
           required: true,
         },
         {
           name: "postHeight",
-          label: "Post Height",
+          label: translate(defaultLanguage, "moderator.setup.postHeight"),
           type: "select",
           defaultValue: [initialPostHeight],
           options: [
-            { label: "Full Height Subscriber Goal", value: "regular" },
-            { label: "Short Subscriber Goal (No Logo)", value: "short" },
             {
-              label: "Subscribe Button and CTA Button (No Goal)",
+              label: translate(defaultLanguage, "moderator.setup.regular"),
+              value: "regular",
+            },
+            {
+              label: translate(defaultLanguage, "moderator.setup.short"),
+              value: "short",
+            },
+            {
+              label: translate(defaultLanguage, "moderator.setup.tiny"),
               value: "tiny",
             },
             {
-              label: "CTA Button (No Subscribing at all)",
+              label: translate(defaultLanguage, "moderator.setup.cta"),
               value: "cta",
             },
           ],
-          helpText:
-            "Choose a subscriber goal, a subscribe button with a follow-up CTA, or a CTA with no subscribing.",
+          helpText: translate(defaultLanguage, "moderator.setup.help"),
           required: true,
         },
       ],
@@ -729,40 +775,45 @@ function buildCreateGoalDetailsForm(
   const commonFields = {
     postTitle: {
       name: "postTitle",
-      label: "Post Title",
+      label: translate(draft.language, "moderator.details.postTitle"),
       type: "string" as const,
       defaultValue: defaultPostTitle,
-      helpText:
-        "This will be used as the title of the post. You can customize it as you see fit.",
+      helpText: translate(draft.language, "moderator.details.postTitleHelp"),
       required: true,
     },
   };
-  const colorOptions = getColorOptions();
+  const colorOptions = getColorOptions(draft.language);
 
   if (draft.postHeight === "tiny") {
     return {
       name: formNames.createSubscribeOnly,
       form: {
-        title: "Sub Goal - Step 2/3 - Subscribe-Only Details",
-        description: "Customize the Tiny subscribe-only post.",
-        acceptLabel: "Next",
-        cancelLabel: "Cancel",
+        title: translate(draft.language, "moderator.details.joinOnlyTitle"),
+        description: translate(
+          draft.language,
+          "moderator.details.joinOnlyDescription",
+        ),
+        acceptLabel: translate(draft.language, "moderator.common.next"),
+        cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: [
           commonFields.postTitle,
           {
             name: "colorTheme",
-            label: "Subscribe Button Color",
+            label: translate(draft.language, "moderator.details.joinColor"),
             type: "select",
             defaultValue: [defaultSubGoalColorTheme],
             options: colorOptions,
-            helpText:
-              "This controls the subscribe button and button glow color.",
+            helpText: translate(
+              draft.language,
+              "moderator.details.joinColorHelp",
+            ),
             required: true,
           },
           getAfterSubscribeActionField(
             subreddit.type,
             "after-subscribe",
             getCurrentSubredditNsfw(subreddit) === true,
+            draft.language,
           ),
         ],
       },
@@ -773,16 +824,20 @@ function buildCreateGoalDetailsForm(
     return {
       name: formNames.createCtaOnly,
       form: {
-        title: "Sub Goal - Step 2/3 - CTA Details",
-        description: "Customize the CTA-only post.",
-        acceptLabel: "Next",
-        cancelLabel: "Cancel",
+        title: translate(draft.language, "moderator.details.ctaTitle"),
+        description: translate(
+          draft.language,
+          "moderator.details.ctaDescription",
+        ),
+        acceptLabel: translate(draft.language, "moderator.common.next"),
+        cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: [
           commonFields.postTitle,
           getAfterSubscribeActionField(
             subreddit.type,
             "cta",
             getCurrentSubredditNsfw(subreddit) === true,
+            draft.language,
           ),
         ],
       },
@@ -796,55 +851,64 @@ function buildCreateGoalDetailsForm(
     sourceSubredditNsfw === false &&
     subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
   const crosspostHelpText = sourceSubredditIsNsfw
-    ? "Crossposting is disabled for NSFW source subreddits."
+    ? translate(draft.language, "moderator.details.crosspostNsfw")
     : sourceSubredditNsfw === undefined
-      ? "Crossposting is disabled because the source subreddit safety status is unavailable."
-      : `Keep this enabled to announce your goal in the r/${appSettings.promoSubreddit} index subreddit.`;
+      ? translate(draft.language, "moderator.details.crosspostUnknown")
+      : translate(draft.language, "moderator.details.crosspostHelp", {
+          subredditName: appSettings.promoSubreddit,
+        });
 
   return {
     name: formNames.createSubscriberGoal,
     form: {
-      title: "Sub Goal - Step 2/3 - Subscriber Goal Details",
-      description: `Customize the ${draft.postHeight === "short" ? "Short" : "Regular"} subscriber goal.`,
-      acceptLabel: "Next",
-      cancelLabel: "Cancel",
+      title: translate(draft.language, "moderator.details.goalTitle"),
+      description: translate(
+        draft.language,
+        "moderator.details.goalDescription",
+        { height: draft.postHeight === "short" ? "Short" : "Regular" },
+      ),
+      acceptLabel: translate(draft.language, "moderator.common.next"),
+      cancelLabel: translate(draft.language, "moderator.common.cancel"),
       fields: [
         commonFields.postTitle,
         {
           name: "subscriberGoal",
-          label: "Enter your Subscriber Goal",
+          label: translate(draft.language, "moderator.details.goal"),
           type: "number",
           defaultValue: getDefaultSubscriberGoal(subreddit.numberOfSubscribers),
-          helpText:
-            "The default is a suggestion based on your current subscriber count.",
+          helpText: translate(draft.language, "moderator.details.goalHelp"),
           required: true,
         },
         {
           name: "colorTheme",
-          label: "Subscribe Button Color",
+          label: translate(draft.language, "moderator.details.joinColor"),
           type: "select",
           defaultValue: [defaultSubGoalColorTheme],
           options: colorOptions,
-          helpText:
-            "This controls the subscribe button, progress bar, and button glow color.",
+          helpText: translate(
+            draft.language,
+            "moderator.details.goalColorHelp",
+          ),
           required: true,
         },
         getAfterSubscribeActionField(
           subreddit.type,
           "after-subscribe",
           sourceSubredditIsNsfw,
+          draft.language,
         ),
         {
           name: "autoCreateNextGoal",
-          label: "Create a New Subscriber Goal 24 Hours after Goal Success",
+          label: translate(draft.language, "moderator.details.autoNext"),
           type: "boolean",
-          helpText:
-            "Once the milestone is reached, automatically create a goal for the next milestone.",
+          helpText: translate(draft.language, "moderator.details.autoNextHelp"),
           defaultValue: true,
         },
         {
           name: "crosspost",
-          label: `Auto-Crosspost to r/${appSettings.promoSubreddit} (Recommended)`,
+          label: translate(draft.language, "moderator.details.crosspost", {
+            subredditName: appSettings.promoSubreddit,
+          }),
           type: "boolean",
           helpText: crosspostHelpText,
           defaultValue: shouldCrosspost,
@@ -867,41 +931,45 @@ function buildCreateGoalFollowUpForm(
     {
       name: "afterSubscribeButtonText",
       label: isCtaOnly
-        ? "CTA Button Text"
-        : "Button Text After a User Subscribes",
+        ? translate(draft.language, "moderator.followUp.ctaText")
+        : translate(draft.language, "moderator.followUp.buttonText"),
       type: "string" as const,
       ...(presetDefaults.buttonText
         ? { defaultValue: presetDefaults.buttonText }
         : {}),
-      helpText: "Recommended: 6-24 characters. Accepted: 5-50 characters.",
+      helpText: translate(draft.language, "moderator.followUp.textHelp"),
       required: false,
     },
     ...(presetDefaults.showUrl
       ? [
           {
             name: "afterSubscribeUrl",
-            label: "URL Link",
+            label: translate(draft.language, "moderator.followUp.url"),
             type: "string" as const,
-            helpText: "Enter a complete secure https:// URL.",
+            helpText: translate(draft.language, "moderator.followUp.urlHelp"),
             required: false,
           },
         ]
       : []),
     {
       name: "afterSubscribeColorTheme",
-      label: isCtaOnly ? "CTA Button Color" : "After-Subscribed Button Color",
+      label: isCtaOnly
+        ? translate(draft.language, "moderator.followUp.ctaColor")
+        : translate(draft.language, "moderator.followUp.buttonColor"),
       type: "select" as const,
       defaultValue: [presetDefaults.colorTheme],
-      options: getColorOptions(),
-      helpText: "This controls the after-subscribed button color.",
+      options: getColorOptions(draft.language),
+      helpText: translate(draft.language, "moderator.followUp.buttonColorHelp"),
       required: true,
     },
     {
       name: "customDeveloperField",
-      label: "Custom Developer Field",
+      label: translate(draft.language, "moderator.followUp.developerField"),
       type: "string" as const,
-      helpText:
-        "This field is for developers and testing only. Please leave this field empty.",
+      helpText: translate(
+        draft.language,
+        "moderator.followUp.developerFieldHelp",
+      ),
       required: false,
     },
   ];
@@ -910,10 +978,13 @@ function buildCreateGoalFollowUpForm(
     return {
       name: formNames.createSubscribeOnlyFollowUp,
       form: {
-        title: "Sub Goal - Step 3/3 - Settings for After Subscribing",
-        description: "Choose what subscribed users will see and do.",
-        acceptLabel: "Create",
-        cancelLabel: "Cancel",
+        title: translate(draft.language, "moderator.followUp.title"),
+        description: translate(
+          draft.language,
+          "moderator.followUp.description",
+        ),
+        acceptLabel: translate(draft.language, "moderator.common.create"),
+        cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: sharedFields,
       },
     };
@@ -923,10 +994,13 @@ function buildCreateGoalFollowUpForm(
     return {
       name: formNames.createCtaOnlyFollowUp,
       form: {
-        title: "Sub Goal - Step 3/3 - CTA Button Settings",
-        description: "Customize the CTA shown immediately to every viewer.",
-        acceptLabel: "Create",
-        cancelLabel: "Cancel",
+        title: translate(draft.language, "moderator.followUp.ctaTitle"),
+        description: translate(
+          draft.language,
+          "moderator.followUp.ctaDescription",
+        ),
+        acceptLabel: translate(draft.language, "moderator.common.create"),
+        cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: sharedFields,
       },
     };
@@ -935,23 +1009,27 @@ function buildCreateGoalFollowUpForm(
   return {
     name: formNames.createSubscriberGoalFollowUp,
     form: {
-      title: "Sub Goal - Step 3/3 - Settings for After Subscribing",
-      description:
-        "Choose what happens after a user subscribes or the goal succeeds.",
-      acceptLabel: "Create",
-      cancelLabel: "Cancel",
+      title: translate(draft.language, "moderator.followUp.goalTitle"),
+      description: translate(
+        draft.language,
+        "moderator.followUp.goalDescription",
+      ),
+      acceptLabel: translate(draft.language, "moderator.common.create"),
+      cancelLabel: translate(draft.language, "moderator.common.cancel"),
       fields: sharedFields,
     },
   };
 }
 
-function getColorOptions(): Array<{ label: string; value: string }> {
+function getColorOptions(
+  language: SubGoalLanguage = defaultSubGoalLanguage,
+): Array<{ label: string; value: string }> {
   const labels: Record<(typeof subGoalColorThemes)[number], string> = {
-    red: "Red",
-    green: "Green",
-    purple: "Purple",
-    blue: "Blue",
-    pink: "Pink",
+    red: translate(language, "moderator.color.red"),
+    green: translate(language, "moderator.color.green"),
+    purple: translate(language, "moderator.color.purple"),
+    blue: translate(language, "moderator.color.blue"),
+    pink: translate(language, "moderator.color.pink"),
   };
   return subGoalColorThemes.map((value) => ({ label: labels[value], value }));
 }
@@ -960,21 +1038,37 @@ function getAfterSubscribeActionField(
   subredditType: unknown,
   context: "after-subscribe" | "cta" = "after-subscribe",
   isNsfw = false,
+  language: SubGoalLanguage = defaultSubGoalLanguage,
 ) {
   const options = [
-    { label: "Link to the Top Post Today", value: "top-post-day" },
     {
-      label: "Link to the Most Recent Post Today",
+      label: translate(language, "moderator.followUp.topPost"),
+      value: "top-post-day",
+    },
+    {
+      label: translate(language, "moderator.followUp.newestPost"),
       value: "newest-post",
     },
-    { label: "Link to Create a New Text Post", value: "create-post" },
     {
-      label: "Link to Create a New Image Post",
+      label: translate(language, "moderator.followUp.createPost"),
+      value: "create-post",
+    },
+    {
+      label: translate(language, "moderator.followUp.sharePicture"),
       value: "share-picture",
     },
-    { label: "Link to a Discord Server", value: "discord" },
-    { label: "Link to a Webpage URL", value: "web-link" },
-    { label: "Link to the Subreddit Wiki", value: "wiki" },
+    {
+      label: translate(language, "moderator.followUp.discord"),
+      value: "discord",
+    },
+    {
+      label: translate(language, "moderator.followUp.web"),
+      value: "web-link",
+    },
+    {
+      label: translate(language, "moderator.followUp.wiki"),
+      value: "wiki",
+    },
   ].filter(
     ({ value }) =>
       !isNsfw || (value !== "top-post-day" && value !== "newest-post"),
@@ -983,8 +1077,8 @@ function getAfterSubscribeActionField(
     name: "afterSubscribePreset",
     label:
       context === "cta"
-        ? "What Should the CTA Button Do?"
-        : "What Should the Button Do After Subscription?",
+        ? translate(language, "moderator.followUp.actionCta")
+        : translate(language, "moderator.followUp.action"),
     type: "select" as const,
     defaultValue: [
       isNsfw ? "create-post" : getDefaultAfterSubscribePreset(subredditType),
@@ -992,8 +1086,8 @@ function getAfterSubscribeActionField(
     options,
     helpText:
       context === "cta"
-        ? "Choose what every viewer can do from the post."
-        : "Choose what subscribed users can do from the post.",
+        ? translate(language, "moderator.followUp.actionCtaHelp")
+        : translate(language, "moderator.followUp.actionHelp"),
     required: true,
   };
 }
@@ -1068,15 +1162,17 @@ async function submitCreateGoalStepTwo(
   res: Response<UiResponse>,
 ): Promise<void> {
   const userId = context.userId;
+  let requestLanguage: unknown = await resolveCurrentSubredditLanguage();
   if (!userId) {
     await respondWithCreateGoalRestart(
       res,
-      "Please log in and restart the create-post flow.",
+      translate(requestLanguage, "moderator.form.restartLogin"),
     );
     return;
   }
   try {
     const draft = await getCreateGoalDraft(redis, userId);
+    requestLanguage = draft?.language ?? requestLanguage;
     const draftKind =
       draft?.postHeight === "tiny"
         ? "subscribe-only"
@@ -1086,7 +1182,7 @@ async function submitCreateGoalStepTwo(
     if (!draft || draft.stage !== "details" || draftKind !== expectedKind) {
       await respondWithCreateGoalRestart(
         res,
-        "Your post setup expired or no longer matches this form. Please begin again.",
+        translate(draft?.language, "moderator.form.expired"),
       );
       return;
     }
@@ -1094,7 +1190,12 @@ async function submitCreateGoalStepTwo(
     const subreddit = await reddit.getCurrentSubreddit();
     const postTitle = values.postTitle?.trim();
     if (!postTitle) {
-      res.json({ showToast: "Please provide a post title!" });
+      res.json({
+        showToast: translate(
+          draft.language,
+          "moderator.form.postTitleRequired",
+        ),
+      });
       return;
     }
     const colorTheme = resolveSubGoalColorTheme(
@@ -1126,7 +1227,9 @@ async function submitCreateGoalStepTwo(
       const subscriberGoal =
         "subscriberGoal" in values ? values.subscriberGoal : undefined;
       if (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal) {
-        res.json({ showToast: "Please select a valid subscriber goal!" });
+        res.json({
+          showToast: translate(draft.language, "moderator.form.goalInvalid"),
+        });
         return;
       }
       const appSettings = getAppSettings();
@@ -1170,7 +1273,12 @@ async function submitCreateGoalStepTwo(
       { workflow: "create_goal", phase: "follow_up_form" },
       error,
     );
-    res.json({ showToast: "Error preparing the follow-up options form." });
+    res.json({
+      showToast: translate(
+        requestLanguage,
+        "moderator.form.prepareFollowUpFailed",
+      ),
+    });
   }
 }
 
@@ -1180,15 +1288,17 @@ async function submitCreateGoalFollowUp(
   res: Response<UiResponse>,
 ): Promise<void> {
   const userId = context.userId;
+  let requestLanguage: unknown = await resolveCurrentSubredditLanguage();
   if (!userId) {
     await respondWithCreateGoalRestart(
       res,
-      "Please log in and restart the create-post flow.",
+      translate(requestLanguage, "moderator.form.restartLogin"),
     );
     return;
   }
   try {
     const draft = await getCreateGoalDraft(redis, userId);
+    requestLanguage = draft?.language ?? requestLanguage;
     if (
       !draft ||
       draft.stage !== "follow-up" ||
@@ -1196,7 +1306,7 @@ async function submitCreateGoalFollowUp(
     ) {
       await respondWithCreateGoalRestart(
         res,
-        "Your post setup expired or no longer matches this form. Please begin again.",
+        translate(draft?.language, "moderator.form.expired"),
       );
       return;
     }
@@ -1221,6 +1331,7 @@ async function submitCreateGoalFollowUp(
     const displayNameError = validateSubredditDisplayName(
       draft.subredditDisplayName,
       subreddit.name,
+      draft.language,
     );
     if (displayNameError) {
       res.json({ showToast: displayNameError });
@@ -1230,7 +1341,9 @@ async function submitCreateGoalFollowUp(
       draft.details.kind === "subscriber-goal" &&
       subreddit.numberOfSubscribers >= draft.details.subscriberGoal
     ) {
-      res.json({ showToast: "Please select a valid subscriber goal!" });
+      res.json({
+        showToast: translate(draft.language, "moderator.form.goalInvalid"),
+      });
       return;
     }
     if (developerCommands.selfPost) {
@@ -1367,23 +1480,34 @@ async function submitCreateGoalFollowUp(
         postUrl: getPostUrl(post),
         errorMessage: highlightResult.errorMessage,
         highlightResult,
+        language: draft.language,
       });
     }
 
     const createdPostLabel =
-      draft.details.kind === "cta-only" ? "CTA post" : "Subscriber Goal post";
+      draft.details.kind === "cta-only"
+        ? translate(draft.language, "moderator.create.ctaLabel")
+        : translate(draft.language, "moderator.create.goalLabel");
     const baseToast =
       highlightResult.issues.length > 0
-        ? `${createdPostLabel} created. ${describeHighlightResult(highlightResult)}`
+        ? translate(draft.language, "moderator.create.degraded", {
+            postType: createdPostLabel,
+            details: describeHighlightResult(highlightResult, draft.language),
+          })
         : crosspostDispatchResult.status === "failed"
-          ? `${createdPostLabel} created, but crosspost to r/${appSettings.promoSubreddit} failed. Moderators can retry.`
-          : `${createdPostLabel} created!`;
+          ? translate(draft.language, "moderator.create.crosspostFailed", {
+              postType: createdPostLabel,
+              subredditName: appSettings.promoSubreddit,
+            })
+          : translate(draft.language, "moderator.create.success", {
+              postType: createdPostLabel,
+            });
     const flairWarning =
       flairResult.status === "omitted"
-        ? " The post was created without Subscriber Goal flair; check the app account's Manage Flair permission."
+        ? ` ${translate(draft.language, "moderator.create.flairWarning")}`
         : "";
     const configurationWarning = afterSubscribeResult.invalidConfiguration
-      ? " The button configuration was invalid, so the default action was used."
+      ? ` ${translate(draft.language, "moderator.create.configurationWarning")}`
       : "";
     res.json({
       showToast: `${baseToast}${flairWarning}${configurationWarning}`,
@@ -1406,7 +1530,7 @@ async function submitCreateGoalFollowUp(
         error instanceof SubscriberGoalModeratorPermissionError ||
         error instanceof SubscriberGoalCreationInProgressError
           ? error.message
-          : "An error occurred while creating the post.",
+          : translate(requestLanguage, "moderator.form.creationFailed"),
     });
   }
 }
@@ -1480,7 +1604,11 @@ async function resolveCurrentUsername(): Promise<string | undefined> {
 }
 
 async function submitExperimentalSelfPost(
-  subreddit: { name: string; numberOfSubscribers: number },
+  subreddit: {
+    name: string;
+    numberOfSubscribers: number;
+    language?: unknown;
+  },
   res: Response<UiResponse>,
 ): Promise<boolean> {
   let username: string | undefined;
@@ -1497,21 +1625,24 @@ async function submitExperimentalSelfPost(
 
   if (!username) {
     res.json({
-      showToast:
-        "The selfPost developer command requires an authenticated Reddit user.",
+      showToast: translate(
+        subreddit.language,
+        "moderator.developer.loginRequired",
+      ),
     });
     return false;
   }
 
   const targetSubreddit = `u_${username}`;
-  const title = `Subscriber Goal test for r/${subreddit.name}`;
-  const text =
-    "This is an experimental Subscriber Goal self-post test.\n\n" +
-    `Source subreddit: r/${subreddit.name}\n` +
-    `Subscriber count: ${subreddit.numberOfSubscribers}\n` +
-    `Executor: u/${username}\n` +
-    `Target: r/${targetSubreddit}\n` +
-    "Created via Devvit runAs: USER.";
+  const title = translate(subreddit.language, "moderator.developer.title", {
+    subredditName: subreddit.name,
+  });
+  const text = translate(subreddit.language, "moderator.developer.body", {
+    subredditName: subreddit.name,
+    subscriberCount: subreddit.numberOfSubscribers,
+    username,
+    targetSubreddit,
+  });
 
   try {
     const post = await reddit.submitPost({
@@ -1527,7 +1658,9 @@ async function submitExperimentalSelfPost(
         : undefined);
 
     res.json({
-      showToast: `Experimental selfPost submitted to r/${targetSubreddit}.`,
+      showToast: translate(subreddit.language, "moderator.developer.success", {
+        targetSubreddit,
+      }),
       ...(postUrl ? { navigateTo: postUrl } : {}),
     });
     return true;
@@ -1539,7 +1672,7 @@ async function submitExperimentalSelfPost(
       error,
     );
     res.json({
-      showToast: "The experimental self-post could not be submitted.",
+      showToast: translate(subreddit.language, "moderator.developer.failed"),
     });
     return false;
   }

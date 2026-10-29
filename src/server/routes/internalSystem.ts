@@ -199,6 +199,7 @@ export function registerInternalSystemRoutes(router: Router): void {
           completedTime: payload.completedTime,
           subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
           goal: subGoalData.goal,
+          language: subGoalData.language,
         });
         res.json(result);
       } catch (error) {

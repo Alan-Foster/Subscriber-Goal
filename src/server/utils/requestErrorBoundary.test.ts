@@ -1,17 +1,22 @@
 import type { NextFunction, Request, Response } from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const hoisted = vi.hoisted(() => ({
+  getCurrentSubreddit: vi.fn(async () => ({ language: "en" })),
+}));
+
 vi.mock("@devvit/web/server", () => ({
   context: { postId: "t3_post" },
+  reddit: { getCurrentSubreddit: hoisted.getCurrentSubreddit },
 }));
 
 import { unhandledRequestErrorHandler } from "./requestErrorBoundary";
 
-const invoke = (path: string, headersSent = false) => {
+const invoke = async (path: string, headersSent = false) => {
   const json = vi.fn();
   const status = vi.fn(() => ({ json }));
   const next = vi.fn();
-  unhandledRequestErrorHandler(
+  await unhandledRequestErrorHandler(
     new Error("route exploded"),
     { path, method: "POST" } as Request,
     { status, json, headersSent } as unknown as Response,
@@ -23,9 +28,9 @@ const invoke = (path: string, headersSent = false) => {
 describe("unhandled request error boundary", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("logs and returns a valid internal UI toast", () => {
+  it("logs and returns a valid internal UI toast", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = invoke("/internal/form/delete-goal");
+    const result = await invoke("/internal/form/delete-goal");
     expect(result.status).toHaveBeenCalledWith(200);
     expect(result.json).toHaveBeenCalledWith({
       showToast: expect.stringContaining("Reference: request-"),
@@ -35,20 +40,22 @@ describe("unhandled request error boundary", () => {
     );
   });
 
-  it("returns JSON 503 for uncaught public API failures", () => {
+  it("returns JSON 503 for uncaught public API failures", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = invoke("/api/refresh");
+    const result = await invoke("/api/refresh");
     expect(result.status).toHaveBeenCalledWith(503);
-    expect(result.json).toHaveBeenCalledWith({
-      status: "error",
-      message: expect.stringContaining("Reference: request-"),
-    });
+    expect(result.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: expect.stringContaining("Reference: request-"),
+      }),
+    );
     expect(errorSpy).toHaveBeenCalledOnce();
   });
 
-  it("delegates after logging when headers were already sent", () => {
+  it("delegates after logging when headers were already sent", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = invoke("/api/refresh", true);
+    const result = await invoke("/api/refresh", true);
     expect(result.next).toHaveBeenCalledWith(expect.any(Error));
     expect(result.status).not.toHaveBeenCalled();
   });

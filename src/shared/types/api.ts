@@ -139,6 +139,8 @@ export type RealtimeMessage = {
 export type ErrorResponse = {
   status: "error";
   message: string;
+  messageKey?: import("../i18n/catalog").MessageKey;
+  messageParams?: Record<string, string | number>;
 };
 
 export type CreateGoalSetupFormValues = {

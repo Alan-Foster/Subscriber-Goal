@@ -1,4 +1,5 @@
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
 import type { HighlightResult } from "./communityHighlights";
 
@@ -24,6 +25,7 @@ type HighlightFailureNotificationParams = {
   errorMessage?: string | undefined;
   postOrigin?: "created" | "existing";
   highlightResult?: HighlightResult;
+  language?: unknown;
 };
 
 export type HighlightFailureMessage = {
@@ -39,20 +41,27 @@ export function buildHighlightFailureMessage({
   errorMessage,
   postOrigin = "created",
   highlightResult,
+  language,
 }: Omit<
   HighlightFailureNotificationParams,
   "reddit" | "subredditId"
 >): HighlightFailureMessage {
   const degraded = highlightResult?.status === "highlighted";
   const subject = degraded
-    ? `Action Required - SubGoal Highlight Needs Attention in r/${subredditName}`
-    : `Action Required - SubGoal Not Highlighted in r/${subredditName}`;
+    ? translate(language, "outbound.highlight.subjectAttention", {
+        subredditName,
+      })
+    : translate(language, "outbound.highlight.subjectMissing", {
+        subredditName,
+      });
   const moderatorLine = moderatorUsername
-    ? `Initiating moderator: u/${moderatorUsername}`
-    : "Initiating moderator: unknown";
+    ? translate(language, "outbound.highlight.moderatorKnown", {
+        moderatorUsername,
+      })
+    : translate(language, "outbound.highlight.moderatorUnknown");
   const postUrlLine = postUrl ? `\n${postUrl}` : "";
   const technicalNote = errorMessage
-    ? `\n\nTechnical note: ${errorMessage}`
+    ? `\n\n${translate(language, "outbound.highlight.technicalNote", { errorMessage })}`
     : "";
 
   const isExisting = postOrigin === "existing";
@@ -60,48 +69,53 @@ export function buildHighlightFailureMessage({
     subject,
     body:
       (degraded
-        ? `The Subscriber Goal is highlighted in r/${subredditName}, but reconciliation did not complete cleanly.\n\n${describeHighlightResult(highlightResult)}\n\n`
+        ? `${translate(language, "outbound.highlight.degradedIntro", { subredditName })}\n\n${describeHighlightResult(highlightResult, language)}\n\n`
         : isExisting
-          ? `Subscriber Goal found an existing valid goal, but it could not be highlighted in r/${subredditName}.\n\n`
-          : `The new Subscriber Goal post was created successfully, but it could not be highlighted in r/${subredditName}.\n\n`) +
+          ? `${translate(language, "outbound.highlight.existingIntro", { subredditName })}\n\n`
+          : `${translate(language, "outbound.highlight.newIntro", { subredditName })}\n\n`) +
       (degraded
-        ? "Manual moderator review is required.\n\n"
-        : "The app attempted to add it to Community Highlights, but could not confirm the change. A subreddit can have at most six Community Highlights.\n\n" +
-          `Manual moderator action is required. Please remove an existing Community Highlight if appropriate, then highlight the ${isExisting ? "existing" : "new"} Subscriber Goal post.\n\n`) +
-      "The app removes only older classic Subscriber Goal highlights during replacement; CTA, Tiny, ambiguous, and unrelated Community Highlights are preserved.\n\n" +
-      `Subreddit: r/${subredditName}\n` +
+        ? `${translate(language, "outbound.highlight.manualReview")}\n\n`
+        : `${translate(language, "outbound.highlight.manualAction", { origin: isExisting ? "existing" : "new" })}\n\n`) +
+      `${translate(language, "outbound.highlight.preservation")}\n\n` +
+      `${translate(language, "outbound.highlight.subreddit", { subredditName })}\n` +
       `${moderatorLine}\n\n` +
-      `${isExisting ? "Existing" : "New"} Subscriber Goal:\n${postTitle}${postUrlLine}` +
+      `${translate(language, "outbound.highlight.goalHeading", { origin: isExisting ? "Existing" : "New" })}\n${postTitle}${postUrlLine}` +
       technicalNote,
   };
 }
 
-export function describeHighlightResult(result: HighlightResult): string {
+export function describeHighlightResult(
+  result: HighlightResult,
+  language?: unknown,
+): string {
   if (result.status === "not_highlighted") {
     if (result.rollbackOutcome === "failed") {
-      return "The goal is not confirmed as highlighted, and rollback could not fully restore the prior Community Highlights.";
+      return translate(
+        language,
+        "outbound.highlight.result.notHighlightedRollback",
+      );
     }
     if (
       result.capacityOutcome === "blocked" ||
       result.capacityOutcome === "concurrent_change"
     ) {
-      return "The goal was not highlighted because no safe Community Highlight slot was available.";
+      return translate(language, "outbound.highlight.result.noCapacity");
     }
-    return "The goal was created, but Reddit did not confirm it as a Community Highlight.";
+    return translate(language, "outbound.highlight.result.notConfirmed");
   }
   if (result.rollbackOutcome === "failed") {
-    return "The goal is highlighted, but rollback was incomplete and the Community Highlights need moderator review.";
+    return translate(language, "outbound.highlight.result.rollback");
   }
   if (result.cleanupOutcome === "failed") {
-    return "The goal is highlighted, but an obsolete classic Subscriber Goal highlight could not be removed.";
+    return translate(language, "outbound.highlight.result.cleanup");
   }
   if (result.reorderOutcome === "failed") {
-    return "The goal is highlighted, but it could not be verified in the first position.";
+    return translate(language, "outbound.highlight.result.reorder");
   }
   if (result.capacityOutcome === "concurrent_change") {
-    return "A concurrent moderator change occurred while Community Highlights were being reconciled.";
+    return translate(language, "outbound.highlight.result.concurrent");
   }
-  return "The Community Highlight needs moderator review.";
+  return translate(language, "outbound.highlight.result.review");
 }
 
 export function getPostUrl(post: {
@@ -126,6 +140,7 @@ export async function notifyHighlightFailure({
   errorMessage,
   postOrigin = "created",
   highlightResult,
+  language,
 }: HighlightFailureNotificationParams): Promise<"sent" | "failed"> {
   const message = buildHighlightFailureMessage({
     subredditName,
@@ -135,6 +150,7 @@ export async function notifyHighlightFailure({
     errorMessage,
     postOrigin,
     ...(highlightResult ? { highlightResult } : {}),
+    language,
   });
 
   console.info(

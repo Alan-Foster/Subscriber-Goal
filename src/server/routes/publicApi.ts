@@ -25,7 +25,6 @@ import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
-import { prohibitedContentMessage } from "../../shared/contentPolicy";
 import { isSubredditBlacklisted } from "../utils/subredditBlacklist";
 import {
   getRequestJourneyId,
@@ -43,6 +42,17 @@ import {
 } from "../data/subscriptionAttempt";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
+import { translate, type MessageKey } from "../../shared/i18n/catalog";
+
+const localizedError = (
+  messageKey: MessageKey,
+  messageParams: Record<string, string | number> = {},
+): ErrorResponse => ({
+  status: "error",
+  message: translate("en", messageKey, messageParams),
+  messageKey,
+  ...(Object.keys(messageParams).length > 0 ? { messageParams } : {}),
+});
 
 const buildState = async (
   postId: string,
@@ -277,10 +287,9 @@ export function registerPublicApiRoutes(router: Router): void {
           },
           error,
         );
-        res.status(503).json({
-          status: "error",
-          message: `Notification settings could not be loaded. Reference: ${operationId}`,
-        } satisfies ErrorResponse);
+        res
+          .status(503)
+          .json(localizedError("errors.notifications.load", { operationId }));
       }
     },
   );
@@ -290,18 +299,16 @@ export function registerPublicApiRoutes(router: Router): void {
     async (req, res): Promise<void> => {
       const userId = context.userId;
       if (!userId) {
-        res.status(401).json({
-          status: "error",
-          message: "Please log in to manage notifications.",
-        } satisfies ErrorResponse);
+        res
+          .status(401)
+          .json(localizedError("errors.notifications.loginRequired"));
         return;
       }
       const body = req.body as Partial<NotificationSettingsRequest> | undefined;
       if (typeof body?.enabled !== "boolean") {
-        res.status(400).json({
-          status: "error",
-          message: "enabled must be a boolean.",
-        } satisfies ErrorResponse);
+        res
+          .status(400)
+          .json(localizedError("errors.notifications.invalidEnabled"));
         return;
       }
 
@@ -340,10 +347,9 @@ export function registerPublicApiRoutes(router: Router): void {
           },
           error,
         );
-        res.status(503).json({
-          status: "error",
-          message: `Notification settings could not be updated. Reference: ${operationId}`,
-        } satisfies ErrorResponse);
+        res
+          .status(503)
+          .json(localizedError("errors.notifications.update", { operationId }));
       }
     },
   );
@@ -351,10 +357,7 @@ export function registerPublicApiRoutes(router: Router): void {
   router.post(apiRoutes.ctaClick, async (_req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
-      res.status(400).json({
-        status: "error",
-        message: "postId is required",
-      } satisfies ErrorResponse);
+      res.status(400).json(localizedError("errors.api.postIdRequired"));
       return;
     }
     try {
@@ -363,10 +366,9 @@ export function registerPublicApiRoutes(router: Router): void {
         subGoalData.afterSubscribeAction.type === "disabled" ||
         !isClickActivityPreset(subGoalData.afterSubscribePreset)
       ) {
-        res.status(400).json({
-          status: "error",
-          message: "This CTA does not use click activity.",
-        } satisfies ErrorResponse);
+        res
+          .status(400)
+          .json(localizedError("errors.api.ctaActivityUnsupported"));
         return;
       }
       await recordCtaClick(redis, postId);
@@ -383,10 +385,7 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
-      res.status(503).json({
-        status: "error",
-        message: "The CTA click could not be recorded.",
-      } satisfies ErrorResponse);
+      res.status(503).json(localizedError("errors.api.ctaActivityFailed"));
     }
   });
 
@@ -395,10 +394,7 @@ export function registerPublicApiRoutes(router: Router): void {
     async (_req, res): Promise<void> => {
       const { postId, userId } = context;
       if (!postId) {
-        res.status(400).json({
-          status: "error",
-          message: "postId is required",
-        } satisfies ErrorResponse);
+        res.status(400).json(localizedError("errors.api.postIdRequired"));
         return;
       }
       try {
@@ -411,18 +407,14 @@ export function registerPublicApiRoutes(router: Router): void {
           subGoalData.postKind !== ctaOnlyPostKind &&
           (!userId || !(await isTrackedSubscriber(redis, userId)))
         ) {
-          res.status(403).json({
-            status: "error",
-            message: "Subscription is required.",
-          } satisfies ErrorResponse);
+          res.status(403).json(localizedError("errors.join.required"));
           return;
         }
         const action = subGoalData.afterSubscribeAction;
         if (action.type !== "top-post-day" && action.type !== "newest-post") {
-          res.status(400).json({
-            status: "error",
-            message: "This button does not use a dynamic post target.",
-          } satisfies ErrorResponse);
+          res
+            .status(400)
+            .json(localizedError("errors.api.dynamicTargetUnsupported"));
           return;
         }
         const subreddit = await reddit.getCurrentSubreddit();
@@ -484,10 +476,9 @@ export function registerPublicApiRoutes(router: Router): void {
           }
         }
         if (!target) {
-          res.status(404).json({
-            status: "error",
-            message: "No post is currently available.",
-          } satisfies ErrorResponse);
+          res
+            .status(404)
+            .json(localizedError("afterJoin.dynamicPostUnavailable"));
           return;
         }
         res.json({
@@ -505,10 +496,7 @@ export function registerPublicApiRoutes(router: Router): void {
           },
           error,
         );
-        res.status(503).json({
-          status: "error",
-          message: "The post target could not be loaded.",
-        } satisfies ErrorResponse);
+        res.status(503).json(localizedError("errors.api.postTargetFailed"));
       }
     },
   );
@@ -522,10 +510,7 @@ export function registerPublicApiRoutes(router: Router): void {
         phase: "missing_post_id",
         status: 400,
       });
-      res.status(400).json({
-        status: "error",
-        message: "postId is required but missing from context",
-      } satisfies ErrorResponse);
+      res.status(400).json(localizedError("errors.api.postIdMissing"));
       return;
     }
 
@@ -533,10 +518,7 @@ export function registerPublicApiRoutes(router: Router): void {
       const subredditName =
         context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
       if (await isSubredditBlacklisted(reddit, subredditName)) {
-        res.status(403).json({
-          status: "error",
-          message: prohibitedContentMessage,
-        } satisfies ErrorResponse);
+        res.status(403).json(localizedError("errors.content.prohibited"));
         return;
       }
       const state = await buildState(postId);
@@ -559,10 +541,11 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
-      res.status(503).json({
-        status: "error",
-        message: `Initialization could not be completed. Reference: ${operationId}`,
-      } satisfies ErrorResponse);
+      res
+        .status(503)
+        .json(
+          localizedError("errors.api.initializationFailed", { operationId }),
+        );
     }
   });
 
@@ -575,10 +558,7 @@ export function registerPublicApiRoutes(router: Router): void {
         phase: "missing_post_id",
         status: 400,
       });
-      res.status(400).json({
-        status: "error",
-        message: "postId is required but missing from context",
-      } satisfies ErrorResponse);
+      res.status(400).json(localizedError("errors.api.postIdMissing"));
       return;
     }
 
@@ -590,10 +570,7 @@ export function registerPublicApiRoutes(router: Router): void {
         requestedAttemptId !== undefined &&
         !isValidSubscriptionAttemptId(requestedAttemptId)
       ) {
-        res.status(400).json({
-          status: "error",
-          message: "Invalid subscription attempt ID.",
-        } satisfies ErrorResponse);
+        res.status(400).json(localizedError("errors.join.invalidAttempt"));
         return;
       }
       const subscriptionAttemptConfirmed = requestedAttemptId
@@ -655,10 +632,9 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
-      res.status(503).json({
-        status: "error",
-        message: `Refresh could not be completed. Reference: ${operationId}`,
-      } satisfies ErrorResponse);
+      res
+        .status(503)
+        .json(localizedError("errors.api.refreshFailed", { operationId }));
     }
   });
 
@@ -667,10 +643,7 @@ export function registerPublicApiRoutes(router: Router): void {
     const journeyId = getRequestJourneyId(req);
     const operationId = createOperationId("subscribe");
     if (!postId) {
-      res.status(400).json({
-        status: "error",
-        message: "postId is required but missing from context",
-      } satisfies ErrorResponse);
+      res.status(400).json(localizedError("errors.api.postIdMissing"));
       return;
     }
 
@@ -680,10 +653,7 @@ export function registerPublicApiRoutes(router: Router): void {
       const body = req.body as SubscribeRequest | undefined;
       const attemptId = body?.attemptId;
       if (attemptId !== undefined && !isValidSubscriptionAttemptId(attemptId)) {
-        res.status(400).json({
-          status: "error",
-          message: "Invalid subscription attempt ID.",
-        } satisfies ErrorResponse);
+        res.status(400).json(localizedError("errors.join.invalidAttempt"));
         return;
       }
       if (attemptId) {
@@ -692,26 +662,19 @@ export function registerPublicApiRoutes(router: Router): void {
         });
       }
       if (subGoalData.postKind === ctaOnlyPostKind) {
-        res.status(400).json({
-          status: "error",
-          message: "This post does not support subscribing.",
-        } satisfies ErrorResponse);
+        res.status(400).json(localizedError("errors.join.unsupported"));
         return;
       }
       if (!userId) {
-        res.status(401).json({
-          status: "error",
-          message: "Please log in to subscribe.",
-        } satisfies ErrorResponse);
+        res.status(401).json(localizedError("errors.join.loginRequired"));
         return;
       }
       if (subGoalData.postKind === subscribeOnlyPostKind) {
         const username = await reddit.getCurrentUsername();
         if (!username) {
-          res.status(400).json({
-            status: "error",
-            message: "Unable to resolve username.",
-          } satisfies ErrorResponse);
+          res
+            .status(400)
+            .json(localizedError("errors.api.usernameUnavailable"));
           return;
         }
 
@@ -781,10 +744,7 @@ export function registerPublicApiRoutes(router: Router): void {
 
       const username = await reddit.getCurrentUsername();
       if (!username) {
-        res.status(400).json({
-          status: "error",
-          message: "Unable to resolve username.",
-        } satisfies ErrorResponse);
+        res.status(400).json(localizedError("errors.api.usernameUnavailable"));
         return;
       }
 
@@ -882,10 +842,9 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
-      res.status(503).json({
-        status: "error",
-        message: `Subscription could not be completed. Reference: ${operationId}`,
-      } satisfies ErrorResponse);
+      res
+        .status(503)
+        .json(localizedError("errors.join.failedReference", { operationId }));
     }
   });
 }

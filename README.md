@@ -3,26 +3,26 @@
 - The webpage for this Devvit application is: [https://developers.reddit.com/apps/subscriber-goal](https://developers.reddit.com/apps/subscriber-goal)
 
 Subscriber Goal is an app that lets you set a subscriber target goal and track your progress towards it!
-Generate a post and place it first in your Community Highlights to encourage new subscriptions.
+Generate a post and place it first in your Community Highlights to encourage new members to join.
 Celebrate the growth of your subreddit using Subscriber Goals!
 
 - To view a live version of Subscriber Goal, visit [https://www.reddit.com/r/SubGoal](https://www.reddit.com/r/SubGoal)
 
 ![An example of the Subscriber Goal Success Page](https://i.redd.it/7d65rf601foh1.jpeg)
 
-![An example of the Unsubscribed vs Subscribed page views](https://i.redd.it/xhll0f151foh1.jpeg)
+![An example of the before vs. after joining page views](https://i.redd.it/xhll0f151foh1.jpeg)
 
 ## Features
 
 - **Progress Bar**: Track progress with a visual ratio bar
 - **Custom Post Technology**: High-quality custom formatting for your subscriber goal
-- **Realtime Subscriber Notifications**: Show your community who just subscribed in real-time
+- **Realtime Member Notifications**: Show your community who just joined in real-time
 - **Goal Achieved Page**: Once reached, the post shows the date and subscriber milestone!
 - **User Data Removal**: Remove a user from the database if they request their data hidden
 
 ![The subreddit r/MotivationalPics saw its average daily subscribers increase by nearly 100%](https://i.redd.it/scygcx731foh1.jpeg)
 
-## New CTA (Call To Action) Mini-Posts and 28 Supported Languages!
+## New CTA (Call To Action) Mini-Posts and 31 Supported Languages!
 
 - **Compressed CTA Buttons**: Perfect for large subreddits that want simple, elegant highlighted tools
 
@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.3.1 - Official Hindi Language Support, now 29 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
+- 2.3.1 - Added Hindi, Punjabi, Marathi, now 31 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
 - 2.2.1 - Integrated post.highlight (0.14.7) to better track pinned goals. Remove My Own Data fixed. NSFW Most Recent Post fixed. New Create a CTA Menu Item. Devvit 0.15.0
 - 2.1.7 - Auto-goals only repins uncompleted goals. Pinned completed goals older than 24h are automatically replaced on app update. Devvit 0.14.5
 - 2.1.5 - Auto-goal system now attempts to re-pin existing goals. Fixed eternal completed lockout.

@@ -116,7 +116,7 @@ describe("SubGoalPage responsive tiny layout", () => {
     );
 
     expect(subscribedHtml).toContain("15.1k subscribers");
-    expect(subscribedHtml).toContain("Subscribed to r/ExampleSub");
+    expect(subscribedHtml).toContain("Joined r/ExampleSub");
     expect(followUpHtml).toContain("15.1k subscribers");
     expect(followUpHtml).toContain("Visit Website");
     expect(followUpHtml).toContain("1 new post this week");

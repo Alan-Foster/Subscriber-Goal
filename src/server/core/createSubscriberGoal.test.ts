@@ -252,6 +252,7 @@ describe("createSubscriberGoal highlight handling", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       flairId: "flair_subgoal",
     });
     expect(post.approve).toHaveBeenCalled();
@@ -490,6 +491,7 @@ describe("createSubscriberGoal highlight handling", () => {
         "100 subscribers / 200 subscribers.",
       ),
       postHeight: "regular",
+      language: "en",
       submitAsUser: true,
       flairId: "flair_subgoal",
     });

@@ -61,7 +61,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={baseState} {...commonProps} />,
     );
 
-    expect(html).toContain("Show my username when I subscribe");
+    expect(html).toContain("Show my username when I join");
   });
 
   it("renders Spanish post text", () => {
@@ -71,7 +71,7 @@ describe("SubGoalPage", () => {
 
     expect(html).toContain("Bienvenido a r/ExampleSub");
     expect(html).toContain("Unirse a r/ExampleSub");
-    expect(html).toContain("Mostrar mi nombre de usuario cuando me suscriba");
+    expect(html).toContain("Mostrar mi nombre de usuario cuando me una");
   });
 
   it("renders Hindi post text", () => {
@@ -81,7 +81,30 @@ describe("SubGoalPage", () => {
 
     expect(html).toContain("r/ExampleSub में आपका स्वागत है");
     expect(html).toContain("r/ExampleSub में शामिल हों");
-    expect(html).toContain("सब्सक्राइब करते समय मेरा यूज़रनेम दिखाएँ");
+    expect(html).toContain("शामिल होते समय मेरा यूज़रनेम दिखाएँ");
+  });
+
+  it("renders Punjabi regular post text", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage state={{ ...baseState, language: "pa" }} {...commonProps} />,
+    );
+
+    expect(html).toContain("r/ExampleSub ਵਿੱਚ ਤੁਹਾਡਾ ਸਵਾਗਤ ਹੈ");
+    expect(html).toContain("r/ExampleSub ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ");
+    expect(html).toContain("ਸ਼ਾਮਲ ਹੋਣ ਵੇਲੇ ਮੇਰਾ ਯੂਜ਼ਰਨੇਮ ਦਿਖਾਓ");
+  });
+
+  it("renders Marathi short post text", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...baseState, language: "mr", postHeight: "short" }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("r/ExampleSub मध्ये तुमचे स्वागत आहे");
+    expect(html).toContain("r/ExampleSub मध्ये सामील व्हा");
+    expect(html).not.toContain('alt="Subreddit icon"');
   });
 
   it("renders custom header text when provided", () => {
@@ -107,7 +130,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).not.toContain("Show my username when I subscribe");
+    expect(html).not.toContain("Show my username when I join");
   });
 
   it("adds attention glow when subscribe button is actionable", () => {
@@ -150,7 +173,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage
         state={tinyState}
         {...commonProps}
-        notice="u/alice just subscribed!"
+        notice="u/alice just joined!"
       />,
     );
 
@@ -158,8 +181,8 @@ describe("SubGoalPage", () => {
     expect(html).not.toContain('alt="Subreddit icon"');
     expect(html).not.toContain("Welcome to r/ExampleSub");
     expect(html).not.toContain("123 / 500");
-    expect(html).not.toContain("u/alice just subscribed!");
-    expect(html).not.toContain("Show my username when I subscribe");
+    expect(html).not.toContain("u/alice just joined!");
+    expect(html).not.toContain("Show my username when I join");
     expect(html).toContain("sg-subscribe-attention");
     expect(html).toContain('data-subscription-button-mode="subscribe"');
   });
@@ -172,7 +195,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("Subscribed to r/ExampleSub");
+    expect(html).toContain("Joined r/ExampleSub");
     expect(html).not.toContain("subscribers");
     expect(html).toContain('disabled=""');
   });

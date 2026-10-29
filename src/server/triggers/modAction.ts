@@ -31,6 +31,7 @@ import { safeGetWikiPageRevisions } from '../utils/redditUtils';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 import { isLinkId, type LinkId, type RedisClient } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
+import { translate } from '../../shared/i18n/catalog';
 import {
   appAccountHealthStateKey,
   checkAppAccountHealth,
@@ -1186,7 +1187,10 @@ async function updateFromWikis(
       try {
         const crosspost = await reddit.crosspost({
           subredditName: appSettings.promoSubreddit,
-          title: `Visit r/${post.subredditName}, they are trying to reach ${formatSubscriberCount(pending.goal)} subscribers!`,
+          title: translate((sourceSubredditInfo as { language?: unknown }).language, 'outbound.crosspost.title', {
+            subredditName: post.subredditName,
+            goal: formatSubscriberCount(pending.goal),
+          }),
           postId: post.id,
           nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });
@@ -1937,6 +1941,7 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
       redis,
       subredditName,
       subredditId: context.subredditId ?? healthSubreddit?.id,
+      language: healthSubreddit?.language,
     });
   }
 

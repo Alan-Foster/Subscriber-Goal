@@ -116,7 +116,7 @@ describe("milestone notifications", () => {
     });
     expect(enqueue).toHaveBeenCalledWith({
       title: milestoneNotificationTitle,
-      body: milestoneNotificationBody,
+      body: "r/ExampleSub reached 10k subscribers. Open the goal post to celebrate.",
       recipients: [
         {
           userId: "t2_alice",

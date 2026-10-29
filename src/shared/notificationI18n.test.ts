@@ -37,4 +37,36 @@ describe("notification messages", () => {
       "लक्ष्य पूरा होने पर आपको सूचना दी जाएगी।",
     );
   });
+
+  it("uses the reviewed Punjabi notification terminology", () => {
+    const messages = getNotificationMessages("pa");
+
+    expect(messages.title).toBe("ਨੋਟੀਫਿਕੇਸ਼ਨ ਸੈਟਿੰਗਾਂ");
+    expect(messages.description).toBe(
+      "ਸਬਸਕ੍ਰਾਈਬਰ ਟੀਚਾ ਪੂਰਾ ਹੋਣ 'ਤੇ ਸੂਚਨਾ ਪ੍ਰਾਪਤ ਕਰੋ",
+    );
+    expect(messages.goalPrompt({ goalText: "1,000" })).toBe(
+      "1,000 ਸਬਸਕ੍ਰਾਈਬਰ ਹੋਣ 'ਤੇ ਸੂਚਨਾ ਪ੍ਰਾਪਤ ਕਰੋ",
+    );
+    expect(messages.enabledHeading).toBe("ਨੋਟੀਫਿਕੇਸ਼ਨ ਚਾਲੂ ਹਨ!");
+    expect(messages.successBody).toBe(
+      "ਟੀਚਾ ਪੂਰਾ ਹੋਣ 'ਤੇ ਤੁਹਾਨੂੰ ਸੂਚਨਾ ਮਿਲੇਗੀ।",
+    );
+  });
+
+  it("uses the reviewed Marathi notification terminology", () => {
+    const messages = getNotificationMessages("mr");
+
+    expect(messages.title).toBe("नोटिफिकेशन सेटिंग्ज");
+    expect(messages.description).toBe(
+      "सबस्क्राइबरचे ध्येय पूर्ण झाल्यावर सूचना मिळवा",
+    );
+    expect(messages.goalPrompt({ goalText: "1,000" })).toBe(
+      "1,000 सबस्क्राइबर झाल्यावर सूचना मिळवा",
+    );
+    expect(messages.enabledHeading).toBe("नोटिफिकेशन्स चालू आहेत!");
+    expect(messages.successBody).toBe(
+      "ध्येय पूर्ण झाल्यावर तुम्हाला सूचना मिळेल.",
+    );
+  });
 });

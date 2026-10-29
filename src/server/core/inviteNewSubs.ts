@@ -1,4 +1,5 @@
 import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
 import type { RedditClient, RedisClient, SubredditId } from "../types";
 
 export const inviteNewSubsHostSubreddit = "subscriber_goal_dev";
@@ -9,9 +10,12 @@ export const inviteNewSubsWikiVersion = "v1" as const;
 export const inviteNewSubsDataWikiVersion = "v1" as const;
 export const inviteNewSubsDeliveryJobName = "invite-new-subs-delivery-job";
 export const inviteNewSubsReportJobName = "invite-new-subs-report-job";
-export const inviteNewSubsSubject = "Tool for Growing your New Subreddit";
+export const inviteNewSubsSubject = translate("en", "outbound.invite.subject");
 export const inviteNewSubsReportRecipient = "Alan-Foster";
-export const inviteNewSubsReportSubject = "New Subreddit DM Report — 12 Hours";
+export const inviteNewSubsReportSubject = translate(
+  "en",
+  "outbound.invite.reportSubject",
+);
 export const inviteNewSubsStartupTestSubreddit = "SubGoal";
 export const inviteNewSubsRetentionSeconds = 7 * 24 * 60 * 60;
 export const inviteNewSubsRecipientCooldownSeconds = 30 * 24 * 60 * 60;
@@ -2926,15 +2930,13 @@ function renderInviteNewSubsReport({
   successful: number;
   failed: number;
 }): string {
-  return [
-    "New-subreddit DM report",
-    "",
-    `Window start: ${new Date(windowStart).toISOString()}`,
-    `Window end: ${new Date(windowEnd).toISOString()}`,
-    `Total attempted: ${total}`,
-    `Successful: ${successful}`,
-    `Failed: ${failed}`,
-  ].join("\n");
+  return translate("en", "outbound.invite.reportBody", {
+    windowStart: new Date(windowStart).toISOString(),
+    windowEnd: new Date(windowEnd).toISOString(),
+    total,
+    successful,
+    failed,
+  });
 }
 
 function logInviteNewSubsReportDuplicate(

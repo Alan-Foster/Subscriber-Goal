@@ -122,6 +122,7 @@ async function processDueAppRepairUnderLease({
         redis,
         subredditName: subreddit.name,
         subredditId: subreddit.id,
+        language: subreddit.language,
       }),
     );
     await runPhase("activity_backfill", () =>

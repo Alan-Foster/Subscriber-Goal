@@ -200,6 +200,7 @@ describe("publicApi routes", () => {
     expect(json).toHaveBeenCalledWith({
       status: "error",
       message: "This content is prohibited",
+      messageKey: "errors.content.prohibited",
     });
     expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
   });
@@ -725,12 +726,14 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledWith(503);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: expect.stringMatching(
-        /^Subscription could not be completed\. Reference: subscribe-/,
-      ),
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: expect.stringMatching(
+          /^Could not join the community\. Reference: subscribe-/,
+        ),
+      }),
+    );
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
 
@@ -749,12 +752,14 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(503);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: expect.stringMatching(
-        /^Subscription could not be completed\. Reference: subscribe-/,
-      ),
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: expect.stringMatching(
+          /^Could not join the community\. Reference: subscribe-/,
+        ),
+      }),
+    );
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
@@ -946,10 +951,12 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(400);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: "Unable to resolve username.",
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: "Unable to resolve username.",
+      }),
+    );
     expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
@@ -1336,10 +1343,12 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(400);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: "This post does not support subscribing.",
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: "This post does not support joining.",
+      }),
+    );
     expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
   });
 
@@ -1396,10 +1405,12 @@ describe("publicApi routes", () => {
         ([options]) => options.timeframe,
       ),
     ).toEqual(["day", "week", "month", "all"]);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: "No post is currently available.",
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: "No post is currently available.",
+      }),
+    );
   });
 
   it("does not hide a top-post API failure behind a broader fallback", async () => {
@@ -1457,10 +1468,12 @@ describe("publicApi routes", () => {
     );
 
     expect(status).toHaveBeenCalledWith(503);
-    expect(json).toHaveBeenCalledWith({
-      status: "error",
-      message: "The post target could not be loaded.",
-    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        message: "The post target could not be loaded.",
+      }),
+    );
   });
 
   it("returns Create Post without loading dynamic listings in NSFW communities", async () => {

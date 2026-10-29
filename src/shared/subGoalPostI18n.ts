@@ -1,40 +1,38 @@
-import { IntlMessageFormat } from "intl-messageformat";
 import { formatSubscriberCount } from "./numberFormat";
+import {
+  appLanguages,
+  defaultAppLanguage,
+  getLanguageMetadata,
+  getMessageTemplate,
+  resolveAppLanguage,
+  translate,
+  type AppLanguage,
+} from "./i18n/catalog";
 
-export const subGoalLanguages = [
-  "id",
-  "bs",
-  "ca",
-  "da",
-  "de",
-  "en",
-  "hi",
-  "es",
-  "et",
-  "fr",
-  "hr",
-  "is",
-  "it",
-  "lv",
-  "lt",
-  "hu",
-  "nl",
-  "nb",
-  "pl",
-  "pt",
-  "ro",
-  "sq",
-  "sk",
-  "sl",
-  "fi",
-  "sv",
-  "tl",
-  "tr",
-  "yo",
-] as const;
-export type SubGoalLanguage = (typeof subGoalLanguages)[number];
+export const subGoalLanguages = appLanguages;
+export type SubGoalLanguage = AppLanguage;
+export const defaultSubGoalLanguage: SubGoalLanguage = defaultAppLanguage;
 
-export const defaultSubGoalLanguage: SubGoalLanguage = "en";
+type SubredditNameParams = { subredditName: string };
+type SubscribersParams = { subscribersCount: number; subscribersText: string };
+type PromoSubredditParams = { promoSubreddit: string };
+type UsernameParams = { username: string | null };
+type CompletedTitleParams = SubredditNameParams & {
+  goalCount?: number;
+  goalText: string;
+};
+type CompletedDateParams = { timeText: string; dateText: string };
+type TextFallbackActiveParams = SubredditNameParams & {
+  subscribersCount: number;
+  subscribersText: string;
+  goalCount: number;
+  goalText: string;
+};
+type TextFallbackCompletedParams = SubredditNameParams & {
+  goalCount: number;
+  goalText: string;
+  completedIso: string;
+};
 
 export type ModeratorInstallPromotionMessages = {
   greeting: string;
@@ -42,680 +40,6 @@ export type ModeratorInstallPromotionMessages = {
   installButton: string;
   mobileInstallButton: string;
 };
-
-const moderatorInstallPromotionMessages: Record<
-  SubGoalLanguage,
-  ModeratorInstallPromotionMessages
-> = {
-  id: {
-    greeting: "Hai",
-    body: "Tambahkan Subscriber Goal ke subreddit Anda sendiri sekarang!",
-    installButton: "Pasang Subscriber Goal Sekarang",
-    mobileInstallButton: "Pasang SubGoal Sekarang",
-  },
-  bs: {
-    greeting: "Zdravo",
-    body: "Dodajte Subscriber Goal na svoje subreddite sada!",
-    installButton: "Instaliraj Subscriber Goal sada",
-    mobileInstallButton: "Instaliraj SubGoal sada",
-  },
-  ca: {
-    greeting: "Hola",
-    body: "Afegeix Subscriber Goal als teus subreddits ara!",
-    installButton: "Instal·la Subscriber Goal ara",
-    mobileInstallButton: "Instal·la SubGoal ara",
-  },
-  da: {
-    greeting: "Hej",
-    body: "Føj Subscriber Goal til dine egne subreddits nu!",
-    installButton: "Installér Subscriber Goal nu",
-    mobileInstallButton: "Installér SubGoal nu",
-  },
-  de: {
-    greeting: "Hallo",
-    body: "Füge Subscriber Goal jetzt zu deinen eigenen Subreddits hinzu!",
-    installButton: "Subscriber Goal jetzt installieren",
-    mobileInstallButton: "SubGoal jetzt installieren",
-  },
-  en: {
-    greeting: "Hi",
-    body: "Add Subscriber Goal to your own subreddits now!",
-    installButton: "Install Subscriber Goal Now",
-    mobileInstallButton: "Install SubGoal Now",
-  },
-  hi: {
-    greeting: "नमस्ते",
-    body: "अभी अपने सबरेडिट्स में Subscriber Goal जोड़ें!",
-    installButton: "अभी Subscriber Goal इंस्टॉल करें",
-    mobileInstallButton: "अभी SubGoal इंस्टॉल करें",
-  },
-  es: {
-    greeting: "Hola",
-    body: "¡Añade Subscriber Goal a tus propios subreddits ahora!",
-    installButton: "Instalar Subscriber Goal ahora",
-    mobileInstallButton: "Instalar SubGoal ahora",
-  },
-  et: {
-    greeting: "Tere",
-    body: "Lisa Subscriber Goal kohe oma subreddititesse!",
-    installButton: "Installi Subscriber Goal kohe",
-    mobileInstallButton: "Installi SubGoal kohe",
-  },
-  fr: {
-    greeting: "Bonjour",
-    body: "Ajoutez Subscriber Goal à vos propres subreddits dès maintenant !",
-    installButton: "Installer Subscriber Goal maintenant",
-    mobileInstallButton: "Installer SubGoal maintenant",
-  },
-  hr: {
-    greeting: "Bok",
-    body: "Dodajte Subscriber Goal na svoje subreddite sada!",
-    installButton: "Instaliraj Subscriber Goal sada",
-    mobileInstallButton: "Instaliraj SubGoal sada",
-  },
-  is: {
-    greeting: "Hæ",
-    body: "Bættu Subscriber Goal við þín eigin subreddit núna!",
-    installButton: "Setja Subscriber Goal upp núna",
-    mobileInstallButton: "Setja SubGoal upp núna",
-  },
-  it: {
-    greeting: "Ciao",
-    body: "Aggiungi subito Subscriber Goal ai tuoi subreddit!",
-    installButton: "Installa Subscriber Goal ora",
-    mobileInstallButton: "Installa SubGoal ora",
-  },
-  lv: {
-    greeting: "Sveiki",
-    body: "Pievieno Subscriber Goal saviem subredditiem jau tagad!",
-    installButton: "Instalēt Subscriber Goal tagad",
-    mobileInstallButton: "Instalēt SubGoal tagad",
-  },
-  lt: {
-    greeting: "Sveiki",
-    body: "Pridėkite Subscriber Goal prie savo subredditų dabar!",
-    installButton: "Įdiegti Subscriber Goal dabar",
-    mobileInstallButton: "Įdiegti SubGoal dabar",
-  },
-  hu: {
-    greeting: "Szia",
-    body: "Add hozzá a Subscriber Goalt a saját subredditjeidhez most!",
-    installButton: "Subscriber Goal telepítése most",
-    mobileInstallButton: "SubGoal telepítése most",
-  },
-  nl: {
-    greeting: "Hoi",
-    body: "Voeg Subscriber Goal nu toe aan je eigen subreddits!",
-    installButton: "Subscriber Goal nu installeren",
-    mobileInstallButton: "SubGoal nu installeren",
-  },
-  nb: {
-    greeting: "Hei",
-    body: "Legg til Subscriber Goal i dine egne subredditer nå!",
-    installButton: "Installer Subscriber Goal nå",
-    mobileInstallButton: "Installer SubGoal nå",
-  },
-  pl: {
-    greeting: "Cześć",
-    body: "Dodaj Subscriber Goal do swoich subredditów już teraz!",
-    installButton: "Zainstaluj Subscriber Goal teraz",
-    mobileInstallButton: "Zainstaluj SubGoal teraz",
-  },
-  pt: {
-    greeting: "Olá",
-    body: "Adicione o Subscriber Goal aos seus próprios subreddits agora!",
-    installButton: "Instalar Subscriber Goal agora",
-    mobileInstallButton: "Instalar SubGoal agora",
-  },
-  ro: {
-    greeting: "Salut",
-    body: "Adaugă Subscriber Goal în propriile subreddituri acum!",
-    installButton: "Instalează Subscriber Goal acum",
-    mobileInstallButton: "Instalează SubGoal acum",
-  },
-  sq: {
-    greeting: "Përshëndetje",
-    body: "Shto Subscriber Goal në subreddit-et e tua tani!",
-    installButton: "Instalo Subscriber Goal tani",
-    mobileInstallButton: "Instalo SubGoal tani",
-  },
-  sk: {
-    greeting: "Ahoj",
-    body: "Pridajte Subscriber Goal do svojich subredditov teraz!",
-    installButton: "Nainštalovať Subscriber Goal teraz",
-    mobileInstallButton: "Nainštalovať SubGoal teraz",
-  },
-  sl: {
-    greeting: "Živjo",
-    body: "Dodajte Subscriber Goal v svoje subreddite zdaj!",
-    installButton: "Namesti Subscriber Goal zdaj",
-    mobileInstallButton: "Namesti SubGoal zdaj",
-  },
-  fi: {
-    greeting: "Hei",
-    body: "Lisää Subscriber Goal omiin subredditeihisi nyt!",
-    installButton: "Asenna Subscriber Goal nyt",
-    mobileInstallButton: "Asenna SubGoal nyt",
-  },
-  sv: {
-    greeting: "Hej",
-    body: "Lägg till Subscriber Goal i dina egna subreddits nu!",
-    installButton: "Installera Subscriber Goal nu",
-    mobileInstallButton: "Installera SubGoal nu",
-  },
-  tl: {
-    greeting: "Kumusta",
-    body: "Idagdag ang Subscriber Goal sa sarili mong mga subreddit ngayon!",
-    installButton: "I-install ang Subscriber Goal Ngayon",
-    mobileInstallButton: "I-install ang SubGoal Ngayon",
-  },
-  tr: {
-    greeting: "Merhaba",
-    body: "Subscriber Goal'u şimdi kendi subreddit'lerinize ekleyin!",
-    installButton: "Subscriber Goal'u Şimdi Yükle",
-    mobileInstallButton: "SubGoal'u Şimdi Yükle",
-  },
-  yo: {
-    greeting: "Báwo",
-    body: "Fi Subscriber Goal kún àwọn subreddit tirẹ báyìí!",
-    installButton: "Fi Subscriber Goal sílẹ̀ báyìí",
-    mobileInstallButton: "Fi SubGoal sílẹ̀ báyìí",
-  },
-};
-
-type SubredditNameParams = {
-  subredditName: string;
-};
-
-type PromoSubredditParams = {
-  promoSubreddit: string;
-};
-
-type UsernameParams = {
-  username?: string | null;
-};
-
-type SubscribersParams = {
-  subscribersCount: number;
-  subscribersText: string;
-};
-
-type LocalizedCountMessages = {
-  subscribers: string;
-  newToday: string;
-  newThisWeek: string;
-};
-
-const localizedCountMessages: Record<SubGoalLanguage, LocalizedCountMessages> =
-  {
-    id: {
-      subscribers: "{count, plural, other {{countText} pelanggan}}",
-      newToday: "{count, plural, other {{countText} baru hari ini}}",
-      newThisWeek: "{count, plural, other {{countText} baru minggu ini}}",
-    },
-    bs: {
-      subscribers:
-        "{count, plural, one {{countText} pretplatnik} few {{countText} pretplatnika} other {{countText} pretplatnika}}",
-      newToday:
-        "{count, plural, one {{countText} novi danas} few {{countText} nova danas} other {{countText} novih danas}}",
-      newThisWeek:
-        "{count, plural, one {{countText} novi ove sedmice} few {{countText} nova ove sedmice} other {{countText} novih ove sedmice}}",
-    },
-    ca: {
-      subscribers:
-        "{count, plural, one {{countText} subscriptor} other {{countText} subscriptors}}",
-      newToday:
-        "{count, plural, one {{countText} nou avui} other {{countText} nous avui}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nou aquesta setmana} other {{countText} nous aquesta setmana}}",
-    },
-    da: {
-      subscribers:
-        "{count, plural, one {{countText} abonnent} other {{countText} abonnenter}}",
-      newToday:
-        "{count, plural, one {{countText} ny i dag} other {{countText} nye i dag}}",
-      newThisWeek:
-        "{count, plural, one {{countText} ny i denne uge} other {{countText} nye i denne uge}}",
-    },
-    de: {
-      subscribers:
-        "{count, plural, one {{countText} Abonnent} other {{countText} Abonnenten}}",
-      newToday:
-        "{count, plural, one {{countText} neuer Abonnent heute} other {{countText} neue Abonnenten heute}}",
-      newThisWeek:
-        "{count, plural, one {{countText} neuer Abonnent diese Woche} other {{countText} neue Abonnenten diese Woche}}",
-    },
-    en: {
-      subscribers:
-        "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",
-      newToday:
-        "{count, plural, one {{countText} new today} other {{countText} new today}}",
-      newThisWeek:
-        "{count, plural, one {{countText} new this week} other {{countText} new this week}}",
-    },
-    hi: {
-      subscribers:
-        "{count, plural, one {{countText} सब्सक्राइबर} other {{countText} सब्सक्राइबर}}",
-      newToday:
-        "{count, plural, one {आज {countText} नया} other {आज {countText} नए}}",
-      newThisWeek:
-        "{count, plural, one {इस सप्ताह {countText} नया} other {इस सप्ताह {countText} नए}}",
-    },
-    es: {
-      subscribers:
-        "{count, plural, one {{countText} suscriptor} other {{countText} suscriptores}}",
-      newToday:
-        "{count, plural, one {{countText} nuevo hoy} other {{countText} nuevos hoy}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nuevo esta semana} other {{countText} nuevos esta semana}}",
-    },
-    et: {
-      subscribers:
-        "{count, plural, one {{countText} tellija} other {{countText} tellijat}}",
-      newToday:
-        "{count, plural, one {{countText} uus täna} other {{countText} uut täna}}",
-      newThisWeek:
-        "{count, plural, one {{countText} uus sel nädalal} other {{countText} uut sel nädalal}}",
-    },
-    fr: {
-      subscribers:
-        "{count, plural, one {{countText} abonné} other {{countText} abonnés}}",
-      newToday:
-        "{count, plural, one {{countText} nouveau aujourd’hui} other {{countText} nouveaux aujourd’hui}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nouveau cette semaine} other {{countText} nouveaux cette semaine}}",
-    },
-    hr: {
-      subscribers:
-        "{count, plural, one {{countText} pretplatnik} few {{countText} pretplatnika} other {{countText} pretplatnika}}",
-      newToday:
-        "{count, plural, one {{countText} novi danas} few {{countText} nova danas} other {{countText} novih danas}}",
-      newThisWeek:
-        "{count, plural, one {{countText} novi ovaj tjedan} few {{countText} nova ovaj tjedan} other {{countText} novih ovaj tjedan}}",
-    },
-    is: {
-      subscribers:
-        "{count, plural, one {{countText} áskrifandi} other {{countText} áskrifendur}}",
-      newToday:
-        "{count, plural, one {{countText} nýr í dag} other {{countText} nýir í dag}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nýr í þessari viku} other {{countText} nýir í þessari viku}}",
-    },
-    it: {
-      subscribers:
-        "{count, plural, one {{countText} iscritto} other {{countText} iscritti}}",
-      newToday:
-        "{count, plural, one {{countText} nuovo oggi} other {{countText} nuovi oggi}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nuovo questa settimana} other {{countText} nuovi questa settimana}}",
-    },
-    lv: {
-      subscribers:
-        "{count, plural, zero {{countText} abonentu} one {{countText} abonents} other {{countText} abonenti}}",
-      newToday:
-        "{count, plural, zero {{countText} jaunu šodien} one {{countText} jauns šodien} other {{countText} jauni šodien}}",
-      newThisWeek:
-        "{count, plural, zero {{countText} jaunu šonedēļ} one {{countText} jauns šonedēļ} other {{countText} jauni šonedēļ}}",
-    },
-    lt: {
-      subscribers:
-        "{count, plural, one {{countText} prenumeratorius} few {{countText} prenumeratoriai} many {{countText} prenumeratorių} other {{countText} prenumeratorių}}",
-      newToday:
-        "{count, plural, one {{countText} naujas šiandien} few {{countText} nauji šiandien} many {{countText} naujų šiandien} other {{countText} naujų šiandien}}",
-      newThisWeek:
-        "{count, plural, one {{countText} naujas šią savaitę} few {{countText} nauji šią savaitę} many {{countText} naujų šią savaitę} other {{countText} naujų šią savaitę}}",
-    },
-    hu: {
-      subscribers: "{count, plural, other {{countText} feliratkozó}}",
-      newToday: "{count, plural, other {{countText} új ma}}",
-      newThisWeek: "{count, plural, other {{countText} új ezen a héten}}",
-    },
-    nl: {
-      subscribers:
-        "{count, plural, one {{countText} abonnee} other {{countText} abonnees}}",
-      newToday:
-        "{count, plural, one {{countText} nieuwe abonnee vandaag} other {{countText} nieuwe abonnees vandaag}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nieuwe abonnee deze week} other {{countText} nieuwe abonnees deze week}}",
-    },
-    nb: {
-      subscribers:
-        "{count, plural, one {{countText} abonnent} other {{countText} abonnenter}}",
-      newToday:
-        "{count, plural, one {{countText} ny i dag} other {{countText} nye i dag}}",
-      newThisWeek:
-        "{count, plural, one {{countText} ny denne uken} other {{countText} nye denne uken}}",
-    },
-    pl: {
-      subscribers:
-        "{count, plural, one {{countText} subskrybent} few {{countText} subskrybentów} many {{countText} subskrybentów} other {{countText} subskrybenta}}",
-      newToday:
-        "{count, plural, one {{countText} nowy dzisiaj} few {{countText} nowych dzisiaj} many {{countText} nowych dzisiaj} other {{countText} nowego dzisiaj}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nowy w tym tygodniu} few {{countText} nowych w tym tygodniu} many {{countText} nowych w tym tygodniu} other {{countText} nowego w tym tygodniu}}",
-    },
-    pt: {
-      subscribers:
-        "{count, plural, one {{countText} inscrito} other {{countText} inscritos}}",
-      newToday:
-        "{count, plural, one {{countText} novo hoje} other {{countText} novos hoje}}",
-      newThisWeek:
-        "{count, plural, one {{countText} novo esta semana} other {{countText} novos esta semana}}",
-    },
-    ro: {
-      subscribers:
-        "{count, plural, one {{countText} abonat} few {{countText} abonați} other {{countText} abonați}}",
-      newToday:
-        "{count, plural, one {{countText} nou astăzi} few {{countText} noi astăzi} other {{countText} noi astăzi}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nou săptămâna aceasta} few {{countText} noi săptămâna aceasta} other {{countText} noi săptămâna aceasta}}",
-    },
-    sq: {
-      subscribers:
-        "{count, plural, one {{countText} abonent} other {{countText} abonentë}}",
-      newToday:
-        "{count, plural, one {{countText} i ri sot} other {{countText} të rinj sot}}",
-      newThisWeek:
-        "{count, plural, one {{countText} i ri këtë javë} other {{countText} të rinj këtë javë}}",
-    },
-    sk: {
-      subscribers:
-        "{count, plural, one {{countText} odberateľ} few {{countText} odberatelia} many {{countText} odberateľa} other {{countText} odberateľov}}",
-      newToday:
-        "{count, plural, one {{countText} nový dnes} few {{countText} noví dnes} many {{countText} nového dnes} other {{countText} nových dnes}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nový tento týždeň} few {{countText} noví tento týždeň} many {{countText} nového tento týždeň} other {{countText} nových tento týždeň}}",
-    },
-    sl: {
-      subscribers:
-        "{count, plural, one {{countText} naročnik} two {{countText} naročnika} few {{countText} naročniki} other {{countText} naročnikov}}",
-      newToday:
-        "{count, plural, one {{countText} nov danes} two {{countText} nova danes} few {{countText} novi danes} other {{countText} novih danes}}",
-      newThisWeek:
-        "{count, plural, one {{countText} nov ta teden} two {{countText} nova ta teden} few {{countText} novi ta teden} other {{countText} novih ta teden}}",
-    },
-    fi: {
-      subscribers:
-        "{count, plural, one {{countText} tilaaja} other {{countText} tilaajaa}}",
-      newToday:
-        "{count, plural, one {{countText} uusi tänään} other {{countText} uutta tänään}}",
-      newThisWeek:
-        "{count, plural, one {{countText} uusi tällä viikolla} other {{countText} uutta tällä viikolla}}",
-    },
-    sv: {
-      subscribers:
-        "{count, plural, one {{countText} prenumerant} other {{countText} prenumeranter}}",
-      newToday:
-        "{count, plural, one {{countText} ny idag} other {{countText} nya idag}}",
-      newThisWeek:
-        "{count, plural, one {{countText} ny den här veckan} other {{countText} nya den här veckan}}",
-    },
-    tl: {
-      subscribers: "{count, plural, other {{countText} subscriber}}",
-      newToday: "{count, plural, other {{countText} bago ngayon}}",
-      newThisWeek: "{count, plural, other {{countText} bago ngayong linggo}}",
-    },
-    tr: {
-      subscribers: "{count, plural, other {{countText} abone}}",
-      newToday: "{count, plural, other {{countText} bugün yeni}}",
-      newThisWeek: "{count, plural, other {{countText} bu hafta yeni}}",
-    },
-    yo: {
-      subscribers: "{count, plural, other {{countText} alabapin}}",
-      newToday: "{count, plural, other {{countText} tuntun lónìí}}",
-      newThisWeek: "{count, plural, other {{countText} tuntun lọ́sẹ̀ yìí}}",
-    },
-  };
-
-const formatLocalizedCountMessage = (
-  language: SubGoalLanguage,
-  message: string,
-  count: number,
-  countText = formatSubscriberCount(count),
-): string =>
-  String(
-    new IntlMessageFormat(
-      message,
-      subGoalPostMessages[language].intlLocale,
-    ).format({ count, countText }),
-  );
-
-export const formatLocalizedSubscriberCount = (
-  language: SubGoalLanguage,
-  count: number,
-  countText?: string,
-): string =>
-  formatLocalizedCountMessage(
-    language,
-    localizedCountMessages[language].subscribers,
-    count,
-    countText,
-  );
-
-export const formatLocalizedSubscriberGrowth = (
-  language: SubGoalLanguage,
-  growth: { count: number; period: "today" | "week" },
-  countText?: string,
-): string =>
-  formatLocalizedCountMessage(
-    language,
-    growth.period === "today"
-      ? localizedCountMessages[language].newToday
-      : localizedCountMessages[language].newThisWeek,
-    growth.count,
-    countText,
-  );
-
-type LocalizedActivityMessages = {
-  postsToday: string;
-  postsThisWeek: string;
-  clicksThisWeek: string;
-};
-
-const localizedActivityMessages: Record<
-  SubGoalLanguage,
-  LocalizedActivityMessages
-> = {
-  id: {
-    postsToday: "{countText} postingan baru hari ini",
-    postsThisWeek: "{countText} postingan baru minggu ini",
-    clicksThisWeek: "{countText} klik minggu ini",
-  },
-  bs: {
-    postsToday: "{countText} novih objava danas",
-    postsThisWeek: "{countText} novih objava ove sedmice",
-    clicksThisWeek: "{countText} klikova ove sedmice",
-  },
-  ca: {
-    postsToday: "{countText} publicacions noves avui",
-    postsThisWeek: "{countText} publicacions noves aquesta setmana",
-    clicksThisWeek: "{countText} clics aquesta setmana",
-  },
-  da: {
-    postsToday: "{countText} nye opslag i dag",
-    postsThisWeek: "{countText} nye opslag i denne uge",
-    clicksThisWeek: "{countText} klik i denne uge",
-  },
-  de: {
-    postsToday: "{countText} neue Beiträge heute",
-    postsThisWeek: "{countText} neue Beiträge diese Woche",
-    clicksThisWeek: "{countText} Klicks diese Woche",
-  },
-  en: {
-    postsToday:
-      "{count, plural, one {{countText} new post today} other {{countText} new posts today}}",
-    postsThisWeek:
-      "{count, plural, one {{countText} new post this week} other {{countText} new posts this week}}",
-    clicksThisWeek:
-      "{count, plural, one {{countText} click this week} other {{countText} clicks this week}}",
-  },
-  hi: {
-    postsToday:
-      "{count, plural, one {आज {countText} नई पोस्ट} other {आज {countText} नई पोस्टें}}",
-    postsThisWeek:
-      "{count, plural, one {इस सप्ताह {countText} नई पोस्ट} other {इस सप्ताह {countText} नई पोस्टें}}",
-    clicksThisWeek:
-      "{count, plural, one {इस सप्ताह {countText} क्लिक} other {इस सप्ताह {countText} क्लिक}}",
-  },
-  es: {
-    postsToday: "{countText} publicaciones nuevas hoy",
-    postsThisWeek: "{countText} publicaciones nuevas esta semana",
-    clicksThisWeek: "{countText} clics esta semana",
-  },
-  et: {
-    postsToday: "{countText} uut postitust täna",
-    postsThisWeek: "{countText} uut postitust sel nädalal",
-    clicksThisWeek: "{countText} klõpsu sel nädalal",
-  },
-  fr: {
-    postsToday: "{countText} nouvelles publications aujourd’hui",
-    postsThisWeek: "{countText} nouvelles publications cette semaine",
-    clicksThisWeek: "{countText} clics cette semaine",
-  },
-  hr: {
-    postsToday: "{countText} novih objava danas",
-    postsThisWeek: "{countText} novih objava ovaj tjedan",
-    clicksThisWeek: "{countText} klikova ovaj tjedan",
-  },
-  is: {
-    postsToday: "{countText} ný innlegg í dag",
-    postsThisWeek: "{countText} ný innlegg í þessari viku",
-    clicksThisWeek: "{countText} smellir í þessari viku",
-  },
-  it: {
-    postsToday: "{countText} nuovi post oggi",
-    postsThisWeek: "{countText} nuovi post questa settimana",
-    clicksThisWeek: "{countText} clic questa settimana",
-  },
-  lv: {
-    postsToday: "{countText} jauni ieraksti šodien",
-    postsThisWeek: "{countText} jauni ieraksti šonedēļ",
-    clicksThisWeek: "{countText} klikšķi šonedēļ",
-  },
-  lt: {
-    postsToday: "{countText} nauji įrašai šiandien",
-    postsThisWeek: "{countText} nauji įrašai šią savaitę",
-    clicksThisWeek: "{countText} paspaudimai šią savaitę",
-  },
-  hu: {
-    postsToday: "{countText} új bejegyzés ma",
-    postsThisWeek: "{countText} új bejegyzés ezen a héten",
-    clicksThisWeek: "{countText} kattintás ezen a héten",
-  },
-  nl: {
-    postsToday: "{countText} nieuwe berichten vandaag",
-    postsThisWeek: "{countText} nieuwe berichten deze week",
-    clicksThisWeek: "{countText} klikken deze week",
-  },
-  nb: {
-    postsToday: "{countText} nye innlegg i dag",
-    postsThisWeek: "{countText} nye innlegg denne uken",
-    clicksThisWeek: "{countText} klikk denne uken",
-  },
-  pl: {
-    postsToday: "{countText} nowych postów dzisiaj",
-    postsThisWeek: "{countText} nowych postów w tym tygodniu",
-    clicksThisWeek: "{countText} kliknięć w tym tygodniu",
-  },
-  pt: {
-    postsToday: "{countText} novas publicações hoje",
-    postsThisWeek: "{countText} novas publicações esta semana",
-    clicksThisWeek: "{countText} cliques esta semana",
-  },
-  ro: {
-    postsToday: "{countText} postări noi astăzi",
-    postsThisWeek: "{countText} postări noi săptămâna aceasta",
-    clicksThisWeek: "{countText} clicuri săptămâna aceasta",
-  },
-  sq: {
-    postsToday: "{countText} postime të reja sot",
-    postsThisWeek: "{countText} postime të reja këtë javë",
-    clicksThisWeek: "{countText} klikime këtë javë",
-  },
-  sk: {
-    postsToday: "{countText} nových príspevkov dnes",
-    postsThisWeek: "{countText} nových príspevkov tento týždeň",
-    clicksThisWeek: "{countText} kliknutí tento týždeň",
-  },
-  sl: {
-    postsToday: "{countText} novih objav danes",
-    postsThisWeek: "{countText} novih objav ta teden",
-    clicksThisWeek: "{countText} klikov ta teden",
-  },
-  fi: {
-    postsToday: "{countText} uutta julkaisua tänään",
-    postsThisWeek: "{countText} uutta julkaisua tällä viikolla",
-    clicksThisWeek: "{countText} klikkausta tällä viikolla",
-  },
-  sv: {
-    postsToday: "{countText} nya inlägg idag",
-    postsThisWeek: "{countText} nya inlägg den här veckan",
-    clicksThisWeek: "{countText} klick den här veckan",
-  },
-  tl: {
-    postsToday: "{countText} bagong post ngayon",
-    postsThisWeek: "{countText} bagong post ngayong linggo",
-    clicksThisWeek: "{countText} click ngayong linggo",
-  },
-  tr: {
-    postsToday: "bugün {countText} yeni gönderi",
-    postsThisWeek: "bu hafta {countText} yeni gönderi",
-    clicksThisWeek: "bu hafta {countText} tıklama",
-  },
-  yo: {
-    postsToday: "{countText} ìfìwéránṣẹ́ tuntun lónìí",
-    postsThisWeek: "{countText} ìfìwéránṣẹ́ tuntun lọ́sẹ̀ yìí",
-    clicksThisWeek: "{countText} ìtẹ̀ lọ́sẹ̀ yìí",
-  },
-};
-
-export const formatLocalizedCtaActivity = (
-  language: SubGoalLanguage,
-  activity: {
-    kind: "posts" | "clicks";
-    count: number;
-    period: "today" | "week";
-  },
-  countText?: string,
-): string => {
-  const messages = localizedActivityMessages[language];
-  const message =
-    activity.kind === "clicks"
-      ? messages.clicksThisWeek
-      : activity.period === "today"
-        ? messages.postsToday
-        : messages.postsThisWeek;
-  return formatLocalizedCountMessage(
-    language,
-    message,
-    activity.count,
-    countText,
-  );
-};
-
-type CompletedTitleParams = SubredditNameParams & {
-  goalCount?: number;
-  goalText: string;
-};
-
-type CompletedDateParams = {
-  timeText: string;
-  dateText: string;
-};
-
-type TextFallbackActiveParams = SubredditNameParams & {
-  subscribersCount: number;
-  subscribersText: string;
-  goalCount: number;
-  goalText: string;
-};
-
-type TextFallbackCompletedParams = SubredditNameParams & {
-  goalCount: number;
-  goalText: string;
-  completedIso: string;
-};
-
 export type SubGoalPostMessages = {
   languageLabel: string;
   intlLocale: string;
@@ -740,1137 +64,6 @@ export type SubGoalPostMessages = {
   fallbackActive: (params: TextFallbackActiveParams) => string;
   fallbackCompleted: (params: TextFallbackCompletedParams) => string;
 };
-
-export const subGoalPostMessages: Record<SubGoalLanguage, SubGoalPostMessages> =
-  {
-    id: {
-      languageLabel: "Bahasa Indonesia",
-      intlLocale: "id-ID",
-      defaultPostTitle: ({ subredditName }) =>
-        `Selamat datang di r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Selamat datang di r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Bergabung dengan r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Sudah berlangganan ke r/${subredditName}`,
-      shareUsernameLabel: "Tampilkan nama pengguna saya saat saya berlangganan",
-      thanksTitle: "Terima kasih sudah berlangganan!",
-      thanksBody: ({ subscribersText }) =>
-        `Sekarang ada ${subscribersText} pelanggan di komunitas!`,
-      thanksReturnButton: "Kembali ke halaman sebelumnya",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} mencapai ${goalText} pelanggan!`,
-      completedGoalFallback: "target",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Target tercapai pukul ${timeText} pada ${dateText}`,
-      completedJustNow: "Target baru saja tercapai!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Lihat target pelanggan lain di r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} baru saja berlangganan!`
-          : "Anggota baru saja berlangganan!",
-      subscribeSuccessToast: "Terima kasih sudah berlangganan!",
-      subscribeErrorToast: "Gagal berlangganan.",
-      loginRequired: "Masuk untuk berlangganan.",
-      loadError: "Tidak dapat memuat data Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Selamat datang di r/${subredditName}\n\n${subscribersText} / ${goalText} pelanggan.\n  Bantu kami mencapai target!\n\nKunjungi postingan ini di Shreddit untuk menggunakan fitur interaktif.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} mencapai ${goalText} pelanggan!\n\nTarget tercapai pada \`${completedIso}\`.`,
-    },
-    bs: {
-      languageLabel: "Bosanski",
-      intlLocale: "bs-BA",
-      defaultPostTitle: ({ subredditName }) =>
-        `Dobro došli u r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Dobro došli u r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Pretplaćeni ste na r/${subredditName}`,
-      shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
-      thanksTitle: "Hvala na pretplati!",
-      thanksBody: ({ subscribersText }) =>
-        `Zajednica sada ima ${subscribersText} pretplatnika!`,
-      thanksReturnButton: "Vrati se na prethodnu stranicu",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} je dostigao ${goalText} pretplatnika!`,
-      completedGoalFallback: "cilj",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Cilj dostignut u ${timeText} dana ${dateText}`,
-      completedJustNow: "Cilj je upravo dostignut!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Pogledaj druge ciljeve pretplatnika u r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} se upravo pretplatio!`
-          : "Novi član se upravo pretplatio!",
-      subscribeSuccessToast: "Hvala na pretplati!",
-      subscribeErrorToast: "Pretplata nije uspjela.",
-      loginRequired: "Prijavi se za pretplatu.",
-      loadError: "Nije moguće učitati podatke Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Dobro došli u r/${subredditName}\n\n${subscribersText} / ${goalText} pretplatnika.\n  Pomozite nam da dostignemo cilj!\n\nPosjetite ovu objavu na Shredditu za interaktivne funkcije.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} je dostigao ${goalText} pretplatnika!\n\nCilj dostignut u \`${completedIso}\`.`,
-    },
-    ca: {
-      languageLabel: "Català",
-      intlLocale: "ca-ES",
-      defaultPostTitle: ({ subredditName }) =>
-        `Benvingut a r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Benvingut a r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Uneix-te a r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Subscrit a r/${subredditName}`,
-      shareUsernameLabel: "Mostra el meu nom d'usuari quan em subscrigui",
-      thanksTitle: "Gràcies per subscriure't!",
-      thanksBody: ({ subscribersText }) =>
-        `Ara hi ha ${subscribersText} subscriptors a la comunitat!`,
-      thanksReturnButton: "Torna a la pàgina anterior",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} ha arribat a ${goalText} subscriptors!`,
-      completedGoalFallback: "l'objectiu",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Objectiu assolit a les ${timeText} el ${dateText}`,
-      completedJustNow: "Objectiu assolit ara mateix!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Vegeu altres objectius de subscriptors a r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} s'acaba de subscriure!`
-          : "Un nou membre s'acaba de subscriure!",
-      subscribeSuccessToast: "Gràcies per subscriure't!",
-      subscribeErrorToast: "La subscripció ha fallat.",
-      loginRequired: "Inicia sessió per subscriure't.",
-      loadError: "No s'han pogut carregar les dades de Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Benvingut a r/${subredditName}\n\n${subscribersText} / ${goalText} subscriptors.\n  Ajuda'ns a assolir el nostre objectiu!\n\nVisita aquesta publicació a Shreddit per utilitzar les funcions interactives.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} ha arribat a ${goalText} subscriptors!\n\nObjectiu assolit a \`${completedIso}\`.`,
-    },
-    da: {
-      languageLabel: "Dansk",
-      intlLocale: "da-DK",
-      defaultPostTitle: ({ subredditName }) =>
-        `Velkommen til r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Deltag i r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Abonnerer på r/${subredditName}`,
-      shareUsernameLabel: "Vis mit brugernavn, når jeg abonnerer",
-      thanksTitle: "Tak for din tilmelding!",
-      thanksBody: ({ subscribersText }) =>
-        `Der er nu ${subscribersText} abonnenter i fællesskabet!`,
-      thanksReturnButton: "Gå tilbage til forrige side",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} har nået ${goalText} abonnenter!`,
-      completedGoalFallback: "målet",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Målet blev nået kl. ${timeText} den ${dateText}`,
-      completedJustNow: "Målet blev netop nået!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Se andre abonnentmål i r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} abonnerede lige!`
-          : "Et nyt medlem abonnerede lige!",
-      subscribeSuccessToast: "Tak for din tilmelding!",
-      subscribeErrorToast: "Abonnementet mislykkedes.",
-      loginRequired: "Log ind for at abonnere.",
-      loadError: "Kunne ikke indlæse Subscriber Goal-data.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Velkommen til r/${subredditName}\n\n${subscribersText} / ${goalText} abonnenter.\n  Hjælp os med at nå vores mål!\n\nBesøg dette opslag på Shreddit for at bruge interaktive funktioner.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} har nået ${goalText} abonnenter!\n\nMålet blev nået kl. \`${completedIso}\`.`,
-    },
-    de: {
-      languageLabel: "Deutsch",
-      intlLocale: "de-DE",
-      defaultPostTitle: ({ subredditName }) =>
-        `Willkommen bei r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Willkommen bei r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `r/${subredditName} beitreten`,
-      subscribedButton: ({ subredditName }) => `r/${subredditName} abonniert`,
-      shareUsernameLabel: "Meinen Benutzernamen anzeigen, wenn ich abonniere",
-      thanksTitle: "Danke fürs Abonnieren!",
-      thanksBody: ({ subscribersText }) =>
-        `Die Community hat jetzt ${subscribersText} Abonnenten!`,
-      thanksReturnButton: "Zur vorherigen Seite zurückkehren",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} hat ${goalText} Abonnenten erreicht!`,
-      completedGoalFallback: "das Ziel",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Ziel erreicht um ${timeText} am ${dateText}`,
-      completedJustNow: "Ziel gerade erreicht!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Weitere Abonnentenziele in r/${promoSubreddit} ansehen`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} hat gerade abonniert!`
-          : "Ein neues Mitglied hat gerade abonniert!",
-      subscribeSuccessToast: "Danke fürs Abonnieren!",
-      subscribeErrorToast: "Abonnement fehlgeschlagen.",
-      loginRequired: "Bitte melde dich an, um zu abonnieren.",
-      loadError: "Subscriber Goal-Daten konnten nicht geladen werden.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Willkommen bei r/${subredditName}\n\n${subscribersText} / ${goalText} Abonnenten.\n  Hilf uns, unser Ziel zu erreichen!\n\nBesuche diesen Beitrag auf Shreddit, um interaktive Funktionen zu nutzen.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} hat ${goalText} Abonnenten erreicht!\n\nZiel erreicht um \`${completedIso}\`.`,
-    },
-    en: {
-      languageLabel: "English",
-      intlLocale: "en-US",
-      defaultPostTitle: ({ subredditName }) => `Welcome to r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Welcome to r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Join r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Subscribed to r/${subredditName}`,
-      shareUsernameLabel: "Show my username when I subscribe",
-      thanksTitle: "Thanks for Subscribing!",
-      thanksBody: ({ subscribersText }) =>
-        `The community now has ${subscribersText} subscribers!`,
-      thanksReturnButton: "Return to Previous Page",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} reached ${goalText} subscribers!`,
-      completedGoalFallback: "the goal",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Goal reached at ${timeText} on ${dateText}`,
-      completedJustNow: "Goal reached just now!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `View other subscriber goals in r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} just subscribed!`
-          : "New member just subscribed!",
-      subscribeSuccessToast: "Thanks for subscribing!",
-      subscribeErrorToast: "Subscription failed.",
-      loginRequired: "Please log in to subscribe.",
-      loadError: "Unable to load Subscriber Goal data.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Welcome to r/${subredditName}\n\n${subscribersText} / ${goalText} subscribers.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} reached ${goalText} subscribers!\n\nGoal reached at \`${completedIso}\`.`,
-    },
-    hi: {
-      languageLabel: "हिन्दी",
-      intlLocale: "hi-IN",
-      defaultPostTitle: ({ subredditName }) =>
-        `r/${subredditName} में आपका स्वागत है!`,
-      welcome: ({ subredditName }) => `r/${subredditName} में आपका स्वागत है`,
-      subscribeButton: ({ subredditName }) =>
-        `r/${subredditName} में शामिल हों`,
-      subscribedButton: ({ subredditName }) =>
-        `r/${subredditName} को सब्सक्राइब कर लिया है`,
-      shareUsernameLabel: "सब्सक्राइब करते समय मेरा यूज़रनेम दिखाएँ",
-      thanksTitle: "सब्सक्राइब करने के लिए धन्यवाद!",
-      thanksBody: ({ subscribersText }) =>
-        `कम्यूनिटी में अब ${subscribersText} सब्सक्राइबर हैं!`,
-      thanksReturnButton: "पिछले पेज पर वापस जाएँ",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} ने ${goalText} सब्सक्राइबर पूरे कर लिए!`,
-      completedGoalFallback: "लक्ष्य",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `लक्ष्य ${dateText} को ${timeText} पर पूरा हुआ`,
-      completedJustNow: "लक्ष्य अभी पूरा हुआ!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `r/${promoSubreddit} में अन्य सब्सक्राइबर लक्ष्य देखें`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} ने अभी-अभी सब्सक्राइब किया!`
-          : "एक नए सदस्य ने अभी-अभी सब्सक्राइब किया!",
-      subscribeSuccessToast: "सब्सक्राइब करने के लिए धन्यवाद!",
-      subscribeErrorToast: "सब्सक्रिप्शन विफल रहा।",
-      loginRequired: "सब्सक्राइब करने के लिए लॉग इन करें।",
-      loadError: "Subscriber Goal डेटा लोड नहीं हो सका।",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `r/${subredditName} में आपका स्वागत है\n\n${subscribersText} / ${goalText} सब्सक्राइबर।\n  लक्ष्य पूरा करने में हमारी मदद करें!\n\nइंटरैक्टिव सुविधाओं का उपयोग करने के लिए इस पोस्ट को Shreddit पर देखें।`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} ने ${goalText} सब्सक्राइबर पूरे कर लिए!\n\nलक्ष्य पूरा होने का समय: \`${completedIso}\``,
-    },
-    es: {
-      languageLabel: "Español",
-      intlLocale: "es-419",
-      defaultPostTitle: ({ subredditName }) =>
-        `¡Bienvenido a r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Bienvenido a r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Unirse a r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Suscrito a r/${subredditName}`,
-      shareUsernameLabel: "Mostrar mi nombre de usuario cuando me suscriba",
-      thanksTitle: "¡Gracias por suscribirte!",
-      thanksBody: ({ subscribersText }) =>
-        `¡Ahora hay ${subscribersText} suscriptores en la comunidad!`,
-      thanksReturnButton: "Volver a la página anterior",
-      completedTitle: ({ subredditName, goalText }) =>
-        `¡r/${subredditName} alcanzó ${goalText} suscriptores!`,
-      completedGoalFallback: "la meta",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Meta alcanzada a las ${timeText} el ${dateText}`,
-      completedJustNow: "¡Meta alcanzada justo ahora!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Ver otras metas de suscriptores en r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `¡u/${username} se acaba de suscribir!`
-          : "¡Un nuevo miembro se acaba de suscribir!",
-      subscribeSuccessToast: "¡Gracias por suscribirte!",
-      subscribeErrorToast: "No se pudo completar la suscripción.",
-      loginRequired: "Inicia sesión para suscribirte.",
-      loadError: "No se pudieron cargar los datos de Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Bienvenido a r/${subredditName}\n\n${subscribersText} / ${goalText} suscriptores.\n  ¡Ayúdanos a alcanzar nuestra meta!\n\nVisita esta publicación en Shreddit para disfrutar las funciones interactivas.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `¡r/${subredditName} alcanzó ${goalText} suscriptores!\n\nMeta alcanzada en \`${completedIso}\`.`,
-    },
-    et: {
-      languageLabel: "Eesti",
-      intlLocale: "et-EE",
-      defaultPostTitle: ({ subredditName }) =>
-        `Tere tulemast r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Tere tulemast r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Liitu kogukonnaga r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Tellitud r/${subredditName}`,
-      shareUsernameLabel: "Näita minu kasutajanime, kui tellin",
-      thanksTitle: "Täname tellimise eest!",
-      thanksBody: ({ subscribersText }) =>
-        `Kogukonnas on nüüd ${subscribersText} tellijat!`,
-      thanksReturnButton: "Tagasi eelmisele lehele",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} jõudis ${goalText} tellijani!`,
-      completedGoalFallback: "eesmärk",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Eesmärk saavutati kell ${timeText} kuupäeval ${dateText}`,
-      completedJustNow: "Eesmärk saavutati just nüüd!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Vaata teisi tellijate eesmärke r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username ? `u/${username} tellis just!` : "Uus liige tellis just!",
-      subscribeSuccessToast: "Täname tellimise eest!",
-      subscribeErrorToast: "Tellimine ebaõnnestus.",
-      loginRequired: "Tellimiseks logi sisse.",
-      loadError: "Subscriber Goal-andmeid ei saanud laadida.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Tere tulemast r/${subredditName}\n\n${subscribersText} / ${goalText} tellijat.\n  Aita meil eesmärk saavutada!\n\nInteraktiivsete funktsioonide kasutamiseks külasta seda postitust Shredditis.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} jõudis ${goalText} tellijani!\n\nEesmärk saavutati \`${completedIso}\`.`,
-    },
-    fr: {
-      languageLabel: "Français",
-      intlLocale: "fr-FR",
-      defaultPostTitle: ({ subredditName }) =>
-        `Bienvenue sur r/${subredditName} !`,
-      welcome: ({ subredditName }) => `Bienvenue sur r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Rejoindre r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Abonné à r/${subredditName}`,
-      shareUsernameLabel: "Afficher mon nom d'utilisateur quand je m'abonne",
-      thanksTitle: "Merci de vous être abonné !",
-      thanksBody: ({ subscribersText }) =>
-        `La communauté compte maintenant ${subscribersText} abonnés !`,
-      thanksReturnButton: "Retourner à la page précédente",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} a atteint ${goalText} abonnés !`,
-      completedGoalFallback: "l'objectif",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Objectif atteint à ${timeText} le ${dateText}`,
-      completedJustNow: "Objectif atteint à l'instant !",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Voir d'autres objectifs d'abonnés dans r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} vient de s'abonner !`
-          : "Un nouveau membre vient de s’abonner !",
-      subscribeSuccessToast: "Merci de vous être abonné !",
-      subscribeErrorToast: "L'abonnement a échoué.",
-      loginRequired: "Veuillez vous connecter pour vous abonner.",
-      loadError: "Impossible de charger les données Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Bienvenue sur r/${subredditName}\n\n${subscribersText} / ${goalText} abonnés.\n  Aidez-nous à atteindre notre objectif !\n\nConsultez cette publication sur Shreddit pour profiter des fonctionnalités interactives.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} a atteint ${goalText} abonnés !\n\nObjectif atteint à \`${completedIso}\`.`,
-    },
-    hr: {
-      languageLabel: "Hrvatski",
-      intlLocale: "hr-HR",
-      defaultPostTitle: ({ subredditName }) =>
-        `Dobro došli u r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Dobro došli u r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Pretplaćeni ste na r/${subredditName}`,
-      shareUsernameLabel: "Prikaži moje korisničko ime kada se pretplatim",
-      thanksTitle: "Hvala na pretplati!",
-      thanksBody: ({ subscribersText }) =>
-        `Zajednica sada ima ${subscribersText} pretplatnika!`,
-      thanksReturnButton: "Povratak na prethodnu stranicu",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} dosegnuo je ${goalText} pretplatnika!`,
-      completedGoalFallback: "cilj",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Cilj je dosegnut u ${timeText} dana ${dateText}`,
-      completedJustNow: "Cilj je upravo dosegnut!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Pogledajte druge ciljeve pretplatnika u r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} se upravo pretplatio!`
-          : "Novi član se upravo pretplatio!",
-      subscribeSuccessToast: "Hvala na pretplati!",
-      subscribeErrorToast: "Pretplata nije uspjela.",
-      loginRequired: "Prijavite se za pretplatu.",
-      loadError: "Nije moguće učitati podatke Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Dobro došli u r/${subredditName}\n\n${subscribersText} / ${goalText} pretplatnika.\n  Pomozite nam dosegnuti cilj!\n\nPosjetite ovu objavu na Shredditu za interaktivne značajke.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} dosegnuo je ${goalText} pretplatnika!\n\nCilj je dosegnut u \`${completedIso}\`.`,
-    },
-    is: {
-      languageLabel: "Íslenska",
-      intlLocale: "is-IS",
-      defaultPostTitle: ({ subredditName }) => `Velkomin í r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Velkomin í r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Gakktu til liðs við r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Áskrifandi að r/${subredditName}`,
-      shareUsernameLabel: "Sýna notandanafnið mitt þegar ég gerist áskrifandi",
-      thanksTitle: "Takk fyrir áskriftina!",
-      thanksBody: ({ subscribersText }) =>
-        `Samfélagið er nú með ${subscribersText} áskrifendur!`,
-      thanksReturnButton: "Fara aftur á fyrri síðu",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} náði ${goalText} áskrifendum!`,
-      completedGoalFallback: "markmiðið",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Markmiði náð kl. ${timeText} þann ${dateText}`,
-      completedJustNow: "Markmiðinu var náð rétt í þessu!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Skoða önnur áskrifendamarkmið í r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} gerðist áskrifandi rétt í þessu!`
-          : "Nýr meðlimur gerðist áskrifandi rétt í þessu!",
-      subscribeSuccessToast: "Takk fyrir áskriftina!",
-      subscribeErrorToast: "Áskrift mistókst.",
-      loginRequired: "Skráðu þig inn til að gerast áskrifandi.",
-      loadError: "Ekki tókst að hlaða Subscriber Goal-gögnum.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Velkomin í r/${subredditName}\n\n${subscribersText} / ${goalText} áskrifendur.\n  Hjálpaðu okkur að ná markmiðinu!\n\nSkoðaðu þessa færslu á Shreddit til að nota gagnvirka eiginleika.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} náði ${goalText} áskrifendum!\n\nMarkmiði náð kl. \`${completedIso}\`.`,
-    },
-    it: {
-      languageLabel: "Italiano",
-      intlLocale: "it-IT",
-      defaultPostTitle: ({ subredditName }) =>
-        `Benvenuto in r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Benvenuto in r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Unisciti a r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Iscritto a r/${subredditName}`,
-      shareUsernameLabel: "Mostra il mio nome utente quando mi iscrivo",
-      thanksTitle: "Grazie per esserti iscritto!",
-      thanksBody: ({ subscribersText }) =>
-        `La community ora ha ${subscribersText} iscritti!`,
-      thanksReturnButton: "Torna alla pagina precedente",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} ha raggiunto ${goalText} iscritti!`,
-      completedGoalFallback: "l'obiettivo",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Obiettivo raggiunto alle ${timeText} del ${dateText}`,
-      completedJustNow: "Obiettivo appena raggiunto!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Visualizza altri obiettivi iscritti in r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} si è appena iscritto!`
-          : "Un nuovo membro si è appena iscritto!",
-      subscribeSuccessToast: "Grazie per esserti iscritto!",
-      subscribeErrorToast: "Iscrizione non riuscita.",
-      loginRequired: "Accedi per iscriverti.",
-      loadError: "Impossibile caricare i dati di Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Benvenuto in r/${subredditName}\n\n${subscribersText} / ${goalText} iscritti.\n  Aiutaci a raggiungere il nostro obiettivo!\n\nVisita questo post su Shreddit per usare le funzionalità interattive.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} ha raggiunto ${goalText} iscritti!\n\nObiettivo raggiunto alle \`${completedIso}\`.`,
-    },
-    lv: {
-      languageLabel: "Latviešu",
-      intlLocale: "lv-LV",
-      defaultPostTitle: ({ subredditName }) =>
-        `Laipni lūdzam r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Laipni lūdzam r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Pievienojies r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Abonēts r/${subredditName}`,
-      shareUsernameLabel: "Rādīt manu lietotājvārdu, kad abonēju",
-      thanksTitle: "Paldies par abonēšanu!",
-      thanksBody: ({ subscribersText }) =>
-        `Kopienā tagad ir ${subscribersText} abonenti!`,
-      thanksReturnButton: "Atgriezties iepriekšējā lapā",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} sasniedza ${goalText} abonentus!`,
-      completedGoalFallback: "mērķis",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Mērķis sasniegts plkst. ${timeText}, ${dateText}`,
-      completedJustNow: "Mērķis tikko sasniegts!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Skatīt citus abonentu mērķus r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} tikko abonēja!`
-          : "Jauns dalībnieks tikko abonēja!",
-      subscribeSuccessToast: "Paldies par abonēšanu!",
-      subscribeErrorToast: "Abonēšana neizdevās.",
-      loginRequired: "Pieraksties, lai abonētu.",
-      loadError: "Neizdevās ielādēt Subscriber Goal datus.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Laipni lūdzam r/${subredditName}\n\n${subscribersText} / ${goalText} abonenti.\n  Palīdzi mums sasniegt mērķi!\n\nApmeklē šo ziņu Shreddit, lai izmantotu interaktīvās funkcijas.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} sasniedza ${goalText} abonentus!\n\nMērķis sasniegts \`${completedIso}\`.`,
-    },
-    lt: {
-      languageLabel: "Lietuvių",
-      intlLocale: "lt-LT",
-      defaultPostTitle: ({ subredditName }) =>
-        `Sveiki atvykę į r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Sveiki atvykę į r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Prisijungti prie r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Prenumeruojate r/${subredditName}`,
-      shareUsernameLabel: "Rodyti mano naudotojo vardą, kai prenumeruoju",
-      thanksTitle: "Ačiū, kad prenumeruojate!",
-      thanksBody: ({ subscribersText }) =>
-        `Bendruomenėje dabar yra ${subscribersText} prenumeratorių!`,
-      thanksReturnButton: "Grįžti į ankstesnį puslapį",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} pasiekė ${goalText} prenumeratorių!`,
-      completedGoalFallback: "tikslas",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Tikslas pasiektas ${timeText}, ${dateText}`,
-      completedJustNow: "Tikslas ką tik pasiektas!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Peržiūrėti kitus prenumeratorių tikslus r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} ką tik užsiprenumeravo!`
-          : "Naujas narys ką tik užsiprenumeravo!",
-      subscribeSuccessToast: "Ačiū, kad prenumeruojate!",
-      subscribeErrorToast: "Prenumerata nepavyko.",
-      loginRequired: "Prisijunkite, kad prenumeruotumėte.",
-      loadError: "Nepavyko įkelti Subscriber Goal duomenų.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Sveiki atvykę į r/${subredditName}\n\n${subscribersText} / ${goalText} prenumeratorių.\n  Padėkite mums pasiekti tikslą!\n\nApsilankykite šiame įraše Shreddit, kad naudotumėte interaktyvias funkcijas.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} pasiekė ${goalText} prenumeratorių!\n\nTikslas pasiektas \`${completedIso}\`.`,
-    },
-    hu: {
-      languageLabel: "Magyar",
-      intlLocale: "hu-HU",
-      defaultPostTitle: ({ subredditName }) =>
-        `Üdvözlünk az r/${subredditName} közösségben!`,
-      welcome: ({ subredditName }) =>
-        `Üdvözlünk az r/${subredditName} közösségben`,
-      subscribeButton: ({ subredditName }) =>
-        `Csatlakozz ehhez: r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Feliratkozva erre: r/${subredditName}`,
-      shareUsernameLabel: "Mutassa a felhasználónevemet, amikor feliratkozom",
-      thanksTitle: "Köszönjük a feliratkozást!",
-      thanksBody: ({ subscribersText }) =>
-        `A közösségnek most ${subscribersText} feliratkozója van!`,
-      thanksReturnButton: "Vissza az előző oldalra",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} elérte a(z) ${goalText} feliratkozót!`,
-      completedGoalFallback: "a cél",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `A cél elérve ekkor: ${dateText}, ${timeText}`,
-      completedJustNow: "A cél éppen most teljesült!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Más feliratkozói célok megtekintése itt: r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} éppen most feliratkozott!`
-          : "Egy új tag éppen most feliratkozott!",
-      subscribeSuccessToast: "Köszönjük a feliratkozást!",
-      subscribeErrorToast: "A feliratkozás sikertelen.",
-      loginRequired: "Jelentkezz be a feliratkozáshoz.",
-      loadError: "Nem sikerült betölteni a Subscriber Goal adatait.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Üdvözlünk az r/${subredditName} közösségben\n\n${subscribersText} / ${goalText} feliratkozó.\n  Segíts elérni a célunkat!\n\nLátogasd meg ezt a bejegyzést Shredditen az interaktív funkciók használatához.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} elérte a(z) ${goalText} feliratkozót!\n\nA cél elérve: \`${completedIso}\`.`,
-    },
-    nl: {
-      languageLabel: "Nederlands",
-      intlLocale: "nl-NL",
-      defaultPostTitle: ({ subredditName }) => `Welkom bij r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Welkom bij r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Lid worden van r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Geabonneerd op r/${subredditName}`,
-      shareUsernameLabel: "Mijn gebruikersnaam tonen wanneer ik me abonneer",
-      thanksTitle: "Bedankt voor je abonnement!",
-      thanksBody: ({ subscribersText }) =>
-        `De community heeft nu ${subscribersText} abonnees!`,
-      thanksReturnButton: "Terug naar vorige pagina",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} heeft ${goalText} abonnees bereikt!`,
-      completedGoalFallback: "het doel",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Doel bereikt om ${timeText} op ${dateText}`,
-      completedJustNow: "Doel zojuist bereikt!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Bekijk andere abonneedoelen in r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} heeft zich zojuist geabonneerd!`
-          : "Een nieuw lid heeft zich zojuist geabonneerd!",
-      subscribeSuccessToast: "Bedankt voor je abonnement!",
-      subscribeErrorToast: "Abonneren mislukt.",
-      loginRequired: "Log in om je te abonneren.",
-      loadError: "Kan Subscriber Goal-gegevens niet laden.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Welkom bij r/${subredditName}\n\n${subscribersText} / ${goalText} abonnees.\n  Help ons ons doel te bereiken!\n\nBezoek dit bericht op Shreddit om interactieve functies te gebruiken.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} heeft ${goalText} abonnees bereikt!\n\nDoel bereikt om \`${completedIso}\`.`,
-    },
-    nb: {
-      languageLabel: "Norsk Bokmål",
-      intlLocale: "nb-NO",
-      defaultPostTitle: ({ subredditName }) =>
-        `Velkommen til r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Velkommen til r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Bli med i r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Abonnerer på r/${subredditName}`,
-      shareUsernameLabel: "Vis brukernavnet mitt når jeg abonnerer",
-      thanksTitle: "Takk for at du abonnerer!",
-      thanksBody: ({ subscribersText }) =>
-        `Det er nå ${subscribersText} abonnenter i fellesskapet!`,
-      thanksReturnButton: "Gå tilbake til forrige side",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} nådde ${goalText} abonnenter!`,
-      completedGoalFallback: "målet",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Målet ble nådd kl. ${timeText} den ${dateText}`,
-      completedJustNow: "Målet ble nettopp nådd!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Se andre abonnentmål i r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} abonnerte nettopp!`
-          : "Et nytt medlem abonnerte nettopp!",
-      subscribeSuccessToast: "Takk for at du abonnerer!",
-      subscribeErrorToast: "Abonnementet mislyktes.",
-      loginRequired: "Logg inn for å abonnere.",
-      loadError: "Kunne ikke laste Subscriber Goal-data.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Velkommen til r/${subredditName}\n\n${subscribersText} / ${goalText} abonnenter.\n  Hjelp oss å nå målet vårt!\n\nBesøk dette innlegget på Shreddit for å bruke interaktive funksjoner.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} nådde ${goalText} abonnenter!\n\nMålet ble nådd kl. \`${completedIso}\`.`,
-    },
-    pl: {
-      languageLabel: "Polski",
-      intlLocale: "pl-PL",
-      defaultPostTitle: ({ subredditName }) => `Witamy w r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Witamy w r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Dołącz do r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Subskrybujesz r/${subredditName}`,
-      shareUsernameLabel: "Pokaż moją nazwę użytkownika, gdy subskrybuję",
-      thanksTitle: "Dziękujemy za subskrypcję!",
-      thanksBody: ({ subscribersText }) =>
-        `Społeczność ma teraz ${subscribersText} subskrybentów!`,
-      thanksReturnButton: "Wróć do poprzedniej strony",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} osiągnęło ${goalText} subskrybentów!`,
-      completedGoalFallback: "cel",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Cel osiągnięty o ${timeText} dnia ${dateText}`,
-      completedJustNow: "Cel właśnie osiągnięty!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Zobacz inne cele subskrybentów w r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} właśnie zasubskrybował!`
-          : "Nowy członek właśnie zasubskrybował!",
-      subscribeSuccessToast: "Dziękujemy za subskrypcję!",
-      subscribeErrorToast: "Subskrypcja nie powiodła się.",
-      loginRequired: "Zaloguj się, aby subskrybować.",
-      loadError: "Nie udało się załadować danych Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Witamy w r/${subredditName}\n\n${subscribersText} / ${goalText} subskrybentów.\n  Pomóż nam osiągnąć cel!\n\nOdwiedź ten post w Shreddit, aby używać funkcji interaktywnych.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} osiągnęło ${goalText} subskrybentów!\n\nCel osiągnięty o \`${completedIso}\`.`,
-    },
-    pt: {
-      languageLabel: "Português",
-      intlLocale: "pt",
-      defaultPostTitle: ({ subredditName }) =>
-        `Bem-vindo ao r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Bem-vindo ao r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Unir-se a r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Inscrito em r/${subredditName}`,
-      shareUsernameLabel: "Mostrar meu nome de usuário quando eu me inscrever",
-      thanksTitle: "Obrigado por se inscrever!",
-      thanksBody: ({ subscribersText }) =>
-        `Agora há ${subscribersText} inscritos na comunidade!`,
-      thanksReturnButton: "Voltar para a página anterior",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} alcançou ${goalText} inscritos!`,
-      completedGoalFallback: "a meta",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Meta alcançada às ${timeText} em ${dateText}`,
-      completedJustNow: "Meta alcançada agora mesmo!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Ver outras metas de inscritos em r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} acabou de se inscrever!`
-          : "Um novo membro acabou de se inscrever!",
-      subscribeSuccessToast: "Obrigado por se inscrever!",
-      subscribeErrorToast: "Falha na inscrição.",
-      loginRequired: "Faça login para se inscrever.",
-      loadError: "Não foi possível carregar os dados do Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Bem-vindo ao r/${subredditName}\n\n${subscribersText} / ${goalText} inscritos.\n  Ajude-nos a alcançar nossa meta!\n\nVisite esta publicação no Shreddit para aproveitar os recursos interativos.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} alcançou ${goalText} inscritos!\n\nMeta alcançada em \`${completedIso}\`.`,
-    },
-    ro: {
-      languageLabel: "Română",
-      intlLocale: "ro-RO",
-      defaultPostTitle: ({ subredditName }) =>
-        `Bun venit pe r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Bun venit pe r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Alătură-te r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Abonat la r/${subredditName}`,
-      shareUsernameLabel: "Afișează-mi numele de utilizator când mă abonez",
-      thanksTitle: "Mulțumim pentru abonare!",
-      thanksBody: ({ subscribersText }) =>
-        `Comunitatea are acum ${subscribersText} abonați!`,
-      thanksReturnButton: "Înapoi la pagina anterioară",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} a atins ${goalText} abonați!`,
-      completedGoalFallback: "obiectivul",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Obiectiv atins la ${timeText} pe ${dateText}`,
-      completedJustNow: "Obiectiv atins chiar acum!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Vezi alte obiective de abonați în r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} tocmai s-a abonat!`
-          : "Un membru nou tocmai s-a abonat!",
-      subscribeSuccessToast: "Mulțumim pentru abonare!",
-      subscribeErrorToast: "Abonarea a eșuat.",
-      loginRequired: "Autentifică-te pentru a te abona.",
-      loadError: "Nu s-au putut încărca datele Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Bun venit pe r/${subredditName}\n\n${subscribersText} / ${goalText} abonați.\n  Ajută-ne să ne atingem obiectivul!\n\nVizitează această postare pe Shreddit pentru a folosi funcțiile interactive.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} a atins ${goalText} abonați!\n\nObiectiv atins la \`${completedIso}\`.`,
-    },
-    sq: {
-      languageLabel: "Shqip",
-      intlLocale: "sq-AL",
-      defaultPostTitle: ({ subredditName }) =>
-        `Mirë se vini në r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Mirë se vini në r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Bashkohu me r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `I abonuar te r/${subredditName}`,
-      shareUsernameLabel: "Shfaq emrin tim të përdoruesit kur abonohem",
-      thanksTitle: "Faleminderit që u abonove!",
-      thanksBody: ({ subscribersText }) =>
-        `Tani ka ${subscribersText} abonentë në komunitet!`,
-      thanksReturnButton: "Kthehu te faqja e mëparshme",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} arriti ${goalText} abonentë!`,
-      completedGoalFallback: "qëllimi",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Qëllimi u arrit në ${timeText} më ${dateText}`,
-      completedJustNow: "Qëllimi sapo u arrit!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Shiko qëllime të tjera abonentësh në r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} sapo u abonua!`
-          : "Një anëtar i ri sapo u abonua!",
-      subscribeSuccessToast: "Faleminderit që u abonove!",
-      subscribeErrorToast: "Abonimi dështoi.",
-      loginRequired: "Identifikohu për t'u abonuar.",
-      loadError: "Nuk mund të ngarkohen të dhënat e Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Mirë se vini në r/${subredditName}\n\n${subscribersText} / ${goalText} abonentë.\n  Na ndihmo të arrijmë qëllimin!\n\nVizito këtë postim në Shreddit për të përdorur funksionet interaktive.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} arriti ${goalText} abonentë!\n\nQëllimi u arrit në \`${completedIso}\`.`,
-    },
-    sk: {
-      languageLabel: "Slovenčina",
-      intlLocale: "sk-SK",
-      defaultPostTitle: ({ subredditName }) => `Vitajte v r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Vitajte v r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Pripojiť sa k r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Prihlásené na odber r/${subredditName}`,
-      shareUsernameLabel:
-        "Zobraziť moje používateľské meno, keď sa prihlásim na odber",
-      thanksTitle: "Ďakujeme za prihlásenie na odber!",
-      thanksBody: ({ subscribersText }) =>
-        `Komunita má teraz ${subscribersText} odberateľov!`,
-      thanksReturnButton: "Vrátiť sa na predchádzajúcu stránku",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} dosiahol ${goalText} odberateľov!`,
-      completedGoalFallback: "cieľ",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Cieľ dosiahnutý o ${timeText} dňa ${dateText}`,
-      completedJustNow: "Cieľ bol práve dosiahnutý!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Pozrieť ďalšie ciele odberateľov v r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} sa práve prihlásil na odber!`
-          : "Nový člen sa práve prihlásil na odber!",
-      subscribeSuccessToast: "Ďakujeme za prihlásenie na odber!",
-      subscribeErrorToast: "Prihlásenie na odber zlyhalo.",
-      loginRequired: "Prihláste sa, aby ste sa mohli prihlásiť na odber.",
-      loadError: "Nepodarilo sa načítať údaje Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Vitajte v r/${subredditName}\n\n${subscribersText} / ${goalText} odberateľov.\n  Pomôžte nám dosiahnuť cieľ!\n\nNavštívte tento príspevok na Shreddite a použite interaktívne funkcie.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} dosiahol ${goalText} odberateľov!\n\nCieľ dosiahnutý o \`${completedIso}\`.`,
-    },
-    sl: {
-      languageLabel: "Slovenščina",
-      intlLocale: "sl-SI",
-      defaultPostTitle: ({ subredditName }) =>
-        `Dobrodošli v r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Dobrodošli v r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Pridruži se r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Naročen na r/${subredditName}`,
-      shareUsernameLabel: "Prikaži moje uporabniško ime, ko se naročim",
-      thanksTitle: "Hvala za naročnino!",
-      thanksBody: ({ subscribersText }) =>
-        `Skupnost ima zdaj ${subscribersText} naročnikov!`,
-      thanksReturnButton: "Nazaj na prejšnjo stran",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} je dosegel ${goalText} naročnikov!`,
-      completedGoalFallback: "cilj",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Cilj dosežen ob ${timeText} dne ${dateText}`,
-      completedJustNow: "Cilj je bil pravkar dosežen!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Oglej si druge cilje naročnikov v r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} se je pravkar naročil!`
-          : "Nov član se je pravkar naročil!",
-      subscribeSuccessToast: "Hvala za naročnino!",
-      subscribeErrorToast: "Naročnina ni uspela.",
-      loginRequired: "Prijavi se za naročnino.",
-      loadError: "Podatkov Subscriber Goal ni bilo mogoče naložiti.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Dobrodošli v r/${subredditName}\n\n${subscribersText} / ${goalText} naročnikov.\n  Pomagaj nam doseči cilj!\n\nObišči to objavo na Shredditu za uporabo interaktivnih funkcij.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} je dosegel ${goalText} naročnikov!\n\nCilj dosežen ob \`${completedIso}\`.`,
-    },
-    fi: {
-      languageLabel: "Suomi",
-      intlLocale: "fi-FI",
-      defaultPostTitle: ({ subredditName }) => `Tervetuloa r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Tervetuloa r/${subredditName}`,
-      subscribeButton: ({ subredditName }) =>
-        `Liity yhteisöön r/${subredditName}`,
-      subscribedButton: ({ subredditName }) => `Tilattu r/${subredditName}`,
-      shareUsernameLabel: "Näytä käyttäjänimeni, kun tilaan",
-      thanksTitle: "Kiitos tilauksesta!",
-      thanksBody: ({ subscribersText }) =>
-        `Yhteisössä on nyt ${subscribersText} tilaajaa!`,
-      thanksReturnButton: "Palaa edelliselle sivulle",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} saavutti ${goalText} tilaajaa!`,
-      completedGoalFallback: "tavoite",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Tavoite saavutettiin klo ${timeText} ${dateText}`,
-      completedJustNow: "Tavoite saavutettiin juuri nyt!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Katso muita tilaajatavoitteita r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username ? `u/${username} tilasi juuri!` : "Uusi jäsen tilasi juuri!",
-      subscribeSuccessToast: "Kiitos tilauksesta!",
-      subscribeErrorToast: "Tilaus epäonnistui.",
-      loginRequired: "Kirjaudu sisään tilataksesi.",
-      loadError: "Subscriber Goal -tietoja ei voitu ladata.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Tervetuloa r/${subredditName}\n\n${subscribersText} / ${goalText} tilaajaa.\n  Auta meitä saavuttamaan tavoitteemme!\n\nKäy tässä julkaisussa Shredditissä käyttääksesi interaktiivisia toimintoja.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} saavutti ${goalText} tilaajaa!\n\nTavoite saavutettiin \`${completedIso}\`.`,
-    },
-    sv: {
-      languageLabel: "Svenska",
-      intlLocale: "sv-SE",
-      defaultPostTitle: ({ subredditName }) =>
-        `Välkommen till r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Välkommen till r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Gå med i r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Prenumererar på r/${subredditName}`,
-      shareUsernameLabel: "Visa mitt användarnamn när jag prenumererar",
-      thanksTitle: "Tack för att du prenumererar!",
-      thanksBody: ({ subscribersText }) =>
-        `Det finns nu ${subscribersText} prenumeranter i communityn!`,
-      thanksReturnButton: "Gå tillbaka till föregående sida",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} nådde ${goalText} prenumeranter!`,
-      completedGoalFallback: "målet",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Målet nåddes kl. ${timeText} den ${dateText}`,
-      completedJustNow: "Målet nåddes precis!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Visa andra prenumerantmål i r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} prenumererade precis!`
-          : "En ny medlem prenumererade precis!",
-      subscribeSuccessToast: "Tack för att du prenumererar!",
-      subscribeErrorToast: "Prenumerationen misslyckades.",
-      loginRequired: "Logga in för att prenumerera.",
-      loadError: "Det gick inte att läsa in Subscriber Goal-data.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Välkommen till r/${subredditName}\n\n${subscribersText} / ${goalText} prenumeranter.\n  Hjälp oss att nå vårt mål!\n\nBesök det här inlägget på Shreddit för att använda interaktiva funktioner.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} nådde ${goalText} prenumeranter!\n\nMålet nåddes kl. \`${completedIso}\`.`,
-    },
-    tl: {
-      languageLabel: "Tagalog",
-      intlLocale: "fil-PH",
-      defaultPostTitle: ({ subredditName }) =>
-        `Maligayang pagdating sa r/${subredditName}!`,
-      welcome: ({ subredditName }) =>
-        `Maligayang pagdating sa r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Sumali sa r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `Naka-subscribe sa r/${subredditName}`,
-      shareUsernameLabel: "Ipakita ang username ko kapag nag-subscribe ako",
-      thanksTitle: "Salamat sa pag-subscribe!",
-      thanksBody: ({ subscribersText }) =>
-        `Mayroon na ngayong ${subscribersText} subscriber sa komunidad!`,
-      thanksReturnButton: "Bumalik sa nakaraang pahina",
-      completedTitle: ({ subredditName, goalText }) =>
-        `Naabot ng r/${subredditName} ang ${goalText} subscriber!`,
-      completedGoalFallback: "ang layunin",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Naabot ang layunin nang ${timeText} noong ${dateText}`,
-      completedJustNow: "Naabot lang ngayon ang layunin!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Tingnan ang ibang mga subscriber goal sa r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `Nag-subscribe lang si u/${username}!`
-          : "May bagong miyembro na nag-subscribe!",
-      subscribeSuccessToast: "Salamat sa pag-subscribe!",
-      subscribeErrorToast: "Nabigo ang subscription.",
-      loginRequired: "Mag-log in para mag-subscribe.",
-      loadError: "Hindi ma-load ang data ng Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Maligayang pagdating sa r/${subredditName}\n\n${subscribersText} / ${goalText} subscriber.\n  Tulungan kaming maabot ang aming layunin!\n\nBisitahin ang post na ito sa Shreddit para magamit ang mga interactive na feature.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `Naabot ng r/${subredditName} ang ${goalText} subscriber!\n\nNaabot ang layunin noong \`${completedIso}\`.`,
-    },
-    tr: {
-      languageLabel: "Türkçe",
-      intlLocale: "tr-TR",
-      defaultPostTitle: ({ subredditName }) =>
-        `r/${subredditName} topluluğuna hoş geldiniz!`,
-      welcome: ({ subredditName }) =>
-        `r/${subredditName} topluluğuna hoş geldiniz`,
-      subscribeButton: ({ subredditName }) =>
-        `r/${subredditName} topluluğuna katıl`,
-      subscribedButton: ({ subredditName }) =>
-        `r/${subredditName} topluluğuna abone oldun`,
-      shareUsernameLabel: "Abone olduğumda kullanıcı adımı göster",
-      thanksTitle: "Abone olduğunuz için teşekkürler!",
-      thanksBody: ({ subscribersText }) =>
-        `Toplulukta artık ${subscribersText} abone var!`,
-      thanksReturnButton: "Önceki sayfaya dön",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} ${goalText} aboneye ulaştı!`,
-      completedGoalFallback: "hedef",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Hedef ${dateText} tarihinde saat ${timeText} itibarıyla tamamlandı`,
-      completedJustNow: "Hedef az önce tamamlandı!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `r/${promoSubreddit} içindeki diğer abone hedeflerini görüntüle`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} az önce abone oldu!`
-          : "Yeni bir üye az önce abone oldu!",
-      subscribeSuccessToast: "Abone olduğunuz için teşekkürler!",
-      subscribeErrorToast: "Abonelik başarısız oldu.",
-      loginRequired: "Abone olmak için giriş yapın.",
-      loadError: "Subscriber Goal verileri yüklenemedi.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `r/${subredditName} topluluğuna hoş geldiniz\n\n${subscribersText} / ${goalText} abone.\n  Hedefimize ulaşmamıza yardım edin!\n\nEtkileşimli özellikleri kullanmak için bu gönderiyi Shreddit'te ziyaret edin.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} ${goalText} aboneye ulaştı!\n\nHedef \`${completedIso}\` tarihinde tamamlandı.`,
-    },
-    yo: {
-      languageLabel: "Yorùbá",
-      intlLocale: "yo-NG",
-      defaultPostTitle: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}!`,
-      welcome: ({ subredditName }) => `Ẹ káàbọ̀ sí r/${subredditName}`,
-      subscribeButton: ({ subredditName }) => `Darapọ̀ mọ́ r/${subredditName}`,
-      subscribedButton: ({ subredditName }) =>
-        `O ti ṣe alabapin sí r/${subredditName}`,
-      shareUsernameLabel: "Fi orúkọ olumulo mi hàn nígbà tí mo bá ṣe alabapin",
-      thanksTitle: "Ẹ ṣé fún alabapin!",
-      thanksBody: ({ subscribersText }) =>
-        `Àwọn alabapin ${subscribersText} wà ní àwùjọ báyìí!`,
-      thanksReturnButton: "Padà sí ojúewé ṣáájú",
-      completedTitle: ({ subredditName, goalText }) =>
-        `r/${subredditName} ti dé ${goalText} alabapin!`,
-      completedGoalFallback: "ìfojúsùn náà",
-      completedReachedAt: ({ timeText, dateText }) =>
-        `Ìfojúsùn dé ní ${timeText} ní ${dateText}`,
-      completedJustNow: "Ìfojúsùn ṣẹ̀ṣẹ̀ dé!",
-      promoAriaLabel: ({ promoSubreddit }) =>
-        `Wo àwọn ìfojúsùn alabapin mìíràn ní r/${promoSubreddit}`,
-      subscriberNotice: ({ username }) =>
-        username
-          ? `u/${username} ṣẹ̀ṣẹ̀ ṣe alabapin!`
-          : "Ọmọ ẹgbẹ́ tuntun ṣẹ̀ṣẹ̀ ṣe alabapin!",
-      subscribeSuccessToast: "Ẹ ṣé fún alabapin!",
-      subscribeErrorToast: "Alabapin kò ṣiṣẹ́.",
-      loginRequired: "Jọwọ wọlé láti ṣe alabapin.",
-      loadError: "Kò le ṣàkójọpọ̀ data Subscriber Goal.",
-      fallbackActive: ({ subredditName, subscribersText, goalText }) =>
-        `Ẹ káàbọ̀ sí r/${subredditName}\n\n${subscribersText} / ${goalText} alabapin.\n  Ẹ ràn wá lọ́wọ́ láti dé ìfojúsùn wa!\n\nṢàbẹ̀wò sí ìfìwéránṣẹ́ yìí lórí Shreddit láti lo àwọn iṣẹ́ ìbánisọ̀rọ̀.`,
-      fallbackCompleted: ({ subredditName, goalText, completedIso }) =>
-        `r/${subredditName} ti dé ${goalText} alabapin!\n\nÌfojúsùn dé ní \`${completedIso}\`.`,
-    },
-  };
-
-export function resolveSubGoalLanguage(value: unknown): SubGoalLanguage {
-  return typeof value === "string" &&
-    subGoalLanguages.includes(value as SubGoalLanguage)
-    ? (value as SubGoalLanguage)
-    : defaultSubGoalLanguage;
-}
-
-export function getModeratorInstallPromotionMessages(
-  language: unknown,
-): ModeratorInstallPromotionMessages {
-  return moderatorInstallPromotionMessages[resolveSubGoalLanguage(language)];
-}
-
-const escapeForRegex = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const replaceCountAndFollowingNoun = (
-  text: string,
-  countText: string,
-  localizedCount: string,
-): string =>
-  text.replace(
-    new RegExp(
-      `${escapeForRegex(countText)}\\s+[\\p{L}\\p{M}][\\p{L}\\p{M}’'-]*`,
-      "u",
-    ),
-    localizedCount,
-  );
-
-const localizedPostMessageCache = new Map<
-  SubGoalLanguage,
-  SubGoalPostMessages
->();
-const subscribersCountSentinel = "__SG_SUBSCRIBERS_COUNT__";
-const goalCountSentinel = "__SG_GOAL_COUNT__";
-
-export function getSubGoalPostMessages(language: unknown): SubGoalPostMessages {
-  const resolvedLanguage = resolveSubGoalLanguage(language);
-  const cached = localizedPostMessageCache.get(resolvedLanguage);
-  if (cached) return cached;
-
-  const messages = subGoalPostMessages[resolvedLanguage];
-  const localizedMessages: SubGoalPostMessages = {
-    ...messages,
-    thanksBody: (params) => {
-      const localizedCount = formatLocalizedSubscriberCount(
-        resolvedLanguage,
-        params.subscribersCount,
-        params.subscribersText,
-      );
-      const original = messages.thanksBody({
-        ...params,
-        subscribersText: subscribersCountSentinel,
-      });
-      if (resolvedLanguage === "yo") {
-        return original.replace(
-          `Àwọn alabapin ${subscribersCountSentinel}`,
-          localizedCount,
-        );
-      }
-      return replaceCountAndFollowingNoun(
-        original,
-        subscribersCountSentinel,
-        localizedCount,
-      );
-    },
-    completedTitle: (params) => {
-      if (params.goalCount === undefined)
-        return messages.completedTitle(params);
-      return replaceCountAndFollowingNoun(
-        messages.completedTitle({ ...params, goalText: goalCountSentinel }),
-        goalCountSentinel,
-        formatLocalizedSubscriberCount(
-          resolvedLanguage,
-          params.goalCount,
-          params.goalText,
-        ),
-      );
-    },
-    fallbackActive: (params) => {
-      const withSubscriberCount = messages
-        .fallbackActive({
-          ...params,
-          subscribersText: subscribersCountSentinel,
-          goalText: goalCountSentinel,
-        })
-        .replace(
-          subscribersCountSentinel,
-          formatLocalizedSubscriberCount(
-            resolvedLanguage,
-            params.subscribersCount,
-            params.subscribersText,
-          ),
-        );
-      return replaceCountAndFollowingNoun(
-        withSubscriberCount,
-        goalCountSentinel,
-        formatLocalizedSubscriberCount(
-          resolvedLanguage,
-          params.goalCount,
-          params.goalText,
-        ),
-      );
-    },
-    fallbackCompleted: (params) =>
-      replaceCountAndFollowingNoun(
-        messages.fallbackCompleted({ ...params, goalText: goalCountSentinel }),
-        goalCountSentinel,
-        formatLocalizedSubscriberCount(
-          resolvedLanguage,
-          params.goalCount,
-          params.goalText,
-        ),
-      ),
-  };
-  localizedPostMessageCache.set(resolvedLanguage, localizedMessages);
-  return localizedMessages;
-}
-
 export type AfterSubscribePresetMessages = {
   joinDiscord: string;
   viewTopPostToday: string;
@@ -1882,303 +75,200 @@ export type AfterSubscribePresetMessages = {
   dynamicPostError: string;
 };
 
-export const afterSubscribePresetMessages: Record<
-  SubGoalLanguage,
-  AfterSubscribePresetMessages
-> = {
-  id: {
-    joinDiscord: "Gabung Discord",
-    viewTopPostToday: "Lihat Postingan Teratas Hari Ini",
-    readWiki: "Baca Wiki",
-    createNewPost: "Buat Postingan Baru",
-    sharePicture: "Bagikan Gambar",
-    viewMostRecentPostToday: "Lihat Postingan Terbaru Hari Ini",
-    dynamicPostUnavailable: "Tidak ada postingan yang tersedia.",
-    dynamicPostError: "Tidak dapat membuka postingan sekarang.",
-  },
-  bs: {
-    joinDiscord: "Pridruži se Discordu",
-    viewTopPostToday: "Pogledaj najbolju objavu danas",
-    readWiki: "Pročitaj Wiki",
-    createNewPost: "Kreiraj novu objavu",
-    sharePicture: "Podijeli sliku",
-    viewMostRecentPostToday: "Pogledaj najnoviju objavu danas",
-    dynamicPostUnavailable: "Nema dostupnih objava.",
-    dynamicPostError: "Objavu trenutno nije moguće otvoriti.",
-  },
-  ca: {
-    joinDiscord: "Uneix-te al Discord",
-    viewTopPostToday: "Mira la publicació destacada d'avui",
-    readWiki: "Llegeix la Wiki",
-    createNewPost: "Crea una publicació",
-    sharePicture: "Comparteix una imatge",
-    viewMostRecentPostToday: "Mira la publicació més recent d'avui",
-    dynamicPostUnavailable: "No hi ha cap publicació disponible.",
-    dynamicPostError: "Ara no es pot obrir la publicació.",
-  },
-  da: {
-    joinDiscord: "Deltag på Discord",
-    viewTopPostToday: "Se dagens bedste opslag",
-    readWiki: "Læs wikien",
-    createNewPost: "Opret et nyt opslag",
-    sharePicture: "Del et billede",
-    viewMostRecentPostToday: "Se dagens nyeste opslag",
-    dynamicPostUnavailable: "Der er ingen tilgængelige opslag.",
-    dynamicPostError: "Opslaget kan ikke åbnes lige nu.",
-  },
-  de: {
-    joinDiscord: "Discord beitreten",
-    viewTopPostToday: "Heutigen Top-Beitrag ansehen",
-    readWiki: "Wiki lesen",
-    createNewPost: "Neuen Beitrag erstellen",
-    sharePicture: "Bild teilen",
-    viewMostRecentPostToday: "Heutigen neuesten Beitrag ansehen",
-    dynamicPostUnavailable: "Kein Beitrag ist verfügbar.",
-    dynamicPostError: "Der Beitrag kann gerade nicht geöffnet werden.",
-  },
-  en: {
-    joinDiscord: "Join the Discord",
-    viewTopPostToday: "View the Top Post Today",
-    readWiki: "Read the Wiki",
-    createNewPost: "Create a New Post",
-    sharePicture: "Share an Image",
-    viewMostRecentPostToday: "View the Most Recent Post Today",
-    dynamicPostUnavailable: "No post is currently available.",
-    dynamicPostError: "The post could not be opened right now.",
-  },
-  hi: {
-    joinDiscord: "Discord से जुड़ें",
-    viewTopPostToday: "आज की शीर्ष पोस्ट देखें",
-    readWiki: "विकी पढ़ें",
-    createNewPost: "नई पोस्ट बनाएँ",
-    sharePicture: "एक तस्वीर शेयर करें",
-    viewMostRecentPostToday: "आज की सबसे हाल की पोस्ट देखें",
-    dynamicPostUnavailable: "अभी कोई पोस्ट उपलब्ध नहीं है।",
-    dynamicPostError: "अभी पोस्ट नहीं खोली जा सकी।",
-  },
-  es: {
-    joinDiscord: "Únete al Discord",
-    viewTopPostToday: "Ver la publicación destacada de hoy",
-    readWiki: "Leer la Wiki",
-    createNewPost: "Crear una publicación",
-    sharePicture: "Compartir una imagen",
-    viewMostRecentPostToday: "Ver la publicación más reciente de hoy",
-    dynamicPostUnavailable: "No hay ninguna publicación disponible.",
-    dynamicPostError: "No se pudo abrir la publicación ahora.",
-  },
-  et: {
-    joinDiscord: "Liitu Discordiga",
-    viewTopPostToday: "Vaata tänast populaarseimat postitust",
-    readWiki: "Loe vikit",
-    createNewPost: "Loo uus postitus",
-    sharePicture: "Jaga pilti",
-    viewMostRecentPostToday: "Vaata tänast uusimat postitust",
-    dynamicPostUnavailable: "Ühtegi postitust pole saadaval.",
-    dynamicPostError: "Postitust ei saa praegu avada.",
-  },
-  fr: {
-    joinDiscord: "Rejoindre le Discord",
-    viewTopPostToday: "Voir la meilleure publication du jour",
-    readWiki: "Lire le Wiki",
-    createNewPost: "Créer une publication",
-    sharePicture: "Partager une image",
-    viewMostRecentPostToday:
-      "Voir la publication la plus récente d’aujourd’hui",
-    dynamicPostUnavailable: "Aucune publication n'est disponible.",
-    dynamicPostError: "Impossible d'ouvrir la publication maintenant.",
-  },
-  hr: {
-    joinDiscord: "Pridruži se Discordu",
-    viewTopPostToday: "Pogledaj najbolju objavu danas",
-    readWiki: "Pročitaj Wiki",
-    createNewPost: "Izradi novu objavu",
-    sharePicture: "Podijeli sliku",
-    viewMostRecentPostToday: "Pogledaj najnoviju objavu danas",
-    dynamicPostUnavailable: "Nema dostupnih objava.",
-    dynamicPostError: "Objavu trenutačno nije moguće otvoriti.",
-  },
-  is: {
-    joinDiscord: "Vertu með á Discord",
-    viewTopPostToday: "Skoða vinsælasta innlegg dagsins",
-    readWiki: "Lesa Wiki",
-    createNewPost: "Búa til nýtt innlegg",
-    sharePicture: "Deila mynd",
-    viewMostRecentPostToday: "Skoða nýjasta innlegg dagsins",
-    dynamicPostUnavailable: "Ekkert innlegg er tiltækt.",
-    dynamicPostError: "Ekki var hægt að opna innleggið núna.",
-  },
-  it: {
-    joinDiscord: "Unisciti al Discord",
-    viewTopPostToday: "Vedi il post migliore di oggi",
-    readWiki: "Leggi la Wiki",
-    createNewPost: "Crea un nuovo post",
-    sharePicture: "Condividi una foto",
-    viewMostRecentPostToday: "Vedi il post più recente di oggi",
-    dynamicPostUnavailable: "Nessun post è disponibile.",
-    dynamicPostError: "Impossibile aprire il post in questo momento.",
-  },
-  lv: {
-    joinDiscord: "Pievienojies Discord",
-    viewTopPostToday: "Skatīt šodienas labāko ierakstu",
-    readWiki: "Lasīt Wiki",
-    createNewPost: "Izveidot jaunu ierakstu",
-    sharePicture: "Kopīgot attēlu",
-    viewMostRecentPostToday: "Skatīt šodienas jaunāko ierakstu",
-    dynamicPostUnavailable: "Nav pieejamu ierakstu.",
-    dynamicPostError: "Ierakstu pašlaik nevar atvērt.",
-  },
-  lt: {
-    joinDiscord: "Prisijungti prie Discord",
-    viewTopPostToday: "Žiūrėti geriausią dienos įrašą",
-    readWiki: "Skaityti Wiki",
-    createNewPost: "Sukurti naują įrašą",
-    sharePicture: "Bendrinti paveikslėlį",
-    viewMostRecentPostToday: "Žiūrėti naujausią šios dienos įrašą",
-    dynamicPostUnavailable: "Nėra pasiekiamų įrašų.",
-    dynamicPostError: "Dabar įrašo atidaryti nepavyko.",
-  },
-  hu: {
-    joinDiscord: "Csatlakozás a Discordhoz",
-    viewTopPostToday: "A nap legjobb bejegyzésének megtekintése",
-    readWiki: "Wiki olvasása",
-    createNewPost: "Új bejegyzés létrehozása",
-    sharePicture: "Kép megosztása",
-    viewMostRecentPostToday: "A mai legfrissebb bejegyzés megtekintése",
-    dynamicPostUnavailable: "Nincs elérhető bejegyzés.",
-    dynamicPostError: "A bejegyzés most nem nyitható meg.",
-  },
-  nl: {
-    joinDiscord: "Word lid van Discord",
-    viewTopPostToday: "Bekijk het topbericht van vandaag",
-    readWiki: "Lees de Wiki",
-    createNewPost: "Maak een nieuw bericht",
-    sharePicture: "Deel een afbeelding",
-    viewMostRecentPostToday: "Bekijk het nieuwste bericht van vandaag",
-    dynamicPostUnavailable: "Er is geen bericht beschikbaar.",
-    dynamicPostError: "Het bericht kan nu niet worden geopend.",
-  },
-  nb: {
-    joinDiscord: "Bli med på Discord",
-    viewTopPostToday: "Se dagens beste innlegg",
-    readWiki: "Les wikien",
-    createNewPost: "Opprett et nytt innlegg",
-    sharePicture: "Del et bilde",
-    viewMostRecentPostToday: "Se dagens nyeste innlegg",
-    dynamicPostUnavailable: "Ingen innlegg er tilgjengelige.",
-    dynamicPostError: "Innlegget kan ikke åpnes akkurat nå.",
-  },
-  pl: {
-    joinDiscord: "Dołącz do Discorda",
-    viewTopPostToday: "Zobacz najlepszy post dnia",
-    readWiki: "Przeczytaj Wiki",
-    createNewPost: "Utwórz nowy post",
-    sharePicture: "Udostępnij zdjęcie",
-    viewMostRecentPostToday: "Zobacz najnowszy post z dzisiaj",
-    dynamicPostUnavailable: "Brak dostępnych postów.",
-    dynamicPostError: "Nie można teraz otworzyć postu.",
-  },
-  pt: {
-    joinDiscord: "Entrar no Discord",
-    viewTopPostToday: "Ver a melhor publicação de hoje",
-    readWiki: "Ler a Wiki",
-    createNewPost: "Criar uma publicação",
-    sharePicture: "Compartilhar uma imagem",
-    viewMostRecentPostToday: "Ver a publicação mais recente de hoje",
-    dynamicPostUnavailable: "Nenhuma publicação está disponível.",
-    dynamicPostError: "Não foi possível abrir a publicação agora.",
-  },
-  ro: {
-    joinDiscord: "Intră pe Discord",
-    viewTopPostToday: "Vezi cea mai bună postare de azi",
-    readWiki: "Citește Wiki",
-    createNewPost: "Creează o postare nouă",
-    sharePicture: "Distribuie o imagine",
-    viewMostRecentPostToday: "Vezi cea mai nouă postare de azi",
-    dynamicPostUnavailable: "Nu există nicio postare disponibilă.",
-    dynamicPostError: "Postarea nu poate fi deschisă acum.",
-  },
-  sq: {
-    joinDiscord: "Bashkohu në Discord",
-    viewTopPostToday: "Shiko postimin më të mirë sot",
-    readWiki: "Lexo Wiki-n",
-    createNewPost: "Krijo një postim të ri",
-    sharePicture: "Ndaj një fotografi",
-    viewMostRecentPostToday: "Shiko postimin më të ri sot",
-    dynamicPostUnavailable: "Nuk ka postime të disponueshme.",
-    dynamicPostError: "Postimi nuk mund të hapet tani.",
-  },
-  sk: {
-    joinDiscord: "Pripojiť sa na Discord",
-    viewTopPostToday: "Zobraziť najlepší príspevok dňa",
-    readWiki: "Prečítať Wiki",
-    createNewPost: "Vytvoriť nový príspevok",
-    sharePicture: "Zdieľať obrázok",
-    viewMostRecentPostToday: "Zobraziť najnovší dnešný príspevok",
-    dynamicPostUnavailable: "Nie je dostupný žiadny príspevok.",
-    dynamicPostError: "Príspevok sa teraz nedá otvoriť.",
-  },
-  sl: {
-    joinDiscord: "Pridruži se Discordu",
-    viewTopPostToday: "Oglej si najboljšo objavo danes",
-    readWiki: "Preberi Wiki",
-    createNewPost: "Ustvari novo objavo",
-    sharePicture: "Deli sliko",
-    viewMostRecentPostToday: "Oglej si najnovejšo današnjo objavo",
-    dynamicPostUnavailable: "Na voljo ni nobene objave.",
-    dynamicPostError: "Objave trenutno ni mogoče odpreti.",
-  },
-  fi: {
-    joinDiscord: "Liity Discordiin",
-    viewTopPostToday: "Katso päivän suosituin julkaisu",
-    readWiki: "Lue Wiki",
-    createNewPost: "Luo uusi julkaisu",
-    sharePicture: "Jaa kuva",
-    viewMostRecentPostToday: "Katso päivän uusin julkaisu",
-    dynamicPostUnavailable: "Julkaisuja ei ole saatavilla.",
-    dynamicPostError: "Julkaisua ei voi avata juuri nyt.",
-  },
-  sv: {
-    joinDiscord: "Gå med i Discord",
-    viewTopPostToday: "Visa dagens populäraste inlägg",
-    readWiki: "Läs wikin",
-    createNewPost: "Skapa ett nytt inlägg",
-    sharePicture: "Dela en bild",
-    viewMostRecentPostToday: "Visa dagens senaste inlägg",
-    dynamicPostUnavailable: "Det finns inga tillgängliga inlägg.",
-    dynamicPostError: "Inlägget kan inte öppnas just nu.",
-  },
-  tl: {
-    joinDiscord: "Sumali sa Discord",
-    viewTopPostToday: "Tingnan ang Nangungunang Post Ngayon",
-    readWiki: "Basahin ang Wiki",
-    createNewPost: "Gumawa ng Bagong Post",
-    sharePicture: "Magbahagi ng Larawan",
-    viewMostRecentPostToday: "Tingnan ang Pinakabagong Post Ngayon",
-    dynamicPostUnavailable: "Walang post na available.",
-    dynamicPostError: "Hindi mabuksan ang post ngayon.",
-  },
-  tr: {
-    joinDiscord: "Discord'a Katıl",
-    viewTopPostToday: "Bugünün En İyi Gönderisini Gör",
-    readWiki: "Wiki'yi Oku",
-    createNewPost: "Yeni Gönderi Oluştur",
-    sharePicture: "Resim Paylaş",
-    viewMostRecentPostToday: "Bugünün En Yeni Gönderisini Gör",
-    dynamicPostUnavailable: "Kullanılabilir gönderi yok.",
-    dynamicPostError: "Gönderi şu anda açılamıyor.",
-  },
-  yo: {
-    joinDiscord: "Darapọ̀ mọ́ Discord",
-    viewTopPostToday: "Wo ìfìwéránṣẹ́ tó ga jù lónìí",
-    readWiki: "Ka Wiki",
-    createNewPost: "Ṣẹ̀dá ìfìwéránṣẹ́ tuntun",
-    sharePicture: "Pín àwòrán",
-    viewMostRecentPostToday: "Wo ìfìwéránṣẹ́ tuntun jù lónìí",
-    dynamicPostUnavailable: "Kò sí ìfìwéránṣẹ́ tó wà.",
-    dynamicPostError: "A kò lè ṣí ìfìwéránṣẹ́ báyìí.",
-  },
+export function resolveSubGoalLanguage(value: unknown): SubGoalLanguage {
+  return resolveAppLanguage(value);
+}
+
+const buildRawPostMessages = (
+  language: SubGoalLanguage,
+): SubGoalPostMessages => {
+  const metadata = getLanguageMetadata(language);
+  return {
+    languageLabel: metadata.label,
+    intlLocale: metadata.locale,
+    defaultPostTitle: (values) =>
+      translate(language, "post.defaultTitle", values),
+    welcome: (values) => translate(language, "post.welcome", values),
+    subscribeButton: (values) => translate(language, "post.joinButton", values),
+    subscribedButton: (values) =>
+      translate(language, "post.joinedButton", values),
+    shareUsernameLabel: translate(language, "post.shareUsername"),
+    thanksTitle: translate(language, "post.thanksTitle"),
+    thanksBody: ({ subscribersCount, subscribersText }) =>
+      translate(language, "post.thanksBody", {
+        subscriberCountLabel: formatCountMessage(
+          language,
+          "metric.subscribersCommunity",
+          subscribersCount,
+          subscribersText,
+        ),
+      }),
+    thanksReturnButton: translate(language, "post.return"),
+    completedTitle: ({ subredditName, goalCount, goalText }) =>
+      translate(language, "post.completedTitle", {
+        subredditName,
+        goalCountLabel: formatCountMessage(
+          language,
+          "metric.subscribersReached",
+          goalCount ?? 10,
+          goalText,
+        ),
+      }),
+    completedGoalFallback: translate(language, "post.completedGoalFallback"),
+    completedReachedAt: (values) =>
+      translate(language, "post.completedReachedAt", values),
+    completedJustNow: translate(language, "post.completedJustNow"),
+    promoAriaLabel: (values) =>
+      translate(language, "post.promoAriaLabel", values),
+    subscriberNotice: ({ username }) =>
+      username
+        ? translate(language, "post.memberJoinedNamed", { username })
+        : translate(language, "post.memberJoinedAnonymous"),
+    subscribeSuccessToast: translate(language, "post.joinSuccess"),
+    subscribeErrorToast: translate(language, "post.joinError"),
+    loginRequired: translate(language, "post.loginRequired"),
+    loadError: translate(language, "post.loadError"),
+    fallbackActive: ({
+      subredditName,
+      subscribersCount,
+      subscribersText,
+      goalCount,
+      goalText,
+    }) =>
+      translate(language, "post.fallbackActive", {
+        subredditName,
+        subscriberCountLabel: formatCountMessage(
+          language,
+          "metric.subscribers",
+          subscribersCount,
+          subscribersText,
+        ),
+        goalCountLabel: formatCountMessage(
+          language,
+          "metric.subscribers",
+          goalCount,
+          goalText,
+        ),
+      }),
+    fallbackCompleted: ({ subredditName, goalCount, goalText, completedIso }) =>
+      translate(language, "post.fallbackCompleted", {
+        subredditName,
+        goalCountLabel: formatCountMessage(
+          language,
+          "metric.subscribersReached",
+          goalCount,
+          goalText,
+        ),
+        completedIso,
+      }),
+  };
 };
 
+export const subGoalPostMessages = Object.fromEntries(
+  subGoalLanguages.map((language) => [
+    language,
+    buildRawPostMessages(language),
+  ]),
+) as Record<SubGoalLanguage, SubGoalPostMessages>;
+
+const formatCountMessage = (
+  language: SubGoalLanguage,
+  key:
+    | "metric.subscribers"
+    | "metric.subscribersCommunity"
+    | "metric.subscribersReached"
+    | "metric.growthToday"
+    | "metric.growthWeek"
+    | "activity.clicksWeek"
+    | "activity.postsToday"
+    | "activity.postsWeek",
+  count: number,
+  countText: string,
+): string =>
+  translate(
+    language,
+    key,
+    getMessageTemplate(language, key).template.includes("{count,")
+      ? { count, countText }
+      : { countText },
+  );
+export const formatLocalizedSubscriberCount = (
+  language: SubGoalLanguage,
+  count: number,
+  countText = formatSubscriberCount(count),
+): string =>
+  formatCountMessage(language, "metric.subscribers", count, countText);
+export const formatLocalizedSubscriberGrowth = (
+  language: SubGoalLanguage,
+  growth: { count: number; period: "today" | "week" },
+  countText = formatSubscriberCount(growth.count),
+): string =>
+  formatCountMessage(
+    language,
+    growth.period === "today" ? "metric.growthToday" : "metric.growthWeek",
+    growth.count,
+    countText,
+  );
+export const formatLocalizedCtaActivity = (
+  language: SubGoalLanguage,
+  activity: {
+    kind: "posts" | "clicks";
+    count: number;
+    period: "today" | "week";
+  },
+  countText = formatSubscriberCount(activity.count),
+): string =>
+  formatCountMessage(
+    language,
+    activity.kind === "clicks"
+      ? "activity.clicksWeek"
+      : activity.period === "today"
+        ? "activity.postsToday"
+        : "activity.postsWeek",
+    activity.count,
+    countText,
+  );
+
+export function getModeratorInstallPromotionMessages(
+  language: unknown,
+): ModeratorInstallPromotionMessages {
+  const resolved = resolveSubGoalLanguage(language);
+  return {
+    greeting: translate(resolved, "promotion.greeting"),
+    body: translate(resolved, "promotion.body"),
+    installButton: translate(resolved, "promotion.install"),
+    mobileInstallButton: translate(resolved, "promotion.installMobile"),
+  };
+}
+
+export function getSubGoalPostMessages(language: unknown): SubGoalPostMessages {
+  return subGoalPostMessages[resolveSubGoalLanguage(language)];
+}
+
+const buildAfterJoinMessages = (
+  language: SubGoalLanguage,
+): AfterSubscribePresetMessages => ({
+  joinDiscord: translate(language, "afterJoin.joinDiscord"),
+  viewTopPostToday: translate(language, "afterJoin.viewTopPostToday"),
+  readWiki: translate(language, "afterJoin.readWiki"),
+  createNewPost: translate(language, "afterJoin.createNewPost"),
+  sharePicture: translate(language, "afterJoin.sharePicture"),
+  viewMostRecentPostToday: translate(
+    language,
+    "afterJoin.viewMostRecentPostToday",
+  ),
+  dynamicPostUnavailable: translate(
+    language,
+    "afterJoin.dynamicPostUnavailable",
+  ),
+  dynamicPostError: translate(language, "afterJoin.dynamicPostError"),
+});
+export const afterSubscribePresetMessages = Object.fromEntries(
+  subGoalLanguages.map((language) => [
+    language,
+    buildAfterJoinMessages(language),
+  ]),
+) as Record<SubGoalLanguage, AfterSubscribePresetMessages>;
 export function getAfterSubscribePresetMessages(
   language: unknown,
 ): AfterSubscribePresetMessages {

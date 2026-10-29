@@ -81,6 +81,49 @@ describe("CompletedPage", () => {
   });
 
   it.each([
+    [
+      "pa",
+      "pa-IN-u-ca-gregory",
+      "r/indianActressClass ਨੇ 10 ਸਬਸਕ੍ਰਾਈਬਰਾਂ ਦਾ ਟੀਚਾ ਪੂਰਾ ਕਰ ਲਿਆ!",
+      "ਟੀਚਾ",
+    ],
+    [
+      "mr",
+      "mr-IN-u-ca-gregory",
+      "r/indianActressClass ने 10 सबस्क्राइबरचा टप्पा गाठला!",
+      "ध्येय",
+    ],
+  ] as const)(
+    "renders %s completed text and a localized Gregorian date",
+    (language, locale, title, goalWord) => {
+      const html = renderCompletedPage(language);
+      const expectedDateText = new Intl.DateTimeFormat(locale, {
+        timeZone: "America/New_York",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      }).format(new Date(baseState.completedTime ?? 0));
+
+      expect(html).toContain(title);
+      expect(html).toContain(expectedDateText);
+      expect(html).toContain(goalWord);
+    },
+  );
+
+  it("renders an existing pt post with Brazilian Portuguese formatting", () => {
+    const html = renderCompletedPage("pt");
+    const expectedDateText = new Intl.DateTimeFormat("pt-BR-u-ca-gregory", {
+      timeZone: "America/New_York",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(baseState.completedTime ?? 0));
+
+    expect(html).toContain("r/indianActressClass alcançou 10 inscritos!");
+    expect(html).toContain(expectedDateText);
+  });
+
+  it.each([
     ["es", "abril"],
     ["fr", "avril"],
     ["de", "29. April 2026"],

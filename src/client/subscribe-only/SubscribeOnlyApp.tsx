@@ -49,6 +49,7 @@ export const SubscribeOnlyApp = () => {
   const notificationMessages = getNotificationMessages(state?.language);
   const notificationSettings = useNotificationSettings(
     viewPhase === "notifications",
+    state?.language,
   );
   const {
     celebrationBursts,

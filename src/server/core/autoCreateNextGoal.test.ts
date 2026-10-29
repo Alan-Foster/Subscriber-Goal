@@ -247,7 +247,7 @@ describe("processDueAutoCreateNextGoals", () => {
       colorTheme: "purple",
       postHeight: "short",
       autoCreateNextGoal: true,
-      language: "es",
+      language: "pt",
       afterSubscribeAction: { type: "disabled" },
       afterSubscribePreset: null,
     });
@@ -273,8 +273,8 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          title: "¡Bienvenido a r/ExampleSub!",
-          language: "es",
+          title: "Bem-vindo ao r/ExampleSub!",
+          language: "pt",
         }),
       }),
     );
@@ -677,6 +677,7 @@ describe("processDueAutoCreateNextGoals", () => {
       postTitle: "Welcome to r/ExampleSub!",
       postUrl: "https://reddit.com/r/examplesub/comments/next",
       errorMessage: "highlight slots full",
+      language: "en",
       highlightResult: expect.objectContaining({
         status: "not_highlighted",
         failureCategory: "capacity",

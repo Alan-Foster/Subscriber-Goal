@@ -3,6 +3,7 @@ import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { NotificationBellIcon } from "./NotificationBellIcon";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../notificationFeatureFlags";
+import { translate } from "../../../shared/i18n/catalog";
 
 type TopButtonsProps = {
   onVisitPromoSubPressed: () => void;
@@ -19,7 +20,7 @@ let hasAnimatedOnce = false;
 export const TopButtons = ({
   onVisitPromoSubPressed,
   onNotificationsPressed,
-  notificationLabel = "Notifications",
+  notificationLabel = translate("en", "notifications.label"),
   promoSubreddit,
   language,
   revealTextOnInteraction = false,

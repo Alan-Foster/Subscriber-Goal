@@ -1,36 +1,46 @@
-import type { ErrorResponse } from '../../shared/types/api';
-import { logDiagnostic } from '../../shared/diagnostics';
+import type { ErrorResponse } from "../../shared/types/api";
+import { logDiagnostic } from "../../shared/diagnostics";
+import { translate } from "../../shared/i18n/catalog";
+
+const invalidResponseMessage = translate(
+  "en",
+  "errors.network.invalidResponse",
+);
+const requestTimeoutMessage = translate("en", "errors.network.timeout");
+const requestFailedMessage = translate("en", "errors.network.failed");
 
 export type JsonRequestResult<T> = {
   data: T | null;
   error: string | null;
+  errorResponse?: ErrorResponse;
   aborted: boolean;
+  status?: number;
 };
 
 export type RetryTerminalReason =
-  | 'success'
-  | 'aborted'
-  | 'timeout'
-  | 'non_retryable_status'
-  | 'exhausted_budget';
+  | "success"
+  | "aborted"
+  | "timeout"
+  | "non_retryable_status"
+  | "exhausted_budget";
 
 export type RetryEvent =
   | {
-      event: 'attempt';
+      event: "attempt";
       attempt: number;
       remainingMs: number;
     }
   | {
-      event: 'retry_wait';
+      event: "retry_wait";
       attempt: number;
       waitMs: number;
       remainingMs: number;
-      reason: 'http_retryable' | 'network_error' | 'timeout' | 'protocol_error';
+      reason: "http_retryable" | "network_error" | "timeout" | "protocol_error";
       status?: number;
       error?: string;
     }
   | {
-      event: 'terminal';
+      event: "terminal";
       attempt: number;
       remainingMs: number;
       reason: RetryTerminalReason;
@@ -45,13 +55,25 @@ function isRetryableHttpStatus(status: number): boolean {
 function errorMessageFromPayload(payload: unknown, status: number): string {
   if (
     payload &&
-    typeof payload === 'object' &&
-    'message' in payload &&
-    typeof (payload as ErrorResponse).message === 'string'
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof (payload as ErrorResponse).message === "string"
   ) {
     return (payload as ErrorResponse).message;
   }
   return `HTTP ${status}`;
+}
+
+function errorResponseFromPayload(payload: unknown): ErrorResponse | undefined {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    (payload as Partial<ErrorResponse>).status === "error" &&
+    typeof (payload as Partial<ErrorResponse>).message === "string"
+  ) {
+    return payload as ErrorResponse;
+  }
+  return undefined;
 }
 
 function buildFetchInit(init?: RequestInit): RequestInit {
@@ -73,23 +95,23 @@ const sleep = (ms: number, signal?: AbortSignal | undefined): Promise<void> =>
       return;
     }
     if (signal?.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'));
+      reject(new DOMException("Aborted", "AbortError"));
       return;
     }
     const id = window.setTimeout(() => {
       if (signal?.aborted) {
-        reject(new DOMException('Aborted', 'AbortError'));
+        reject(new DOMException("Aborted", "AbortError"));
         return;
       }
       resolve();
     }, ms);
     signal?.addEventListener(
-      'abort',
+      "abort",
       () => {
         window.clearTimeout(id);
-        reject(new DOMException('Aborted', 'AbortError'));
+        reject(new DOMException("Aborted", "AbortError"));
       },
-      { once: true }
+      { once: true },
     );
   });
 
@@ -112,7 +134,7 @@ export type RequestJsonWithRetryOptions = {
 export async function requestJsonWithRetry<T>(
   input: RequestInfo,
   init: RequestInit | undefined,
-  options: RequestJsonWithRetryOptions = {}
+  options: RequestJsonWithRetryOptions = {},
 ): Promise<JsonRequestResult<T>> {
   const maxDurationMs = options.maxDurationMs ?? 5000;
   const initialDelayMs = options.initialDelayMs ?? 200;
@@ -124,20 +146,23 @@ export async function requestJsonWithRetry<T>(
   const abortSignal = init?.signal ?? undefined;
   const requestLabel =
     options.debugLabel ??
-    (typeof input === 'string' ? (input.split('?')[0] ?? 'request') : 'request');
+    (typeof input === "string"
+      ? (input.split("?")[0] ?? "request")
+      : "request");
   const start = Date.now();
-  const timeLeft = (): number => Math.max(0, maxDurationMs - (Date.now() - start));
+  const timeLeft = (): number =>
+    Math.max(0, maxDurationMs - (Date.now() - start));
   const emit = (event: RetryEvent): void => {
     options.onEvent?.(event);
     if (options.debugLabel) {
       console.info(
-        `[fetch-retry:${options.debugLabel}] ${JSON.stringify(event)}`
+        `[fetch-retry:${options.debugLabel}] ${JSON.stringify(event)}`,
       );
     }
-    if (event.event === 'retry_wait') {
+    if (event.event === "retry_wait") {
       logDiagnostic(
-        'warn',
-        'client_request_retry',
+        "warn",
+        "client_request_retry",
         {
           workflow: requestLabel,
           phase: event.reason,
@@ -145,16 +170,16 @@ export async function requestJsonWithRetry<T>(
           attempt: event.attempt,
           remainingMs: event.remainingMs,
         },
-        event.error
+        event.error,
       );
     } else if (
-      event.event === 'terminal' &&
-      event.reason !== 'success' &&
-      event.reason !== 'aborted'
+      event.event === "terminal" &&
+      event.reason !== "success" &&
+      event.reason !== "aborted"
     ) {
       logDiagnostic(
-        'error',
-        'client_request_failed',
+        "error",
+        "client_request_failed",
         {
           workflow: requestLabel,
           phase: event.reason,
@@ -162,7 +187,7 @@ export async function requestJsonWithRetry<T>(
           attempt: event.attempt,
           remainingMs: event.remainingMs,
         },
-        event.error
+        event.error,
       );
     }
   };
@@ -176,17 +201,18 @@ export async function requestJsonWithRetry<T>(
 
   let nextDelay = initialDelayMs;
   let attempt = 0;
+  let lastErrorResponse: ErrorResponse | undefined;
 
   while (true) {
     attempt += 1;
-    emit({ event: 'attempt', attempt, remainingMs: timeLeft() });
+    emit({ event: "attempt", attempt, remainingMs: timeLeft() });
 
     if (abortSignal?.aborted) {
       emit({
-        event: 'terminal',
+        event: "terminal",
         attempt,
         remainingMs: timeLeft(),
-        reason: 'aborted',
+        reason: "aborted",
       });
       return { data: null, error: null, aborted: true };
     }
@@ -200,12 +226,12 @@ export async function requestJsonWithRetry<T>(
       didAttemptTimeout = true;
       attemptController.abort();
     }, attemptTimeoutMs);
-    abortSignal?.addEventListener('abort', onExternalAbort, { once: true });
+    abortSignal?.addEventListener("abort", onExternalAbort, { once: true });
 
     try {
       const res = await fetch(
         input,
-        buildFetchInit({ ...(init ?? {}), signal: attemptController.signal })
+        buildFetchInit({ ...(init ?? {}), signal: attemptController.signal }),
       );
       const body = await res.text();
       let payload: unknown = {};
@@ -216,28 +242,34 @@ export async function requestJsonWithRetry<T>(
         invalidJson = true;
         payload = {};
         const normalized = body.trimStart().toLowerCase();
-        logDiagnostic('warn', 'client_non_json_response', {
+        logDiagnostic("warn", "client_non_json_response", {
           workflow: requestLabel,
-          phase: normalized.startsWith('failed to call devvit application')
-            ? 'gateway'
-            : normalized.startsWith('<!doctype html') || normalized.startsWith('<html')
-              ? 'html'
+          phase: normalized.startsWith("failed to call devvit application")
+            ? "gateway"
+            : normalized.startsWith("<!doctype html") ||
+                normalized.startsWith("<html")
+              ? "html"
               : body.length === 0
-                ? 'empty'
-                : 'malformed_json',
+                ? "empty"
+                : "malformed_json",
           status: res.status,
-          contentType: res.headers.get('content-type') ?? 'unknown',
+          contentType: res.headers.get("content-type") ?? "unknown",
           bodyLength: body.length,
         });
       }
 
-      if (!invalidJson && res.ok && options.validate && !options.validate(payload)) {
+      if (
+        !invalidJson &&
+        res.ok &&
+        options.validate &&
+        !options.validate(payload)
+      ) {
         invalidJson = true;
-        logDiagnostic('warn', 'client_invalid_success_payload', {
+        logDiagnostic("warn", "client_invalid_success_payload", {
           workflow: requestLabel,
-          phase: 'protocol',
+          phase: "protocol",
           status: res.status,
-          contentType: res.headers.get('content-type') ?? 'unknown',
+          contentType: res.headers.get("content-type") ?? "unknown",
           bodyLength: body.length,
         });
       }
@@ -246,34 +278,34 @@ export async function requestJsonWithRetry<T>(
         const remaining = timeLeft();
         if (remaining <= 0) {
           emit({
-            event: 'terminal',
+            event: "terminal",
             attempt,
             remainingMs: 0,
-            reason: 'exhausted_budget',
+            reason: "exhausted_budget",
             status: res.status,
-            error: 'Invalid JSON response',
+            error: invalidResponseMessage,
           });
-          return { data: null, error: 'Invalid JSON response', aborted: false };
+          return { data: null, error: invalidResponseMessage, aborted: false };
         }
         const wait = Math.min(withJitter(nextDelay), remaining);
         emit({
-          event: 'retry_wait',
+          event: "retry_wait",
           attempt,
           waitMs: wait,
           remainingMs: remaining,
-          reason: 'protocol_error',
+          reason: "protocol_error",
           status: res.status,
-          error: 'Invalid JSON response',
+          error: invalidResponseMessage,
         });
         try {
           await sleep(wait, abortSignal);
         } catch {
           // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
           emit({
-            event: 'terminal',
+            event: "terminal",
             attempt,
             remainingMs: timeLeft(),
-            reason: 'aborted',
+            reason: "aborted",
           });
           return { data: null, error: null, aborted: true };
         }
@@ -283,49 +315,67 @@ export async function requestJsonWithRetry<T>(
 
       if (res.ok) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: timeLeft(),
-          reason: 'success',
+          reason: "success",
           status: res.status,
         });
-        return { data: payload as T, error: null, aborted: false };
+        return {
+          data: payload as T,
+          error: null,
+          aborted: false,
+          status: res.status,
+        };
       }
 
       const errMsg = errorMessageFromPayload(payload, res.status);
+      lastErrorResponse = errorResponseFromPayload(payload);
 
       if (!isRetryableHttpStatus(res.status)) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: timeLeft(),
-          reason: 'non_retryable_status',
+          reason: "non_retryable_status",
           status: res.status,
           error: errMsg,
         });
-        return { data: null, error: errMsg, aborted: false };
+        return {
+          data: null,
+          error: errMsg,
+          ...(lastErrorResponse ? { errorResponse: lastErrorResponse } : {}),
+          aborted: false,
+          status: res.status,
+        };
       }
 
       const remaining = timeLeft();
       if (remaining <= 0) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: 0,
-          reason: 'exhausted_budget',
+          reason: "exhausted_budget",
           status: res.status,
           error: errMsg,
         });
-        return { data: null, error: errMsg, aborted: false };
+        return {
+          data: null,
+          error: errMsg,
+          ...(lastErrorResponse ? { errorResponse: lastErrorResponse } : {}),
+          aborted: false,
+          status: res.status,
+        };
       }
 
       const wait = Math.min(withJitter(nextDelay), remaining);
       emit({
-        event: 'retry_wait',
+        event: "retry_wait",
         attempt,
         waitMs: wait,
         remainingMs: remaining,
-        reason: 'http_retryable',
+        reason: "http_retryable",
         status: res.status,
         error: errMsg,
       });
@@ -334,10 +384,10 @@ export async function requestJsonWithRetry<T>(
       } catch {
         // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: timeLeft(),
-          reason: 'aborted',
+          reason: "aborted",
         });
         return { data: null, error: null, aborted: true };
       }
@@ -346,41 +396,41 @@ export async function requestJsonWithRetry<T>(
     } catch (error) {
       if (didAttemptTimeout) {
         logDiagnostic(
-          'warn',
-          'client_request_attempt_timeout',
-          { workflow: requestLabel, phase: 'attempt', attempt },
-          error
+          "warn",
+          "client_request_attempt_timeout",
+          { workflow: requestLabel, phase: "attempt", attempt },
+          error,
         );
         const remaining = timeLeft();
         if (remaining <= 0) {
           emit({
-            event: 'terminal',
+            event: "terminal",
             attempt,
             remainingMs: 0,
-            reason: 'timeout',
-            error: 'Request timed out',
+            reason: "timeout",
+            error: requestTimeoutMessage,
           });
-          return { data: null, error: 'Request timed out', aborted: false };
+          return { data: null, error: requestTimeoutMessage, aborted: false };
         }
 
         const wait = Math.min(withJitter(nextDelay), remaining);
         emit({
-          event: 'retry_wait',
+          event: "retry_wait",
           attempt,
           waitMs: wait,
           remainingMs: remaining,
-          reason: 'timeout',
-          error: 'Request timed out',
+          reason: "timeout",
+          error: requestTimeoutMessage,
         });
         try {
           await sleep(wait, abortSignal);
         } catch {
           // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
           emit({
-            event: 'terminal',
+            event: "terminal",
             attempt,
             remainingMs: timeLeft(),
-            reason: 'aborted',
+            reason: "aborted",
           });
           return { data: null, error: null, aborted: true };
         }
@@ -390,33 +440,34 @@ export async function requestJsonWithRetry<T>(
 
       if (
         error instanceof DOMException &&
-        error.name === 'AbortError' &&
+        error.name === "AbortError" &&
         abortSignal?.aborted
       ) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: timeLeft(),
-          reason: 'aborted',
+          reason: "aborted",
         });
         return { data: null, error: null, aborted: true };
       }
 
       logDiagnostic(
-        'warn',
-        'client_request_attempt_failed',
-        { workflow: requestLabel, phase: 'attempt', attempt },
-        error
+        "warn",
+        "client_request_attempt_failed",
+        { workflow: requestLabel, phase: "attempt", attempt },
+        error,
       );
 
-      const message = error instanceof Error ? error.message : 'Request failed';
+      const message =
+        error instanceof Error ? error.message : requestFailedMessage;
       const remaining = timeLeft();
       if (remaining <= 0) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: 0,
-          reason: 'exhausted_budget',
+          reason: "exhausted_budget",
           error: message,
         });
         return { data: null, error: message, aborted: false };
@@ -425,21 +476,21 @@ export async function requestJsonWithRetry<T>(
       const wait = Math.min(withJitter(nextDelay), remaining);
       if (wait <= 0) {
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: remaining,
-          reason: 'exhausted_budget',
+          reason: "exhausted_budget",
           error: message,
         });
         return { data: null, error: message, aborted: false };
       }
 
       emit({
-        event: 'retry_wait',
+        event: "retry_wait",
         attempt,
         waitMs: wait,
         remainingMs: remaining,
-        reason: 'network_error',
+        reason: "network_error",
         error: message,
       });
       try {
@@ -447,10 +498,10 @@ export async function requestJsonWithRetry<T>(
       } catch {
         // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
         emit({
-          event: 'terminal',
+          event: "terminal",
           attempt,
           remainingMs: timeLeft(),
-          reason: 'aborted',
+          reason: "aborted",
         });
         return { data: null, error: null, aborted: true };
       }
@@ -458,7 +509,7 @@ export async function requestJsonWithRetry<T>(
       nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
     } finally {
       window.clearTimeout(timeoutId);
-      abortSignal?.removeEventListener('abort', onExternalAbort);
+      abortSignal?.removeEventListener("abort", onExternalAbort);
     }
   }
 }

@@ -72,6 +72,7 @@ export const App = () => {
   const notificationMessages = getNotificationMessages(state?.language);
   const notificationSettings = useNotificationSettings(
     page === "notifications",
+    state?.language,
   );
   const readyReportedRef = useRef(false);
 
@@ -136,11 +137,7 @@ export const App = () => {
     navigateTo(`https://www.reddit.com/r/${promoSubreddit}/`);
   };
   const handleModeratorInstall = () => {
-    if (
-      !state ||
-      state.postHeight === "tiny" ||
-      state.postHeight === "cta"
-    ) {
+    if (!state || state.postHeight === "tiny" || state.postHeight === "cta") {
       return;
     }
     const analyticsContext = getGoalJourneyContext(state);
