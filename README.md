@@ -24,7 +24,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## New CTA (Call To Action) Mini-Posts and 31 Supported Languages!
 
-- **Compressed CTA Buttons**: Perfect for large subreddits that want simple, elegant highlighted tools
+- **Compressed Action Buttons**: Perfect for large subreddits that want simple, elegant highlighted tools
 
 ![An example of CTA Posts](https://i.redd.it/4tkh6pj43foh1.jpeg)
 
