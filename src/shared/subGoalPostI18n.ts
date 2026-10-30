@@ -167,12 +167,30 @@ const buildRawPostMessages = (
   };
 };
 
-export const subGoalPostMessages = Object.fromEntries(
-  subGoalLanguages.map((language) => [
-    language,
-    buildRawPostMessages(language),
-  ]),
-) as Record<SubGoalLanguage, SubGoalPostMessages>;
+const createLazyLanguageRecord = <T>(
+  build: (language: SubGoalLanguage) => T,
+): Record<SubGoalLanguage, T> => {
+  const cache = new Map<SubGoalLanguage, T>();
+  const record = {} as Record<SubGoalLanguage, T>;
+  for (const language of subGoalLanguages) {
+    Object.defineProperty(record, language, {
+      configurable: false,
+      enumerable: true,
+      get: () => {
+        let value = cache.get(language);
+        if (value === undefined) {
+          value = build(language);
+          cache.set(language, value);
+        }
+        return value;
+      },
+    });
+  }
+  return Object.freeze(record);
+};
+
+export const subGoalPostMessages =
+  createLazyLanguageRecord(buildRawPostMessages);
 
 const formatCountMessage = (
   language: SubGoalLanguage,
@@ -266,12 +284,9 @@ const buildAfterJoinMessages = (
   ),
   dynamicPostError: translate(language, "afterJoin.dynamicPostError"),
 });
-export const afterSubscribePresetMessages = Object.fromEntries(
-  subGoalLanguages.map((language) => [
-    language,
-    buildAfterJoinMessages(language),
-  ]),
-) as Record<SubGoalLanguage, AfterSubscribePresetMessages>;
+export const afterSubscribePresetMessages = createLazyLanguageRecord(
+  buildAfterJoinMessages,
+);
 export function getAfterSubscribePresetMessages(
   language: unknown,
 ): AfterSubscribePresetMessages {

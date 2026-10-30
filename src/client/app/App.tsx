@@ -31,6 +31,7 @@ import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NotificationConfirmationPage } from "./pages/NotificationConfirmationPage";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "./notificationFeatureFlags";
+import { usePrimaryCtaPaintTiming } from "../utils/startupPerformance";
 
 type PageName =
   | "subGoal"
@@ -75,6 +76,11 @@ export const App = () => {
     state?.language,
   );
   const readyReportedRef = useRef(false);
+
+  usePrimaryCtaPaintTiming(
+    !loading && !prohibited && state !== null,
+    `${page}:${state?.postHeight ?? "loading"}`,
+  );
 
   useEffect(() => {
     if (readyReportedRef.current || loading || prohibited || state === null) {

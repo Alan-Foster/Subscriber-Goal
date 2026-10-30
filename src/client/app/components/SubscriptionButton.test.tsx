@@ -23,6 +23,11 @@ describe("SubscriptionButton", () => {
       expect(html).toContain("whitespace-normal");
       expect(html).toContain("[overflow-wrap:anywhere]");
       expect(html).not.toContain('disabled=""');
+      if (mode === "subscribe") {
+        expect(html).toContain('data-subgoal-primary-cta="true"');
+      } else {
+        expect(html).not.toContain("data-subgoal-primary-cta");
+      }
     },
   );
 

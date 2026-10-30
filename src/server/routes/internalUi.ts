@@ -25,9 +25,9 @@ import {
   defaultSubGoalLanguage,
   resolveSubGoalLanguage,
   subGoalLanguages,
-  subGoalPostMessages,
   type SubGoalLanguage,
 } from "../../shared/subGoalPostI18n";
+import { getLanguageMetadata } from "../../shared/i18n/catalog";
 import { formNames, internalRoutes } from "../../shared/routes";
 import {
   createSubscriberGoal,
@@ -709,7 +709,7 @@ async function buildCreateGoalSetupForm(
           type: "select",
           defaultValue: [defaultLanguage],
           options: subGoalLanguages.map((language) => ({
-            label: subGoalPostMessages[language].languageLabel,
+            label: getLanguageMetadata(language).label,
             value: language,
           })),
           helpText: translate(defaultLanguage, "moderator.setup.languageHelp"),

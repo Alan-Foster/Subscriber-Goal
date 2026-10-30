@@ -202,7 +202,7 @@ describe("publicApi routes", () => {
       message: "This content is prohibited",
       messageKey: "errors.content.prohibited",
     });
-    expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
+    expect(hoisted.getSubGoalData).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -269,6 +269,30 @@ describe("publicApi routes", () => {
       moderatorInstallPromoEligible: true,
       user: { id: "t2_moderator", username: "ExampleModerator" },
     });
+    expect(hoisted.reddit.getCurrentUser).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
+  });
+
+  it("reports init phase durations through Server-Timing", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const setHeader = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json, setHeader } as unknown as Response,
+    );
+
+    expect(setHeader).toHaveBeenCalledOnce();
+    const [name, value] = setHeader.mock.calls[0] as [string, string];
+    expect(name).toBe("Server-Timing");
+    expect(value).toMatch(/goal_data;dur=\d+\.\d/);
+    expect(value).toMatch(/blacklist;dur=\d+\.\d/);
+    expect(value).toMatch(/subreddit;dur=\d+\.\d/);
+    expect(value).toMatch(/user;dur=\d+\.\d/);
+    expect(value).toMatch(/subscriber_status;dur=\d+\.\d/);
+    expect(value).toMatch(/icon;dur=\d+\.\d/);
+    expect(value).toMatch(/total;dur=\d+\.\d/);
   });
 
   it("fails open when moderator promotion eligibility cannot be loaded", async () => {

@@ -28,6 +28,7 @@ import { NotificationSettingsPage } from "../app/pages/NotificationSettingsPage"
 import { useNotificationSettings } from "../app/hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../app/notificationFeatureFlags";
+import { usePrimaryCtaPaintTiming } from "../utils/startupPerformance";
 
 type TinySubscribeViewPhase =
   | "subscribe"
@@ -57,6 +58,11 @@ export const SubscribeOnlyApp = () => {
     prefersReducedMotion,
     triggerCelebration,
   } = useCelebration();
+
+  usePrimaryCtaPaintTiming(
+    !loading && !prohibited && state !== null,
+    `${viewPhase}:${state?.postHeight ?? "loading"}`,
+  );
 
   useEffect(() => {
     if (

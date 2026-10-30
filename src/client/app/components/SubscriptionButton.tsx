@@ -35,6 +35,7 @@ export const SubscriptionButton = ({
       ) : null}
       <button
         className="relative z-10 max-w-full cursor-pointer rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-center text-base font-semibold whitespace-normal text-[color:var(--sg-button-text)] [overflow-wrap:anywhere] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        data-subgoal-primary-cta={mode === "subscribe" ? "true" : undefined}
         data-sg-theme={colorTheme}
         disabled={disabled}
         onClick={disabled ? undefined : onClick}

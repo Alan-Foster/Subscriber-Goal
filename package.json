@@ -5,8 +5,9 @@
   "license": "BSD-3-Clause",
   "type": "module",
   "scripts": {
+    "assets:check": "node scripts/assets.mjs",
     "build": "vite build",
-    "check": "npm run i18n:check && npm run type-check && npm run lint:fix && npm run prettier",
+    "check": "npm run assets:check && npm run i18n:check && npm run type-check && npm run lint:fix && npm run prettier",
     "deploy": "npm run build && devvit upload",
     "dev": "devvit playtest",
     "lint": "eslint ./src",

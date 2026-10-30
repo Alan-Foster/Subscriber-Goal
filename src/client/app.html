@@ -10,6 +10,11 @@
   </head>
   <body class="h-full">
     <div id="root" class="h-full"></div>
+    <script>
+      try {
+        performance.mark("subgoal:bootstrap");
+      } catch {}
+    </script>
     <script type="module" src="app/index.tsx"></script>
   </body>
 </html>

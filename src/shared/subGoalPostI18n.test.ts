@@ -51,6 +51,16 @@ const expectedJoinButtons: Record<SubGoalLanguage, string> = {
 };
 
 describe("subGoalPostI18n", () => {
+  it("exposes enumerable lazy language accessors with stable cached values", () => {
+    expect(Object.keys(subGoalPostMessages)).toEqual(subGoalLanguages);
+    expect(
+      Object.getOwnPropertyDescriptor(subGoalPostMessages, "en")?.get,
+    ).toBeTypeOf("function");
+    expect(subGoalPostMessages.en).toBe(subGoalPostMessages.en);
+    expect(afterSubscribePresetMessages.en).toBe(
+      afterSubscribePresetMessages.en,
+    );
+  });
   it("protects generated titles from Reddit entity substitution without changing visible copy", () => {
     for (const language of subGoalLanguages) {
       const generated = getSubGoalPostMessages(language).defaultPostTitle({

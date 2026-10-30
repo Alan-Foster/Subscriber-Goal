@@ -23,6 +23,7 @@ import {
   type MessageValues,
 } from "../../shared/i18n/catalog";
 import { localizeError } from "../../shared/i18n/errors";
+import { markInitEnd, markInitStart } from "../utils/startupPerformance";
 
 type RequestResult<T> = {
   data: T | null;
@@ -640,6 +641,7 @@ export const useSubGoal = () => {
     let cancelled = false;
 
     const runInit = async () => {
+      markInitStart();
       const result = await requestJsonWithRetry<InitResponse>(
         "/api/init",
         { signal },
@@ -653,6 +655,7 @@ export const useSubGoal = () => {
         setLoading(false);
         return;
       }
+      markInitEnd();
       setState(result.data?.state ?? null);
       setError(null);
       setLoading(false);
@@ -738,6 +741,7 @@ export const useSubGoal = () => {
         return;
       }
 
+      markInitEnd();
       setState(nextState);
       setError(null);
     };

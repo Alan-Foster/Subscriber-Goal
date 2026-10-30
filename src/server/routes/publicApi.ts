@@ -1,4 +1,4 @@
-import type { Router } from "express";
+import type { Response, Router } from "express";
 import { context, reddit, redis, realtime } from "@devvit/web/server";
 import { notifications } from "@devvit/notifications";
 import type {
@@ -54,42 +54,95 @@ const localizedError = (
   ...(Object.keys(messageParams).length > 0 ? { messageParams } : {}),
 });
 
-const buildState = async (
-  postId: string,
-  options?: {
-    subscribersOverride?: number;
-    recentSubscriberOverride?: string;
-  },
-): Promise<SubGoalState> => {
-  const subGoalData = await getSubGoalData(redis, postId, context.postData);
-  if (subGoalData.postKind === subscribeOnlyPostKind) {
-    return await buildSubscribeOnlyState(postId, subGoalData);
+type InitTimingName =
+  | "goal_data"
+  | "blacklist"
+  | "subreddit"
+  | "user"
+  | "subscriber_status"
+  | "icon";
+type InitTimings = Partial<Record<InitTimingName, number>>;
+
+const timedInitOperation = async <T>(
+  timings: InitTimings | undefined,
+  name: InitTimingName,
+  operation: () => Promise<T>,
+): Promise<T> => {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    if (timings) timings[name] = performance.now() - startedAt;
   }
-  if (subGoalData.postKind === ctaOnlyPostKind) {
-    return await buildCtaOnlyState(postId, subGoalData);
+};
+
+const setInitServerTiming = (
+  res: Response,
+  timings: InitTimings,
+  startedAt: number,
+): void => {
+  const names: InitTimingName[] = [
+    "goal_data",
+    "blacklist",
+    "subreddit",
+    "user",
+    "subscriber_status",
+    "icon",
+  ];
+  const entries = names.map(
+    (name) => `${name};dur=${(timings[name] ?? 0).toFixed(1)}`,
+  );
+  entries.push(`total;dur=${(performance.now() - startedAt).toFixed(1)}`);
+  res.setHeader?.("Server-Timing", entries.join(", "));
+};
+
+type CurrentSubreddit = Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>;
+type SubGoalData = Awaited<ReturnType<typeof getSubGoalData>>;
+type CurrentUserContext = {
+  user: { id: string; username: string } | null;
+  moderatorInstallPromoEligible: boolean;
+};
+type BuildStateDependencies = {
+  subGoalData?: SubGoalData;
+  subredditPromise?: Promise<CurrentSubreddit>;
+  trackedSubscriberPromise?: Promise<boolean>;
+  userContextPromise?: Promise<CurrentUserContext>;
+  subredditIconPromise?: Promise<string>;
+  timings?: InitTimings;
+};
+
+const loadCurrentUser = async (
+  timings?: InitTimings,
+): Promise<CurrentUserContext> => {
+  if (!context.userId) {
+    logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
+      workflow: "moderator_install_promo",
+      phase: "eligibility",
+      authenticated: false,
+      eligible: false,
+    });
+    return { user: null, moderatorInstallPromoEligible: false };
   }
 
-  const subreddit = await reddit.getCurrentSubreddit();
-  const subredditIcon = await getSubredditIcon(
-    reddit,
-    subreddit.id,
-    (subreddit as { settings?: { communityIcon?: string } }).settings,
-  );
-  const appSettings = getPublicAppSettings();
-  const username = context.userId ? await reddit.getCurrentUsername() : null;
-  const user =
-    context.userId && username ? { id: context.userId, username } : null;
-  let moderatorInstallPromoEligible = false;
-  if (user) {
+  return await timedInitOperation(timings, "user", async () => {
     try {
       const currentUser = await reddit.getCurrentUser();
-      moderatorInstallPromoEligible = currentUser?.isModerator === true;
-      logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
-        workflow: "moderator_install_promo",
-        phase: "eligibility",
-        authenticated: true,
-        eligible: moderatorInstallPromoEligible,
-      });
+      if (currentUser?.username) {
+        const moderatorInstallPromoEligible = currentUser.isModerator === true;
+        logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
+          workflow: "moderator_install_promo",
+          phase: "eligibility",
+          authenticated: true,
+          eligible: moderatorInstallPromoEligible,
+        });
+        return {
+          user: {
+            id: context.userId as string,
+            username: currentUser.username,
+          },
+          moderatorInstallPromoEligible,
+        };
+      }
     } catch (error) {
       logDiagnostic(
         "warn",
@@ -103,17 +156,65 @@ const buildState = async (
         error,
       );
     }
-  } else {
-    logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
-      workflow: "moderator_install_promo",
-      phase: "eligibility",
-      authenticated: false,
-      eligible: false,
+
+    const username = await reddit.getCurrentUsername();
+    return {
+      user: username ? { id: context.userId as string, username } : null,
+      moderatorInstallPromoEligible: false,
+    };
+  });
+};
+
+const buildState = async (
+  postId: string,
+  options?: {
+    subscribersOverride?: number;
+    recentSubscriberOverride?: string;
+  },
+  dependencies: BuildStateDependencies = {},
+): Promise<SubGoalState> => {
+  const subGoalData =
+    dependencies.subGoalData ??
+    (await getSubGoalData(redis, postId, context.postData));
+  if (subGoalData.postKind === subscribeOnlyPostKind) {
+    return await buildSubscribeOnlyState(postId, subGoalData, undefined, {
+      subredditPromise: dependencies.subredditPromise,
+      trackedSubscriberPromise: dependencies.trackedSubscriberPromise,
     });
   }
-  const subscribed = user?.id
-    ? await isTrackedSubscriber(redis, user.id)
-    : false;
+  if (subGoalData.postKind === ctaOnlyPostKind) {
+    return await buildCtaOnlyState(
+      postId,
+      subGoalData,
+      dependencies.subredditPromise,
+    );
+  }
+
+  const subredditPromise =
+    dependencies.subredditPromise ?? reddit.getCurrentSubreddit();
+  const userPromise =
+    dependencies.userContextPromise ?? loadCurrentUser(dependencies.timings);
+  const subscribedPromise =
+    dependencies.trackedSubscriberPromise ??
+    (context.userId
+      ? timedInitOperation(dependencies.timings, "subscriber_status", () =>
+          isTrackedSubscriber(redis, context.userId as string),
+        )
+      : Promise.resolve(false));
+  const iconPromise =
+    dependencies.subredditIconPromise ??
+    timedInitOperation(dependencies.timings, "icon", async () => {
+      const subreddit = await subredditPromise;
+      return await getSubredditIcon(
+        reddit,
+        subreddit.id,
+        (subreddit as { settings?: { communityIcon?: string } }).settings,
+      );
+    });
+  const [subreddit, subredditIcon, userContext, subscribed] = await Promise.all(
+    [subredditPromise, iconPromise, userPromise, subscribedPromise],
+  );
+  const appSettings = getPublicAppSettings();
 
   return {
     goal: subGoalData.goal > 0 ? subGoalData.goal : null,
@@ -130,8 +231,8 @@ const buildState = async (
     postHeight: subGoalData.postHeight === "short" ? "short" : "regular",
     language: subGoalData.language,
     subscribed,
-    moderatorInstallPromoEligible,
-    user,
+    moderatorInstallPromoEligible: userContext.moderatorInstallPromoEligible,
+    user: userContext.user,
     appSettings,
     subreddit: {
       id: subreddit.id,
@@ -187,19 +288,33 @@ const buildSubscribeOnlyState = async (
     subscribersOverride?: number;
     observedSubscribers?: number;
   },
+  dependencies: {
+    subredditPromise?: Promise<CurrentSubreddit> | undefined;
+    trackedSubscriberPromise?: Promise<boolean> | undefined;
+  } = {},
 ): Promise<SubscribeOnlyState> => {
-  const subscribed = context.userId
-    ? await isTrackedSubscriber(redis, context.userId)
-    : false;
+  const subscribedPromise =
+    dependencies.trackedSubscriberPromise ??
+    (context.userId
+      ? isTrackedSubscriber(redis, context.userId)
+      : Promise.resolve(false));
+  const subredditPromise =
+    options?.observedSubscribers === undefined
+      ? (dependencies.subredditPromise ?? reddit.getCurrentSubreddit())
+      : null;
+  const [subscribed, subreddit] = await Promise.all([
+    subscribedPromise,
+    subredditPromise,
+  ]);
   const currentSubscribers =
-    options?.observedSubscribers ??
-    (await reddit.getCurrentSubreddit()).numberOfSubscribers;
+    options?.observedSubscribers ?? subreddit?.numberOfSubscribers ?? 0;
   const subscribers = options?.subscribersOverride ?? currentSubscribers;
-  const { growth } = await observeDailySubscriberCount(
-    redis,
-    currentSubscribers,
-    { displayedSubscribers: subscribers },
-  );
+  const [dailySubscribers, ctaActivity] = await Promise.all([
+    observeDailySubscriberCount(redis, currentSubscribers, {
+      displayedSubscribers: subscribers,
+    }),
+    getCtaActivityMetric(redis, postId, subGoalData.afterSubscribePreset),
+  ]);
   return {
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
@@ -209,46 +324,40 @@ const buildSubscribeOnlyState = async (
     language: subGoalData.language,
     subscribed,
     authenticated: Boolean(context.userId),
-    ctaActivity: await getCtaActivityMetric(
-      redis,
-      postId,
-      subGoalData.afterSubscribePreset,
-    ),
+    ctaActivity,
     subreddit: {
       name:
         subGoalData.subredditDisplayName ?? context.subredditName ?? "unknown",
       subscribers,
-      growth,
+      growth: dailySubscribers.growth,
     },
   };
 };
 
 const buildCtaOnlyState = async (
   postId: string,
-  subGoalData: Awaited<ReturnType<typeof getSubGoalData>>,
+  subGoalData: SubGoalData,
+  subredditPromise = reddit.getCurrentSubreddit(),
 ): Promise<CtaOnlyState> => {
-  const subreddit = await reddit.getCurrentSubreddit();
-  const { growth } = await observeDailySubscriberCount(
-    redis,
-    subreddit.numberOfSubscribers,
-    { displayedSubscribers: subreddit.numberOfSubscribers },
-  );
+  const subreddit = await subredditPromise;
+  const [dailySubscribers, ctaActivity] = await Promise.all([
+    observeDailySubscriberCount(redis, subreddit.numberOfSubscribers, {
+      displayedSubscribers: subreddit.numberOfSubscribers,
+    }),
+    getCtaActivityMetric(redis, postId, subGoalData.afterSubscribePreset),
+  ]);
   return {
     colorTheme: subGoalData.colorTheme,
     afterSubscribeAction: subGoalData.afterSubscribeAction,
     trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: "cta",
     promoSubreddit: getPublicAppSettings().promoSubreddit,
-    ctaActivity: await getCtaActivityMetric(
-      redis,
-      postId,
-      subGoalData.afterSubscribePreset,
-    ),
+    ctaActivity,
     language: subGoalData.language,
     subreddit: {
       name: subGoalData.subredditDisplayName ?? subreddit.name,
       subscribers: subreddit.numberOfSubscribers,
-      growth,
+      growth: dailySubscribers.growth,
     },
   };
 };
@@ -502,6 +611,8 @@ export function registerPublicApiRoutes(router: Router): void {
   );
 
   router.get(apiRoutes.init, async (_req, res): Promise<void> => {
+    const initStartedAt = performance.now();
+    const initTimings: InitTimings = {};
     const { postId } = context;
     if (!postId) {
       logDiagnostic("warn", "api_validation_failed", {
@@ -510,18 +621,113 @@ export function registerPublicApiRoutes(router: Router): void {
         phase: "missing_post_id",
         status: 400,
       });
+      setInitServerTiming(res, initTimings, initStartedAt);
       res.status(400).json(localizedError("errors.api.postIdMissing"));
       return;
     }
 
     try {
-      const subredditName =
-        context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-      if (await isSubredditBlacklisted(reddit, subredditName)) {
+      const subredditPromise = timedInitOperation(
+        initTimings,
+        "subreddit",
+        () => reddit.getCurrentSubreddit(),
+      );
+      const goalDataPromise = timedInitOperation(initTimings, "goal_data", () =>
+        getSubGoalData(redis, postId, context.postData),
+      );
+      const trackedSubscriberPromise = timedInitOperation(
+        initTimings,
+        "subscriber_status",
+        () =>
+          context.userId
+            ? isTrackedSubscriber(redis, context.userId)
+            : Promise.resolve(false),
+      );
+      const blacklistPromise = timedInitOperation(
+        initTimings,
+        "blacklist",
+        async () => {
+          const subredditName =
+            context.subredditName ?? (await subredditPromise).name;
+          return await isSubredditBlacklisted(reddit, subredditName);
+        },
+      );
+      const userContextPromise = goalDataPromise.then(async (subGoalData) =>
+        subGoalData.postKind !== subscribeOnlyPostKind &&
+        subGoalData.postKind !== ctaOnlyPostKind
+          ? await loadCurrentUser(initTimings)
+          : {
+              user: null,
+              moderatorInstallPromoEligible: false,
+            },
+      );
+      const subredditIconPromise = Promise.all([
+        goalDataPromise,
+        subredditPromise,
+      ]).then(async ([subGoalData, subreddit]) =>
+        subGoalData.postKind !== subscribeOnlyPostKind &&
+        subGoalData.postKind !== ctaOnlyPostKind
+          ? await timedInitOperation(initTimings, "icon", () =>
+              getSubredditIcon(
+                reddit,
+                subreddit.id,
+                (subreddit as { settings?: { communityIcon?: string } })
+                  .settings,
+              ),
+            )
+          : null,
+      );
+      const [
+        blacklistResult,
+        goalDataResult,
+        subredditResult,
+        subscriberResult,
+        userContextResult,
+        subredditIconResult,
+      ] = await Promise.allSettled([
+        blacklistPromise,
+        goalDataPromise,
+        subredditPromise,
+        trackedSubscriberPromise,
+        userContextPromise,
+        subredditIconPromise,
+      ]);
+      if (blacklistResult.status === "rejected") {
+        throw blacklistResult.reason;
+      }
+      if (blacklistResult.value) {
+        setInitServerTiming(res, initTimings, initStartedAt);
         res.status(403).json(localizedError("errors.content.prohibited"));
         return;
       }
-      const state = await buildState(postId);
+      if (goalDataResult.status === "rejected") {
+        throw goalDataResult.reason;
+      }
+      if (subredditResult.status === "rejected") {
+        throw subredditResult.reason;
+      }
+      if (subscriberResult.status === "rejected") {
+        throw subscriberResult.reason;
+      }
+      if (userContextResult.status === "rejected") {
+        throw userContextResult.reason;
+      }
+      if (subredditIconResult.status === "rejected") {
+        throw subredditIconResult.reason;
+      }
+      const state = await buildState(postId, undefined, {
+        subGoalData: goalDataResult.value,
+        subredditPromise: Promise.resolve(subredditResult.value),
+        trackedSubscriberPromise: Promise.resolve(subscriberResult.value),
+        ...(subredditIconResult.value === null
+          ? {}
+          : {
+              userContextPromise: Promise.resolve(userContextResult.value),
+              subredditIconPromise: Promise.resolve(subredditIconResult.value),
+            }),
+        timings: initTimings,
+      });
+      setInitServerTiming(res, initTimings, initStartedAt);
       res.json({
         type: "init",
         postId,
@@ -541,6 +747,7 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
+      setInitServerTiming(res, initTimings, initStartedAt);
       res
         .status(503)
         .json(
