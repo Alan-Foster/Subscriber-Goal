@@ -646,11 +646,11 @@ describe("internalUi color theme create goal routes", () => {
         { label: "Full Height Subscriber Goal", value: "regular" },
         { label: "Short Subscriber Goal (No Logo)", value: "short" },
         {
-          label: "Join Button and CTA Button (No Goal)",
+          label: "Subscribe Button and Call to Action Button (No Goal)",
           value: "tiny",
         },
         {
-          label: "CTA Button (No Joining)",
+          label: "Call To Action Button (No Subscribing)",
           value: "cta",
         },
       ],

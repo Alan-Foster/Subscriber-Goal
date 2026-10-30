@@ -1764,6 +1764,8 @@
       "label": "Bosanski",
       "locale": "bs-BA",
       "messages": {
+        "moderator.setup.cta": "Dugme za poziv na akciju (Bez pretplate)",
+        "moderator.setup.tiny": "Dugme za pretplatu i dugme za poziv na akciju (Bez cilja)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikova ove sedmice}}",
         "activity.postsToday": "{count, plural, other {{countText} novih objava danas}}",
         "activity.postsWeek": "{count, plural, other {{countText} novih objava ove sedmice}}",
@@ -1827,6 +1829,8 @@
       "label": "Català",
       "locale": "ca-ES",
       "messages": {
+        "moderator.setup.cta": "Botó de crida a l'acció (Sense subscripció)",
+        "moderator.setup.tiny": "Botó de subscripció i botó de crida a l'acció (Sense objectiu)",
         "activity.clicksWeek": "{count, plural, other {{countText} clics aquesta setmana}}",
         "activity.postsToday": "{count, plural, other {{countText} publicacions noves avui}}",
         "activity.postsWeek": "{count, plural, other {{countText} publicacions noves aquesta setmana}}",
@@ -1890,6 +1894,8 @@
       "label": "Dansk",
       "locale": "da-DK",
       "messages": {
+        "moderator.setup.cta": "Handlingsknap (Uden abonnement)",
+        "moderator.setup.tiny": "Abonner-knap og handlingsknap (Intet mål)",
         "activity.clicksWeek": "{count, plural, other {{countText} klik i denne uge}}",
         "activity.postsToday": "{count, plural, other {{countText} nye opslag i dag}}",
         "activity.postsWeek": "{count, plural, other {{countText} nye opslag i denne uge}}",
@@ -1953,6 +1959,8 @@
       "label": "Deutsch",
       "locale": "de-DE",
       "messages": {
+        "moderator.setup.cta": "Handlungsaufforderungs-Button (Ohne Abonnieren)",
+        "moderator.setup.tiny": "Abonnieren-Button und Handlungsaufforderungs-Button (Kein Ziel)",
         "activity.clicksWeek": "{count, plural, other {{countText} Klicks diese Woche}}",
         "activity.postsToday": "{count, plural, other {{countText} neue Beiträge heute}}",
         "activity.postsWeek": "{count, plural, other {{countText} neue Beiträge diese Woche}}",
@@ -2033,7 +2041,7 @@
         "errors.join.required": "You must join the community first.",
         "errors.join.transport": "Could not join the community.",
         "errors.join.unsupported": "This post does not support joining.",
-        "menu.createCta.description": "Create a new CTA button post",
+        "menu.createCta.description": "Create a new Call to Action Button Post",
         "menu.createCta.label": "Sub Goal - Create a CTA Button",
         "menu.createGoal.description": "Create a new subscriber goal post",
         "menu.createGoal.label": "Sub Goal - Create a New Goal",
@@ -2061,7 +2069,7 @@
         "moderator.followUp.buttonText": "Button Text After a User Joins",
         "moderator.followUp.description": "Choose what members will see and do after joining.",
         "moderator.followUp.title": "Sub Goal - Step 3/3 - Settings for After Joining",
-        "moderator.setup.cta": "CTA Button (No Joining)",
+        "moderator.setup.cta": "Call To Action Button (No Subscribing)",
         "moderator.setup.description": "Choose the shared post settings. You will customize the post on the next two pages.",
         "moderator.setup.displayName": "Customize Subreddit Name Capitalization",
         "moderator.setup.help": "Choose a subscriber goal, a Join button with a follow-up CTA, or a CTA with no joining.",
@@ -2069,7 +2077,7 @@
         "moderator.setup.postHeight": "Post Height",
         "moderator.setup.regular": "Full Height Subscriber Goal",
         "moderator.setup.short": "Short Subscriber Goal (No Logo)",
-        "moderator.setup.tiny": "Join Button and CTA Button (No Goal)",
+        "moderator.setup.tiny": "Subscribe Button and Call to Action Button (No Goal)",
         "moderator.setup.title": "Sub Goal - Step 1/3 - Choose Post Type",
         "notifications.alertsLabel": "Goal completion alerts",
         "notifications.backAriaLabel": "Return to previous page",
@@ -2282,6 +2290,8 @@
       "label": "Español",
       "locale": "es-419",
       "messages": {
+        "moderator.setup.cta": "Botón de llamada a la acción (Sin suscripción)",
+        "moderator.setup.tiny": "Botón de suscripción y botón de llamada a la acción (Sin objetivo)",
         "activity.clicksWeek": "{count, plural, other {{countText} clics esta semana}}",
         "activity.postsToday": "{count, plural, other {{countText} publicaciones nuevas hoy}}",
         "activity.postsWeek": "{count, plural, other {{countText} publicaciones nuevas esta semana}}",
@@ -2345,6 +2355,8 @@
       "label": "Eesti",
       "locale": "et-EE",
       "messages": {
+        "moderator.setup.cta": "Tegevusele kutsuv nupp (Ilma tellimiseta)",
+        "moderator.setup.tiny": "Tellimisnupp ja tegevusele kutsuv nupp (Ilma eesmärgita)",
         "activity.clicksWeek": "{count, plural, other {{countText} klõpsu sel nädalal}}",
         "activity.postsToday": "{count, plural, other {{countText} uut postitust täna}}",
         "activity.postsWeek": "{count, plural, other {{countText} uut postitust sel nädalal}}",
@@ -2408,6 +2420,8 @@
       "label": "Suomi",
       "locale": "fi-FI",
       "messages": {
+        "moderator.setup.cta": "Toimintakehotuspainike (Ilman tilaamista)",
+        "moderator.setup.tiny": "Tilauspainike ja toimintakehotuspainike (Ei tavoitetta)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikkausta tällä viikolla}}",
         "activity.postsToday": "{count, plural, other {{countText} uutta julkaisua tänään}}",
         "activity.postsWeek": "{count, plural, other {{countText} uutta julkaisua tällä viikolla}}",
@@ -2471,6 +2485,8 @@
       "label": "Français",
       "locale": "fr-FR",
       "messages": {
+        "moderator.setup.cta": "Bouton d'appel à l'action (Sans abonnement)",
+        "moderator.setup.tiny": "Bouton d'abonnement et bouton d'appel à l'action (Sans objectif)",
         "activity.clicksWeek": "{count, plural, other {{countText} clics cette semaine}}",
         "activity.postsToday": "{count, plural, other {{countText} nouvelles publications aujourd’hui}}",
         "activity.postsWeek": "{count, plural, other {{countText} nouvelles publications cette semaine}}",
@@ -2534,6 +2550,8 @@
       "label": "हिन्दी",
       "locale": "hi-IN",
       "messages": {
+        "moderator.setup.cta": "कार्रवाई के लिए प्रेरित करने वाला बटन (बिना सब्सक्राइब किए)",
+        "moderator.setup.tiny": "सब्सक्राइब बटन और कार्रवाई के लिए प्रेरित करने वाला बटन (बिना लक्ष्य)",
         "activity.clicksWeek": "{count, plural, other {इस सप्ताह {countText} क्लिक}}",
         "activity.postsToday": "{count, plural, one {आज {countText} नई पोस्ट} other {आज {countText} नई पोस्टें}}",
         "activity.postsWeek": "{count, plural, one {इस सप्ताह {countText} नई पोस्ट} other {इस सप्ताह {countText} नई पोस्टें}}",
@@ -2597,6 +2615,8 @@
       "label": "Hrvatski",
       "locale": "hr-HR",
       "messages": {
+        "moderator.setup.cta": "Gumb za poziv na akciju (Bez pretplate)",
+        "moderator.setup.tiny": "Gumb za pretplatu i gumb za poziv na akciju (Bez cilja)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikova ovaj tjedan}}",
         "activity.postsToday": "{count, plural, other {{countText} novih objava danas}}",
         "activity.postsWeek": "{count, plural, other {{countText} novih objava ovaj tjedan}}",
@@ -2660,6 +2680,8 @@
       "label": "Magyar",
       "locale": "hu-HU",
       "messages": {
+        "moderator.setup.cta": "Cselekvésre ösztönző gomb (Feliratkozás nélkül)",
+        "moderator.setup.tiny": "Feliratkozás gomb és cselekvésre ösztönző gomb (Cél nélkül)",
         "activity.clicksWeek": "{count, plural, other {{countText} kattintás ezen a héten}}",
         "activity.postsToday": "{count, plural, other {{countText} új bejegyzés ma}}",
         "activity.postsWeek": "{count, plural, other {{countText} új bejegyzés ezen a héten}}",
@@ -2723,6 +2745,8 @@
       "label": "Bahasa Indonesia",
       "locale": "id-ID",
       "messages": {
+        "moderator.setup.cta": "Tombol Ajakan Bertindak (Tanpa Berlangganan)",
+        "moderator.setup.tiny": "Tombol Berlangganan dan Tombol Ajakan Bertindak (Tanpa Target)",
         "activity.clicksWeek": "{count, plural, other {{countText} klik minggu ini}}",
         "activity.postsToday": "{count, plural, other {{countText} postingan baru hari ini}}",
         "activity.postsWeek": "{count, plural, other {{countText} postingan baru minggu ini}}",
@@ -2786,6 +2810,8 @@
       "label": "Íslenska",
       "locale": "is-IS",
       "messages": {
+        "moderator.setup.cta": "Aðgerðahvetjandi hnappur (Án áskriftar)",
+        "moderator.setup.tiny": "Áskriftarhnappur og aðgerðahvetjandi hnappur (Ekkert markmið)",
         "activity.clicksWeek": "{count, plural, other {{countText} smellir í þessari viku}}",
         "activity.postsToday": "{count, plural, other {{countText} ný innlegg í dag}}",
         "activity.postsWeek": "{count, plural, other {{countText} ný innlegg í þessari viku}}",
@@ -2849,6 +2875,8 @@
       "label": "Italiano",
       "locale": "it-IT",
       "messages": {
+        "moderator.setup.cta": "Pulsante di invito all'azione (Senza iscrizione)",
+        "moderator.setup.tiny": "Pulsante di iscrizione e pulsante di invito all'azione (Senza obiettivo)",
         "activity.clicksWeek": "{count, plural, other {{countText} clic questa settimana}}",
         "activity.postsToday": "{count, plural, other {{countText} nuovi post oggi}}",
         "activity.postsWeek": "{count, plural, other {{countText} nuovi post questa settimana}}",
@@ -2912,6 +2940,8 @@
       "label": "Lietuvių",
       "locale": "lt-LT",
       "messages": {
+        "moderator.setup.cta": "Raginimo veikti mygtukas (Be prenumeratos)",
+        "moderator.setup.tiny": "Prenumeratos mygtukas ir raginimo veikti mygtukas (Be tikslo)",
         "activity.clicksWeek": "{count, plural, other {{countText} paspaudimai šią savaitę}}",
         "activity.postsToday": "{count, plural, other {{countText} nauji įrašai šiandien}}",
         "activity.postsWeek": "{count, plural, other {{countText} nauji įrašai šią savaitę}}",
@@ -2975,6 +3005,8 @@
       "label": "Latviešu",
       "locale": "lv-LV",
       "messages": {
+        "moderator.setup.cta": "Aicinājuma rīkoties poga (Bez abonēšanas)",
+        "moderator.setup.tiny": "Abonēšanas poga un aicinājuma rīkoties poga (Bez mērķa)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikšķi šonedēļ}}",
         "activity.postsToday": "{count, plural, other {{countText} jauni ieraksti šodien}}",
         "activity.postsWeek": "{count, plural, other {{countText} jauni ieraksti šonedēļ}}",
@@ -3038,6 +3070,8 @@
       "label": "मराठी",
       "locale": "mr-IN",
       "messages": {
+        "moderator.setup.cta": "कृतीस प्रवृत्त करणारे बटण (सबस्क्राइब न करता)",
+        "moderator.setup.tiny": "सबस्क्राइब बटण आणि कृतीस प्रवृत्त करणारे बटण (ध्येयाशिवाय)",
         "activity.clicksWeek": "{count, plural, one {या आठवड्यात {countText} क्लिक} other {या आठवड्यात {countText} क्लिक}}",
         "activity.postsToday": "{count, plural, one {आज {countText} नवीन पोस्ट} other {आज {countText} नवीन पोस्ट}}",
         "activity.postsWeek": "{count, plural, one {या आठवड्यात {countText} नवीन पोस्ट} other {या आठवड्यात {countText} नवीन पोस्ट}}",
@@ -3101,6 +3135,8 @@
       "label": "Norsk Bokmål",
       "locale": "nb-NO",
       "messages": {
+        "moderator.setup.cta": "Handlingsoppfordringsknapp (Uten abonnement)",
+        "moderator.setup.tiny": "Abonner-knapp og handlingsoppfordringsknapp (Uten mål)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikk denne uken}}",
         "activity.postsToday": "{count, plural, other {{countText} nye innlegg i dag}}",
         "activity.postsWeek": "{count, plural, other {{countText} nye innlegg denne uken}}",
@@ -3164,6 +3200,8 @@
       "label": "Nederlands",
       "locale": "nl-NL",
       "messages": {
+        "moderator.setup.cta": "Oproep-tot-actieknop (Zonder abonneren)",
+        "moderator.setup.tiny": "Abonneerknop en oproep-tot-actieknop (Geen doel)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikken deze week}}",
         "activity.postsToday": "{count, plural, other {{countText} nieuwe berichten vandaag}}",
         "activity.postsWeek": "{count, plural, other {{countText} nieuwe berichten deze week}}",
@@ -3227,6 +3265,8 @@
       "label": "ਪੰਜਾਬੀ",
       "locale": "pa-IN",
       "messages": {
+        "moderator.setup.cta": "ਕਾਰਵਾਈ ਲਈ ਪ੍ਰੇਰਿਤ ਕਰਨ ਵਾਲਾ ਬਟਨ (ਸਬਸਕ੍ਰਾਈਬ ਕੀਤੇ ਬਿਨਾਂ)",
+        "moderator.setup.tiny": "ਸਬਸਕ੍ਰਾਈਬ ਬਟਨ ਅਤੇ ਕਾਰਵਾਈ ਲਈ ਪ੍ਰੇਰਿਤ ਕਰਨ ਵਾਲਾ ਬਟਨ (ਬਿਨਾਂ ਟੀਚੇ)",
         "activity.clicksWeek": "{count, plural, one {ਇਸ ਹਫ਼ਤੇ {countText} ਕਲਿੱਕ} other {ਇਸ ਹਫ਼ਤੇ {countText} ਕਲਿੱਕ}}",
         "activity.postsToday": "{count, plural, one {ਅੱਜ {countText} ਨਵੀਂ ਪੋਸਟ} other {ਅੱਜ {countText} ਨਵੀਆਂ ਪੋਸਟਾਂ}}",
         "activity.postsWeek": "{count, plural, one {ਇਸ ਹਫ਼ਤੇ {countText} ਨਵੀਂ ਪੋਸਟ} other {ਇਸ ਹਫ਼ਤੇ {countText} ਨਵੀਆਂ ਪੋਸਟਾਂ}}",
@@ -3290,6 +3330,8 @@
       "label": "Polski",
       "locale": "pl-PL",
       "messages": {
+        "moderator.setup.cta": "Przycisk wezwania do działania (Bez subskrypcji)",
+        "moderator.setup.tiny": "Przycisk subskrypcji i przycisk wezwania do działania (Bez celu)",
         "activity.clicksWeek": "{count, plural, other {{countText} kliknięć w tym tygodniu}}",
         "activity.postsToday": "{count, plural, other {{countText} nowych postów dzisiaj}}",
         "activity.postsWeek": "{count, plural, other {{countText} nowych postów w tym tygodniu}}",
@@ -3353,6 +3395,8 @@
       "label": "Português (Brasil)",
       "locale": "pt-BR",
       "messages": {
+        "moderator.setup.cta": "Botão de chamada para ação (Sem inscrição)",
+        "moderator.setup.tiny": "Botão de inscrição e botão de chamada para ação (Sem meta)",
         "activity.clicksWeek": "{count, plural, other {{countText} cliques esta semana}}",
         "activity.postsToday": "{count, plural, other {{countText} novas publicações hoje}}",
         "activity.postsWeek": "{count, plural, other {{countText} novas publicações esta semana}}",
@@ -3416,6 +3460,8 @@
       "label": "Română",
       "locale": "ro-RO",
       "messages": {
+        "moderator.setup.cta": "Buton de îndemn la acțiune (Fără abonare)",
+        "moderator.setup.tiny": "Buton de abonare și buton de îndemn la acțiune (Fără obiectiv)",
         "activity.clicksWeek": "{count, plural, other {{countText} clicuri săptămâna aceasta}}",
         "activity.postsToday": "{count, plural, other {{countText} postări noi astăzi}}",
         "activity.postsWeek": "{count, plural, other {{countText} postări noi săptămâna aceasta}}",
@@ -3479,6 +3525,8 @@
       "label": "Slovenčina",
       "locale": "sk-SK",
       "messages": {
+        "moderator.setup.cta": "Tlačidlo výzvy na akciu (Bez odberu)",
+        "moderator.setup.tiny": "Tlačidlo na odber a tlačidlo výzvy na akciu (Bez cieľa)",
         "activity.clicksWeek": "{count, plural, other {{countText} kliknutí tento týždeň}}",
         "activity.postsToday": "{count, plural, other {{countText} nových príspevkov dnes}}",
         "activity.postsWeek": "{count, plural, other {{countText} nových príspevkov tento týždeň}}",
@@ -3542,6 +3590,8 @@
       "label": "Slovenščina",
       "locale": "sl-SI",
       "messages": {
+        "moderator.setup.cta": "Gumb s pozivom k dejanju (Brez naročanja)",
+        "moderator.setup.tiny": "Gumb za naročanje in gumb s pozivom k dejanju (Brez cilja)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikov ta teden}}",
         "activity.postsToday": "{count, plural, other {{countText} novih objav danes}}",
         "activity.postsWeek": "{count, plural, other {{countText} novih objav ta teden}}",
@@ -3605,6 +3655,8 @@
       "label": "Shqip",
       "locale": "sq-AL",
       "messages": {
+        "moderator.setup.cta": "Butoni i thirrjes për veprim (Pa abonim)",
+        "moderator.setup.tiny": "Butoni i abonimit dhe butoni i thirrjes për veprim (Pa objektiv)",
         "activity.clicksWeek": "{count, plural, other {{countText} klikime këtë javë}}",
         "activity.postsToday": "{count, plural, other {{countText} postime të reja sot}}",
         "activity.postsWeek": "{count, plural, other {{countText} postime të reja këtë javë}}",
@@ -3668,6 +3720,8 @@
       "label": "Svenska",
       "locale": "sv-SE",
       "messages": {
+        "moderator.setup.cta": "Uppmaningsknapp (Utan prenumeration)",
+        "moderator.setup.tiny": "Prenumerationsknapp och uppmaningsknapp (Inget mål)",
         "activity.clicksWeek": "{count, plural, other {{countText} klick den här veckan}}",
         "activity.postsToday": "{count, plural, other {{countText} nya inlägg idag}}",
         "activity.postsWeek": "{count, plural, other {{countText} nya inlägg den här veckan}}",
@@ -3731,6 +3785,8 @@
       "label": "Tagalog",
       "locale": "fil-PH",
       "messages": {
+        "moderator.setup.cta": "Button sa Paghikayat na Kumilos (Walang Pag-subscribe)",
+        "moderator.setup.tiny": "Button sa Pag-subscribe at Button sa Paghikayat na Kumilos (Walang Goal)",
         "activity.clicksWeek": "{count, plural, other {{countText} click ngayong linggo}}",
         "activity.postsToday": "{count, plural, other {{countText} bagong post ngayon}}",
         "activity.postsWeek": "{count, plural, other {{countText} bagong post ngayong linggo}}",
@@ -3794,6 +3850,8 @@
       "label": "Türkçe",
       "locale": "tr-TR",
       "messages": {
+        "moderator.setup.cta": "Harekete Geçirici Buton (Abonelik Olmadan)",
+        "moderator.setup.tiny": "Abone Ol Butonu ve Harekete Geçirici Buton (Hedef Yok)",
         "activity.clicksWeek": "{count, plural, other {bu hafta {countText} tıklama}}",
         "activity.postsToday": "{count, plural, other {bugün {countText} yeni gönderi}}",
         "activity.postsWeek": "{count, plural, other {bu hafta {countText} yeni gönderi}}",
@@ -3857,6 +3915,8 @@
       "label": "Yorùbá",
       "locale": "yo-NG",
       "messages": {
+        "moderator.setup.cta": "Bọ́tìnì Ìpè sí Ìgbésẹ̀ (Láìsí Ìforúkọsílẹ̀)",
+        "moderator.setup.tiny": "Bọ́tìnì Ìforúkọsílẹ̀ àti Bọ́tìnì Ìpè sí Ìgbésẹ̀ (Láìsí Àfojúsùn)",
         "activity.clicksWeek": "{count, plural, other {{countText} ìtẹ̀ lọ́sẹ̀ yìí}}",
         "activity.postsToday": "{count, plural, other {{countText} ìfìwéránṣẹ́ tuntun lónìí}}",
         "activity.postsWeek": "{count, plural, other {{countText} ìfìwéránṣẹ́ tuntun lọ́sẹ̀ yìí}}",

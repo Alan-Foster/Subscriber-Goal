@@ -59,7 +59,7 @@
       },
       {
         "label": "Sub Goal - Create a CTA Button",
-        "description": "Create a new CTA button post",
+        "description": "Create a new Call to Action Button Post",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/create-cta"

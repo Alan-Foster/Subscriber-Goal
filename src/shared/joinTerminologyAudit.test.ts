@@ -31,12 +31,15 @@ const legacyVisiblePhrases = [
   "does not support subscribing",
   "Subscription could not be completed",
 ] as const;
+const approvedSubscribeButtonLabel =
+  "Subscribe Button and Call to Action Button (No Goal)";
 
 describe("visible Join terminology", () => {
   it("does not reintroduce legacy subscription-action copy", () => {
     const source = visibleCopyFiles
       .map((file) => readFileSync(join(globalThis.process.cwd(), file), "utf8"))
-      .join("\n");
+      .join("\n")
+      .replaceAll(approvedSubscribeButtonLabel, "");
     const readmeCurrentCopy = readFileSync(
       join(globalThis.process.cwd(), "README.md"),
       "utf8",

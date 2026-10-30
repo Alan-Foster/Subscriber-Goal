@@ -133,6 +133,7 @@ describe("devvit.json route alignment", () => {
 
     expect(createCtaItem).toMatchObject({
       label: "Sub Goal - Create a CTA Button",
+      description: "Create a new Call to Action Button Post",
       forUserType: "moderator",
     });
     expect(moderatorEraseItem).toMatchObject({

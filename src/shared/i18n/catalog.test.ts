@@ -32,6 +32,149 @@ describe("localization catalog", () => {
     }
   });
 
+  it("defines the two no-goal post type labels in all 31 locales", () => {
+    const expected = {
+      id: {
+        tiny: "Tombol Berlangganan dan Tombol Ajakan Bertindak (Tanpa Target)",
+        cta: "Tombol Ajakan Bertindak (Tanpa Berlangganan)",
+      },
+      bs: {
+        tiny: "Dugme za pretplatu i dugme za poziv na akciju (Bez cilja)",
+        cta: "Dugme za poziv na akciju (Bez pretplate)",
+      },
+      ca: {
+        tiny: "Botó de subscripció i botó de crida a l'acció (Sense objectiu)",
+        cta: "Botó de crida a l'acció (Sense subscripció)",
+      },
+      da: {
+        tiny: "Abonner-knap og handlingsknap (Intet mål)",
+        cta: "Handlingsknap (Uden abonnement)",
+      },
+      de: {
+        tiny: "Abonnieren-Button und Handlungsaufforderungs-Button (Kein Ziel)",
+        cta: "Handlungsaufforderungs-Button (Ohne Abonnieren)",
+      },
+      en: {
+        tiny: "Subscribe Button and Call to Action Button (No Goal)",
+        cta: "Call To Action Button (No Subscribing)",
+      },
+      hi: {
+        tiny: "सब्सक्राइब बटन और कार्रवाई के लिए प्रेरित करने वाला बटन (बिना लक्ष्य)",
+        cta: "कार्रवाई के लिए प्रेरित करने वाला बटन (बिना सब्सक्राइब किए)",
+      },
+      pa: {
+        tiny: "ਸਬਸਕ੍ਰਾਈਬ ਬਟਨ ਅਤੇ ਕਾਰਵਾਈ ਲਈ ਪ੍ਰੇਰਿਤ ਕਰਨ ਵਾਲਾ ਬਟਨ (ਬਿਨਾਂ ਟੀਚੇ)",
+        cta: "ਕਾਰਵਾਈ ਲਈ ਪ੍ਰੇਰਿਤ ਕਰਨ ਵਾਲਾ ਬਟਨ (ਸਬਸਕ੍ਰਾਈਬ ਕੀਤੇ ਬਿਨਾਂ)",
+      },
+      mr: {
+        tiny: "सबस्क्राइब बटण आणि कृतीस प्रवृत्त करणारे बटण (ध्येयाशिवाय)",
+        cta: "कृतीस प्रवृत्त करणारे बटण (सबस्क्राइब न करता)",
+      },
+      es: {
+        tiny: "Botón de suscripción y botón de llamada a la acción (Sin objetivo)",
+        cta: "Botón de llamada a la acción (Sin suscripción)",
+      },
+      et: {
+        tiny: "Tellimisnupp ja tegevusele kutsuv nupp (Ilma eesmärgita)",
+        cta: "Tegevusele kutsuv nupp (Ilma tellimiseta)",
+      },
+      fr: {
+        tiny: "Bouton d'abonnement et bouton d'appel à l'action (Sans objectif)",
+        cta: "Bouton d'appel à l'action (Sans abonnement)",
+      },
+      hr: {
+        tiny: "Gumb za pretplatu i gumb za poziv na akciju (Bez cilja)",
+        cta: "Gumb za poziv na akciju (Bez pretplate)",
+      },
+      is: {
+        tiny: "Áskriftarhnappur og aðgerðahvetjandi hnappur (Ekkert markmið)",
+        cta: "Aðgerðahvetjandi hnappur (Án áskriftar)",
+      },
+      it: {
+        tiny: "Pulsante di iscrizione e pulsante di invito all'azione (Senza obiettivo)",
+        cta: "Pulsante di invito all'azione (Senza iscrizione)",
+      },
+      lv: {
+        tiny: "Abonēšanas poga un aicinājuma rīkoties poga (Bez mērķa)",
+        cta: "Aicinājuma rīkoties poga (Bez abonēšanas)",
+      },
+      lt: {
+        tiny: "Prenumeratos mygtukas ir raginimo veikti mygtukas (Be tikslo)",
+        cta: "Raginimo veikti mygtukas (Be prenumeratos)",
+      },
+      hu: {
+        tiny: "Feliratkozás gomb és cselekvésre ösztönző gomb (Cél nélkül)",
+        cta: "Cselekvésre ösztönző gomb (Feliratkozás nélkül)",
+      },
+      nl: {
+        tiny: "Abonneerknop en oproep-tot-actieknop (Geen doel)",
+        cta: "Oproep-tot-actieknop (Zonder abonneren)",
+      },
+      nb: {
+        tiny: "Abonner-knapp og handlingsoppfordringsknapp (Uten mål)",
+        cta: "Handlingsoppfordringsknapp (Uten abonnement)",
+      },
+      pl: {
+        tiny: "Przycisk subskrypcji i przycisk wezwania do działania (Bez celu)",
+        cta: "Przycisk wezwania do działania (Bez subskrypcji)",
+      },
+      pt: {
+        tiny: "Botão de inscrição e botão de chamada para ação (Sem meta)",
+        cta: "Botão de chamada para ação (Sem inscrição)",
+      },
+      ro: {
+        tiny: "Buton de abonare și buton de îndemn la acțiune (Fără obiectiv)",
+        cta: "Buton de îndemn la acțiune (Fără abonare)",
+      },
+      sq: {
+        tiny: "Butoni i abonimit dhe butoni i thirrjes për veprim (Pa objektiv)",
+        cta: "Butoni i thirrjes për veprim (Pa abonim)",
+      },
+      sk: {
+        tiny: "Tlačidlo na odber a tlačidlo výzvy na akciu (Bez cieľa)",
+        cta: "Tlačidlo výzvy na akciu (Bez odberu)",
+      },
+      sl: {
+        tiny: "Gumb za naročanje in gumb s pozivom k dejanju (Brez cilja)",
+        cta: "Gumb s pozivom k dejanju (Brez naročanja)",
+      },
+      fi: {
+        tiny: "Tilauspainike ja toimintakehotuspainike (Ei tavoitetta)",
+        cta: "Toimintakehotuspainike (Ilman tilaamista)",
+      },
+      sv: {
+        tiny: "Prenumerationsknapp och uppmaningsknapp (Inget mål)",
+        cta: "Uppmaningsknapp (Utan prenumeration)",
+      },
+      tl: {
+        tiny: "Button sa Pag-subscribe at Button sa Paghikayat na Kumilos (Walang Goal)",
+        cta: "Button sa Paghikayat na Kumilos (Walang Pag-subscribe)",
+      },
+      tr: {
+        tiny: "Abone Ol Butonu ve Harekete Geçirici Buton (Hedef Yok)",
+        cta: "Harekete Geçirici Buton (Abonelik Olmadan)",
+      },
+      yo: {
+        tiny: "Bọ́tìnì Ìforúkọsílẹ̀ àti Bọ́tìnì Ìpè sí Ìgbésẹ̀ (Láìsí Àfojúsùn)",
+        cta: "Bọ́tìnì Ìpè sí Ìgbésẹ̀ (Láìsí Ìforúkọsílẹ̀)",
+      },
+    } as const;
+
+    expect(Object.keys(expected).sort()).toEqual([...appLanguages].sort());
+    for (const language of appLanguages) {
+      expect(
+        localizationCatalog.locales[language].messages["moderator.setup.tiny"],
+        `${language}.moderator.setup.tiny`,
+      ).toBe(expected[language].tiny);
+      expect(
+        localizationCatalog.locales[language].messages["moderator.setup.cta"],
+        `${language}.moderator.setup.cta`,
+      ).toBe(expected[language].cta);
+    }
+    expect(expected.en.tiny).not.toMatch(/\bCTA\b/u);
+    expect(expected.en.cta).not.toMatch(/\bCTA\b/u);
+  });
+
   it("defines Punjabi and Marathi metadata", () => {
     expect(getLanguageMetadata("pa")).toMatchObject({
       label: "ਪੰਜਾਬੀ",
