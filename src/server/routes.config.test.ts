@@ -18,9 +18,9 @@ describe("devvit.json route alignment", () => {
       tasks: {
         "posts-updater-job": { endpoint: string };
         "milestone-notification-job": { endpoint: string };
-        "invite-new-subs-poll-job": { endpoint: string; cron: string };
+        "invite-new-subs-poll-job": { endpoint: string };
         "invite-new-subs-delivery-job": { endpoint: string };
-        "invite-new-subs-report-job": { endpoint: string; cron: string };
+        "invite-new-subs-report-job": { endpoint: string };
       };
     };
     menu: {
@@ -96,16 +96,15 @@ describe("devvit.json route alignment", () => {
     expect(
       devvitConfig.scheduler.tasks["milestone-notification-job"].endpoint,
     ).toBe(internalRoutes.scheduler.milestoneNotificationJob);
+    // v2.3.1 temporary pause: restore poll `*/1 * * * *` and report `0 */12 * * *` crons to re-enable.
     expect(devvitConfig.scheduler.tasks["invite-new-subs-poll-job"]).toEqual({
       endpoint: internalRoutes.scheduler.inviteNewSubsPollJob,
-      cron: "*/1 * * * *",
     });
     expect(
       devvitConfig.scheduler.tasks["invite-new-subs-delivery-job"].endpoint,
     ).toBe(internalRoutes.scheduler.inviteNewSubsDeliveryJob);
     expect(devvitConfig.scheduler.tasks["invite-new-subs-report-job"]).toEqual({
       endpoint: internalRoutes.scheduler.inviteNewSubsReportJob,
-      cron: "0 */12 * * *",
     });
   });
 

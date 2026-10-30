@@ -115,12 +115,6 @@ const loadCurrentUser = async (
   timings?: InitTimings,
 ): Promise<CurrentUserContext> => {
   if (!context.userId) {
-    logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
-      workflow: "moderator_install_promo",
-      phase: "eligibility",
-      authenticated: false,
-      eligible: false,
-    });
     return { user: null, moderatorInstallPromoEligible: false };
   }
 
@@ -129,12 +123,6 @@ const loadCurrentUser = async (
       const currentUser = await reddit.getCurrentUser();
       if (currentUser?.username) {
         const moderatorInstallPromoEligible = currentUser.isModerator === true;
-        logDiagnostic("info", "moderator_install_promo_eligibility_checked", {
-          workflow: "moderator_install_promo",
-          phase: "eligibility",
-          authenticated: true,
-          eligible: moderatorInstallPromoEligible,
-        });
         return {
           user: {
             id: context.userId as string,

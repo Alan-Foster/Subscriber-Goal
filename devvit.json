@@ -116,15 +116,13 @@
         "endpoint": "/internal/scheduler/milestone-notification-job"
       },
       "invite-new-subs-poll-job": {
-        "endpoint": "/internal/scheduler/invite-new-subs-poll-job",
-        "cron": "*/1 * * * *"
+        "endpoint": "/internal/scheduler/invite-new-subs-poll-job"
       },
       "invite-new-subs-delivery-job": {
         "endpoint": "/internal/scheduler/invite-new-subs-delivery-job"
       },
       "invite-new-subs-report-job": {
-        "endpoint": "/internal/scheduler/invite-new-subs-report-job",
-        "cron": "0 */12 * * *"
+        "endpoint": "/internal/scheduler/invite-new-subs-report-job"
       }
     }
   },
