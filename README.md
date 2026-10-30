@@ -39,7 +39,6 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ![Select Create a New Goal from the dropdown next to Mod Tools](https://i.redd.it/qqrxpxt094af1.jpeg)
 
-
 ## Changelog
 
 - 2.3.1 - Added Hindi, Punjabi, Marathi, now 31 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
