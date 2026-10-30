@@ -2042,7 +2042,7 @@
         "errors.join.transport": "Could not join the community.",
         "errors.join.unsupported": "This post does not support joining.",
         "menu.createCta.description": "Create a new Call to Action Button Post",
-        "menu.createCta.label": "Sub Goal - Create a CTA Button",
+        "menu.createCta.label": "Sub Goal - Create an Action Button",
         "menu.createGoal.description": "Create a new subscriber goal post",
         "menu.createGoal.label": "Sub Goal - Create a New Goal",
         "menu.deleteGoal.description": "Delete the current subscriber goal post",

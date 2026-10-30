@@ -58,7 +58,7 @@
         "endpoint": "/internal/menu/create-goal"
       },
       {
-        "label": "Sub Goal - Create a CTA Button",
+        "label": "Sub Goal - Create an Action Button",
         "description": "Create a new Call to Action Button Post",
         "location": "subreddit",
         "forUserType": "moderator",
