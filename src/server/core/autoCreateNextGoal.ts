@@ -25,7 +25,7 @@ import {
   notifyHighlightFailure,
 } from "../utils/highlightFailureNotifications";
 import { logDiagnostic } from "../../shared/diagnostics";
-import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
+import { isCrosspostEligible } from "../utils/subredditSafety";
 import {
   acquireCommunityGoalMutationLease,
   releaseCommunityGoalMutationLease,
@@ -70,7 +70,7 @@ export async function processDueAutoCreateNextGoals({
     exhausted: 0,
   };
 
-  for (const [sourceIndex, sourcePostId] of duePostIds.entries()) {
+  for (const sourcePostId of duePostIds) {
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
     const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     let acquired = false;
@@ -178,27 +178,13 @@ export async function processDueAutoCreateNextGoals({
       }
 
       const subreddit = await reddit.getCurrentSubreddit();
-      const eligibility = getAutomaticGoalEligibility(subreddit);
-      if (!eligibility.eligible) {
-        summary.skipped += duePostIds.length - sourceIndex;
-        await cancelAllAutoCreateNextGoals(redis);
-        logDiagnostic("info", "auto_create_goal_ineligible", {
-          workflow: "auto_create_next_goal",
-          phase: "eligibility",
-          subredditType: eligibility.subredditType,
-          isSfw: eligibility.isSfw,
-          safetyStatus: eligibility.safetyStatus,
-          reason: eligibility.reason,
-        });
-        break;
-      }
-
       const subredditDisplayName =
         sourceGoalData.subredditDisplayName ?? subreddit.name;
       const messages = getSubGoalPostMessages(sourceGoalData.language);
-      const crosspost =
-        subreddit.name.toLowerCase() !==
-        appSettings.promoSubreddit.toLowerCase();
+      const crosspost = isCrosspostEligible(
+        subreddit,
+        appSettings.promoSubreddit,
+      );
 
       const { post, highlightResult } = await createSubscriberGoal({
         reddit,

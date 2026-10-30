@@ -59,12 +59,13 @@ import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
-import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
+import {
+  getCurrentSubredditNsfw,
+  isCrosspostEligible,
+} from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
-  createDefaultAfterSubscribeAction,
-  createDefaultCreatePostAction,
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
   isAfterSubscribePreset,
@@ -845,18 +846,11 @@ function buildCreateGoalDetailsForm(
   }
 
   const appSettings = getAppSettings();
-  const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
-  const sourceSubredditIsNsfw = sourceSubredditNsfw === true;
-  const shouldCrosspost =
-    sourceSubredditNsfw === false &&
-    subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
-  const crosspostHelpText = sourceSubredditIsNsfw
-    ? translate(draft.language, "moderator.details.crosspostNsfw")
-    : sourceSubredditNsfw === undefined
-      ? translate(draft.language, "moderator.details.crosspostUnknown")
-      : translate(draft.language, "moderator.details.crosspostHelp", {
-          subredditName: appSettings.promoSubreddit,
-        });
+  const sourceSubredditIsNsfw = getCurrentSubredditNsfw(subreddit) === true;
+  const shouldCrosspost = isCrosspostEligible(
+    subreddit,
+    appSettings.promoSubreddit,
+  );
 
   return {
     name: formNames.createSubscriberGoal,
@@ -904,16 +898,25 @@ function buildCreateGoalDetailsForm(
           helpText: translate(draft.language, "moderator.details.autoNextHelp"),
           defaultValue: true,
         },
-        {
-          name: "crosspost",
-          label: translate(draft.language, "moderator.details.crosspost", {
-            subredditName: appSettings.promoSubreddit,
-          }),
-          type: "boolean",
-          helpText: crosspostHelpText,
-          defaultValue: shouldCrosspost,
-          disabled: !shouldCrosspost,
-        },
+        ...(shouldCrosspost
+          ? [
+              {
+                name: "crosspost",
+                label: translate(
+                  draft.language,
+                  "moderator.details.crosspost",
+                  { subredditName: appSettings.promoSubreddit },
+                ),
+                type: "boolean" as const,
+                helpText: translate(
+                  draft.language,
+                  "moderator.details.crosspostHelp",
+                  { subredditName: appSettings.promoSubreddit },
+                ),
+                defaultValue: true,
+              },
+            ]
+          : []),
       ],
     },
   };
@@ -921,12 +924,17 @@ function buildCreateGoalDetailsForm(
 
 function buildCreateGoalFollowUpForm(
   draft: Extract<CreateGoalDraft, { stage: "follow-up" }>,
+  submittedValues?: CreateGoalFollowUpValues,
 ): NonNullable<UiResponse["showForm"]> {
   const presetDefaults = getAfterSubscribePresetDefaults(
     draft.details.afterSubscribePreset,
     draft.language,
   );
   const isCtaOnly = draft.details.kind === "cta-only";
+  const submittedButtonText = submittedValues?.afterSubscribeButtonText;
+  const submittedUrl = submittedValues?.afterSubscribeUrl;
+  const submittedColorTheme = submittedValues?.afterSubscribeColorTheme;
+  const submittedDeveloperField = submittedValues?.customDeveloperField;
   const sharedFields = [
     {
       name: "afterSubscribeButtonText",
@@ -934,11 +942,11 @@ function buildCreateGoalFollowUpForm(
         ? translate(draft.language, "moderator.followUp.ctaText")
         : translate(draft.language, "moderator.followUp.buttonText"),
       type: "string" as const,
-      ...(presetDefaults.buttonText
-        ? { defaultValue: presetDefaults.buttonText }
+      ...(submittedButtonText !== undefined || presetDefaults.buttonText
+        ? { defaultValue: submittedButtonText ?? presetDefaults.buttonText }
         : {}),
       helpText: translate(draft.language, "moderator.followUp.textHelp"),
-      required: false,
+      required: true,
     },
     ...(presetDefaults.showUrl
       ? [
@@ -946,8 +954,11 @@ function buildCreateGoalFollowUpForm(
             name: "afterSubscribeUrl",
             label: translate(draft.language, "moderator.followUp.url"),
             type: "string" as const,
+            ...(submittedUrl !== undefined
+              ? { defaultValue: submittedUrl }
+              : {}),
             helpText: translate(draft.language, "moderator.followUp.urlHelp"),
-            required: false,
+            required: true,
           },
         ]
       : []),
@@ -957,7 +968,7 @@ function buildCreateGoalFollowUpForm(
         ? translate(draft.language, "moderator.followUp.ctaColor")
         : translate(draft.language, "moderator.followUp.buttonColor"),
       type: "select" as const,
-      defaultValue: [presetDefaults.colorTheme],
+      defaultValue: submittedColorTheme ?? [presetDefaults.colorTheme],
       options: getColorOptions(draft.language),
       helpText: translate(draft.language, "moderator.followUp.buttonColorHelp"),
       required: true,
@@ -970,6 +981,9 @@ function buildCreateGoalFollowUpForm(
         draft.language,
         "moderator.followUp.developerFieldHelp",
       ),
+      ...(submittedDeveloperField !== undefined
+        ? { defaultValue: submittedDeveloperField }
+        : {}),
       required: false,
     },
   ];
@@ -1233,20 +1247,19 @@ async function submitCreateGoalStepTwo(
         return;
       }
       const appSettings = getAppSettings();
-      const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
-      const defaultCrosspost =
-        sourceSubredditNsfw === false &&
-        subreddit.name.toLowerCase() !==
-          appSettings.promoSubreddit.toLowerCase();
+      const crosspostEligible = isCrosspostEligible(
+        subreddit,
+        appSettings.promoSubreddit,
+      );
       details = {
         kind: "subscriber-goal",
         postTitle,
         subscriberGoal,
         colorTheme,
         crosspost:
-          "crosspost" in values && typeof values.crosspost === "boolean"
-            ? values.crosspost
-            : defaultCrosspost,
+          crosspostEligible &&
+          "crosspost" in values &&
+          values.crosspost === true,
         afterSubscribePreset,
         autoCreateNextGoal:
           !("autoCreateNextGoal" in values) ||
@@ -1370,16 +1383,6 @@ async function submitCreateGoalFollowUp(
       subreddit.name,
       values.afterSubscribeUrl,
     );
-    const invalidConfigurationFallback = isNsfw
-      ? createDefaultCreatePostAction({
-          language: draft.language,
-          subredditName: subreddit.name,
-        })
-      : createDefaultAfterSubscribeAction({
-          language: draft.language,
-          subredditName: subreddit.name,
-          subredditType: subreddit.type,
-        });
     const afterSubscribeResult = resolveAfterSubscribeAction({
       type: resolvedActionInput.type,
       buttonText: replacedNsfwDynamicPreset
@@ -1393,19 +1396,35 @@ async function submitCreateGoalFollowUp(
         draft.details.kind === "cta-only"
           ? defaultAfterSubscribeColorTheme
           : draft.details.colorTheme,
-      invalidConfigurationFallback,
     });
-    const persistedAfterSubscribePreset =
-      afterSubscribeResult.invalidConfiguration
-        ? isNsfw
-          ? "create-post"
-          : getDefaultAfterSubscribePreset(subreddit.type)
-        : normalizedPreset;
+    if (afterSubscribeResult.invalidConfiguration) {
+      res.json({
+        showToast: translate(
+          draft.language,
+          "moderator.form.actionConfigurationInvalid",
+        ),
+        showForm: buildCreateGoalFollowUpForm(draft, values),
+      });
+      return;
+    }
+    const persistedAfterSubscribePreset = normalizedPreset;
     const appSettings = getAppSettings();
     const autoCreateNextGoal =
       draft.details.kind === "subscriber-goal"
         ? draft.details.autoCreateNextGoal
         : false;
+    const crosspostEligible = isCrosspostEligible(
+      subreddit,
+      appSettings.promoSubreddit,
+    );
+    const crosspostBecameIneligible =
+      draft.details.kind === "subscriber-goal" &&
+      draft.details.crosspost &&
+      !crosspostEligible;
+    const crosspost =
+      draft.details.kind === "subscriber-goal" &&
+      draft.details.crosspost &&
+      crosspostEligible;
     const { post, crosspostDispatchResult, highlightResult, flairResult } =
       await createSubscriberGoal({
         reddit,
@@ -1417,10 +1436,7 @@ async function submitCreateGoalFollowUp(
             ? { goal: draft.details.subscriberGoal }
             : {}),
           subredditDisplayName: draft.subredditDisplayName,
-          crosspost:
-            draft.details.kind === "subscriber-goal"
-              ? draft.details.crosspost
-              : false,
+          crosspost,
           colorTheme:
             draft.details.kind === "cta-only" &&
             afterSubscribeResult.action.type !== "disabled"
@@ -1450,10 +1466,6 @@ async function submitCreateGoalFollowUp(
       });
 
     await safelyDeleteCreateGoalDraft(userId);
-    const crosspost =
-      draft.details.kind === "subscriber-goal"
-        ? draft.details.crosspost
-        : false;
     console.info(
       `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${crosspost}`,
     );
@@ -1506,11 +1518,11 @@ async function submitCreateGoalFollowUp(
       flairResult.status === "omitted"
         ? ` ${translate(draft.language, "moderator.create.flairWarning")}`
         : "";
-    const configurationWarning = afterSubscribeResult.invalidConfiguration
-      ? ` ${translate(draft.language, "moderator.create.configurationWarning")}`
+    const crosspostEligibilityWarning = crosspostBecameIneligible
+      ? ` ${translate(draft.language, "moderator.create.crosspostIneligible")}`
       : "";
     res.json({
-      showToast: `${baseToast}${flairWarning}${configurationWarning}`,
+      showToast: `${baseToast}${flairWarning}${crosspostEligibilityWarning}`,
       navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
     });
   } catch (error) {

@@ -892,7 +892,7 @@ describe("internalUi color theme create goal routes", () => {
     });
     expect(
       response.showForm.form.fields.find((field) => field.name === "crosspost"),
-    ).toMatchObject({ defaultValue: true, disabled: false });
+    ).toMatchObject({ defaultValue: true });
     expect(
       response.showForm.form.fields.find(
         (field) => field.name === "afterSubscribePreset",
@@ -1211,6 +1211,100 @@ describe("internalUi color theme create goal routes", () => {
     });
   });
 
+  it("ignores a forged crosspost value when the community is ineligible", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "private",
+      nsfw: false,
+    });
+    seedCreateGoalDraft("regular", "en", { stage: "details" });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          postTitle: "A Private Goal",
+          subscriberGoal: 250,
+          colorTheme: ["pink"],
+          crosspost: true,
+          autoCreateNextGoal: true,
+        },
+      } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(
+      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
+    ).toMatchObject({ details: { crosspost: false } });
+  });
+
+  it("treats an omitted eligible crosspost value as disabled", async () => {
+    seedCreateGoalDraft("regular", "en", { stage: "details" });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          postTitle: "A Local Goal",
+          subscriberGoal: 250,
+          colorTheme: ["pink"],
+          autoCreateNextGoal: true,
+        },
+      } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(
+      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
+    ).toMatchObject({ details: { crosspost: false } });
+  });
+
+  it("skips crossposting with a warning when eligibility changes before creation", async () => {
+    seedCreateGoalDraft("regular", "en", { crosspost: true });
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "private",
+      nsfw: false,
+    });
+    const routes = createRouteHarness();
+    const res = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      res,
+    );
+
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      expect.anything(),
+      expect.objectContaining({ id: "t3_newpost" }),
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+      undefined,
+      "regular",
+      expect.anything(),
+      "top-post-day",
+    );
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showToast: expect.stringContaining(
+          "Crossposting was skipped because this community is no longer eligible.",
+        ),
+      }),
+    );
+  });
+
   it("stores Tiny Step 2 and opens a follow-up form without goal-only fields", async () => {
     seedCreateGoalDraft("tiny", "en", { stage: "details" });
     const routes = createRouteHarness();
@@ -1335,6 +1429,7 @@ describe("internalUi color theme create goal routes", () => {
               fields: Array<{
                 name: string;
                 defaultValue?: unknown;
+                required?: boolean;
                 options?: Array<{ label: string; value: string }>;
               }>;
             };
@@ -1352,6 +1447,15 @@ describe("internalUi color theme create goal routes", () => {
           ?.defaultValue,
       ).toBe(buttonText);
       expect(
+        fields.find((field) => field.name === "afterSubscribeButtonText")
+          ?.required,
+      ).toBe(true);
+      if (showUrl) {
+        expect(
+          fields.find((field) => field.name === "afterSubscribeUrl")?.required,
+        ).toBe(true);
+      }
+      expect(
         fields.find((field) => field.name === "afterSubscribeColorTheme")
           ?.defaultValue,
       ).toEqual([colorTheme]);
@@ -1368,48 +1472,54 @@ describe("internalUi color theme create goal routes", () => {
     },
   );
 
-  it("disables goal crossposting when the source subreddit is NSFW", async () => {
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      nsfw: true,
-    });
-    const routes = createRouteHarness();
-    const json = vi.fn();
-    const res = { json } as unknown as Response;
+  it.each([
+    ["NSFW", { name: "ExampleSub", type: "public", nsfw: true }],
+    ["unknown-safety", { name: "ExampleSub", type: "public" }],
+    ["restricted", { name: "ExampleSub", type: "restricted", nsfw: false }],
+    ["private", { name: "ExampleSub", type: "private", nsfw: false }],
+    ["promotional", { name: "SubGoal", type: "public", nsfw: false }],
+  ] as const)(
+    "hides goal crossposting for %s communities",
+    async (_label, data) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        numberOfSubscribers: 100,
+        ...data,
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const res = { json } as unknown as Response;
 
-    await routes.get(internalRoutes.forms.createGoalSetup)?.(
-      {
-        body: {
-          language: ["en"],
-          subredditDisplayName: "ExampleSub",
-          postHeight: ["regular"],
-        },
-      } as Request,
-      res,
-    );
+      await routes.get(internalRoutes.forms.createGoalSetup)?.(
+        {
+          body: {
+            language: ["en"],
+            subredditDisplayName: data.name,
+            postHeight: ["regular"],
+          },
+        } as Request,
+        res,
+      );
 
-    const response = json.mock.calls[0]?.[0] as {
-      showForm: {
-        form: {
-          fields: Array<{
-            name: string;
-            defaultValue?: unknown;
-            disabled?: boolean;
-            helpText?: string;
-          }>;
+      const response = json.mock.calls[0]?.[0] as {
+        showForm: {
+          form: {
+            fields: Array<{
+              name: string;
+              defaultValue?: unknown;
+              disabled?: boolean;
+              helpText?: string;
+            }>;
+          };
         };
       };
-    };
-    expect(
-      response.showForm.form.fields.find((field) => field.name === "crosspost"),
-    ).toMatchObject({
-      defaultValue: false,
-      disabled: true,
-      helpText: "Crossposting is disabled for NSFW source subreddits.",
-    });
-  });
+      expect(
+        response.showForm.form.fields.find(
+          (field) => field.name === "crosspost",
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   it("rejects invalid setup selections without storing a draft", async () => {
     const routes = createRouteHarness();
@@ -1685,7 +1795,7 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
-  it("falls back to Top Post and warns when CTA data is invalid", async () => {
+  it("rejects invalid CTA data and preserves the submitted values", async () => {
     seedCreateGoalDraft("tiny", "en", {
       colorTheme: "blue",
       afterSubscribePreset: "web-link",
@@ -1704,26 +1814,34 @@ describe("internalUi color theme create goal routes", () => {
       res,
     );
 
-    expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledWith(
-      hoisted.redis,
-      expect.anything(),
-      expect.objectContaining({ id: "t3_newpost" }),
-      "ExampleSub",
-      "blue",
-      "en",
-      {
-        type: "top-post-day",
-        buttonText: "View the Top Post Today",
-        colorTheme: "blue",
-      },
-      "top-post-day",
-    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        showToast:
-          "Subscriber Goal post created! The button configuration was invalid, so the default action was used.",
+        showToast: expect.stringContaining(
+          "Please enter button text between 5 and 50 characters",
+        ),
+        showForm: expect.objectContaining({
+          form: expect.objectContaining({
+            fields: expect.arrayContaining([
+              expect.objectContaining({
+                name: "afterSubscribeButtonText",
+                defaultValue: "No",
+              }),
+              expect.objectContaining({
+                name: "afterSubscribeUrl",
+                defaultValue: "http://insecure.example",
+              }),
+              expect.objectContaining({
+                name: "afterSubscribeColorTheme",
+                defaultValue: ["pink"],
+              }),
+            ]),
+          }),
+        }),
       }),
     );
+    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(true);
   });
 
   it.each([
@@ -1731,7 +1849,7 @@ describe("internalUi color theme create goal routes", () => {
     ["discord", {}],
     ["wiki", {}],
   ] as const)(
-    "falls back to Top Post when the %s preset has no URL",
+    "rejects the %s preset when its required URL is missing",
     async (afterSubscribePreset, body) => {
       seedCreateGoalDraft("tiny", "en", {
         colorTheme: "red",
@@ -1744,20 +1862,8 @@ describe("internalUi color theme create goal routes", () => {
         { json: vi.fn() } as unknown as Response,
       );
 
-      expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledWith(
-        hoisted.redis,
-        expect.anything(),
-        expect.objectContaining({ id: "t3_newpost" }),
-        "ExampleSub",
-        "red",
-        "en",
-        {
-          type: "top-post-day",
-          buttonText: "View the Top Post Today",
-          colorTheme: "blue",
-        },
-        "top-post-day",
-      );
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
     },
   );
 

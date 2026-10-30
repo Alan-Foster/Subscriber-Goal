@@ -181,7 +181,7 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("creates the next default milestone and carries display settings forward", async () => {
+  it("creates the next milestone below the onboarding minimum and carries display settings forward", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
 
     await expect(
@@ -280,7 +280,7 @@ describe("processDueAutoCreateNextGoals", () => {
     );
   });
 
-  it("cancels queued goals without creating in an NSFW subreddit", async () => {
+  it("creates locally without crossposting in an NSFW subreddit", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -302,14 +302,18 @@ describe("processDueAutoCreateNextGoals", () => {
       }),
     ).resolves.toEqual({
       due: 1,
-      created: 0,
-      skipped: 1,
+      created: 1,
+      skipped: 0,
       failed: 0,
       rescheduled: 0,
       exhausted: 0,
     });
 
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ crosspost: false }),
+      }),
+    );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
     );
@@ -317,7 +321,7 @@ describe("processDueAutoCreateNextGoals", () => {
   });
 
   it.each(["restricted", "private"])(
-    "cancels queued goals without creating in a %s subreddit",
+    "creates locally without crossposting in a %s subreddit",
     async (type) => {
       hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -340,13 +344,17 @@ describe("processDueAutoCreateNextGoals", () => {
         }),
       ).resolves.toMatchObject({
         due: 1,
-        created: 0,
-        skipped: 1,
+        created: 1,
+        skipped: 0,
         failed: 0,
         rescheduled: 0,
       });
 
-      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({ crosspost: false }),
+        }),
+      );
       expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
         hoisted.redis,
       );
@@ -354,7 +362,7 @@ describe("processDueAutoCreateNextGoals", () => {
     },
   );
 
-  it("fails closed when subreddit safety metadata is missing", async () => {
+  it("creates locally without crossposting when safety metadata is missing", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -363,17 +371,23 @@ describe("processDueAutoCreateNextGoals", () => {
       type: "public",
     });
 
-    await processDueAutoCreateNextGoals({
-      reddit: hoisted.reddit as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["reddit"],
-      redis: hoisted.redis as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["redis"],
-      appSettings: baseSettings,
-    });
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as Parameters<
+          typeof processDueAutoCreateNextGoals
+        >[0]["reddit"],
+        redis: hoisted.redis as Parameters<
+          typeof processDueAutoCreateNextGoals
+        >[0]["redis"],
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ created: 1, skipped: 0, failed: 0 });
 
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ crosspost: false }),
+      }),
+    );
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
     );

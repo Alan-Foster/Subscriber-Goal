@@ -65,10 +65,12 @@ export async function reconcileOnboardingForLifecycle(
     lifecycleSource,
     nowMs = Date.now(),
     appSettings = getAppSettings(),
+    allowOnboardingRearm = true,
   }: {
     lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">;
     nowMs?: number;
     appSettings?: ServerAppSettings;
+    allowOnboardingRearm?: boolean;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
   try {
@@ -77,6 +79,7 @@ export async function reconcileOnboardingForLifecycle(
         lifecycleSource,
         nowMs,
         appSettings,
+        allowOnboardingRearm,
         mutationLease,
       }),
     );
@@ -95,11 +98,13 @@ async function reconcileOnboardingForLifecycleUnderLease(
     lifecycleSource,
     nowMs,
     appSettings,
+    allowOnboardingRearm,
     mutationLease,
   }: {
     lifecycleSource: Extract<OnboardingLifecycleSource, "install" | "upgrade">;
     nowMs: number;
     appSettings: ServerAppSettings;
+    allowOnboardingRearm: boolean;
     mutationLease: CommunityGoalMutationLease;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
@@ -316,6 +321,18 @@ async function reconcileOnboardingForLifecycleUnderLease(
 
       if (isWorkflowActive(previousGoal, previousReminder)) {
         const reason = "active_workflow_preserved";
+        logReconciliationDecision(
+          lifecycleSource,
+          "unchanged",
+          reason,
+          previousGoal,
+          previousReminder,
+        );
+        return { status: "unchanged", reason };
+      }
+
+      if (!allowOnboardingRearm) {
+        const reason = "onboarding_ineligible";
         logReconciliationDecision(
           lifecycleSource,
           "unchanged",

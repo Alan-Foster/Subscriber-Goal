@@ -302,7 +302,7 @@ describe("onAppChanged", () => {
     expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { lifecycleSource: "install" },
+      { lifecycleSource: "install", allowOnboardingRearm: true },
     );
     expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.rememberAppInstaller).toHaveBeenCalledWith(
@@ -341,7 +341,7 @@ describe("onAppChanged", () => {
     expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { lifecycleSource: "upgrade" },
+      { lifecycleSource: "upgrade", allowOnboardingRearm: true },
     );
     expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
@@ -371,7 +371,11 @@ describe("onAppChanged", () => {
 
     await onAppChanged({ lifecycleSource: "upgrade" });
 
-    expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
+    expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { lifecycleSource: "upgrade", allowOnboardingRearm: false },
+    );
     expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
       expect.anything(),
       39,
@@ -424,7 +428,11 @@ describe("onAppChanged", () => {
         expect.any(Number),
         "subreddit_not_public",
       );
-      expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
+      expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        { lifecycleSource, allowOnboardingRearm: false },
+      );
     },
   );
 
@@ -452,7 +460,11 @@ describe("onAppChanged", () => {
       expect.any(Number),
       "subreddit_not_sfw",
     );
-    expect(hoisted.reconcileOnboardingForLifecycle).not.toHaveBeenCalled();
+    expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { lifecycleSource: "install", allowOnboardingRearm: false },
+    );
   });
 
   it("does not arm install onboarding when eligibility lookup fails", async () => {

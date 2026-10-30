@@ -84,7 +84,10 @@ export async function onAppChanged({
   await runPhase("subscriber_stats_migration", () =>
     initializeSubscriberStatsMigration(redis),
   );
-  if (shouldInitializeReleaseOnboarding(lifecycleSource)) {
+  if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
+    const automaticOnboardingEnabled = shouldInitializeReleaseOnboarding(
+      lifecycleSource,
+    );
     if (!currentSubreddit) {
       try {
         currentSubreddit = await reddit.getCurrentSubreddit();
@@ -114,34 +117,35 @@ export async function onAppChanged({
     console.info(
       `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} safetyStatus=${eligibility.safetyStatus} isSfw=${eligibility.isSfw} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
     );
-    let reconciliationStatus = "not_eligible";
-    if (eligibility.eligible) {
-      const reconciliation = await reconcileOnboardingForLifecycle(
-        reddit,
-        redis,
-        {
-          lifecycleSource:
-            lifecycleSource === "install" ? "install" : "upgrade",
-        },
-      );
-      reconciliationStatus = reconciliation.status;
-    }
-    await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
-    await scheduleOnboardingReminder(redis, { lifecycleSource });
-    if (!eligibility.eligible) {
-      const nowMs = Date.now();
-      await markOnboardingReminderIneligible(
-        redis,
-        eligibility.subscriberCount,
-        nowMs,
-        eligibility.reason,
-      );
-      await markOnboardingSubscriberGoalIneligible(
-        redis,
-        eligibility.subscriberCount,
-        nowMs,
-        eligibility.reason,
-      );
+    const reconciliation = await reconcileOnboardingForLifecycle(
+      reddit,
+      redis,
+      {
+        lifecycleSource:
+          lifecycleSource === "install" ? "install" : "upgrade",
+        allowOnboardingRearm:
+          automaticOnboardingEnabled && eligibility.eligible,
+      },
+    );
+    const reconciliationStatus = reconciliation.status;
+    if (automaticOnboardingEnabled) {
+      await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
+      await scheduleOnboardingReminder(redis, { lifecycleSource });
+      if (!eligibility.eligible) {
+        const nowMs = Date.now();
+        await markOnboardingReminderIneligible(
+          redis,
+          eligibility.subscriberCount,
+          nowMs,
+          eligibility.reason,
+        );
+        await markOnboardingSubscriberGoalIneligible(
+          redis,
+          eligibility.subscriberCount,
+          nowMs,
+          eligibility.reason,
+        );
+      }
     }
     const [goalState, reminderState] = await Promise.all([
       getOnboardingSubscriberGoalState(redis),

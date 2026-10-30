@@ -311,6 +311,29 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
+  it("does not arm onboarding when rearming is disabled and no goal exists", async () => {
+    await expect(
+      reconcileOnboardingForLifecycle(
+        createReddit() as never,
+        redis as never,
+        {
+          lifecycleSource: "upgrade",
+          nowMs,
+          allowOnboardingRearm: false,
+        },
+      ),
+    ).resolves.toEqual({
+      status: "unchanged",
+      reason: "onboarding_ineligible",
+    });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toEqual({});
+    await expect(redis.hGetAll(onboardingReminderStateKey)).resolves.toEqual(
+      {},
+    );
+  });
+
   it("records a highlighted goal as existing without arming timers", async () => {
     const reddit = createReddit({ highlighted: true });
 
@@ -487,7 +510,11 @@ describe("onboarding lifecycle reconciliation", () => {
       reconcileOnboardingForLifecycle(
         createReddit({ posts: [post] }) as never,
         redis as never,
-        { lifecycleSource: "upgrade", nowMs },
+        {
+          lifecycleSource: "upgrade",
+          nowMs,
+          allowOnboardingRearm: false,
+        },
       ),
     ).resolves.toMatchObject({
       status: "replacement_scheduled",
