@@ -117,6 +117,8 @@ export type SubGoalData = {
   headerText?: string | null;
   colorTheme: SubGoalColorTheme;
   autoCreateNextGoal: boolean;
+  /** Distinguishes an explicit opt-out from posts created before this setting existed. */
+  autoCreateNextGoalConfigured: boolean;
   language: SubGoalLanguage;
   postHeight: SubGoalPostHeight;
   afterSubscribeAction: AfterSubscribeAction;
@@ -402,6 +404,8 @@ export async function getSubGoalData(
     headerText: headerText && headerText.length > 0 ? headerText : null,
     colorTheme: resolvedColorTheme,
     autoCreateNextGoal: autoCreateNextGoal === "true",
+    autoCreateNextGoalConfigured:
+      autoCreateNextGoal === "true" || autoCreateNextGoal === "false",
     language: resolvedLanguage,
     postHeight: resolvedHeight,
     afterSubscribeAction,
@@ -417,7 +421,10 @@ export async function setSubGoalData(
   postId: string,
   data: Omit<
     SubGoalData,
-    "postKind" | "afterSubscribeAction" | "afterSubscribePreset"
+    | "postKind"
+    | "afterSubscribeAction"
+    | "afterSubscribePreset"
+    | "autoCreateNextGoalConfigured"
   > & {
     postKind?: PostKind;
     afterSubscribeAction?: AfterSubscribeAction;

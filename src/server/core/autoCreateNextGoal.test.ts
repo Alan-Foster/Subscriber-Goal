@@ -40,6 +40,7 @@ const hoisted = vi.hoisted(() => ({
   notifyHighlightFailure: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
+  checkAppAccountHealth: vi.fn(),
   reddit: {
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn(),
@@ -99,6 +100,10 @@ vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
 }));
 
+vi.mock("./appAccountHealth", () => ({
+  checkAppAccountHealth: hoisted.checkAppAccountHealth,
+}));
+
 vi.mock("../utils/highlightFailureNotifications", () => ({
   getPostUrl: vi.fn((post: { permalink?: string; url?: string }) =>
     post.permalink ? `https://reddit.com${post.permalink}` : post.url,
@@ -113,6 +118,12 @@ describe("processDueAutoCreateNextGoals", () => {
     hoisted.redisHashes.clear();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "healthy",
+      healthy: true,
+      permissions: ["posts"],
+      notification: "not_needed",
+    });
     hoisted.recordAutoCreateNextGoalFailure.mockResolvedValue({
       failureCount: 1,
       retryAt: 301_000,
@@ -178,6 +189,101 @@ describe("processDueAutoCreateNextGoals", () => {
       exhausted: 0,
     });
 
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("suppresses a due successor while orphaned-goal onboarding owns it", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.redisHashes.set(
+      "onboarding_subscriber_goal_v4_state",
+      new Map([
+        ["intent", "orphaned_completed_goal"],
+        ["replacementSourcePostId", "t3_source"],
+        ["status", "awaiting_warning"],
+      ]),
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ due: 1, created: 0, skipped: 1 });
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_source",
+    );
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("lets a valid Tiny primary suppress a due milestone successor", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_tiny"]);
+    hoisted.redisHashes.set(
+      "subscriber_goals",
+      new Map([
+        ["t3_tiny_post_kind", "subscribe-only-v1"],
+        ["t3_tiny_post_height", "tiny"],
+      ]),
+    );
+    hoisted.reddit.getPostById.mockImplementation(async (postId: string) => ({
+      id: postId,
+      createdAt: new Date(),
+      removedByCategory: undefined,
+    }));
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ due: 1, created: 0, skipped: 1 });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("adopts a newer completed classic instead of creating from an older source", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
+      "t3_source",
+      "t3_newer_completed",
+    ]);
+    hoisted.redisHashes.set(
+      "subscriber_goals",
+      new Map([
+        ["t3_source_post_kind", "subscriber-goal-v1"],
+        ["t3_source_post_height", "regular"],
+        ["t3_newer_completed_post_kind", "subscriber-goal-v1"],
+        ["t3_newer_completed_post_height", "short"],
+      ]),
+    );
+    hoisted.reddit.getPostById.mockImplementation(async (postId: string) => ({
+      id: postId,
+      createdAt: new Date(
+        postId === "t3_source"
+          ? "2026-09-01T00:00:00Z"
+          : "2026-09-02T00:00:00Z",
+      ),
+      removedByCategory: undefined,
+    }));
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ due: 1, created: 0, skipped: 1 });
+    expect(
+      hoisted.redisHashes
+        .get("auto_create_next_goal_v1_successors")
+        ?.get("t3_source"),
+    ).toBe("t3_newer_completed");
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_source",
+    );
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
@@ -280,7 +386,7 @@ describe("processDueAutoCreateNextGoals", () => {
     );
   });
 
-  it("creates locally without crossposting in an NSFW subreddit", async () => {
+  it("suppresses automatic replacement in an NSFW subreddit", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -302,26 +408,19 @@ describe("processDueAutoCreateNextGoals", () => {
       }),
     ).resolves.toEqual({
       due: 1,
-      created: 1,
-      skipped: 0,
+      created: 0,
+      skipped: 1,
       failed: 0,
       rescheduled: 0,
       exhausted: 0,
     });
 
-    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.objectContaining({ crosspost: false }),
-      }),
-    );
-    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
-      hoisted.redis,
-    );
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
   });
 
   it.each(["restricted", "private"])(
-    "creates locally without crossposting in a %s subreddit",
+    "suppresses automatic replacement in a %s subreddit",
     async (type) => {
       hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -344,25 +443,18 @@ describe("processDueAutoCreateNextGoals", () => {
         }),
       ).resolves.toMatchObject({
         due: 1,
-        created: 1,
-        skipped: 0,
+        created: 0,
+        skipped: 1,
         failed: 0,
         rescheduled: 0,
       });
 
-      expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
-        expect.objectContaining({
-          options: expect.objectContaining({ crosspost: false }),
-        }),
-      );
-      expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
-        hoisted.redis,
-      );
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
       expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
     },
   );
 
-  it("creates locally without crossposting when safety metadata is missing", async () => {
+  it("suppresses automatic replacement when safety metadata is missing", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
@@ -381,16 +473,9 @@ describe("processDueAutoCreateNextGoals", () => {
         >[0]["redis"],
         appSettings: baseSettings,
       }),
-    ).resolves.toMatchObject({ created: 1, skipped: 0, failed: 0 });
+    ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
 
-    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        options: expect.objectContaining({ crosspost: false }),
-      }),
-    );
-    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
-      hoisted.redis,
-    );
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
   });
 

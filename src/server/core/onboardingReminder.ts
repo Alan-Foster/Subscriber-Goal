@@ -16,6 +16,8 @@ import {
   onboardingMaxAttempts,
   onboardingMinimumSubscriberCount,
   scheduleOnboardingSubscriberGoalAfterWarning,
+  saveOnboardingState,
+  selectOnboardingGoalStaggerMinutes,
   selectOnboardingRetryDelayMs,
   type OnboardingDetectionDiagnostics,
   type OnboardingExistingSource,
@@ -30,6 +32,30 @@ import {
   onboardingReminderStaggerMaxMinutes,
   onboardingReminderStaggerMinMinutes,
 } from "./onboardingConfig";
+
+function isExpectedCompletedReplacement(
+  state:
+    | Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>>
+    | undefined,
+  postId: string | undefined,
+): boolean {
+  return Boolean(
+    state?.intent === "orphaned_completed_goal" &&
+    state.replacementSourcePostId === postId,
+  );
+}
+
+function isUpgradeOnboardingIntent(
+  state:
+    | Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>>
+    | undefined,
+): boolean {
+  return Boolean(
+    state?.lifecycleSource === "upgrade" &&
+    (state.intent === "missing_goal" ||
+      state.intent === "orphaned_completed_goal"),
+  );
+}
 
 export {
   onboardingReminderStaggerMaxMinutes,
@@ -127,11 +153,14 @@ export function buildOnboardingReminderMessage(
   subredditName: string,
   lifecycleSource: OnboardingLifecycleSource = "install",
   language?: unknown,
+  intent: "missing_goal" | "orphaned_completed_goal" = "missing_goal",
 ): OnboardingReminderMessage {
   const isUpgrade = lifecycleSource === "upgrade";
   const automaticCreationNotice = translate(
     language,
-    "outbound.onboarding.automation",
+    intent === "orphaned_completed_goal"
+      ? "outbound.onboarding.orphanedAutomation"
+      : "outbound.onboarding.automation",
     {
       delay: formatDelay(onboardingGoalBaseDelayMs),
       maxMinutes: onboardingGoalStaggerMaxMinutes.toLocaleString("en-US"),
@@ -484,6 +513,47 @@ export async function processDueOnboardingReminder({
       };
     }
 
+    const activeGoalState = await getOnboardingSubscriberGoalState(redis);
+    const upgradeOnboardingIntent = isUpgradeOnboardingIntent(activeGoalState);
+    const recoveredFromAccountPause = Boolean(
+      upgradeOnboardingIntent && activeGoalState?.pausedForAccountRecovery,
+    );
+    let accountHealthVerified = false;
+    if (upgradeOnboardingIntent && activeGoalState) {
+      const preflightHealth = await checkAppAccountHealth({
+        reddit,
+        redis,
+        subredditName: subreddit.name,
+        subredditId: subreddit.id,
+        language: subreddit.language,
+        notify: false,
+        scheduleUnknownRetry: false,
+        nowMs,
+      });
+      if (!preflightHealth.healthy || preflightHealth.status !== "healthy") {
+        const retryAt = nowMs + 5 * 60 * 1000;
+        await saveOnboardingState(redis, {
+          ...activeGoalState,
+          status: "awaiting_warning",
+          pausedForAccountRecovery: true,
+        });
+        await saveOnboardingReminderState(redis, {
+          ...reloaded,
+          status: "pending",
+          nextRunAt: retryAt,
+        });
+        logDiagnostic("info", "onboarding_paused_for_account_recovery", {
+          workflow: "onboarding_reminder",
+          phase: "permission_preflight",
+          lifecycleSource: reloaded.lifecycleSource,
+          sourcePostId: activeGoalState.replacementSourcePostId ?? "none",
+          nextRunAt: retryAt,
+        });
+        return { status: "paused", ...base };
+      }
+      accountHealthVerified = true;
+    }
+
     const existing = await ensureExistingSubscriberGoalHighlighted({
       reddit,
       redis,
@@ -506,7 +576,37 @@ export async function processDueOnboardingReminder({
       existing.status === "completed" &&
       existing.postId &&
       existing.source &&
-      existing.completedTime
+      upgradeOnboardingIntent &&
+      !isExpectedCompletedReplacement(activeGoalState, existing.postId)
+    ) {
+      await markOnboardingSubscriberGoalCompleted(
+        redis,
+        existing.postId,
+        existing.source,
+        "completed_no_recovery",
+        nowMs,
+      );
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        result: "completed_no_recovery",
+        postId: existing.postId,
+        existingSource: existing.source,
+      });
+      return {
+        status: "existing",
+        postId: existing.postId,
+        existingSource: existing.source,
+        ...inspected,
+      };
+    }
+    if (
+      existing.status === "completed" &&
+      existing.postId &&
+      existing.source &&
+      existing.completedTime &&
+      !isExpectedCompletedReplacement(activeGoalState, existing.postId)
     ) {
       const completed = await reconcileCompletedGoal({
         reddit,
@@ -540,7 +640,11 @@ export async function processDueOnboardingReminder({
         ...inspected,
       };
     }
-    if (existing.status !== "missing" && existing.postId) {
+    if (
+      existing.status !== "missing" &&
+      existing.postId &&
+      !isExpectedCompletedReplacement(activeGoalState, existing.postId)
+    ) {
       const existingSource = existing.source ?? "tracked";
       await saveOnboardingReminderState(redis, {
         ...reloaded,
@@ -583,17 +687,52 @@ export async function processDueOnboardingReminder({
       };
     }
 
-    const health = await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: subreddit.language,
-      notify: false,
-      scheduleUnknownRetry: false,
-      nowMs,
-    });
-    if (!health.healthy || health.status !== "healthy") {
+    if (recoveredFromAccountPause && activeGoalState) {
+      const { pausedForAccountRecovery: _paused, ...resumed } = activeGoalState;
+      const creationStaggerMinutes = selectOnboardingGoalStaggerMinutes();
+      const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
+      const nextRunAt = nowMs + reminderStaggerMinutes * 60 * 1000;
+      await saveOnboardingState(redis, {
+        ...resumed,
+        status: "awaiting_warning",
+        armedAt: nowMs,
+        creationStaggerMinutes,
+      });
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: "pending",
+        armedAt: nowMs,
+        nextRunAt,
+        reminderStaggerMinutes,
+      });
+      logDiagnostic("info", "onboarding_resumed_after_account_recovery", {
+        workflow: "onboarding_reminder",
+        phase: "post_recovery_classification",
+        lifecycleSource: reloaded.lifecycleSource,
+        sourcePostId: activeGoalState.replacementSourcePostId ?? "none",
+        nextRunAt,
+        reminderStaggerMinutes,
+        creationStaggerMinutes,
+      });
+      return { status: "not_due", ...inspected };
+    }
+
+    if (!accountHealthVerified) {
+      const health = await checkAppAccountHealth({
+        reddit,
+        redis,
+        subredditName: subreddit.name,
+        subredditId: subreddit.id,
+        language: subreddit.language,
+        notify: false,
+        scheduleUnknownRetry: false,
+        nowMs,
+      });
+      if (health.healthy && health.status === "healthy") {
+        accountHealthVerified = true;
+      }
+    }
+    if (!accountHealthVerified) {
       const errorMessage =
         "Subscriber Goal lacks verified Manage Posts permission.";
       await saveOnboardingReminderState(redis, {
@@ -631,6 +770,7 @@ export async function processDueOnboardingReminder({
       subreddit.name,
       reloaded.lifecycleSource,
       subreddit.language,
+      activeGoalState?.intent,
     );
     const dispatchToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     await saveOnboardingReminderState(redis, {

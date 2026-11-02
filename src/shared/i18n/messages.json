@@ -1379,6 +1379,15 @@
       },
       "protectedTokens": ["Subscriber Goal"]
     },
+    "outbound.onboarding.orphanedAutomation": {
+      "description": "Outbound moderator message: completed-goal replacement automation",
+      "policy": "fallback",
+      "placeholders": {
+        "delay": "Human-readable delay",
+        "maxMinutes": "Display-formatted maximum delay in minutes"
+      },
+      "protectedTokens": ["Subscriber Goal", "Tiny", "Action Button"]
+    },
     "outbound.health.body": {
       "description": "Outbound moderator or member message: Health body",
       "policy": "fallback",
@@ -2245,6 +2254,7 @@
         "outbound.onboarding.info": "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.",
         "outbound.onboarding.support": "If you have questions, please send a DM to u/Alan-Foster.",
         "outbound.onboarding.automation": "If a highlighted Subscriber Goal does not already exist, the {delay} countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add a goal to Community Highlights during the following {maxMinutes} minutes. A subreddit can have at most six Community Highlights.",
+        "outbound.onboarding.orphanedAutomation": "The highlighted Subscriber Goal milestone is complete. Unless an active regular or short milestone goal, Tiny goal, or Action Button post is found, the {delay} countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add the next milestone goal to Community Highlights during the following {maxMinutes} minutes. A subreddit can have at most six Community Highlights.",
         "outbound.health.body": "Subscriber Goal cannot create or maintain goal posts in r/{subredditName} because u/{appUsername} is no longer a moderator with Manage Posts permission.\n\nPlease restore u/{appUsername} with Manage Posts permission, or reinstall Subscriber Goal from {installationUrl}. Flair permission is optional but is needed to apply the Subscriber Goal post flair.\n\nThe app can accept a valid moderator invitation, but it cannot create an invitation or change its own moderator permissions.",
         "outbound.highlight.moderatorKnown": "Initiating moderator: u/{moderatorUsername}",
         "outbound.highlight.moderatorUnknown": "Initiating moderator: unknown",

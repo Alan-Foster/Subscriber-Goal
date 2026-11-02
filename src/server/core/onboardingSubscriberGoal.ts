@@ -217,6 +217,9 @@ export type OnboardingSubscriberGoalState = {
   errorMessage?: string;
   attempts?: number;
   pausedAt?: number;
+  intent?: "missing_goal" | "orphaned_completed_goal";
+  replacementSourcePostId?: string;
+  pausedForAccountRecovery?: boolean;
 };
 
 export type OnboardingSubscriberGoalSummary = {
@@ -246,6 +249,18 @@ export type OnboardingSubscriberGoalSummary = {
   eligibilitySubscriberCount?: number;
   errorMessage?: string;
 };
+
+export function isExpectedCompletedReplacement(
+  state: OnboardingSubscriberGoalState | undefined,
+  postId: string | undefined,
+): boolean {
+  return Boolean(
+    state &&
+    state.intent === "orphaned_completed_goal" &&
+    state.replacementSourcePostId &&
+    state.replacementSourcePostId === postId,
+  );
+}
 
 type CandidatePost = {
   id?: string;
@@ -287,6 +302,7 @@ export type OnboardingGoalCandidate = {
   goal?: number;
   completedTime?: number;
   autoCreateNextGoal?: boolean;
+  autoCreateNextGoalConfigured?: boolean;
   discoveryOrder: number;
 };
 
@@ -316,6 +332,8 @@ export type OnboardingHighlightEnsuranceResult =
     goal?: number;
     completedTime?: number;
     autoCreateNextGoal?: boolean;
+    autoCreateNextGoalConfigured?: boolean;
+    supersededCompletedPostIds?: string[];
     errorMessage?: string;
   };
 
@@ -859,7 +877,31 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       existing.status === "completed" &&
       existing.postId &&
       existing.source &&
-      existing.completedTime
+      reloaded.intent === "orphaned_completed_goal" &&
+      !isExpectedCompletedReplacement(reloaded, existing.postId)
+    ) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        postId: existing.postId,
+        existingSource: existing.source,
+        resultStatus: "completed_no_recovery",
+      });
+      return {
+        status: "existing",
+        postId: existing.postId,
+        existingSource: existing.source,
+        lifecycleSource: reloaded.lifecycleSource,
+        ...inspected,
+      };
+    }
+    if (
+      existing.status === "completed" &&
+      existing.postId &&
+      existing.source &&
+      existing.completedTime &&
+      !isExpectedCompletedReplacement(reloaded, existing.postId)
     ) {
       const completed = await reconcileCompletedGoal({
         reddit,
@@ -888,7 +930,11 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         ...inspected,
       };
     }
-    if (existing.status !== "missing" && existing.postId) {
+    if (
+      existing.status !== "missing" &&
+      existing.postId &&
+      !isExpectedCompletedReplacement(reloaded, existing.postId)
+    ) {
       await saveOnboardingState(redis, {
         ...reloaded,
         status: "complete",
@@ -1019,7 +1065,31 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       finalExisting.status === "completed" &&
       finalExisting.postId &&
       finalExisting.source &&
-      finalExisting.completedTime
+      reloaded.intent === "orphaned_completed_goal" &&
+      !isExpectedCompletedReplacement(reloaded, finalExisting.postId)
+    ) {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        postId: finalExisting.postId,
+        existingSource: finalExisting.source,
+        resultStatus: "completed_no_recovery",
+      });
+      return {
+        status: "existing",
+        postId: finalExisting.postId,
+        existingSource: finalExisting.source,
+        lifecycleSource: reloaded.lifecycleSource,
+        ...inspected,
+      };
+    }
+    if (
+      finalExisting.status === "completed" &&
+      finalExisting.postId &&
+      finalExisting.source &&
+      finalExisting.completedTime &&
+      !isExpectedCompletedReplacement(reloaded, finalExisting.postId)
     ) {
       const completed = await reconcileCompletedGoal({
         reddit,
@@ -1048,7 +1118,11 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         ...inspected,
       };
     }
-    if (finalExisting.status !== "missing" && finalExisting.postId) {
+    if (
+      finalExisting.status !== "missing" &&
+      finalExisting.postId &&
+      !isExpectedCompletedReplacement(reloaded, finalExisting.postId)
+    ) {
       await saveOnboardingState(redis, {
         ...reloaded,
         status: "complete",
@@ -1124,6 +1198,12 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         mutationLease,
       },
     });
+    if (reloaded.replacementSourcePostId) {
+      await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+        [reloaded.replacementSourcePostId]: post.id,
+      });
+      await cancelAutoCreateNextGoal(redis, reloaded.replacementSourcePostId);
+    }
     if (highlightResult.issues.length > 0) {
       try {
         await notifyHighlightFailureIncident({
@@ -1508,6 +1588,8 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       candidate.goal = goalData.goal;
       candidate.completedTime = goalData.completedTime;
       candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
+      candidate.autoCreateNextGoalConfigured =
+        goalData.autoCreateNextGoalConfigured;
       if (!candidate.completedTime && subscriberCount === undefined) {
         subscriberCount = (await reddit.getCurrentSubreddit())
           .numberOfSubscribers;
@@ -1537,6 +1619,10 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       candidate.classificationConfidence !== "ambiguous",
   );
   const protectedHighlighted = highlighted.filter(
+    (candidate) =>
+      candidate.classification === "tiny" || candidate.classification === "cta",
+  );
+  const protectedCandidates = candidates.filter(
     (candidate) =>
       candidate.classification === "tiny" || candidate.classification === "cta",
   );
@@ -1654,14 +1740,44 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       return result;
     }
 
+    // Tiny and Action Button posts are intentional primary experiences. They
+    // suppress legacy completed-goal recovery so upgrades cannot add a second
+    // subscribe surface beside them.
+    if (protectedCandidates.length > 0) {
+      await clearActiveHighlightFailureIncident(redis);
+      const selected = newestGoalCandidate(
+        protectedHighlighted.length > 0
+          ? protectedHighlighted
+          : protectedCandidates,
+      );
+      const result: OnboardingHighlightEnsuranceResult = {
+        status: selected.isHighlighted
+          ? "existing"
+          : "existing_not_highlighted",
+        ...base,
+        postId: selected.postId,
+        source: selected.source,
+        classification: selected.classification,
+        classificationConfidence: selected.classificationConfidence,
+        selectedWasAlreadyHighlighted: selected.isHighlighted,
+        ...(selected.isHighlighted
+          ? {
+              verificationResult: "highlighted" as const,
+              reconciliationOutcome: "complete" as const,
+            }
+          : {}),
+        notificationOutcome: "not_requested",
+      };
+      logHighlightEnsurance(result.status, result);
+      return result;
+    }
+
     if (completedGoals.length > 0) {
       await clearActiveHighlightFailureIncident(redis);
-      const autoReplaceableGoals = completedGoals.filter(
-        (candidate) => candidate.autoCreateNextGoal,
-      );
-      const selected = newestGoalCandidate(
-        autoReplaceableGoals.length > 0 ? autoReplaceableGoals : completedGoals,
-      );
+      const selected = newestGoalCandidate(completedGoals);
+      const supersededCompletedPostIds = completedGoals
+        .filter((candidate) => candidate.postId !== selected.postId)
+        .map((candidate) => candidate.postId);
       const result: OnboardingHighlightEnsuranceResult = {
         status: "completed",
         ...base,
@@ -1674,6 +1790,9 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
           ? { verificationResult: "highlighted" as const }
           : {}),
         notificationOutcome: "not_requested",
+        ...(supersededCompletedPostIds.length > 0
+          ? { supersededCompletedPostIds }
+          : {}),
         ...(selected.goal === undefined ? {} : { goal: selected.goal }),
         ...(selected.completedTime === undefined
           ? {}
@@ -1681,6 +1800,12 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
         ...(selected.autoCreateNextGoal === undefined
           ? {}
           : { autoCreateNextGoal: selected.autoCreateNextGoal }),
+        ...(selected.autoCreateNextGoalConfigured === undefined
+          ? {}
+          : {
+              autoCreateNextGoalConfigured:
+                selected.autoCreateNextGoalConfigured,
+            }),
       };
       logHighlightEnsurance(result.status, result);
       return result;
@@ -2602,6 +2727,18 @@ function parseOnboardingState(
   const pausedAt = parseStateNumber(raw.pausedAt);
   if (pausedAt !== undefined) state.pausedAt = pausedAt;
   if (
+    raw.intent === "missing_goal" ||
+    raw.intent === "orphaned_completed_goal"
+  ) {
+    state.intent = raw.intent;
+  }
+  if (raw.replacementSourcePostId) {
+    state.replacementSourcePostId = raw.replacementSourcePostId;
+  }
+  if (raw.pausedForAccountRecovery === "true") {
+    state.pausedForAccountRecovery = true;
+  }
+  if (
     raw.resultStatus === "created" ||
     raw.resultStatus === "existing" ||
     raw.resultStatus === "ineligible" ||
@@ -2668,6 +2805,9 @@ function serializeOnboardingState(
     existingSource: state.existingSource ?? "",
     resultStatus: state.resultStatus ?? "",
     errorMessage: state.errorMessage ?? "",
+    intent: state.intent ?? "",
+    replacementSourcePostId: state.replacementSourcePostId ?? "",
+    pausedForAccountRecovery: String(state.pausedForAccountRecovery ?? false),
     attempts: String(state.attempts ?? 0),
     pausedAt: String(state.pausedAt ?? ""),
   };

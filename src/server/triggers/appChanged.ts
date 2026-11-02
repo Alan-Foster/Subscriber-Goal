@@ -96,9 +96,8 @@ export async function onAppChanged({
     initializeSubscriberStatsMigration(redis),
   );
   if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
-    const automaticOnboardingEnabled = shouldInitializeReleaseOnboarding(
-      lifecycleSource,
-    );
+    const automaticOnboardingEnabled =
+      shouldInitializeReleaseOnboarding(lifecycleSource);
     if (!currentSubreddit) {
       try {
         currentSubreddit = await reddit.getCurrentSubreddit();
@@ -117,6 +116,7 @@ export async function onAppChanged({
       workflow: "app_changed",
       phase: "lifecycle_setup",
       lifecycleSource,
+      upgradeActor: installerUsername ?? "unknown",
       subscriberCount: eligibility.subscriberCount,
       minimumSubscriberCount: onboardingMinimumSubscriberCount,
       subredditType: eligibility.subredditType,
@@ -132,8 +132,7 @@ export async function onAppChanged({
       reddit,
       redis,
       {
-        lifecycleSource:
-          lifecycleSource === "install" ? "install" : "upgrade",
+        lifecycleSource: lifecycleSource === "install" ? "install" : "upgrade",
         allowOnboardingRearm:
           automaticOnboardingEnabled && eligibility.eligible,
       },
@@ -167,6 +166,7 @@ export async function onAppChanged({
       workflow: "onboarding_lifecycle",
       phase: "lifecycle_setup_complete",
       lifecycleSource,
+      upgradeActor: installerUsername ?? "unknown",
       eligible: eligibility.eligible,
       reconciliationStatus,
       nextAction,

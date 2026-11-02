@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
+import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 
 const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
@@ -575,6 +576,161 @@ describe("onboarding subscriber goal", () => {
     });
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(1);
   });
+
+  it("ignores the expected completed predecessor and maps the delayed successor", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const predecessor = {
+      id: "t3_predecessor",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      stickied: true,
+      createdAt: new Date(nowMs - 60_000),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+    };
+    await redis.hSet(onboardingSubscriberGoalStateKey, {
+      intent: "orphaned_completed_goal",
+      replacementSourcePostId: predecessor.id,
+    });
+    await redis.hSet("subscriber_goals", {
+      [`${predecessor.id}_goal`]: "1000",
+      [`${predecessor.id}_completed_time`]: String(nowMs - 60_000),
+      [`${predecessor.id}_auto_create_next_goal`]: "true",
+      [`${predecessor.id}_post_kind`]: "subscriber-goal-v1",
+      [`${predecessor.id}_post_height`]: "regular",
+    });
+    reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([predecessor]),
+    });
+    reddit.getPostById.mockResolvedValue(predecessor);
+    const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(state.nextRunAt),
+      }),
+    ).resolves.toMatchObject({ status: "created", postId: "t3_created" });
+    await expect(
+      redis.hGet(autoCreateNextGoalSuccessorsKey, predecessor.id),
+    ).resolves.toBe("t3_created");
+  });
+
+  it("terminates orphan recovery when a different completed goal appears", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    await redis.hSet(onboardingSubscriberGoalStateKey, {
+      intent: "orphaned_completed_goal",
+      replacementSourcePostId: "t3_original",
+    });
+    const newerCompleted = {
+      id: "t3_newer_completed",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      stickied: true,
+      createdAt: new Date(nowMs),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+    };
+    await redis.hSet("subscriber_goals", {
+      [`${newerCompleted.id}_goal`]: "1000",
+      [`${newerCompleted.id}_completed_time`]: String(nowMs),
+      [`${newerCompleted.id}_auto_create_next_goal`]: "true",
+      [`${newerCompleted.id}_post_kind`]: "subscriber-goal-v1",
+      [`${newerCompleted.id}_post_height`]: "regular",
+    });
+    reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([newerCompleted]),
+    });
+    reddit.getPostById.mockResolvedValue(newerCompleted);
+    const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(state.nextRunAt),
+      }),
+    ).resolves.toMatchObject({
+      status: "existing",
+      postId: newerCompleted.id,
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "active classic",
+      postId: "t3_active_replacement",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      goal: "2000",
+    },
+    {
+      label: "protected Tiny",
+      postId: "t3_tiny_replacement",
+      postKind: "subscribe-only-v1",
+      postHeight: "tiny",
+      goal: undefined,
+    },
+  ])(
+    "adopts a $label that appears during orphan recovery",
+    async (candidate) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      });
+      await redis.hSet(onboardingSubscriberGoalStateKey, {
+        intent: "orphaned_completed_goal",
+        replacementSourcePostId: "t3_original",
+      });
+      await redis.hSet("subscriber_goals", {
+        [`${candidate.postId}_post_kind`]: candidate.postKind,
+        [`${candidate.postId}_post_height`]: candidate.postHeight,
+        ...(candidate.goal
+          ? { [`${candidate.postId}_goal`]: candidate.goal }
+          : {}),
+      });
+      const post = {
+        id: candidate.postId,
+        authorName: "subscriber-goal",
+        subredditId: "t5_example",
+        subredditName: "ExampleSub",
+        stickied: true,
+        createdAt: new Date(nowMs),
+        postData: {
+          postKind: candidate.postKind,
+          postHeight: candidate.postHeight,
+        },
+      };
+      reddit.getNewPosts.mockReturnValue({
+        all: vi.fn().mockResolvedValue([post]),
+      });
+      reddit.getPostById.mockResolvedValue(post);
+      const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: Number(state.nextRunAt),
+        }),
+      ).resolves.toMatchObject({
+        status: "existing",
+        postId: candidate.postId,
+      });
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    },
+  );
 
   it("suppresses creation when a goal appears after the initial duplicate check", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {

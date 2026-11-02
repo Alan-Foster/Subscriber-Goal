@@ -41,6 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- 2.3.3 - Improved auto-goal system on app upgrades to prevent duplicate goals. 
 - 2.3.2 - Missing mod accounts are re-added when removed, with proper uninstall steps provided via dm.
 - 2.3.1 - Added Hindi, Punjabi, Marathi, now 31 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
 - 2.2.1 - Integrated post.highlight (0.14.7) to better track pinned goals. Remove My Own Data fixed. NSFW Most Recent Post fixed. New Create a CTA Menu Item. Devvit 0.15.0

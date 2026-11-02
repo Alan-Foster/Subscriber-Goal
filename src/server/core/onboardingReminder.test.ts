@@ -9,6 +9,7 @@ const hoisted = vi.hoisted(() => ({
   markOnboardingSubscriberGoalCancelled: vi.fn(),
   markOnboardingSubscriberGoalCompleted: vi.fn(),
   scheduleOnboardingSubscriberGoalAfterWarning: vi.fn(),
+  saveOnboardingState: vi.fn(),
   checkAppAccountHealth: vi.fn(),
   reconcileCompletedGoal: vi.fn(),
 }));
@@ -59,9 +60,11 @@ vi.mock("./onboardingSubscriberGoal", () => ({
     hoisted.markOnboardingSubscriberGoalCompleted,
   onboardingMinimumSubscriberCount: 1_000,
   onboardingMaxAttempts: 3,
+  selectOnboardingGoalStaggerMinutes: () => 1,
   selectOnboardingRetryDelayMs: () => 5 * 60 * 1000,
   scheduleOnboardingSubscriberGoalAfterWarning:
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+  saveOnboardingState: hoisted.saveOnboardingState,
 }));
 
 vi.mock("./completedGoalReconciliation", () => ({
@@ -168,6 +171,8 @@ describe("onboarding reminder", () => {
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockResolvedValue(
       undefined,
     );
+    hoisted.saveOnboardingState.mockReset();
+    hoisted.saveOnboardingState.mockResolvedValue(undefined);
     hoisted.ensureExistingSubscriberGoalHighlighted.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
@@ -219,6 +224,25 @@ describe("onboarding reminder", () => {
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
     expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
     expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
+  });
+
+  it("explains completed-goal replacement without claiming no highlighted goal exists", () => {
+    const message = buildOnboardingReminderMessage(
+      "ExampleSub",
+      "upgrade",
+      "en",
+      "orphaned_completed_goal",
+    );
+
+    expect(message.bodyMarkdown).toContain(
+      "highlighted Subscriber Goal milestone is complete",
+    );
+    expect(message.bodyMarkdown).toContain(
+      "active regular or short milestone goal, Tiny goal, or Action Button post",
+    );
+    expect(message.bodyMarkdown).not.toContain(
+      "If a highlighted Subscriber Goal does not already exist",
+    );
   });
 
   it("selects inclusive reminder stagger boundaries", () => {
@@ -591,6 +615,199 @@ describe("onboarding reminder", () => {
       expect.stringContaining('"event":"onboarding_reminder_cancelled"'),
     );
   });
+
+  it.each(["orphaned_completed_goal", "missing_goal"] as const)(
+    "pauses %s upgrade onboarding until app-account permissions recover",
+    async (intent) => {
+      hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+        version: "onboarding_subscriber_goal_v4",
+        status: "awaiting_warning",
+        lifecycleSource: "upgrade",
+        armedAt: nowMs,
+        creationStaggerMinutes: 10,
+        operationId: "onboarding:test",
+        intent,
+        ...(intent === "orphaned_completed_goal"
+          ? { replacementSourcePostId: "t3_completed" }
+          : {}),
+      });
+      hoisted.checkAppAccountHealth.mockResolvedValue({
+        status: "unhealthy",
+        healthy: false,
+        permissions: [],
+        notification: "not_needed",
+      });
+      await scheduleOnboardingReminder(redis as never, { nowMs });
+
+      await expect(
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + onboardingReminderDelayMs,
+        }),
+      ).resolves.toMatchObject({ status: "paused" });
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+      expect(hoisted.saveOnboardingState).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ pausedForAccountRecovery: true }),
+      );
+      await expect(
+        redis.hGetAll(onboardingReminderStateKey),
+      ).resolves.toMatchObject({ status: "pending" });
+    },
+  );
+
+  it("selects fresh warning and creation staggers after account recovery", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      version: "onboarding_subscriber_goal_v4",
+      status: "awaiting_warning",
+      lifecycleSource: "upgrade",
+      armedAt: nowMs,
+      creationStaggerMinutes: 999,
+      operationId: "onboarding:test",
+      intent: "missing_goal",
+      pausedForAccountRecovery: true,
+    });
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    expect(hoisted.saveOnboardingState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        armedAt: nowMs + onboardingReminderDelayMs,
+        creationStaggerMinutes: 1,
+        operationId: "onboarding:test",
+      }),
+    );
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      nextRunAt: String(
+        nowMs +
+          onboardingReminderDelayMs +
+          onboardingReminderStaggerMinMinutes * 60_000,
+      ),
+    });
+  });
+
+  it("selects fresh staggers after recovery when only the expected predecessor remains", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      version: "onboarding_subscriber_goal_v4",
+      status: "awaiting_warning",
+      lifecycleSource: "upgrade",
+      armedAt: nowMs,
+      creationStaggerMinutes: 999,
+      operationId: "onboarding:orphan",
+      intent: "orphaned_completed_goal",
+      replacementSourcePostId: "t3_expected",
+      pausedForAccountRecovery: true,
+    });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "completed",
+      postId: "t3_expected",
+      source: "tracked",
+      classification: "classic",
+      completedTime: nowMs - 60_000,
+      candidateCount: 1,
+    });
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    expect(hoisted.saveOnboardingState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        armedAt: nowMs + onboardingReminderDelayMs,
+        creationStaggerMinutes: 1,
+        operationId: "onboarding:orphan",
+        replacementSourcePostId: "t3_expected",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "active classic",
+      existing: {
+        status: "existing",
+        postId: "t3_active",
+        source: "tracked",
+        classification: "classic",
+      },
+    },
+    {
+      label: "protected Tiny",
+      existing: {
+        status: "existing",
+        postId: "t3_tiny",
+        source: "tracked",
+        classification: "tiny",
+      },
+    },
+    {
+      label: "protected Action Button",
+      existing: {
+        status: "existing",
+        postId: "t3_action_button",
+        source: "tracked",
+        classification: "cta",
+      },
+    },
+    {
+      label: "different completed goal",
+      existing: {
+        status: "completed",
+        postId: "t3_new_completed",
+        source: "tracked",
+        classification: "classic",
+        completedTime: nowMs - 60_000,
+      },
+    },
+  ])(
+    "stops recovered onboarding for $label before selecting staggers",
+    async ({ existing }) => {
+      hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+        version: "onboarding_subscriber_goal_v4",
+        status: "awaiting_warning",
+        lifecycleSource: "upgrade",
+        armedAt: nowMs,
+        creationStaggerMinutes: 999,
+        operationId: "onboarding:test",
+        intent: "orphaned_completed_goal",
+        replacementSourcePostId: "t3_original_completed",
+        pausedForAccountRecovery: true,
+      });
+      hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+        ...existing,
+        candidateCount: 1,
+      });
+      await scheduleOnboardingReminder(redis as never, { nowMs });
+
+      await expect(
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + onboardingReminderDelayMs,
+        }),
+      ).resolves.toMatchObject({ status: "existing", postId: existing.postId });
+      expect(hoisted.saveOnboardingState).not.toHaveBeenCalled();
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    },
+  );
 
   it("pauses an armed reminder and re-randomizes it when re-enabled", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);

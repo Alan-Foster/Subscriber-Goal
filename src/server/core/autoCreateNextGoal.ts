@@ -33,6 +33,8 @@ import {
 } from "./communityGoalMutation";
 import { retireSubscriberGoalPost } from "./postRetirement";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
+import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
+import { checkAppAccountHealth } from "./appAccountHealth";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -46,6 +48,7 @@ export type AutoCreateNextGoalSummary = {
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
 export { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
+const onboardingSubscriberGoalStateKey = "onboarding_subscriber_goal_v4_state";
 
 export async function processDueAutoCreateNextGoals({
   reddit,
@@ -106,6 +109,28 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
 
+      const [onboardingIntent, replacementSourcePostId, onboardingStatus] =
+        await redis.hMGet(onboardingSubscriberGoalStateKey, [
+          "intent",
+          "replacementSourcePostId",
+          "status",
+        ]);
+      if (
+        onboardingIntent === "orphaned_completed_goal" &&
+        replacementSourcePostId === sourcePostId &&
+        onboardingStatus !== "complete"
+      ) {
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "onboarding_takeover",
+          postId: sourcePostId,
+          reason: "orphaned_goal_onboarding_active",
+        });
+        continue;
+      }
+
       const existingSuccessor = await redis.hGet(
         autoCreateNextGoalSuccessorsKey,
         sourcePostId,
@@ -162,22 +187,72 @@ export async function processDueAutoCreateNextGoals({
         throw sourcePostError;
       }
 
-      const newerActiveGoal = await findNewerActiveClassicGoal({
+      const newerClassicGoal = await findNewerClassicGoal({
         reddit,
         redis,
         sourcePostId,
         sourceCreatedAtMs,
       });
-      if (newerActiveGoal) {
+      if (newerClassicGoal) {
         await redis.hSet(autoCreateNextGoalSuccessorsKey, {
-          [sourcePostId]: newerActiveGoal,
+          [sourcePostId]: newerClassicGoal,
         });
         await cancelAutoCreateNextGoal(redis, sourcePostId);
         summary.skipped += 1;
         continue;
       }
 
+      const protectedPrimary = await findProtectedPrimaryGoal({
+        reddit,
+        redis,
+        sourcePostId,
+      });
+      if (protectedPrimary) {
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "protected_experience",
+          postId: sourcePostId,
+          protectedPostId: protectedPrimary,
+          reason: "protected_primary_present",
+        });
+        continue;
+      }
+
       const subreddit = await reddit.getCurrentSubreddit();
+      const automaticEligibility = getAutomaticGoalEligibility(subreddit);
+      if (!automaticEligibility.eligible) {
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "eligibility",
+          postId: sourcePostId,
+          reason: automaticEligibility.reason,
+        });
+        continue;
+      }
+      const accountHealth = await checkAppAccountHealth({
+        reddit,
+        redis,
+        subredditName: subreddit.name,
+        subredditId: subreddit.id,
+        language: subreddit.language,
+        notify: false,
+        scheduleUnknownRetry: true,
+        nowMs,
+      });
+      if (!accountHealth.healthy || accountHealth.status !== "healthy") {
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "permission_preflight",
+          postId: sourcePostId,
+          reason: "account_recovery_required",
+        });
+        continue;
+      }
       const subredditDisplayName =
         sourceGoalData.subredditDisplayName ?? subreddit.name;
       const messages = getSubGoalPostMessages(sourceGoalData.language);
@@ -330,7 +405,40 @@ export async function processDueAutoCreateNextGoals({
   return summary;
 }
 
-async function findNewerActiveClassicGoal({
+async function findProtectedPrimaryGoal({
+  reddit,
+  redis,
+  sourcePostId,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  sourcePostId: `t3_${string}`;
+}): Promise<`t3_${string}` | undefined> {
+  for (const candidateId of await getSubscriberGoalCandidatePostIds(redis)) {
+    if (!isLinkId(candidateId) || candidateId === sourcePostId) continue;
+    const [kind, height] = await redis.hMGet(subscriberGoalsKey, [
+      `${candidateId}${postKindSuffix}`,
+      `${candidateId}${postHeightSuffix}`,
+    ]);
+    if (
+      kind !== "subscribe-only-v1" &&
+      kind !== "cta-only-v1" &&
+      height !== "tiny" &&
+      height !== "cta"
+    ) {
+      continue;
+    }
+    try {
+      const post = await reddit.getPostById(candidateId);
+      if (!getTerminalRemovedByCategory(post)) return candidateId;
+    } catch (error) {
+      if (!isMissingPostError(error, candidateId)) throw error;
+    }
+  }
+  return undefined;
+}
+
+async function findNewerClassicGoal({
   reddit,
   redis,
   sourcePostId,
@@ -355,7 +463,7 @@ async function findNewerActiveClassicGoal({
       continue;
     }
     const data = await getSubGoalData(redis, candidateId);
-    if (!data.goal || data.completedTime) continue;
+    if (!data.goal) continue;
     try {
       const post = await reddit.getPostById(candidateId);
       if (getTerminalRemovedByCategory(post)) continue;
