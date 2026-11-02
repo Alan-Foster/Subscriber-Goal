@@ -51,6 +51,20 @@ describe("TopButtons", () => {
     expect(html).toContain('height="20"');
   });
 
+  it("renders a responsive bottom-left statistics control when provided", () => {
+    const html = renderToStaticMarkup(
+      <TopButtons
+        onStatisticsPressed={vi.fn()}
+        onVisitPromoSubPressed={vi.fn()}
+        promoSubreddit="SubGoal"
+        language="en"
+      />,
+    );
+    expect(html).toContain("absolute bottom-4 left-4");
+    expect(html).toContain('aria-label="Statistics"');
+    expect(html).toContain('class="hidden sm:inline"');
+  });
+
   it("reveals compact notification text toward the center", () => {
     const html = renderToStaticMarkup(
       <TopButtons

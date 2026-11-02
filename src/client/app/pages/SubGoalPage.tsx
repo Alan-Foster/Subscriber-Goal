@@ -20,6 +20,7 @@ type SubGoalPageProps = {
   notice: string | null;
   onAfterSubscribeNavigate: (target: string | NavigationTarget) => void;
   onNotifications?: () => void;
+  onStatistics?: () => void;
 };
 
 export const SubGoalPage = ({
@@ -32,6 +33,7 @@ export const SubGoalPage = ({
   notice,
   onAfterSubscribeNavigate,
   onNotifications,
+  onStatistics,
 }: SubGoalPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
   const notificationMessages = getNotificationMessages(state.language);
@@ -98,6 +100,7 @@ export const SubGoalPage = ({
       data-sg-theme={state.colorTheme}
     >
       <TopButtons
+        onStatisticsPressed={onStatistics}
         onNotificationsPressed={onNotifications}
         notificationLabel={notificationMessages.label}
         onVisitPromoSubPressed={onVisitPromoSub}

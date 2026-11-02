@@ -41,10 +41,84 @@ export type SubscriberGoalState = SharedPostState & {
   headerText: string | null;
   subscribed: boolean;
   moderatorInstallPromoEligible: boolean;
+  canViewStatistics: boolean;
   user: BasicUserData | null;
   appSettings: PublicAppSettings;
   subreddit: BasicSubredditData;
 };
+
+export type StatisticsComparisonStatus =
+  | "increase"
+  | "decrease"
+  | "unchanged"
+  | "new";
+
+export type StatisticsComparableValue = {
+  value: number;
+  previousValue: number;
+  absoluteChange: number;
+  percentChange: number | null;
+  comparisonStatus: StatisticsComparisonStatus;
+};
+
+export type StatisticsCtaRow = {
+  label: string;
+  clicks: StatisticsComparableValue;
+  uniqueUsers: StatisticsComparableValue;
+};
+
+export type StatisticsResponse = {
+  schemaVersion: 1;
+  subreddit: { name: string };
+  period: {
+    hours: 24 | 168;
+    generatedAt: string;
+    start: string;
+    end: string;
+    previousStart: string;
+    previousEnd: string;
+    bucketGranularitySeconds: 3600;
+  };
+  metrics: {
+    loads: {
+      total: StatisticsComparableValue;
+      subscribed: StatisticsComparableValue;
+      unsubscribed: StatisticsComparableValue;
+    };
+    visitors: {
+      unique: StatisticsComparableValue;
+      new: StatisticsComparableValue;
+      returning: StatisticsComparableValue;
+      returningRate: StatisticsComparableValue;
+    };
+    joins: {
+      clicks: StatisticsComparableValue;
+      confirmed: StatisticsComparableValue;
+      conversionRate: StatisticsComparableValue;
+    };
+    ctas: {
+      clicks: StatisticsComparableValue;
+      conversionRate: StatisticsComparableValue;
+      byLabel: StatisticsCtaRow[];
+    };
+  };
+  methodology: {
+    uniqueCounting: string;
+    newVisitorDefinition: string;
+    returningVisitorDefinition: string;
+    anonymousIdentity: string;
+    membership: string;
+    retentionDays: 30;
+    collectionStartedAt: "deployment";
+  };
+};
+
+export type StatisticsEventRequest = {
+  type: "join_click" | "cta_click";
+  eventId: string;
+};
+
+export type StatisticsEventResponse = { status: "ok" };
 
 export type SubscribeOnlyState = SharedPostState & {
   postHeight: "tiny";

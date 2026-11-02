@@ -13,6 +13,7 @@ type TopButtonsProps = {
   language: SubGoalLanguage;
   revealTextOnInteraction?: boolean;
   notificationsEntryEnabled?: boolean;
+  onStatisticsPressed?: (() => void) | undefined;
 };
 
 let hasAnimatedOnce = false;
@@ -25,6 +26,7 @@ export const TopButtons = ({
   language,
   revealTextOnInteraction = false,
   notificationsEntryEnabled = NOTIFICATION_SETTINGS_ENTRY_ENABLED,
+  onStatisticsPressed,
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
   const messages = getSubGoalPostMessages(language);
@@ -37,6 +39,31 @@ export const TopButtons = ({
 
   return (
     <>
+      {onStatisticsPressed ? (
+        <div className="absolute bottom-4 left-4 z-20">
+          <button
+            type="button"
+            aria-label="Statistics"
+            className={`${shouldAnimate ? "sg-fade-in" : ""} inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-xs font-semibold leading-none whitespace-nowrap text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
+            onClick={onStatisticsPressed}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 16.25V10.5h2.5v5.75H3Zm5.75 0V3.75h2.5v12.5h-2.5Zm5.75 0V7h2.5v9.25h-2.5Z"
+                fill="currentColor"
+              />
+            </svg>
+            <span className="hidden sm:inline">Statistics</span>
+          </button>
+        </div>
+      ) : null}
       {notificationsEntryEnabled && onNotificationsPressed ? (
         <div className="absolute left-4 top-4 z-20">
           <button

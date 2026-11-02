@@ -19,6 +19,7 @@ const state: SubscriberGoalState = {
   headerText: null,
   subscribed: false,
   moderatorInstallPromoEligible: false,
+  canViewStatistics: false,
   user: { id: "t2_user", username: "alice" },
   appSettings: { promoSubreddit: "SubGoal" },
   subreddit: {

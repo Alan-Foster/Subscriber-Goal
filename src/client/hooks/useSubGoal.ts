@@ -24,6 +24,10 @@ import {
 } from "../../shared/i18n/catalog";
 import { localizeError } from "../../shared/i18n/errors";
 import { markInitEnd, markInitStart } from "../utils/startupPerformance";
+import {
+  createStatisticsEventId,
+  statisticsRequestHeaders,
+} from "../analytics/statisticsAnalytics";
 
 type RequestResult<T> = {
   data: T | null;
@@ -316,6 +320,7 @@ export const isSubGoalState = (value: unknown): value is SubGoalState => {
     typeof subreddit.isNsfw === "boolean" &&
     typeof value.subscribed === "boolean" &&
     typeof value.moderatorInstallPromoEligible === "boolean" &&
+    typeof value.canViewStatistics === "boolean" &&
     isNullableFiniteNumber(value.goal) &&
     (value.goal === null || (value.goal as number) > 0) &&
     isNullableString(value.recentSubscriber) &&
@@ -528,6 +533,8 @@ export const useSubGoal = () => {
   const noticeTimeoutRef = useRef<number | null>(null);
   const subscriptionAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const loadEventIdRef = useRef<string | null>(null);
+  loadEventIdRef.current ??= createStatisticsEventId();
   const messages = getSubGoalPostMessages(state?.language);
   const postHeight = state?.postHeight;
   const recentSubscriber =
@@ -650,7 +657,12 @@ export const useSubGoal = () => {
       markInitStart();
       const result = await requestJsonWithRetry<InitResponse>(
         "/api/init",
-        { signal },
+        {
+          signal,
+          headers: statisticsRequestHeaders(
+            loadEventIdRef.current ?? undefined,
+          ),
+        },
         { ...initRetryOptions, validate: isInitResponse },
       );
       if (cancelled || result.aborted) {
@@ -698,7 +710,11 @@ export const useSubGoal = () => {
 
       const result = await requestJsonWithRetry<InitResponse>(
         "/api/init",
-        undefined,
+        {
+          headers: statisticsRequestHeaders(
+            loadEventIdRef.current ?? undefined,
+          ),
+        },
         {
           ...initRetryOptions,
           maxDurationMs: 3000,
@@ -902,6 +918,7 @@ export const useSubGoal = () => {
             headers: {
               "Content-Type": "application/json",
               ...goalJourneyAnalytics.journeyHeaders(),
+              ...statisticsRequestHeaders(),
             },
             body: JSON.stringify({
               ...(payload ?? {}),

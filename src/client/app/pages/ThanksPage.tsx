@@ -25,6 +25,7 @@ type ThanksPageProps = {
   onNotificationOptIn?: () => Promise<boolean>;
   showModeratorInstallPromo?: boolean;
   onModeratorInstall?: () => void;
+  onStatistics?: () => void;
 };
 
 export const ThanksPage = ({
@@ -38,6 +39,7 @@ export const ThanksPage = ({
   onNotificationOptIn,
   showModeratorInstallPromo = false,
   onModeratorInstall,
+  onStatistics,
 }: ThanksPageProps) => {
   const messages = getSubGoalPostMessages(state.language);
   const moderatorPromoMessages = getModeratorInstallPromotionMessages(
@@ -80,6 +82,7 @@ export const ThanksPage = ({
   return (
     <div className="relative flex h-full w-full flex-col items-center justify-center gap-4 px-4 py-6 text-center text-[color:var(--sg-text-primary)]">
       <TopButtons
+        onStatisticsPressed={onStatistics}
         onVisitPromoSubPressed={onVisitPromoSub}
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}

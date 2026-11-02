@@ -4,6 +4,8 @@ export const apiRoutes = {
   subscribe: "/api/subscribe",
   afterSubscribeTarget: "/api/after-subscribe-target",
   ctaClick: "/api/cta-click",
+  statistics: "/api/statistics",
+  statisticsEvent: "/api/statistics-event",
   notificationSettings: "/api/notification-settings",
 } as const;
 

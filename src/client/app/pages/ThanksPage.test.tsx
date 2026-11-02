@@ -17,6 +17,7 @@ const baseState: SubscriberGoalState = {
   afterSubscribeAction: { type: "disabled" },
   subscribed: true,
   moderatorInstallPromoEligible: false,
+  canViewStatistics: false,
   user: { id: "t2_user", username: "alice" },
   appSettings: {
     promoSubreddit: "SubGoal",

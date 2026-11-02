@@ -18,6 +18,7 @@ const hoisted = vi.hoisted(() => ({
     getCurrentSubreddit: vi.fn(),
     getCurrentUser: vi.fn(),
     getCurrentUsername: vi.fn(),
+    getModerators: vi.fn(),
     getTopPosts: vi.fn(),
     getNewPosts: vi.fn(),
     subscribeToCurrentSubreddit: vi.fn(),
@@ -40,6 +41,11 @@ const hoisted = vi.hoisted(() => ({
   getCtaActivityMetric: vi.fn(),
   isClickActivityPreset: vi.fn(),
   recordCtaClick: vi.fn(),
+  getStatisticsReport: vi.fn(),
+  recordStatisticsLoad: vi.fn(),
+  recordStatisticsJoinClick: vi.fn(),
+  recordStatisticsConfirmedJoin: vi.fn(),
+  recordStatisticsCtaClick: vi.fn(),
   notifications: {
     isOptedIn: vi.fn(),
     optInCurrentUser: vi.fn(),
@@ -100,6 +106,14 @@ vi.mock("../data/ctaActivity", () => ({
   recordCtaClick: hoisted.recordCtaClick,
 }));
 
+vi.mock("../data/statisticsAnalytics", () => ({
+  getStatisticsReport: hoisted.getStatisticsReport,
+  recordStatisticsLoad: hoisted.recordStatisticsLoad,
+  recordStatisticsJoinClick: hoisted.recordStatisticsJoinClick,
+  recordStatisticsConfirmedJoin: hoisted.recordStatisticsConfirmedJoin,
+  recordStatisticsCtaClick: hoisted.recordStatisticsCtaClick,
+}));
+
 import { registerPublicApiRoutes } from "./publicApi";
 
 type RouteHandler = (req: Request, res: Response) => void | Promise<void>;
@@ -147,6 +161,9 @@ describe("publicApi routes", () => {
     });
     hoisted.reddit.getTopPosts.mockReturnValue({ all: vi.fn() });
     hoisted.reddit.getNewPosts.mockReturnValue({ all: vi.fn() });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn().mockResolvedValue([]),
+    });
     hoisted.getPublicAppSettings.mockReturnValue({ promoSubreddit: "SubGoal" });
     hoisted.getSubredditIcon.mockResolvedValue("/icon.png");
     hoisted.observeDailySubscriberCount.mockResolvedValue({
@@ -172,6 +189,10 @@ describe("publicApi routes", () => {
     hoisted.notifications.optInCurrentUser.mockResolvedValue({ success: true });
     hoisted.notifications.optOutCurrentUser.mockResolvedValue({
       success: true,
+    });
+    hoisted.getStatisticsReport.mockResolvedValue({
+      schemaVersion: 1,
+      subreddit: { name: "ExampleSub" },
     });
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscriber-goal-v1",
@@ -269,6 +290,9 @@ describe("publicApi routes", () => {
       username: "ExampleModerator",
       isModerator: true,
     });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn().mockResolvedValue([{ username: "ExampleModerator" }]),
+    });
     const routes = createRouteHarness();
     const json = vi.fn();
 
@@ -284,6 +308,94 @@ describe("publicApi routes", () => {
     });
     expect(hoisted.reddit.getCurrentUser).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getCurrentUsername).not.toHaveBeenCalled();
+  });
+
+  it("rejects anonymous direct statistics requests", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.statistics)?.(
+      { query: { hours: "24" } } as unknown as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(401);
+    expect(hoisted.getStatisticsReport).not.toHaveBeenCalled();
+  });
+
+  it("serves only the current subreddit to an authorized moderator", async () => {
+    hoisted.context.userId = "t2_moderator";
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      username: "ExampleModerator",
+      isModerator: true,
+    });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn().mockResolvedValue([{ username: "ExampleModerator" }]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.statistics)?.(
+      { query: { hours: "168", subreddit: "OtherSub" } } as unknown as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.getStatisticsReport).toHaveBeenCalledWith(
+      hoisted.redis,
+      "ExampleSub",
+      168,
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ subreddit: { name: "ExampleSub" } }),
+    );
+  });
+
+  it("rejects an authenticated non-moderator statistics request", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      username: "OrdinaryUser",
+      isModerator: false,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.statistics)?.(
+      { query: { hours: "24" } } as unknown as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(403);
+    expect(hoisted.getStatisticsReport).not.toHaveBeenCalled();
+  });
+
+  it("resolves CTA analytics labels from server configuration", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    await routes.get(apiRoutes.statisticsEvent)?.(
+      {
+        body: {
+          type: "cta_click",
+          eventId: "11111111-1111-4111-8111-111111111111",
+          label: "Forged label",
+        },
+        header: (name: string) =>
+          name === "X-SG-Visitor-ID"
+            ? "22222222-2222-4222-8222-222222222222"
+            : undefined,
+      } as unknown as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.recordStatisticsCtaClick).toHaveBeenCalledWith(
+      hoisted.redis,
+      expect.objectContaining({
+        label: "Join the Discord",
+        visitorIdentity: "22222222-2222-4222-8222-222222222222",
+      }),
+    );
+    expect(json).toHaveBeenCalledWith({ status: "ok" });
   });
 
   it("reports init phase durations through Server-Timing", async () => {

@@ -30,8 +30,10 @@ import { NotificationSettingsPage } from "./pages/NotificationSettingsPage";
 import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NotificationConfirmationPage } from "./pages/NotificationConfirmationPage";
+import { StatisticsPage } from "./pages/StatisticsPage";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "./notificationFeatureFlags";
 import { usePrimaryCtaPaintTiming } from "../utils/startupPerformance";
+import { recordStatisticsEvent } from "../analytics/statisticsAnalytics";
 
 type PageName =
   | "subGoal"
@@ -39,7 +41,8 @@ type PageName =
   | "completed"
   | "tinyConfirmation"
   | "notificationConfirmation"
-  | "notifications";
+  | "notifications"
+  | "statistics";
 
 const subscriberGoalInstallUrl =
   "https://developers.reddit.com/apps/subscriber-goal";
@@ -167,6 +170,16 @@ export const App = () => {
       setPage("notifications");
     }
   };
+  const handleOpenStatistics = () => {
+    if (
+      state?.postHeight !== "tiny" &&
+      state?.postHeight !== "cta" &&
+      state?.canViewStatistics
+    ) {
+      setPage("statistics");
+    }
+  };
+  const handleReturnFromStatistics = () => setPage("subGoal");
   const handleReturnFromNotifications = () => {
     setPage(previousPageRef.current);
   };
@@ -208,6 +221,7 @@ export const App = () => {
       return;
     }
     subscribeAttemptRef.current = true;
+    recordStatisticsEvent("join_click");
     const authenticated =
       state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
     const analyticsContext = getGoalJourneyContext(state);
@@ -339,7 +353,9 @@ export const App = () => {
 
   let content = null;
   if (state) {
-    if (page === "notifications") {
+    if (page === "statistics") {
+      content = <StatisticsPage onReturn={handleReturnFromStatistics} />;
+    } else if (page === "notifications") {
       content = (
         <NotificationSettingsPage
           state={state}
@@ -388,6 +404,9 @@ export const App = () => {
           onNotificationOptIn={handleNotificationOptIn}
           showModeratorInstallPromo={showModeratorInstallPromo}
           onModeratorInstall={handleModeratorInstall}
+          {...(state.postHeight !== "tiny" && state.canViewStatistics
+            ? { onStatistics: handleOpenStatistics }
+            : {})}
         />
       );
     } else if (
@@ -420,6 +439,9 @@ export const App = () => {
           notice={notice}
           onAfterSubscribeNavigate={handleAfterSubscribeNavigate}
           onNotifications={handleOpenNotifications}
+          {...(state.postHeight !== "tiny" && state.canViewStatistics
+            ? { onStatistics: handleOpenStatistics }
+            : {})}
         />
       );
     }
@@ -463,12 +485,14 @@ export const App = () => {
 
   return (
     <div
-      className={`sg-goal-frame relative flex ${appHeightClass} w-full cursor-pointer flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
+      className={`sg-goal-frame relative flex ${appHeightClass} w-full ${page === "statistics" ? "cursor-default" : "cursor-pointer"} flex-col items-center justify-center overflow-hidden bg-[color:var(--sg-bg)] text-[color:var(--sg-text-primary)]`}
       data-app-interaction-shell="true"
       data-sg-theme={frameColorTheme}
-      {...(state && !prohibited ? interactionHandlers : {})}
+      {...(state && !prohibited && page !== "statistics"
+        ? interactionHandlers
+        : {})}
       onClickCapture={
-        state && !prohibited
+        state && !prohibited && page !== "statistics"
           ? (event) => {
               interactionHandlers.onClickCapture(event);
               goalJourneyAnalytics.committedInteraction();

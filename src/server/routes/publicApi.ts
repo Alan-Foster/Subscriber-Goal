@@ -1,4 +1,4 @@
-import type { Response, Router } from "express";
+import type { Request, Response, Router } from "express";
 import { context, reddit, redis, realtime } from "@devvit/web/server";
 import { notifications } from "@devvit/notifications";
 import type {
@@ -12,6 +12,9 @@ import type {
   RefreshResponse,
   RealtimeMessage,
   RecordCtaClickResponse,
+  StatisticsEventRequest,
+  StatisticsEventResponse,
+  StatisticsResponse,
   SubGoalState,
   SubscribeOnlyState,
   SubscribeRequest,
@@ -44,6 +47,14 @@ import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import { translate, type MessageKey } from "../../shared/i18n/catalog";
 import { isPrivateSubredditAccessError } from "../utils/redditPermissionErrors";
+import { canViewCurrentSubredditStatistics } from "../utils/statisticsAuthorization";
+import {
+  getStatisticsReport,
+  recordStatisticsConfirmedJoin,
+  recordStatisticsCtaClick,
+  recordStatisticsJoinClick,
+  recordStatisticsLoad,
+} from "../data/statisticsAnalytics";
 
 const refreshPermissionDiagnosticKey =
   "refresh_permission_denied_diagnostic_v1";
@@ -121,6 +132,8 @@ type SubGoalData = Awaited<ReturnType<typeof getSubGoalData>>;
 type CurrentUserContext = {
   user: { id: string; username: string } | null;
   moderatorInstallPromoEligible: boolean;
+  isModerator: boolean;
+  moderatedSubreddits: string[];
 };
 type BuildStateDependencies = {
   subGoalData?: SubGoalData;
@@ -135,7 +148,12 @@ const loadCurrentUser = async (
   timings?: InitTimings,
 ): Promise<CurrentUserContext> => {
   if (!context.userId) {
-    return { user: null, moderatorInstallPromoEligible: false };
+    return {
+      user: null,
+      moderatorInstallPromoEligible: false,
+      isModerator: false,
+      moderatedSubreddits: [],
+    };
   }
 
   return await timedInitOperation(timings, "user", async () => {
@@ -149,6 +167,11 @@ const loadCurrentUser = async (
             username: currentUser.username,
           },
           moderatorInstallPromoEligible,
+          isModerator: moderatorInstallPromoEligible,
+          moderatedSubreddits:
+            currentUser.modPermissions instanceof Map
+              ? [...currentUser.modPermissions.keys()]
+              : [],
         };
       }
     } catch (error) {
@@ -169,6 +192,8 @@ const loadCurrentUser = async (
     return {
       user: username ? { id: context.userId as string, username } : null,
       moderatorInstallPromoEligible: false,
+      isModerator: false,
+      moderatedSubreddits: [],
     };
   });
 };
@@ -223,6 +248,18 @@ const buildState = async (
     [subredditPromise, iconPromise, userPromise, subscribedPromise],
   );
   const appSettings = getPublicAppSettings();
+  const canViewStatistics = await canViewCurrentSubredditStatistics(
+    reddit,
+    context.userId,
+    subreddit.name,
+    userContext.user
+      ? {
+          username: userContext.user.username,
+          isModerator: userContext.isModerator,
+          moderatedSubreddits: userContext.moderatedSubreddits,
+        }
+      : null,
+  );
 
   return {
     goal: subGoalData.goal > 0 ? subGoalData.goal : null,
@@ -240,6 +277,7 @@ const buildState = async (
     language: subGoalData.language,
     subscribed,
     moderatorInstallPromoEligible: userContext.moderatorInstallPromoEligible,
+    canViewStatistics,
     user: userContext.user,
     appSettings,
     subreddit: {
@@ -371,6 +409,15 @@ const buildCtaOnlyState = async (
 };
 
 export function registerPublicApiRoutes(router: Router): void {
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const requestHeader = (req: Request, name: string): string | undefined => {
+    const value = req.header?.(name)?.trim();
+    return value && uuidPattern.test(value) ? value : undefined;
+  };
+  const visitorIdentity = (req: Request): string | undefined =>
+    context.userId ?? requestHeader(req, "X-SG-Visitor-ID");
+
   router.get(
     apiRoutes.notificationSettings,
     async (_req, res): Promise<void> => {
@@ -506,6 +553,91 @@ export function registerPublicApiRoutes(router: Router): void {
     }
   });
 
+  router.post(apiRoutes.statisticsEvent, async (req, res): Promise<void> => {
+    const body = req.body as StatisticsEventRequest | undefined;
+    if (
+      !body ||
+      (body.type !== "join_click" && body.type !== "cta_click") ||
+      !uuidPattern.test(body.eventId)
+    ) {
+      res.status(400).json(localizedError("errors.api.invalidRequest"));
+      return;
+    }
+    try {
+      if (body.type === "join_click") {
+        await recordStatisticsJoinClick(redis, body.eventId);
+      } else {
+        const postId = context.postId;
+        if (!postId) {
+          res.status(400).json(localizedError("errors.api.postIdRequired"));
+          return;
+        }
+        const data = await getSubGoalData(redis, postId, context.postData);
+        if (data.afterSubscribeAction.type === "disabled") {
+          res
+            .status(400)
+            .json(localizedError("errors.api.ctaActivityUnsupported"));
+          return;
+        }
+        const identity = visitorIdentity(req);
+        await recordStatisticsCtaClick(redis, {
+          eventId: body.eventId,
+          label: data.afterSubscribeAction.buttonText,
+          ...(identity ? { visitorIdentity: identity } : {}),
+        });
+      }
+      res.json({ status: "ok" } satisfies StatisticsEventResponse);
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "statistics_event_failed",
+        { workflow: "statistics", phase: body.type },
+        error,
+      );
+      res.status(503).json(localizedError("errors.api.requestFailed"));
+    }
+  });
+
+  router.get(apiRoutes.statistics, async (req, res): Promise<void> => {
+    if (!context.userId) {
+      res.status(401).json(localizedError("errors.join.loginRequired"));
+      return;
+    }
+    const hours = Number((req.query as Record<string, unknown>)?.hours);
+    if (hours !== 24 && hours !== 168) {
+      res.status(400).json(localizedError("errors.api.invalidRequest"));
+      return;
+    }
+    try {
+      const subreddit = await reddit.getCurrentSubreddit();
+      if (
+        !(await canViewCurrentSubredditStatistics(
+          reddit,
+          context.userId,
+          subreddit.name,
+        ))
+      ) {
+        res.status(403).json(localizedError("errors.api.forbidden"));
+        return;
+      }
+      res.json(
+        (await getStatisticsReport(
+          redis,
+          subreddit.name,
+          hours,
+        )) satisfies StatisticsResponse,
+      );
+    } catch (error) {
+      logDiagnostic(
+        "error",
+        "api_request_failed",
+        { route: apiRoutes.statistics, workflow: "statistics", status: 503 },
+        error,
+      );
+      res.status(503).json(localizedError("errors.api.requestFailed"));
+    }
+  });
+
   router.get(
     apiRoutes.afterSubscribeTarget,
     async (_req, res): Promise<void> => {
@@ -618,7 +750,7 @@ export function registerPublicApiRoutes(router: Router): void {
     },
   );
 
-  router.get(apiRoutes.init, async (_req, res): Promise<void> => {
+  router.get(apiRoutes.init, async (req, res): Promise<void> => {
     const initStartedAt = performance.now();
     const initTimings: InitTimings = {};
     const { postId } = context;
@@ -667,6 +799,8 @@ export function registerPublicApiRoutes(router: Router): void {
           : {
               user: null,
               moderatorInstallPromoEligible: false,
+              isModerator: false,
+              moderatedSubreddits: [],
             },
       );
       const subredditIconPromise = Promise.all([
@@ -741,6 +875,24 @@ export function registerPublicApiRoutes(router: Router): void {
         postId,
         state,
       } satisfies InitResponse);
+      const loadEventId = requestHeader(req, "X-SG-Event-ID");
+      if (loadEventId) {
+        try {
+          const identity = visitorIdentity(req);
+          await recordStatisticsLoad(redis, {
+            eventId: loadEventId,
+            subscribed: subscriberResult.value,
+            ...(identity ? { visitorIdentity: identity } : {}),
+          });
+        } catch (error) {
+          logDiagnostic(
+            "warn",
+            "statistics_event_failed",
+            { workflow: "statistics", phase: "load" },
+            error,
+          );
+        }
+      }
     } catch (error) {
       const operationId = createOperationId("init");
       logDiagnostic(
@@ -901,6 +1053,14 @@ export function registerPublicApiRoutes(router: Router): void {
         await reddit.subscribeToCurrentSubreddit();
         logSubscribePhase(operationId, postId, "reddit_subscribed");
         if (attemptId) {
+          await runSubscribeSideEffect(
+            operationId,
+            postId,
+            "statistics_confirmed_join",
+            () => recordStatisticsConfirmedJoin(redis, attemptId),
+          );
+        }
+        if (attemptId) {
           await storeSubscriptionAttemptReceipt(
             redis,
             attemptId,
@@ -972,6 +1132,14 @@ export function registerPublicApiRoutes(router: Router): void {
 
       await reddit.subscribeToCurrentSubreddit();
       logSubscribePhase(operationId, postId, "reddit_subscribed");
+      if (attemptId) {
+        await runSubscribeSideEffect(
+          operationId,
+          postId,
+          "statistics_confirmed_join",
+          () => recordStatisticsConfirmedJoin(redis, attemptId),
+        );
+      }
       if (attemptId) {
         await storeSubscriptionAttemptReceipt(redis, attemptId, postId, userId);
         logSubscribePhase(operationId, postId, "attempt_receipt_stored");

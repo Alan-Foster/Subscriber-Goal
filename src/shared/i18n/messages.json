@@ -727,6 +727,24 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "errors.api.invalidRequest": {
+      "description": "User-facing error: Invalid API request",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "errors.api.forbidden": {
+      "description": "User-facing error: API access forbidden",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "errors.api.requestFailed": {
+      "description": "User-facing error: API request failed",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "errors.api.dynamicTargetUnsupported": {
       "description": "User-facing error: Api dynamic Target Unsupported",
       "policy": "fallback",
@@ -2153,6 +2171,9 @@
         "errors.api.postIdMissing": "postId is required but missing from context",
         "errors.api.ctaActivityUnsupported": "This CTA does not use click activity.",
         "errors.api.ctaActivityFailed": "The CTA click could not be recorded.",
+        "errors.api.invalidRequest": "The request was invalid.",
+        "errors.api.forbidden": "You do not have permission to view this data.",
+        "errors.api.requestFailed": "The request could not be completed.",
         "errors.api.dynamicTargetUnsupported": "This button does not use a dynamic post target.",
         "errors.api.postUnavailable": "No post is currently available.",
         "errors.api.postTargetFailed": "The post target could not be loaded.",

@@ -17,6 +17,7 @@ import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 import { logDiagnostic } from "../../../shared/diagnostics";
 import { requestJsonWithRetry } from "../../utils/fetchWithRetry";
 import { localizeError } from "../../../shared/i18n/errors";
+import { recordStatisticsEvent } from "../../analytics/statisticsAnalytics";
 
 type ActionableAfterSubscribeAction = Exclude<
   AfterSubscribeAction,
@@ -47,6 +48,7 @@ export const AfterSubscribeButton = ({
       return;
     }
     resolvingRef.current = true;
+    recordStatisticsEvent("cta_click");
     const actionType = getAfterSubscribeAnalyticsActionType(action);
     if (analyticsContext) {
       goalJourneyAnalytics.afterSubscribeCtaActivated(

@@ -70,7 +70,14 @@ describe("AfterSubscribeButton", () => {
     expect(onNavigate).toHaveBeenCalledWith(
       "https://www.reddit.com/r/ExampleSub/wiki/index/",
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      apiRoutes.statisticsEvent,
+      expect.objectContaining({ method: "POST", keepalive: true }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      apiRoutes.afterSubscribeTarget,
+      expect.anything(),
+    );
   });
 
   it("records every tracked direct-link activation without delaying navigation", async () => {
@@ -93,11 +100,15 @@ describe("AfterSubscribeButton", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledWith(apiRoutes.ctaClick, {
-      method: "POST",
-      keepalive: true,
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      fetchMock.mock.calls.filter(([route]) => route === apiRoutes.ctaClick),
+    ).toHaveLength(2);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([route]) => route === apiRoutes.statisticsEvent,
+      ),
+    ).toHaveLength(2);
     expect(onNavigate).toHaveBeenCalledTimes(2);
   });
 
@@ -122,7 +133,7 @@ describe("AfterSubscribeButton", () => {
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledWith(
       apiRoutes.afterSubscribeTarget,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),

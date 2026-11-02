@@ -17,6 +17,7 @@ const hoisted = vi.hoisted(() => ({
     afterSubscribeAction: { type: "disabled" },
     subscribed: false,
     moderatorInstallPromoEligible: false,
+    canViewStatistics: false,
     user: { id: "t2_user", username: "alice" },
     appSettings: {
       promoSubreddit: "SubGoal",
@@ -52,6 +53,7 @@ const hoisted = vi.hoisted(() => ({
   showToast: vi.fn(),
   prohibited: false,
   notificationSettingsEntryEnabled: true,
+  recordStatisticsEvent: vi.fn(),
 }));
 
 hoisted.state = hoisted.createState() as SubGoalState;
@@ -76,6 +78,10 @@ vi.mock("../hooks/useSubGoal", () => ({
   }),
 }));
 
+vi.mock("../analytics/statisticsAnalytics", () => ({
+  recordStatisticsEvent: hoisted.recordStatisticsEvent,
+}));
+
 vi.mock("./notificationFeatureFlags", () => ({
   get NOTIFICATION_SETTINGS_ENTRY_ENABLED() {
     return hoisted.notificationSettingsEntryEnabled;
@@ -85,6 +91,58 @@ vi.mock("./notificationFeatureFlags", () => ({
 import { App } from "./App";
 
 describe("App", () => {
+  const statisticsMetric = {
+    value: 1,
+    previousValue: 0,
+    absoluteChange: 1,
+    percentChange: null,
+    comparisonStatus: "new",
+  } as const;
+  const statisticsReport = {
+    schemaVersion: 1,
+    subreddit: { name: "ExampleSub" },
+    period: {
+      hours: 24,
+      generatedAt: "2026-11-02T12:00:00.000Z",
+      start: "2026-11-01T13:00:00.000Z",
+      end: "2026-11-02T12:00:00.000Z",
+      previousStart: "2026-10-31T13:00:00.000Z",
+      previousEnd: "2026-11-01T13:00:00.000Z",
+      bucketGranularitySeconds: 3600,
+    },
+    metrics: {
+      loads: {
+        total: statisticsMetric,
+        subscribed: statisticsMetric,
+        unsubscribed: statisticsMetric,
+      },
+      visitors: {
+        unique: statisticsMetric,
+        new: statisticsMetric,
+        returning: statisticsMetric,
+        returningRate: statisticsMetric,
+      },
+      joins: {
+        clicks: statisticsMetric,
+        confirmed: statisticsMetric,
+        conversionRate: statisticsMetric,
+      },
+      ctas: {
+        clicks: statisticsMetric,
+        conversionRate: statisticsMetric,
+        byLabel: [],
+      },
+    },
+    methodology: {
+      uniqueCounting: "approximate",
+      newVisitorDefinition: "new",
+      returningVisitorDefinition: "returning",
+      anonymousIdentity: "browser based.",
+      membership: "App-tracked membership.",
+      retentionDays: 30,
+      collectionStartedAt: "deployment",
+    },
+  };
   const useWideViewportWithoutReducedMotion = () => {
     window.matchMedia = vi.fn(
       (query: string) =>
@@ -118,6 +176,49 @@ describe("App", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("shows the private statistics page only when eligible and returns to main", async () => {
+    hoisted.state = {
+      ...hoisted.createState(),
+      canViewStatistics: true,
+    } as SubGoalState;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(statisticsReport), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Statistics"]')
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      container.querySelector('[data-statistics-page="true"]'),
+    ).not.toBeNull();
+    expect(container.textContent).toContain("Unique visitors");
+
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Return"))
+        ?.click();
+    });
+    expect(container.querySelector('[data-statistics-page="true"]')).toBeNull();
+    expect(container.textContent).toContain("Show my username when I join");
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("opens notification settings and returns without triggering confetti", async () => {
