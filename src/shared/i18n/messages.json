@@ -1283,6 +1283,22 @@
       },
       "protectedTokens": ["Subscriber Goal"]
     },
+    "outbound.health.removalSubject": {
+      "description": "Private message subject sent to a moderator who removed the app account",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": ["Subscriber Goal"]
+    },
+    "outbound.health.removalBody": {
+      "description": "Private message sent to a moderator who removed the app account",
+      "policy": "fallback",
+      "placeholders": {
+        "moderatorName": "Moderator who removed the app account",
+        "subredditName": "Subreddit display name without r/",
+        "installationUrl": "Subreddit-specific App Installation Page URL"
+      },
+      "protectedTokens": ["Subscriber Goal", "u/subscriber-goal"]
+    },
     "outbound.highlight.subjectAttention": {
       "description": "Outbound moderator or member message: Highlight subject Attention",
       "policy": "fallback",
@@ -1368,12 +1384,10 @@
       "policy": "fallback",
       "placeholders": {
         "subredditName": "Subreddit display name without r/",
-        "appUsername": "Runtime value for appUsername"
+        "appUsername": "Runtime value for appUsername",
+        "installationUrl": "Subreddit-specific App Installation Page URL"
       },
-      "protectedTokens": [
-        "Subscriber Goal",
-        "https://developers.reddit.com/apps/subscriber-goal."
-      ]
+      "protectedTokens": ["Subscriber Goal"]
     },
     "outbound.highlight.moderatorKnown": {
       "description": "Outbound moderator or member message: Highlight moderator Known",
@@ -2218,6 +2232,8 @@
         "outbound.onboarding.installSubject": "Welcome to Subscriber Goal in r/{subredditName}",
         "outbound.onboarding.upgradeSubject": "Subscriber Goal automatic goal update for r/{subredditName}",
         "outbound.health.subject": "Subscriber Goal needs moderator access in r/{subredditName}",
+        "outbound.health.removalSubject": "Subscriber Goal Moderator Account Removed",
+        "outbound.health.removalBody": "Hi u/{moderatorName},\n\nYou removed u/subscriber-goal from the moderator team of r/{subredditName}.\n\nSubscriber Goal requires its app account to have moderator permissions to work correctly.\n\nIf you want to remove Subscriber Goal, please uninstall it from your community's App Installation Page:\n\n[{installationUrl}]({installationUrl})\n\nIf you removed the account by accident, please invite u/subscriber-goal back to the moderator team with the required permissions. Subscriber Goal will automatically accept the invitation.\n\nThis is an automated message.",
         "outbound.highlight.subjectAttention": "Action Required - SubGoal Highlight Needs Attention in r/{subredditName}",
         "outbound.highlight.subjectMissing": "Action Required - SubGoal Not Highlighted in r/{subredditName}",
         "outbound.invite.subject": "Tool for Growing your New Subreddit",
@@ -2229,7 +2245,7 @@
         "outbound.onboarding.info": "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.",
         "outbound.onboarding.support": "If you have questions, please send a DM to u/Alan-Foster.",
         "outbound.onboarding.automation": "If a highlighted Subscriber Goal does not already exist, the {delay} countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add a goal to Community Highlights during the following {maxMinutes} minutes. A subreddit can have at most six Community Highlights.",
-        "outbound.health.body": "Subscriber Goal cannot create or maintain goal posts in r/{subredditName} because u/{appUsername} is no longer a moderator with Manage Posts permission.\n\nPlease restore u/{appUsername} with Manage Posts permission, or reinstall Subscriber Goal from https://developers.reddit.com/apps/subscriber-goal. Flair permission is optional but is needed to apply the Subscriber Goal post flair.\n\nThe app will not add itself back or change its own moderator permissions.",
+        "outbound.health.body": "Subscriber Goal cannot create or maintain goal posts in r/{subredditName} because u/{appUsername} is no longer a moderator with Manage Posts permission.\n\nPlease restore u/{appUsername} with Manage Posts permission, or reinstall Subscriber Goal from {installationUrl}. Flair permission is optional but is needed to apply the Subscriber Goal post flair.\n\nThe app can accept a valid moderator invitation, but it cannot create an invitation or change its own moderator permissions.",
         "outbound.highlight.moderatorKnown": "Initiating moderator: u/{moderatorUsername}",
         "outbound.highlight.moderatorUnknown": "Initiating moderator: unknown",
         "outbound.highlight.degradedIntro": "The Subscriber Goal is highlighted in r/{subredditName}, but reconciliation did not complete cleanly.",

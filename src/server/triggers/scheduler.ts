@@ -1,4 +1,4 @@
-import { context, reddit, redis } from "@devvit/web/server";
+import { context, reddit, redis, scheduler } from "@devvit/web/server";
 import {
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
@@ -37,6 +37,7 @@ import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
+import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
   clearPostOperationalState,
@@ -62,6 +63,32 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
   const appSettings = getAppSettings();
+  try {
+    const recovery = await processDueAppAccountRecovery({
+      reddit,
+      redis,
+      scheduler,
+    });
+    if (
+      recovery.status === "pending" ||
+      recovery.status === "processing" ||
+      recovery.status === "locked" ||
+      recovery.status === "missing" ||
+      recovery.status === "insufficient_permissions" ||
+      recovery.status === "acceptance_failed" ||
+      recovery.status === "verification_failed" ||
+      recovery.status === "exhausted"
+    ) {
+      return;
+    }
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "app_account_recovery" },
+      error,
+    );
+  }
   let subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | null =
     null;
   try {

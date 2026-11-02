@@ -16,6 +16,7 @@ export const internalRoutes = {
   },
   scheduler: {
     postsUpdaterJob: "/internal/scheduler/posts-updater-job",
+    appAccountRecoveryJob: "/internal/scheduler/app-account-recovery-job",
     milestoneNotificationJob: "/internal/scheduler/milestone-notification-job",
     inviteNewSubsPollJob: "/internal/scheduler/invite-new-subs-poll-job",
     inviteNewSubsDeliveryJob:

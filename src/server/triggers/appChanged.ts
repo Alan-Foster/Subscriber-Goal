@@ -1,4 +1,4 @@
-import { context, reddit, redis } from "@devvit/web/server";
+import { context, reddit, redis, scheduler } from "@devvit/web/server";
 import { ensureSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
 import { initializeRecentSubscriberIndexMigration } from "../data/subGoalData";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../core/onboardingReminder";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
+import { recordLifecycleAndScheduleRecovery } from "../core/appAccountRecovery";
 import { scheduleAppRepair } from "../core/appRepair";
 import { reconcileOnboardingForLifecycle } from "../core/onboardingLifecycle";
 
@@ -73,6 +74,16 @@ export async function onAppChanged({
   };
 
   await rememberAppInstaller(redis, installerUsername);
+  if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
+    await recordLifecycleAndScheduleRecovery({
+      redis,
+      scheduler,
+      lifecycleSource,
+      subredditName,
+      ...(context.subredditId ? { subredditId: context.subredditId } : {}),
+      ...(installerUsername ? { installerUsername } : {}),
+    });
+  }
   await scheduleAppRepair(redis);
 
   await runPhase("subreddit_display_name", () =>

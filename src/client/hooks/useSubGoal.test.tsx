@@ -101,21 +101,11 @@ const SubscribeHarness = () => {
 };
 
 describe("useSubGoal tiny behavior", () => {
-  let setIntervalSpy: ReturnType<typeof vi.spyOn>;
-  let clearIntervalSpy: ReturnType<typeof vi.spyOn>;
-  let intervalCallback: (() => void) | undefined;
-
   beforeEach(() => {
     (
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
-    setIntervalSpy = vi.spyOn(window, "setInterval");
-    setIntervalSpy.mockImplementation((callback: TimerHandler) => {
-      intervalCallback = callback as () => void;
-      return 1;
-    });
-    clearIntervalSpy = vi.spyOn(window, "clearInterval");
     hoisted.requestJsonWithRetry.mockResolvedValue({
       data: { type: "init", postId: "t3_tiny", state: tinyState },
       error: null,
@@ -124,12 +114,11 @@ describe("useSubGoal tiny behavior", () => {
     hoisted.connectRealtime.mockResolvedValue({ disconnect: vi.fn() });
   });
 
-  afterEach(() => {
-    setIntervalSpy.mockRestore();
-    clearIntervalSpy.mockRestore();
-  });
+  afterEach(() => vi.useRealTimers());
 
   it("polls Tiny aggregate state every minute without connecting realtime", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -141,7 +130,7 @@ describe("useSubGoal tiny behavior", () => {
 
     expect(container.textContent).toBe("tiny");
     expect(hoisted.connectRealtime).not.toHaveBeenCalled();
-    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 60000);
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 60000);
 
     hoisted.requestJsonWithRetry.mockResolvedValueOnce({
       data: {
@@ -160,21 +149,21 @@ describe("useSubGoal tiny behavior", () => {
       aborted: false,
     });
     await act(async () => {
-      intervalCallback?.();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60000);
     });
     expect(hoisted.requestJsonWithRetry).toHaveBeenLastCalledWith(
       "/api/refresh",
       undefined,
-      { validate: expect.any(Function) },
+      { maxDurationMs: 0, validate: expect.any(Function) },
     );
 
     await act(async () => root.unmount());
-    expect(clearIntervalSpy).toHaveBeenCalledWith(1);
     container.remove();
   });
 
-  it("keeps polling after a transient Tiny refresh failure", async () => {
+  it("backs off failed refresh cycles and resets after success", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -182,18 +171,45 @@ describe("useSubGoal tiny behavior", () => {
       root.render(<Harness />);
       await Promise.resolve();
     });
-    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
-      data: null,
-      error: "temporarily unavailable",
-      aborted: false,
-    });
+    hoisted.requestJsonWithRetry
+      .mockResolvedValueOnce({
+        data: null,
+        error: "temporarily unavailable",
+        aborted: false,
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: "still unavailable",
+        aborted: false,
+      })
+      .mockResolvedValueOnce({
+        data: { type: "refresh", postId: "t3_tiny", state: tinyState },
+        error: null,
+        aborted: false,
+      });
 
     await act(async () => {
-      intervalCallback?.();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60000);
     });
+    expect(setTimeoutSpy).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      120000,
+    );
 
-    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120000);
+    });
+    expect(setTimeoutSpy).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      240000,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(240000);
+    });
+    expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 60000);
+
+    expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(4);
     await act(async () => root.unmount());
     container.remove();
   });

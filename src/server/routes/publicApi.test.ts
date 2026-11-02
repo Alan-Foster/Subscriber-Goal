@@ -23,6 +23,7 @@ const hoisted = vi.hoisted(() => ({
     subscribeToCurrentSubreddit: vi.fn(),
   },
   redis: {},
+  redisValues: new Map<string, string>(),
   realtime: {
     send: vi.fn(),
   },
@@ -126,6 +127,18 @@ describe("publicApi routes", () => {
     hoisted.context.userId = null;
     hoisted.context.subredditName = "ExampleSub";
     hoisted.context.postData = undefined;
+    hoisted.redisValues.clear();
+    Object.assign(hoisted.redis, {
+      set: vi.fn(
+        async (key: string, value: string, options?: { nx?: boolean }) => {
+          if (!options?.nx || !hoisted.redisValues.has(key)) {
+            hoisted.redisValues.set(key, value);
+          }
+          return "OK";
+        },
+      ),
+      get: vi.fn(async (key: string) => hoisted.redisValues.get(key)),
+    });
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -479,6 +492,46 @@ describe("publicApi routes", () => {
         growth: { count: 5, period: "today" },
       },
     });
+  });
+
+  it("rate-limits private-subreddit permission diagnostics across post IDs", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.reddit.getCurrentSubreddit.mockRejectedValue(
+      new Error("7 PERMISSION_DENIED: 403 Forbidden: private"),
+    );
+    const routes = createRouteHarness();
+    const firstJson = vi.fn();
+    const firstStatus = vi.fn(() => ({ json: firstJson }));
+
+    await routes.get(apiRoutes.refresh)?.(
+      { query: {} } as Request,
+      { status: firstStatus } as unknown as Response,
+    );
+    hoisted.context.postId = "t3_another_post";
+    const secondJson = vi.fn();
+    const secondStatus = vi.fn(() => ({ json: secondJson }));
+    await routes.get(apiRoutes.refresh)?.(
+      { query: {} } as Request,
+      { status: secondStatus } as unknown as Response,
+    );
+
+    expect(firstStatus).toHaveBeenCalledWith(503);
+    expect(secondStatus).toHaveBeenCalledWith(503);
+    expect(firstJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        messageKey: "errors.api.refreshFailed",
+      }),
+    );
+    expect(secondJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "error",
+        messageKey: "errors.api.refreshFailed",
+      }),
+    );
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
   it("returns exact-attempt confirmation bound to the current user and post", async () => {

@@ -65,6 +65,7 @@ const hoisted = vi.hoisted(() => ({
   observeDailySubscriberCount: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   processDueAppAccountHealthCheck: vi.fn(),
+  processDueAppAccountRecovery: vi.fn(),
   processDueAppRepair: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getPostOperationalState: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("@devvit/web/server", () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
   redis: {},
+  scheduler: {},
 }));
 
 vi.mock("../settings", () => ({
@@ -178,6 +180,9 @@ vi.mock("../core/onboardingReminder", () => ({
 vi.mock("../core/appAccountHealth", () => ({
   processDueAppAccountHealthCheck: hoisted.processDueAppAccountHealthCheck,
 }));
+vi.mock("../core/appAccountRecovery", () => ({
+  processDueAppAccountRecovery: hoisted.processDueAppAccountRecovery,
+}));
 
 vi.mock("../core/appRepair", () => ({
   processDueAppRepair: hoisted.processDueAppRepair,
@@ -218,6 +223,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.removeSubscriberGoalPost.mockReset();
     hoisted.observeDailySubscriberCount.mockReset();
     hoisted.processDueAppAccountHealthCheck.mockReset();
+    hoisted.processDueAppAccountRecovery.mockReset();
     hoisted.processDueAppRepair.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
     hoisted.getPostOperationalState.mockReset();
@@ -287,6 +293,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       growth: { count: 1, period: "week" },
     });
     hoisted.processDueAppAccountHealthCheck.mockResolvedValue(undefined);
+    hoisted.processDueAppAccountRecovery.mockResolvedValue({ status: "stale" });
     hoisted.processDueAppRepair.mockResolvedValue("not_due");
   });
 
@@ -332,6 +339,20 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       10,
     );
     expect(hoisted.getQueuedUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("runs recovery before subreddit work and stops while access is missing", async () => {
+    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+      status: "missing",
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.processDueAppAccountRecovery).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
+    expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+    expect(hoisted.getQueuedUpdates).not.toHaveBeenCalled();
   });
 
   it("isolates aggregate observation failures from the remaining scheduler", async () => {

@@ -10,6 +10,7 @@ export const appAccountHealthNotificationLockKey =
 export const appAccountHealthRetryStateKey =
   "app_account_health_v1_retry_state";
 export const subscriberGoalAppUsername = "subscriber-goal";
+export const appAccountHealthMaxRetryAttempts = 3;
 
 export type AppAccountHealthStatus = "healthy" | "unhealthy" | "unknown";
 
@@ -48,6 +49,7 @@ export function buildAppAccountRecoveryMessage(
     bodyMarkdown: translate(language, "outbound.health.body", {
       subredditName,
       appUsername: subscriberGoalAppUsername,
+      installationUrl: `https://developers.reddit.com/r/${subredditName}/apps/subscriber-goal`,
     }),
   };
 }
@@ -87,7 +89,8 @@ export async function checkAppAccountHealth({
         60_000 * 2 ** (attempts - 1),
       );
       await redis.hSet(appAccountHealthRetryStateKey, {
-        status: "pending",
+        status:
+          attempts < appAccountHealthMaxRetryAttempts ? "pending" : "exhausted",
         attempts: String(attempts),
         nextRunAt: String(nowMs + retryDelayMs),
         subredditName,
@@ -160,7 +163,10 @@ export async function checkAppAccountHealth({
     60_000 * 2 ** (healthRetryAttempts - 1),
   );
   await redis.hSet(appAccountHealthRetryStateKey, {
-    status: "pending",
+    status:
+      healthRetryAttempts < appAccountHealthMaxRetryAttempts
+        ? "pending"
+        : "exhausted",
     attempts: String(healthRetryAttempts),
     nextRunAt: String(nowMs + healthRetryDelayMs),
     subredditName,

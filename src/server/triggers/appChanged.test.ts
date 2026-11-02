@@ -28,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
   reconcileSubscriberGoalHighlights: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   rememberAppInstaller: vi.fn(),
+  recordLifecycleAndScheduleRecovery: vi.fn(),
   checkAppAccountHealth: vi.fn(),
   scheduleAppRepair: vi.fn(),
 }));
@@ -38,6 +39,7 @@ vi.mock("@devvit/web/server", () => ({
     getCurrentSubreddit: hoisted.getCurrentSubreddit,
   },
   redis: {},
+  scheduler: {},
 }));
 
 vi.mock("../data/subredditDisplayNameData", () => ({
@@ -142,6 +144,10 @@ vi.mock("../core/appAccountHealth", () => ({
   rememberAppInstaller: hoisted.rememberAppInstaller,
   checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
+vi.mock("../core/appAccountRecovery", () => ({
+  recordLifecycleAndScheduleRecovery:
+    hoisted.recordLifecycleAndScheduleRecovery,
+}));
 
 vi.mock("../core/appRepair", () => ({
   scheduleAppRepair: hoisted.scheduleAppRepair,
@@ -188,6 +194,8 @@ describe("onAppChanged", () => {
     hoisted.reconcileSubscriberGoalHighlights.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockReset();
     hoisted.rememberAppInstaller.mockReset();
+    hoisted.recordLifecycleAndScheduleRecovery.mockReset();
+    hoisted.recordLifecycleAndScheduleRecovery.mockResolvedValue("incident-1");
     hoisted.checkAppAccountHealth.mockReset();
     hoisted.scheduleAppRepair.mockReset();
     hoisted.ensureCommunityPostActivityBackfill.mockResolvedValue(undefined);
@@ -309,6 +317,13 @@ describe("onAppChanged", () => {
       expect.anything(),
       "InstallingMod",
     );
+    expect(hoisted.recordLifecycleAndScheduleRecovery).toHaveBeenCalledWith({
+      redis: expect.anything(),
+      scheduler: expect.anything(),
+      lifecycleSource: "install",
+      subredditName: "SubGoal",
+      installerUsername: "InstallingMod",
+    });
     expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
     expect(hoisted.reconcileSubscriberGoalHighlights).not.toHaveBeenCalled();
@@ -344,6 +359,12 @@ describe("onAppChanged", () => {
       { lifecycleSource: "upgrade", allowOnboardingRearm: true },
     );
     expect(hoisted.getCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(hoisted.recordLifecycleAndScheduleRecovery).toHaveBeenCalledWith({
+      redis: expect.anything(),
+      scheduler: expect.anything(),
+      lifecycleSource: "upgrade",
+      subredditName: "SubGoal",
+    });
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,

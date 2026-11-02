@@ -611,14 +611,14 @@ export const useSubGoal = () => {
     showNotice(messages.subscriberNotice({ username: recentSubscriber }));
   }, [messages, recentSubscriber, showNotice]);
 
-  const refresh = useCallback(async () => {
+  const requestRefresh = useCallback(async () => {
     const result = await requestJsonWithRetry<RefreshResponse>(
       "/api/refresh",
       undefined,
-      { validate: isRefreshResponse },
+      { maxDurationMs: 0, validate: isRefreshResponse },
     );
     if (result.aborted) {
-      return null;
+      return { state: null, succeeded: false };
     }
     if (result.error) {
       setError(
@@ -628,12 +628,18 @@ export const useSubGoal = () => {
           result.error ?? messages.loadError,
         ),
       );
-      return null;
+      return { state: null, succeeded: false };
     }
-    setState(result.data?.state ?? null);
+    const refreshedState = result.data?.state ?? null;
+    setState(refreshedState);
     setError(null);
-    return result.data?.state ?? null;
+    return { state: refreshedState, succeeded: true };
   }, [messages.loadError, state?.language]);
+
+  const refresh = useCallback(async () => {
+    const result = await requestRefresh();
+    return result.state;
+  }, [requestRefresh]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -825,23 +831,54 @@ export const useSubGoal = () => {
     if (!postHeight) {
       return;
     }
-    const interval = window.setInterval(
-      () => {
-        void refresh().catch((error: unknown) => {
-          logDiagnostic(
-            "error",
-            "client_async_handler_failed",
-            { workflow: "refresh", phase: "interval" },
-            error,
-          );
-        });
-      },
+    const baseIntervalMs =
       postHeight === "tiny" || postHeight === "cta"
         ? tinyRefreshIntervalMs
-        : regularRefreshIntervalMs,
-    );
-    return () => window.clearInterval(interval);
-  }, [postHeight, refresh]);
+        : regularRefreshIntervalMs;
+    const maximumIntervalMs = 15 * 60_000;
+    let consecutiveFailures = 0;
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const scheduleNext = (delayMs: number): void => {
+      timeoutId = window.setTimeout(() => {
+        void requestRefresh()
+          .then(({ succeeded }) => {
+            if (cancelled) return;
+            consecutiveFailures = succeeded ? 0 : consecutiveFailures + 1;
+            const nextDelay = succeeded
+              ? baseIntervalMs
+              : Math.min(
+                  maximumIntervalMs,
+                  baseIntervalMs * 2 ** consecutiveFailures,
+                );
+            scheduleNext(nextDelay);
+          })
+          .catch((error: unknown) => {
+            if (cancelled) return;
+            consecutiveFailures += 1;
+            logDiagnostic(
+              "error",
+              "client_async_handler_failed",
+              { workflow: "refresh", phase: "backoff" },
+              error,
+            );
+            scheduleNext(
+              Math.min(
+                maximumIntervalMs,
+                baseIntervalMs * 2 ** consecutiveFailures,
+              ),
+            );
+          });
+      }, delayMs);
+    };
+
+    scheduleNext(baseIntervalMs);
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [postHeight, requestRefresh]);
 
   const subscribe = useCallback(
     async (payload?: SubscribeRequest): Promise<SubscribeResult> => {

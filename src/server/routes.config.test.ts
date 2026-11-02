@@ -17,6 +17,7 @@ describe("devvit.json route alignment", () => {
     scheduler: {
       tasks: {
         "posts-updater-job": { endpoint: string };
+        "app-account-recovery-job": { endpoint: string };
         "milestone-notification-job": { endpoint: string };
         "invite-new-subs-poll-job": { endpoint: string };
         "invite-new-subs-delivery-job": { endpoint: string };
@@ -93,6 +94,9 @@ describe("devvit.json route alignment", () => {
     expect(devvitConfig.scheduler.tasks["posts-updater-job"].endpoint).toBe(
       internalRoutes.scheduler.postsUpdaterJob,
     );
+    expect(
+      devvitConfig.scheduler.tasks["app-account-recovery-job"].endpoint,
+    ).toBe(internalRoutes.scheduler.appAccountRecoveryJob);
     expect(
       devvitConfig.scheduler.tasks["milestone-notification-job"].endpoint,
     ).toBe(internalRoutes.scheduler.milestoneNotificationJob);

@@ -22,7 +22,7 @@ const hoisted = vi.hoisted(() => ({
   redisState: {
     redisMock: undefined as unknown,
   },
-  checkAppAccountHealth: vi.fn(),
+  handleAppAccountModeratorAction: vi.fn(),
 }));
 
 const mockContext = hoisted.mockContext;
@@ -179,6 +179,7 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).watch(...args),
   },
   context: hoisted.mockContext,
+  scheduler: {},
 }));
 
 vi.mock('../utils/crosspostLogs', () => ({
@@ -197,7 +198,9 @@ vi.mock('../utils/redditUtils', () => ({
 vi.mock('../core/appAccountHealth', () => ({
   appAccountHealthStateKey: 'app_account_health_v1_state',
   subscriberGoalAppUsername: 'subscriber-goal',
-  checkAppAccountHealth: hoisted.checkAppAccountHealth,
+}));
+vi.mock('../core/appAccountRecovery', () => ({
+  handleAppAccountModeratorAction: hoisted.handleAppAccountModeratorAction,
 }));
 
 import { onModAction, processCrosspostDispatchQueue } from './modAction';
@@ -232,8 +235,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     });
     safeGetWikiPageRevisionsMock.mockReset();
     loggedEvents.length = 0;
-    hoisted.checkAppAccountHealth.mockReset();
-    hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: false });
+    hoisted.handleAppAccountModeratorAction.mockReset();
+    hoisted.handleAppAccountModeratorAction.mockResolvedValue(undefined);
   });
 
   it.each([
@@ -254,9 +257,11 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         targetUser: { name: 'subscriber-goal' },
       });
 
-      expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith({
+      expect(hoisted.handleAppAccountModeratorAction).toHaveBeenCalledWith({
         reddit: expect.anything(),
         redis: expect.anything(),
+        scheduler: expect.anything(),
+        action,
         subredditName: 'ExampleSub',
         subredditId: 't5_example',
       });
@@ -271,7 +276,30 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       targetUser: { name: 'another-mod' },
     });
 
-    expect(hoisted.checkAppAccountHealth).not.toHaveBeenCalled();
+    expect(hoisted.handleAppAccountModeratorAction).not.toHaveBeenCalled();
+  });
+
+  it('records the removing moderator and event timestamp for recovery', async () => {
+    mockContext.subredditName = 'ExampleSub';
+    mockContext.subredditId = 't5_example';
+
+    await onModAction({
+      action: 'removemoderator',
+      actionedAt: '2026-11-01T12:00:00.000Z',
+      moderator: { name: 'RemovingMod' },
+      targetUser: { name: 'subscriber-goal' },
+    });
+
+    expect(hoisted.handleAppAccountModeratorAction).toHaveBeenCalledWith({
+      reddit: expect.anything(),
+      redis: expect.anything(),
+      scheduler: expect.anything(),
+      action: 'removemoderator',
+      actionedAt: '2026-11-01T12:00:00.000Z',
+      moderatorName: 'RemovingMod',
+      subredditName: 'ExampleSub',
+      subredditId: 't5_example',
+    });
   });
 
   it('skips ingestion when running outside authority subreddit', async () => {

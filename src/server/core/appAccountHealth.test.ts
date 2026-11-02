@@ -166,6 +166,20 @@ describe("app account health", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
+  it("caps unknown-health retries instead of retrying indefinitely", async () => {
+    reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
+
+    await check();
+    await check();
+    await check();
+
+    expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toMatchObject({
+      status: "exhausted",
+      attempts: "3",
+      subredditName: "ExampleSub",
+    });
+  });
+
   it("can fail closed without scheduling a permission retry", async () => {
     reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
 

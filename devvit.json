@@ -112,6 +112,9 @@
         "endpoint": "/internal/scheduler/posts-updater-job",
         "cron": "*/1 * * * *"
       },
+      "app-account-recovery-job": {
+        "endpoint": "/internal/scheduler/app-account-recovery-job"
+      },
       "milestone-notification-job": {
         "endpoint": "/internal/scheduler/milestone-notification-job"
       },

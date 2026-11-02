@@ -1,4 +1,4 @@
-import { reddit, redis, context } from '@devvit/web/server';
+import { reddit, redis, context, scheduler } from '@devvit/web/server';
 import type { ServerAppSettings } from '../settings';
 import { formatSubscriberCount } from '../../shared/numberFormat';
 import { getAppSettings } from '../settings';
@@ -34,12 +34,13 @@ import { logDiagnostic } from '../../shared/diagnostics';
 import { translate } from '../../shared/i18n/catalog';
 import {
   appAccountHealthStateKey,
-  checkAppAccountHealth,
   subscriberGoalAppUsername,
 } from '../core/appAccountHealth';
+import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
 
 export type ModActionEvent = {
   action?: string;
+  actionedAt?: string;
   targetUser?: {
     name?: string;
   };
@@ -1936,12 +1937,22 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     const healthSubreddit =
       currentSubreddit ??
       (!context.subredditId ? await reddit.getCurrentSubreddit() : undefined);
-    await checkAppAccountHealth({
+    await handleAppAccountModeratorAction({
       reddit,
       redis,
+      scheduler,
+      action: event.action!,
+      ...(event.moderator?.name
+        ? { moderatorName: event.moderator.name }
+        : {}),
+      ...(event.actionedAt ? { actionedAt: event.actionedAt } : {}),
       subredditName,
-      subredditId: context.subredditId ?? healthSubreddit?.id,
-      language: healthSubreddit?.language,
+      ...(context.subredditId ?? healthSubreddit?.id
+        ? { subredditId: context.subredditId ?? healthSubreddit!.id }
+        : {}),
+      ...(healthSubreddit?.language
+        ? { language: healthSubreddit.language }
+        : {}),
     });
   }
 

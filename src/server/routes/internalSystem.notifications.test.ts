@@ -13,6 +13,7 @@ const hoisted = vi.hoisted(() => ({
   onAppChanged: vi.fn(),
   processInviteNewSubsDelivery: vi.fn(),
   processInviteNewSubsReport: vi.fn(),
+  processAppAccountRecovery: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -42,6 +43,9 @@ vi.mock("../core/inviteNewSubs", () => ({
   processInviteNewSubsDelivery: hoisted.processInviteNewSubsDelivery,
   processInviteNewSubsPoll: vi.fn(),
   processInviteNewSubsReport: hoisted.processInviteNewSubsReport,
+}));
+vi.mock("../core/appAccountRecovery", () => ({
+  processAppAccountRecovery: hoisted.processAppAccountRecovery,
 }));
 
 import { registerInternalSystemRoutes } from "./internalSystem";
@@ -123,6 +127,76 @@ describe("app lifecycle routes", () => {
       expect(json).toHaveBeenCalledWith({ status: "ok" });
     },
   );
+});
+
+describe("app-account recovery scheduler route", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const getHandler = (): Handler | undefined => {
+    let handler: Handler | undefined;
+    const router = {
+      post: (path: string, candidate: Handler) => {
+        if (path === internalRoutes.scheduler.appAccountRecoveryJob) {
+          handler = candidate;
+        }
+      },
+    } as unknown as Router;
+    registerInternalSystemRoutes(router);
+    return handler;
+  };
+
+  it("processes a typed incident token", async () => {
+    const result = { status: "healthy", incidentToken: "incident-1" };
+    hoisted.processAppAccountRecovery.mockResolvedValue(result);
+    const json = vi.fn();
+
+    await getHandler()?.(
+      { body: { data: { incidentToken: "incident-1" } } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.processAppAccountRecovery).toHaveBeenCalledWith({
+      reddit: expect.any(Object),
+      redis: expect.any(Object),
+      scheduler: expect.any(Object),
+      incidentToken: "incident-1",
+    });
+    expect(json).toHaveBeenCalledWith(result);
+  });
+
+  it("rejects a missing incident token", async () => {
+    const json = vi.fn();
+    const status = vi.fn().mockReturnValue({ json });
+
+    await getHandler()?.(
+      { body: { data: {} } } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "Recovery incident token is required.",
+    });
+    expect(hoisted.processAppAccountRecovery).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 when recovery processing fails", async () => {
+    hoisted.processAppAccountRecovery.mockRejectedValue(new Error("failed"));
+    const json = vi.fn();
+    const status = vi.fn().mockReturnValue({ json });
+
+    await getHandler()?.(
+      { body: { incidentToken: "incident-1" } } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith({
+      status: "error",
+      message: "Failed to process app-account recovery",
+    });
+  });
 });
 
 describe("new-subreddit DM report scheduler route", () => {

@@ -17,6 +17,7 @@ import {
   processInviteNewSubsPoll,
   processInviteNewSubsReport,
 } from "../core/inviteNewSubs";
+import { processAppAccountRecovery } from "../core/appAccountRecovery";
 
 export function registerInternalSystemRoutes(router: Router): void {
   router.post(
@@ -124,6 +125,43 @@ export function registerInternalSystemRoutes(router: Router): void {
         res.status(503).json({
           status: "error",
           message: "Failed to record post creation",
+        });
+      }
+    },
+  );
+
+  router.post(
+    internalRoutes.scheduler.appAccountRecoveryJob,
+    async (req, res): Promise<void> => {
+      const payload = req.body?.data ?? req.body;
+      if (!payload || typeof payload.incidentToken !== "string") {
+        res.status(400).json({
+          status: "error",
+          message: "Recovery incident token is required.",
+        });
+        return;
+      }
+      try {
+        const result = await processAppAccountRecovery({
+          reddit,
+          redis,
+          scheduler,
+          incidentToken: payload.incidentToken,
+        });
+        res.json(result);
+      } catch (error) {
+        logDiagnostic(
+          "error",
+          "scheduler_route_failed",
+          {
+            route: internalRoutes.scheduler.appAccountRecoveryJob,
+            workflow: "app_account_recovery",
+          },
+          error,
+        );
+        res.status(503).json({
+          status: "error",
+          message: "Failed to process app-account recovery",
         });
       }
     },

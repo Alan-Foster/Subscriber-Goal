@@ -43,6 +43,26 @@ import {
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import { translate, type MessageKey } from "../../shared/i18n/catalog";
+import { isPrivateSubredditAccessError } from "../utils/redditPermissionErrors";
+
+const refreshPermissionDiagnosticKey =
+  "refresh_permission_denied_diagnostic_v1";
+const refreshPermissionDiagnosticTtlMs = 15 * 60_000;
+
+async function claimRefreshPermissionDiagnostic(): Promise<boolean> {
+  try {
+    const token = crypto.randomUUID();
+    await redis.set(refreshPermissionDiagnosticKey, token, {
+      nx: true,
+      expiration: new Date(Date.now() + refreshPermissionDiagnosticTtlMs),
+    });
+    return (await redis.get(refreshPermissionDiagnosticKey)) === token;
+  } catch {
+    // diagnostic-allow-silent: preserve the structured API response and fall
+    // back to logging the original permission error if rate limiting is down.
+    return true;
+  }
+}
 
 const localizedError = (
   messageKey: MessageKey,
@@ -815,18 +835,23 @@ export function registerPublicApiRoutes(router: Router): void {
       } satisfies RefreshResponse);
     } catch (error) {
       const operationId = createOperationId("refresh");
-      logDiagnostic(
-        "error",
-        "api_request_failed",
-        {
-          operationId,
-          route: apiRoutes.refresh,
-          workflow: "refresh",
-          postId,
-          status: 503,
-        },
-        error,
-      );
+      const shouldLog =
+        !isPrivateSubredditAccessError(error) ||
+        (await claimRefreshPermissionDiagnostic());
+      if (shouldLog) {
+        logDiagnostic(
+          "error",
+          "api_request_failed",
+          {
+            operationId,
+            route: apiRoutes.refresh,
+            workflow: "refresh",
+            postId,
+            status: 503,
+          },
+          error,
+        );
+      }
       res
         .status(503)
         .json(localizedError("errors.api.refreshFailed", { operationId }));

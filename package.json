@@ -24,6 +24,8 @@
   "dependencies": {
     "@devvit/analytics": "0.15.1",
     "@devvit/notifications": "0.15.1",
+    "@devvit/protos": "0.15.1",
+    "@devvit/shared-types": "0.15.1",
     "@devvit/start": "0.15.1",
     "@devvit/web": "0.15.1",
     "clsx": "2.1.1",
