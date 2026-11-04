@@ -14,14 +14,16 @@ describe("SubscriptionButton", () => {
         />,
       );
 
-      expect(html).toContain("sg-subscribe-attention");
+      expect(html).toContain("sg-attention-host");
+      expect(html).toContain('class="sg-subscribe-attention-shell absolute"');
+      expect(html).toContain('class="sg-subscribe-attention absolute"');
       expect(html).toContain(`data-subscription-button-mode="${mode}"`);
       expect(html).toContain("rounded-full");
       expect(html).toContain("px-6 py-2");
-      expect(html).toContain("min-h-[60px]");
-      expect(html).toContain("min-w-[255px]");
+      expect(html).toContain("min-h-[52px]");
+      expect(html).toContain("min-w-[220px]");
       expect(html).toContain("gap-2");
-      expect(html).toContain("text-2xl");
+      expect(html).toContain("text-lg");
       expect(html).toContain("sg-hover-grow");
       expect(html).toContain("max-w-full");
       expect(html).toContain("text-center");
@@ -49,6 +51,7 @@ describe("SubscriptionButton", () => {
       );
 
       expect(html).not.toContain("sg-subscribe-attention");
+      expect(html).not.toContain("sg-subscribe-attention-shell");
       expect(html).toContain('disabled=""');
     },
   );
@@ -64,7 +67,8 @@ describe("SubscriptionButton", () => {
     );
 
     expect(html).toContain('data-sg-theme="pink"');
-    expect(html).toContain("sg-subscribe-attention");
+    expect(html).toContain('class="sg-subscribe-attention-shell absolute"');
+    expect(html).toContain('class="sg-subscribe-attention absolute"');
     expect(html).not.toContain('disabled=""');
   });
 

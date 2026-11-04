@@ -101,7 +101,7 @@ describe("App", () => {
     comparisonStatus: "new",
   } as const;
   const statisticsReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     subreddit: { name: "ExampleSub" },
     period: {
       hours: 24,
@@ -113,10 +113,9 @@ describe("App", () => {
       bucketGranularitySeconds: 3600,
     },
     metrics: {
-      loads: {
-        total: statisticsMetric,
-        subscribed: statisticsMetric,
-        unsubscribed: statisticsMetric,
+      traffic: {
+        impressions: statisticsMetric,
+        viewingSessions: statisticsMetric,
       },
       visitors: {
         unique: statisticsMetric,
@@ -126,23 +125,58 @@ describe("App", () => {
       },
       joins: {
         clicks: statisticsMetric,
+        uniqueClickSessions: statisticsMetric,
         confirmed: statisticsMetric,
-        conversionRate: statisticsMetric,
+        clickSuccessRate: statisticsMetric,
+        ctr: statisticsMetric,
       },
       ctas: {
         clicks: statisticsMetric,
-        conversionRate: statisticsMetric,
+        uniqueClickSessions: statisticsMetric,
+        eligibleSessions: statisticsMetric,
+        ctr: statisticsMetric,
         byLabel: [],
+      },
+      membership: {
+        appTrackedSubscribedSessions: statisticsMetric,
+        joinEligibleSessions: statisticsMetric,
+      },
+      ctaOnly: {
+        clicks: statisticsMetric,
+        uniqueClickSessions: statisticsMetric,
+        eligibleSessions: statisticsMetric,
+        ctr: statisticsMetric,
+      },
+      interactions: {
+        uniqueSessions: statisticsMetric,
+        eligibleSessions: statisticsMetric,
+        ctr: statisticsMetric,
+      },
+      legacy: { unclassifiedCtaClicks: statisticsMetric },
+    },
+    coverage: {
+      trafficAndVisitors: {
+        firstKnownAt: "2026-10-01T00:00:00.000Z",
+        inferredFromLegacyData: false,
+        current: { status: "complete", coveredHours: 24, requestedHours: 24 },
+        previous: { status: "complete", coveredHours: 24, requestedHours: 24 },
+      },
+      sessionsAndInteractions: {
+        firstKnownAt: "2026-10-01T00:00:00.000Z",
+        inferredFromLegacyData: false,
+        current: { status: "complete", coveredHours: 24, requestedHours: 24 },
+        previous: { status: "complete", coveredHours: 24, requestedHours: 24 },
       },
     },
     methodology: {
+      formulas: {},
       uniqueCounting: "approximate",
       newVisitorDefinition: "new",
       returningVisitorDefinition: "returning",
       anonymousIdentity: "browser based.",
       membership: "App-tracked membership.",
       retentionDays: 30,
-      collectionStartedAt: "deployment",
+      sessionDefinition: "hourly",
     },
   };
   const useWideViewportWithoutReducedMotion = () => {
@@ -269,6 +303,13 @@ describe("App", () => {
       container.querySelector('[data-statistics-page="true"]'),
     ).not.toBeNull();
     expect(container.textContent).toContain("Unique visitors");
+    const exportControls = container.querySelector(
+      '[data-statistics-export-controls="true"]',
+    );
+    expect(exportControls?.querySelector("button")?.textContent).toBe(
+      "Copy JSON",
+    );
+    expect(container.textContent).not.toContain("Export CSV");
 
     await act(async () => {
       Array.from(container.querySelectorAll("button"))

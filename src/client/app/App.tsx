@@ -503,7 +503,9 @@ export const App = () => {
           : undefined
       }
     >
-      <div className="sg-goal-ui flex h-full w-full flex-col items-center justify-center">
+      <div
+        className={`sg-goal-ui flex h-full w-full flex-col items-center justify-center ${page === "statistics" ? "min-h-0" : ""}`}
+      >
         {(state?.postHeight === "tiny" || state?.postHeight === "cta") &&
         content ? (
           <TinyViewTransition transitionKey={page}>

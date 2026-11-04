@@ -29,12 +29,17 @@ export const GoalNotificationButton = ({
 
   return (
     <span
-      className="relative isolate flex min-w-0 flex-1 sm:max-w-96 sm:flex-none"
+      className="sg-attention-host relative isolate flex min-w-0 flex-1 sm:max-w-96 sm:flex-none"
       data-goal-notification-action="true"
       data-sg-theme={colorTheme}
     >
       {!submitting ? (
-        <span aria-hidden="true" className="sg-subscribe-attention absolute" />
+        <span
+          aria-hidden="true"
+          className="sg-subscribe-attention-shell absolute"
+        >
+          <span className="sg-subscribe-attention absolute" />
+        </span>
       ) : null}
       <button
         type="button"

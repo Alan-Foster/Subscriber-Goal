@@ -51,24 +51,38 @@ export type StatisticsComparisonStatus =
   | "increase"
   | "decrease"
   | "unchanged"
-  | "new";
+  | "new"
+  | "unavailable";
 
 export type StatisticsComparableValue = {
-  value: number;
-  previousValue: number;
-  absoluteChange: number;
+  value: number | null;
+  previousValue: number | null;
+  absoluteChange: number | null;
   percentChange: number | null;
   comparisonStatus: StatisticsComparisonStatus;
+};
+
+export type StatisticsCoveragePeriod = {
+  status: "complete" | "partial" | "unavailable";
+  coveredHours: number;
+  requestedHours: number;
+};
+
+export type StatisticsCoverage = {
+  firstKnownAt: string | null;
+  inferredFromLegacyData: boolean;
+  current: StatisticsCoveragePeriod;
+  previous: StatisticsCoveragePeriod;
 };
 
 export type StatisticsCtaRow = {
   label: string;
   clicks: StatisticsComparableValue;
-  uniqueUsers: StatisticsComparableValue;
+  uniqueSessions: StatisticsComparableValue;
 };
 
 export type StatisticsResponse = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   subreddit: { name: string };
   period: {
     hours: 24 | 168;
@@ -80,10 +94,9 @@ export type StatisticsResponse = {
     bucketGranularitySeconds: 3600;
   };
   metrics: {
-    loads: {
-      total: StatisticsComparableValue;
-      subscribed: StatisticsComparableValue;
-      unsubscribed: StatisticsComparableValue;
+    traffic: {
+      impressions: StatisticsComparableValue;
+      viewingSessions: StatisticsComparableValue;
     };
     visitors: {
       unique: StatisticsComparableValue;
@@ -91,25 +104,52 @@ export type StatisticsResponse = {
       returning: StatisticsComparableValue;
       returningRate: StatisticsComparableValue;
     };
+    membership: {
+      appTrackedSubscribedSessions: StatisticsComparableValue;
+      joinEligibleSessions: StatisticsComparableValue;
+    };
     joins: {
       clicks: StatisticsComparableValue;
+      uniqueClickSessions: StatisticsComparableValue;
       confirmed: StatisticsComparableValue;
-      conversionRate: StatisticsComparableValue;
+      clickSuccessRate: StatisticsComparableValue;
+      ctr: StatisticsComparableValue;
     };
     ctas: {
       clicks: StatisticsComparableValue;
-      conversionRate: StatisticsComparableValue;
+      uniqueClickSessions: StatisticsComparableValue;
+      eligibleSessions: StatisticsComparableValue;
+      ctr: StatisticsComparableValue;
       byLabel: StatisticsCtaRow[];
     };
+    ctaOnly: {
+      clicks: StatisticsComparableValue;
+      uniqueClickSessions: StatisticsComparableValue;
+      eligibleSessions: StatisticsComparableValue;
+      ctr: StatisticsComparableValue;
+    };
+    interactions: {
+      uniqueSessions: StatisticsComparableValue;
+      eligibleSessions: StatisticsComparableValue;
+      ctr: StatisticsComparableValue;
+    };
+    legacy: {
+      unclassifiedCtaClicks: StatisticsComparableValue;
+    };
+  };
+  coverage: {
+    trafficAndVisitors: StatisticsCoverage;
+    sessionsAndInteractions: StatisticsCoverage;
   };
   methodology: {
+    formulas: Record<string, string>;
     uniqueCounting: string;
     newVisitorDefinition: string;
     returningVisitorDefinition: string;
     anonymousIdentity: string;
     membership: string;
     retentionDays: 30;
-    collectionStartedAt: "deployment";
+    sessionDefinition: string;
   };
 };
 

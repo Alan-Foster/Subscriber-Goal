@@ -27,15 +27,20 @@ export const SubscriptionButton = ({
 
   return (
     <span
-      className="relative isolate inline-flex max-w-full"
+      className="sg-attention-host relative isolate inline-flex max-w-full"
       data-sg-theme={colorTheme}
       data-subscription-button-mode={mode}
     >
       {showAttention ? (
-        <span aria-hidden="true" className="sg-subscribe-attention absolute" />
+        <span
+          aria-hidden="true"
+          className="sg-subscribe-attention-shell absolute"
+        >
+          <span className="sg-subscribe-attention absolute" />
+        </span>
       ) : null}
       <button
-        className="sg-hover-grow relative z-10 inline-flex min-h-[60px] min-w-[255px] max-w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-center text-2xl font-semibold whitespace-normal text-[color:var(--sg-button-text)] [overflow-wrap:anywhere] disabled:cursor-not-allowed disabled:opacity-60"
+        className="sg-hover-grow relative z-10 inline-flex min-h-[52px] min-w-[220px] max-w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[color:var(--sg-accent)] px-6 py-2 text-center text-lg font-semibold whitespace-normal text-[color:var(--sg-button-text)] [overflow-wrap:anywhere] disabled:cursor-not-allowed disabled:opacity-60"
         data-subgoal-primary-cta={mode === "subscribe" ? "true" : undefined}
         data-sg-theme={colorTheme}
         disabled={disabled}

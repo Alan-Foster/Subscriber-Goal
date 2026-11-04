@@ -446,6 +446,12 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "statistics.label": {
+      "description": "Statistics dashboard: Label",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "notifications.loadError": {
       "description": "Goal notification interface: Load Error",
       "policy": "required",
@@ -2162,6 +2168,7 @@
         "notifications.enabledToast": "Notifications enabled.",
         "notifications.goalPrompt": "Get Notified at {goalText}",
         "notifications.label": "Notifications",
+        "statistics.label": "Statistics",
         "notifications.loadError": "Notification settings could not be loaded.",
         "notifications.loginRequired": "Please log in to manage notifications.",
         "notifications.return": "Return",

@@ -29,6 +29,7 @@ import { useNotificationSettings } from "../app/hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../app/notificationFeatureFlags";
 import { usePrimaryCtaPaintTiming } from "../utils/startupPerformance";
+import { recordStatisticsEvent } from "../analytics/statisticsAnalytics";
 
 type TinySubscribeViewPhase =
   | "subscribe"
@@ -210,6 +211,7 @@ export const SubscribeOnlyApp = () => {
   const performSubscribe = async () => {
     if (subscribeAttemptRef.current) return;
     subscribeAttemptRef.current = true;
+    recordStatisticsEvent("join_click");
     const analyticsContext = getGoalJourneyContext(state);
     goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!state.authenticated) {

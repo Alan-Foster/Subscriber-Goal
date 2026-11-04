@@ -8,7 +8,7 @@ type SubredditIconProps = {
 
 export const SubredditIcon = ({
   iconUrl,
-  size = 60,
+  size = 80,
   onClick,
 }: SubredditIconProps) => {
   const dimensionStyle = { width: size, height: size };

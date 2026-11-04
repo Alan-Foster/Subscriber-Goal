@@ -565,7 +565,17 @@ export function registerPublicApiRoutes(router: Router): void {
     }
     try {
       if (body.type === "join_click") {
-        await recordStatisticsJoinClick(redis, body.eventId);
+        const postId = context.postId;
+        if (!postId) {
+          res.status(400).json(localizedError("errors.api.postIdRequired"));
+          return;
+        }
+        const identity = visitorIdentity(req);
+        await recordStatisticsJoinClick(redis, {
+          eventId: body.eventId,
+          postId,
+          ...(identity ? { visitorIdentity: identity } : {}),
+        });
       } else {
         const postId = context.postId;
         if (!postId) {
@@ -582,7 +592,9 @@ export function registerPublicApiRoutes(router: Router): void {
         const identity = visitorIdentity(req);
         await recordStatisticsCtaClick(redis, {
           eventId: body.eventId,
+          postId,
           label: data.afterSubscribeAction.buttonText,
+          kind: data.postKind === ctaOnlyPostKind ? "cta_only" : "secondary",
           ...(identity ? { visitorIdentity: identity } : {}),
         });
       }
@@ -881,7 +893,20 @@ export function registerPublicApiRoutes(router: Router): void {
           const identity = visitorIdentity(req);
           await recordStatisticsLoad(redis, {
             eventId: loadEventId,
-            subscribed: subscriberResult.value,
+            postId,
+            appTrackedSubscribed: subscriberResult.value,
+            exposure:
+              state.postHeight === "cta"
+                ? state.afterSubscribeAction.type === "disabled"
+                  ? "none"
+                  : "cta_only"
+                : subscriberResult.value
+                  ? state.afterSubscribeAction.type === "disabled"
+                    ? "none"
+                    : "secondary_cta"
+                  : state.postHeight === "tiny" || state.completedTime === null
+                    ? "join"
+                    : "none",
             ...(identity ? { visitorIdentity: identity } : {}),
           });
         } catch (error) {
@@ -1057,7 +1082,16 @@ export function registerPublicApiRoutes(router: Router): void {
             operationId,
             postId,
             "statistics_confirmed_join",
-            () => recordStatisticsConfirmedJoin(redis, attemptId),
+            () =>
+              recordStatisticsConfirmedJoin(redis, {
+                attemptId,
+                postId,
+                ...(visitorIdentity(req)
+                  ? { visitorIdentity: visitorIdentity(req) }
+                  : {}),
+                secondaryCtaEligible:
+                  subGoalData.afterSubscribeAction.type !== "disabled",
+              }),
           );
         }
         if (attemptId) {
@@ -1137,7 +1171,16 @@ export function registerPublicApiRoutes(router: Router): void {
           operationId,
           postId,
           "statistics_confirmed_join",
-          () => recordStatisticsConfirmedJoin(redis, attemptId),
+          () =>
+            recordStatisticsConfirmedJoin(redis, {
+              attemptId,
+              postId,
+              ...(visitorIdentity(req)
+                ? { visitorIdentity: visitorIdentity(req) }
+                : {}),
+              secondaryCtaEligible:
+                subGoalData.afterSubscribeAction.type !== "disabled",
+            }),
         );
       }
       if (attemptId) {

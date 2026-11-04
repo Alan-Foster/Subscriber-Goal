@@ -10,9 +10,19 @@ describe("client subscribe attention styles", () => {
     );
 
     expect(css).not.toContain(".sg-subscribe-attention::after");
+    expect(css).toMatch(
+      /\.sg-subscribe-attention-shell\s*\{[^}]*inset:\s*-4px;[^}]*transition:\s*transform 180ms ease-in-out;[^}]*transform-origin:\s*center;/s,
+    );
+    expect(css).toMatch(/\.sg-subscribe-attention\s*\{[^}]*inset:\s*0;/s);
     expect(css).toMatch(/\.sg-subscribe-attention\s*\{[^}]*z-index:\s*0;/s);
     expect(css).toMatch(
+      /@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.sg-attention-host:hover > \.sg-subscribe-attention-shell\s*\{[^}]*transform:\s*scale\(1\.05\);/,
+    );
+    expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sg-subscribe-attention\s*\{[\s\S]*animation:\s*none;/,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sg-subscribe-attention-shell\s*\{[^}]*transition:\s*none;/,
     );
     expect(css).toMatch(
       /\.sg-hover-grow\s*\{[^}]*transition:\s*transform 180ms ease-in-out;[^}]*transform-origin:\s*center;/s,

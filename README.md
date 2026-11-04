@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.3.4 - UI improvements. Login prompt for non-users. Local install metrics for 24h and 7d for subbed vs unsubbed app loads, clicks, click success. Devvit 0.15.2
+- 2.4.1 - UI improvements. Login prompt for non-users. Local install metrics for 24h and 7d for subbed vs unsubbed app loads, clicks, click success. Devvit 0.15.2
 - 2.3.3 - Improved auto-goal system on app upgrades to prevent duplicate goals. 
 - 2.3.2 - Missing mod accounts are re-added when removed, with proper uninstall steps provided via dm.
 - 2.3.1 - Added Hindi, Punjabi, Marathi, now 31 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1

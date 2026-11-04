@@ -30,6 +30,7 @@ export const TopButtons = ({
 }: TopButtonsProps) => {
   const shouldAnimate = !hasAnimatedOnce;
   const messages = getSubGoalPostMessages(language);
+  const statisticsLabel = translate(language, "statistics.label");
   const activatedRef = useRef(false);
   const notificationsActivatedRef = useRef(false);
 
@@ -43,7 +44,7 @@ export const TopButtons = ({
         <div className="absolute bottom-4 left-4 z-20">
           <button
             type="button"
-            aria-label="Statistics"
+            aria-label={statisticsLabel}
             className={`${shouldAnimate ? "sg-fade-in" : ""} inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-xs font-semibold leading-none whitespace-nowrap text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
             onClick={onStatisticsPressed}
           >
@@ -60,7 +61,7 @@ export const TopButtons = ({
                 fill="currentColor"
               />
             </svg>
-            <span className="hidden sm:inline">Statistics</span>
+            <span className="hidden sm:inline">{statisticsLabel}</span>
           </button>
         </div>
       ) : null}

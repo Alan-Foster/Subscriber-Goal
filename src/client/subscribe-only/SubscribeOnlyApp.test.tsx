@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   navigateTo: vi.fn(),
   showToast: vi.fn(),
   showLoginPrompt: vi.fn(),
+  recordStatisticsEvent: vi.fn(),
   prohibited: false,
 }));
 
@@ -33,6 +34,9 @@ vi.mock("../hooks/useSubGoal", () => ({
     subscribe: hoisted.subscribe,
     prohibited: hoisted.prohibited,
   }),
+}));
+vi.mock("../analytics/statisticsAnalytics", () => ({
+  recordStatisticsEvent: hoisted.recordStatisticsEvent,
 }));
 
 vi.mock("../app/notificationFeatureFlags", () => ({
@@ -425,6 +429,7 @@ describe("SubscribeOnlyApp", () => {
 
     expect(container.textContent).toContain("Join r/ExampleSub");
     expect(container.textContent).toContain("Joined r/ExampleSub");
+    expect(hoisted.recordStatisticsEvent).toHaveBeenCalledWith("join_click");
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
     ).not.toBeNull();
