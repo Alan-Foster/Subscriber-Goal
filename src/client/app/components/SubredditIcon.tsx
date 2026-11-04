@@ -8,13 +8,13 @@ type SubredditIconProps = {
 
 export const SubredditIcon = ({
   iconUrl,
-  size = 100,
+  size = 60,
   onClick,
 }: SubredditIconProps) => {
   const dimensionStyle = { width: size, height: size };
   return (
     <div
-      className="flex items-center justify-center rounded-full bg-[color:var(--sg-surface)]"
+      className="sg-hover-grow flex items-center justify-center rounded-full bg-[color:var(--sg-surface)]"
       style={dimensionStyle}
     >
       <LoadingElement isLoading={!iconUrl} className="h-full w-full">

@@ -531,6 +531,11 @@ export const useSubGoal = () => {
   const prohibited = error === prohibitedContentMessage;
   const realtimeConnectedRef = useRef(false);
   const noticeTimeoutRef = useRef<number | null>(null);
+  const initialNoticeDelayRef = useRef<number | null>(null);
+  const initialWelcomeStartedRef = useRef(false);
+  const initialNoticeWindowCompleteRef = useRef(false);
+  const pendingInitialNoticeRef = useRef<string | null>(null);
+  const seenNoticeEventsRef = useRef(new Set<string>());
   const subscriptionAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const loadEventIdRef = useRef<string | null>(null);
@@ -552,6 +557,29 @@ export const useSubGoal = () => {
     }, 2800);
   }, []);
 
+  const announceSubscriber = useCallback(
+    (username: string | null, subscriberCount: number) => {
+      const eventKey = `${subscriberCount}:${username ?? "anonymous"}`;
+      if (seenNoticeEventsRef.current.has(eventKey)) {
+        return;
+      }
+      seenNoticeEventsRef.current.add(eventKey);
+      if (seenNoticeEventsRef.current.size > 100) {
+        const oldestEvent = seenNoticeEventsRef.current.values().next().value;
+        if (oldestEvent !== undefined) {
+          seenNoticeEventsRef.current.delete(oldestEvent);
+        }
+      }
+      const message = messages.subscriberNotice({ username });
+      if (!initialNoticeWindowCompleteRef.current) {
+        pendingInitialNoticeRef.current = message;
+        return;
+      }
+      showNotice(message);
+    },
+    [messages, showNotice],
+  );
+
   const handleRealtimeMessage = useCallback(
     (data: unknown) => {
       const message = data as Partial<RealtimeMessage>;
@@ -568,10 +596,7 @@ export const useSubGoal = () => {
         message.recentSubscriber.length > 0
           ? message.recentSubscriber
           : null;
-      const noticeMessage = messages.subscriberNotice({
-        username: recentSubscriber,
-      });
-      showNotice(noticeMessage);
+      announceSubscriber(recentSubscriber, newSubscriberCount);
       setState((prev) => {
         if (!prev || prev.postHeight === "tiny" || prev.postHeight === "cta") {
           return prev;
@@ -591,13 +616,16 @@ export const useSubGoal = () => {
         };
       });
     },
-    [messages, showNotice],
+    [announceSubscriber],
   );
 
   useEffect(
     () => () => {
       if (noticeTimeoutRef.current) {
         window.clearTimeout(noticeTimeoutRef.current);
+      }
+      if (initialNoticeDelayRef.current) {
+        window.clearTimeout(initialNoticeDelayRef.current);
       }
     },
     [],
@@ -612,11 +640,25 @@ export const useSubGoal = () => {
   }, []);
 
   useEffect(() => {
-    if (!recentSubscriber) {
+    if (!postHeight || postHeight === "tiny" || postHeight === "cta") {
       return;
     }
-    showNotice(messages.subscriberNotice({ username: recentSubscriber }));
-  }, [messages, recentSubscriber, showNotice]);
+    if (!initialWelcomeStartedRef.current) {
+      initialWelcomeStartedRef.current = true;
+      initialNoticeDelayRef.current = window.setTimeout(() => {
+        initialNoticeWindowCompleteRef.current = true;
+        initialNoticeDelayRef.current = null;
+        const pendingNotice = pendingInitialNoticeRef.current;
+        pendingInitialNoticeRef.current = null;
+        if (pendingNotice) {
+          showNotice(pendingNotice);
+        }
+      }, 5000);
+    }
+    if (recentSubscriber && state) {
+      announceSubscriber(recentSubscriber, state.subreddit.subscribers);
+    }
+  }, [announceSubscriber, postHeight, recentSubscriber, showNotice, state]);
 
   const requestRefresh = useCallback(async () => {
     const result = await requestJsonWithRetry<RefreshResponse>(

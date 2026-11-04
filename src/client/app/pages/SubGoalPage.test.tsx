@@ -63,6 +63,53 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain("Show my username when I join");
+    expect(html).toContain("sg-hover-grow h-3 w-3");
+    expect(html).toContain('<span class="sg-hover-grow">');
+  });
+
+  it.each(["regular", "short"] as const)(
+    "renders localized authentication buttons for logged-out %s goals",
+    (postHeight) => {
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          state={{ ...baseState, postHeight, user: null }}
+          {...commonProps}
+        />,
+      );
+
+      expect(html).toContain("Sign Up");
+      expect(html).toContain("Log In");
+      expect(html).toContain('data-logged-out-auth-buttons="true"');
+      expect(html).not.toContain('data-subscription-button-mode="subscribe"');
+    },
+  );
+
+  it("renders logged-out authentication buttons for tiny goals", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{ ...tinyState, authenticated: false }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Sign Up");
+    expect(html).toContain("Log In");
+    expect(html).not.toContain('viewBox="0 0 20 20"');
+  });
+
+  it("makes only regular goal titles and progress bars accessible subscription controls", () => {
+    const regularHtml = renderToStaticMarkup(
+      <SubGoalPage state={baseState} {...commonProps} />,
+    );
+    const tinyHtml = renderToStaticMarkup(
+      <SubGoalPage state={tinyState} {...commonProps} />,
+    );
+
+    expect(regularHtml).toContain("Join r/ExampleSub using the progress bar");
+    expect(regularHtml).toContain('role="progressbar"');
+    expect(regularHtml).toContain('aria-valuenow="123"');
+    expect(regularHtml).toContain("Welcome to r/ExampleSub</span></button>");
+    expect(tinyHtml).not.toContain('role="progressbar"');
   });
 
   it("renders Spanish post text", () => {

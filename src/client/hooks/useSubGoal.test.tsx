@@ -82,6 +82,16 @@ const Harness = () => {
   );
 };
 
+const NoticeHarness = () => {
+  const { notice, state } = useSubGoal();
+  return (
+    <div>
+      <span data-state>{state?.postHeight ?? "loading"}</span>
+      <span data-notice>{notice ?? "welcome"}</span>
+    </div>
+  );
+};
+
 const SubscribeHarness = () => {
   const { state, subscribe, submitting } = useSubGoal();
   const [result, setResult] = useState("idle");
@@ -112,10 +122,165 @@ describe("useSubGoal tiny behavior", () => {
       error: null,
       aborted: false,
     });
-    hoisted.connectRealtime.mockResolvedValue({ disconnect: vi.fn() });
+    hoisted.connectRealtime.mockResolvedValue({
+      disconnect: vi.fn().mockResolvedValue(undefined),
+    });
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("starts the five-second welcome window only after regular state renders", async () => {
+    vi.useFakeTimers();
+    let resolveInit:
+      | ((value: {
+          data: { type: "init"; postId: string; state: SubscriberGoalState };
+          error: null;
+          aborted: false;
+        }) => void)
+      | undefined;
+    hoisted.requestJsonWithRetry.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveInit = resolve;
+      }),
+    );
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<NoticeHarness />));
+
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(container.querySelector("[data-state]")?.textContent).toBe(
+      "loading",
+    );
+    await act(async () => {
+      resolveInit?.({
+        data: {
+          type: "init",
+          postId: "t3_regular",
+          state: { ...regularState, recentSubscriber: "alice" },
+        },
+        error: null,
+        aborted: false,
+      });
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "welcome",
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(4999));
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "welcome",
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "u/alice just joined!",
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(2800));
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "welcome",
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps the latest initial update and announces later realtime events immediately", async () => {
+    vi.useFakeTimers();
+    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
+      data: {
+        type: "init",
+        postId: "t3_regular",
+        state: { ...regularState, recentSubscriber: "alice" },
+      },
+      error: null,
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<NoticeHarness />);
+      await Promise.resolve();
+    });
+    const onMessage = hoisted.connectRealtime.mock.calls[0]?.[0]?.onMessage as
+      | ((data: unknown) => void)
+      | undefined;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+      onMessage?.({
+        type: "sub",
+        newSubscriberCount: 101,
+        recentSubscriber: "bob",
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      onMessage?.({
+        type: "sub",
+        newSubscriberCount: 102,
+        recentSubscriber: "carol",
+      });
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "u/carol just joined!",
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    await act(async () => {
+      onMessage?.({
+        type: "sub",
+        newSubscriberCount: 103,
+        recentSubscriber: "dave",
+      });
+    });
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "u/dave just joined!",
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(2799));
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "u/dave just joined!",
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    await act(async () => {
+      onMessage?.({
+        type: "sub",
+        newSubscriberCount: 103,
+        recentSubscriber: "dave",
+      });
+    });
+    expect(container.querySelector("[data-notice]")?.textContent).toBe(
+      "welcome",
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("cleans up initial and polling timers when a regular goal unmounts", async () => {
+    vi.useFakeTimers();
+    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
+      data: {
+        type: "init",
+        postId: "t3_regular",
+        state: { ...regularState, recentSubscriber: "alice" },
+      },
+      error: null,
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<NoticeHarness />);
+      await Promise.resolve();
+    });
+
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await act(async () => root.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    container.remove();
+  });
 
   it("polls Tiny aggregate state every minute without connecting realtime", async () => {
     vi.useFakeTimers();

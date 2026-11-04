@@ -48,6 +48,9 @@ export type SubGoalPostMessages = {
   welcome: (params: SubredditNameParams) => string;
   subscribeButton: (params: SubredditNameParams) => string;
   subscribedButton: (params: SubredditNameParams) => string;
+  signUpButton: string;
+  logInButton: string;
+  progressSubscribeAriaLabel: (params: SubredditNameParams) => string;
   shareUsernameLabel: string;
   thanksTitle: string;
   thanksBody: (params: SubscribersParams) => string;
@@ -95,6 +98,10 @@ const buildRawPostMessages = (
     subscribeButton: (values) => translate(language, "post.joinButton", values),
     subscribedButton: (values) =>
       translate(language, "post.joinedButton", values),
+    signUpButton: translate(language, "post.signUpButton"),
+    logInButton: translate(language, "post.logInButton"),
+    progressSubscribeAriaLabel: (values) =>
+      translate(language, "post.progressSubscribeAriaLabel", values),
     shareUsernameLabel: translate(language, "post.shareUsername"),
     thanksTitle: translate(language, "post.thanksTitle"),
     thanksBody: ({ subscribersCount, subscribersText }) =>

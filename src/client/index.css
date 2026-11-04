@@ -140,6 +140,17 @@ body {
   z-index: 10;
 }
 
+.sg-hover-grow {
+  transition: transform 180ms ease-in-out;
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sg-hover-grow:hover {
+    transform: scale(1.05);
+  }
+}
+
 .sg-goal-frame::after {
   content: "";
   position: absolute;
@@ -266,6 +277,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sg-hover-grow {
+    transition: none;
+  }
+
   .sg-tiny-view-enter,
   .sg-tiny-view-exit {
     animation: none;

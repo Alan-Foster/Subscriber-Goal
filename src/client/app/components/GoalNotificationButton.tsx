@@ -42,7 +42,7 @@ export const GoalNotificationButton = ({
         aria-busy={submitting}
         aria-invalid={error ? true : undefined}
         title={error ?? undefined}
-        className={`relative z-10 inline-flex min-h-10 w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-[color:var(--sg-accent)] font-semibold text-[color:var(--sg-button-text)] shadow-sm transition hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-wait disabled:opacity-60 sm:w-auto sm:max-w-96 ${compact ? "px-4 py-2 text-sm leading-tight" : "px-5 py-2 text-base leading-tight sm:px-6"}`}
+        className={`sg-hover-grow relative z-10 inline-flex min-h-10 w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-[color:var(--sg-accent)] font-semibold text-[color:var(--sg-button-text)] shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-wait disabled:opacity-60 sm:w-auto sm:max-w-96 ${compact ? "px-4 py-2 text-sm leading-tight" : "px-5 py-2 text-base leading-tight sm:px-6"}`}
         onClick={() => {
           if (activatedRef.current) return;
           activatedRef.current = true;

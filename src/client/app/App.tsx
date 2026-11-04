@@ -1,4 +1,4 @@
-import { navigateTo, showToast } from "@devvit/web/client";
+import { navigateTo, showLoginPrompt, showToast } from "@devvit/web/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
@@ -53,7 +53,6 @@ export const App = () => {
     loading,
     submitting,
     subscribe,
-    setError,
     notice,
     showNotice,
     prohibited,
@@ -228,8 +227,7 @@ export const App = () => {
     goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!authenticated) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "login_required");
-      setError(messages.loginRequired);
-      showToast(messages.loginRequired);
+      showLoginPrompt();
       subscribeAttemptRef.current = false;
       return;
     }

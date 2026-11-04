@@ -18,6 +18,11 @@ describe("SubscriptionButton", () => {
       expect(html).toContain(`data-subscription-button-mode="${mode}"`);
       expect(html).toContain("rounded-full");
       expect(html).toContain("px-6 py-2");
+      expect(html).toContain("min-h-[60px]");
+      expect(html).toContain("min-w-[255px]");
+      expect(html).toContain("gap-2");
+      expect(html).toContain("text-2xl");
+      expect(html).toContain("sg-hover-grow");
       expect(html).toContain("max-w-full");
       expect(html).toContain("text-center");
       expect(html).toContain("whitespace-normal");
@@ -25,8 +30,13 @@ describe("SubscriptionButton", () => {
       expect(html).not.toContain('disabled=""');
       if (mode === "subscribe") {
         expect(html).toContain('data-subgoal-primary-cta="true"');
+        expect(html).toContain('viewBox="0 0 20 20"');
+        expect(html).toContain('d="M2.5 10h15m-6-6 6 6-6 6"');
+        expect(html).toContain('stroke-width="2.5"');
+        expect(html).toContain('aria-hidden="true"');
       } else {
         expect(html).not.toContain("data-subgoal-primary-cta");
+        expect(html).not.toContain('viewBox="0 0 20 20"');
       }
     },
   );
@@ -82,7 +92,7 @@ describe("SubscriptionButton", () => {
       <SubscriptionButton label="Visit Website" mode="link" />,
     );
 
-    expect(html).toContain(">Visit Website</button>");
+    expect(html).toContain(">Visit Website</span></button>");
     expect(html).not.toContain("sm:hidden");
     expect(html).not.toContain("hidden sm:inline");
   });

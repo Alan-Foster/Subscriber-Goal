@@ -1,4 +1,4 @@
-import { navigateTo, showToast } from "@devvit/web/client";
+import { navigateTo, showLoginPrompt, showToast } from "@devvit/web/client";
 import { useEffect, useRef, useState } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
@@ -37,8 +37,7 @@ type TinySubscribeViewPhase =
   | "notifications";
 
 export const SubscribeOnlyApp = () => {
-  const { state, loading, submitting, setError, subscribe, prohibited } =
-    useSubGoal();
+  const { state, loading, submitting, subscribe, prohibited } = useSubGoal();
   const [viewPhase, setViewPhase] =
     useState<TinySubscribeViewPhase>("subscribe");
   const previousViewPhaseRef =
@@ -215,8 +214,7 @@ export const SubscribeOnlyApp = () => {
     goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!state.authenticated) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "login_required");
-      setError(messages.loginRequired);
-      showToast(messages.loginRequired);
+      showLoginPrompt();
       subscribeAttemptRef.current = false;
       return;
     }

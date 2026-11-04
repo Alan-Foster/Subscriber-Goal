@@ -100,7 +100,7 @@ export const TopButtons = ({
           aria-label={messages.promoAriaLabel({ promoSubreddit })}
           className={`${
             shouldAnimate ? "sg-fade-in" : ""
-          } ${revealTextOnInteraction ? "group relative" : "gap-1.5"} inline-flex cursor-pointer items-center whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
+          } ${revealTextOnInteraction ? "group relative" : "gap-1.5"} sg-hover-grow inline-flex cursor-pointer items-center whitespace-nowrap border-0 bg-transparent p-0 text-xs font-semibold leading-none text-[color:var(--sg-text-secondary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)]`}
           onClick={() => {
             if (activatedRef.current) return;
             activatedRef.current = true;

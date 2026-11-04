@@ -9,6 +9,7 @@ import type { NavigationTarget } from "../../../shared/types/api";
 import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
+import { LoggedOutAuthButtons } from "../components/LoggedOutAuthButtons";
 
 type SubGoalPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
@@ -49,6 +50,10 @@ export const SubGoalPage = ({
         ? "subscribed"
         : "subscribe";
   const isDisabled = buttonMode === "submitting" || buttonMode === "subscribed";
+  const authenticated =
+    state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
+  const showAuthenticationButtons =
+    !authenticated && !state.subscribed && !isSubmitting;
   const buttonLabel = afterSubscribeAction
     ? afterSubscribeAction.buttonText
     : state.subscribed
@@ -59,7 +64,13 @@ export const SubGoalPage = ({
   const showNotice = Boolean(notice);
   const isShort = state.postHeight === "short";
   if (state.postHeight === "tiny") {
-    const actionButton = afterSubscribeAction ? (
+    const actionButton = showAuthenticationButtons ? (
+      <LoggedOutAuthButtons
+        signUpLabel={messages.signUpButton}
+        logInLabel={messages.logInButton}
+        onAuthenticate={handleButtonClick}
+      />
+    ) : afterSubscribeAction ? (
       <AfterSubscribeButton
         action={afterSubscribeAction}
         analyticsContext={getGoalJourneyContext(state)}
@@ -123,13 +134,17 @@ export const SubGoalPage = ({
         </>
       ) : null}
       <div className="relative h-7 w-full">
-        <div
+        <button
+          type="button"
+          aria-hidden={showNotice}
+          disabled={showNotice || isDisabled}
+          onClick={showNotice || isDisabled ? undefined : onSubscribe}
           className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${
             showNotice ? "opacity-0" : "opacity-100"
-          }`}
+          } sg-hover-grow border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
         >
           <span className="w-full truncate text-center">{welcomeText}</span>
-        </div>
+        </button>
         <div
           className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${
             showNotice ? "opacity-100" : "opacity-0"
@@ -145,6 +160,11 @@ export const SubGoalPage = ({
           start={0}
           showText
           width="70%"
+          onActivate={onSubscribe}
+          activationLabel={messages.progressSubscribeAriaLabel({
+            subredditName: state.subreddit.name,
+          })}
+          disabled={isDisabled}
         />
       ) : (
         <ProgressBar
@@ -152,9 +172,20 @@ export const SubGoalPage = ({
           start={0}
           showText
           width="70%"
+          onActivate={onSubscribe}
+          activationLabel={messages.progressSubscribeAriaLabel({
+            subredditName: state.subreddit.name,
+          })}
+          disabled={isDisabled}
         />
       )}
-      {afterSubscribeAction ? (
+      {showAuthenticationButtons ? (
+        <LoggedOutAuthButtons
+          signUpLabel={messages.signUpButton}
+          logInLabel={messages.logInButton}
+          onAuthenticate={handleButtonClick}
+        />
+      ) : afterSubscribeAction ? (
         <AfterSubscribeButton
           action={afterSubscribeAction}
           analyticsContext={getGoalJourneyContext(state)}
@@ -179,12 +210,12 @@ export const SubGoalPage = ({
         >
           <input
             type="checkbox"
-            className="h-3 w-3 cursor-pointer accent-[color:var(--sg-accent)] disabled:cursor-not-allowed"
+            className="sg-hover-grow h-3 w-3 cursor-pointer accent-[color:var(--sg-accent)] disabled:cursor-not-allowed"
             checked={shareUsername}
             disabled={isDisabled}
             onChange={(event) => onShareUsernameChange(event.target.checked)}
           />
-          {messages.shareUsernameLabel}
+          <span className="sg-hover-grow">{messages.shareUsernameLabel}</span>
         </label>
       )}
       <div className="h-5" />

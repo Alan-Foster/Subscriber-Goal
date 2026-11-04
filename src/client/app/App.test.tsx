@@ -51,6 +51,7 @@ const hoisted = vi.hoisted(() => ({
   showNotice: vi.fn(),
   navigateTo: vi.fn(),
   showToast: vi.fn(),
+  showLoginPrompt: vi.fn(),
   prohibited: false,
   notificationSettingsEntryEnabled: true,
   recordStatisticsEvent: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock("@devvit/web/client", () => ({
   context: {},
   navigateTo: hoisted.navigateTo,
   showToast: hoisted.showToast,
+  showLoginPrompt: hoisted.showLoginPrompt,
 }));
 
 vi.mock("../hooks/useSubGoal", () => ({
@@ -176,6 +178,65 @@ describe("App", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it.each(["regular", "short"] as const)(
+    "shows native authentication controls for logged-out %s goals",
+    async (postHeight) => {
+      hoisted.state = {
+        ...hoisted.createState(),
+        postHeight,
+        user: null,
+      } as SubGoalState;
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(<App />));
+
+      expect(container.textContent).toContain("Sign Up");
+      expect(container.textContent).toContain("Log In");
+      expect(container.textContent).not.toContain("Join r/ExampleSub");
+
+      await act(async () => {
+        Array.from(container.querySelectorAll("button"))
+          .find((button) => button.textContent === "Log In")
+          ?.click();
+      });
+      expect(hoisted.showLoginPrompt).toHaveBeenCalledTimes(1);
+      expect(hoisted.subscribe).not.toHaveBeenCalled();
+      expect(hoisted.showToast).not.toHaveBeenCalledWith(
+        "Please log in to join.",
+      );
+
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  );
+
+  it("routes logged-out title and progress activation to the native login prompt", async () => {
+    hoisted.state = { ...hoisted.createState(), user: null } as SubGoalState;
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Welcome to r/ExampleSub")
+        ?.click();
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Join r/ExampleSub using the progress bar"]',
+        )
+        ?.click();
+    });
+
+    expect(hoisted.showLoginPrompt).toHaveBeenCalledTimes(2);
+    expect(hoisted.recordStatisticsEvent).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("shows the private statistics page only when eligible and returns to main", async () => {

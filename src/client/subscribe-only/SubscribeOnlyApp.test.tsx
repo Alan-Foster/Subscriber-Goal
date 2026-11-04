@@ -15,12 +15,14 @@ const hoisted = vi.hoisted(() => ({
   setError: vi.fn(),
   navigateTo: vi.fn(),
   showToast: vi.fn(),
+  showLoginPrompt: vi.fn(),
   prohibited: false,
 }));
 
 vi.mock("@devvit/web/client", () => ({
   navigateTo: hoisted.navigateTo,
   showToast: hoisted.showToast,
+  showLoginPrompt: hoisted.showLoginPrompt,
 }));
 vi.mock("../hooks/useSubGoal", () => ({
   useSubGoal: () => ({
@@ -211,6 +213,29 @@ describe("SubscribeOnlyApp", () => {
     expect(html).toContain('data-tiny-promo-link="true"');
     expect(html).toContain('width="20"');
     expect(html).toContain('height="20"');
+  });
+
+  it("uses native authentication controls for a logged-out subscribe-only post", async () => {
+    hoisted.state = createTinyState({
+      subscribed: false,
+      authenticated: false,
+    });
+    const container = await renderApp();
+
+    expect(container.textContent).toContain("Sign Up");
+    expect(container.textContent).toContain("Log In");
+    expect(container.textContent).not.toContain("Join r/ExampleSub");
+
+    await act(async () => {
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Sign Up")
+        ?.click();
+    });
+    expect(hoisted.showLoginPrompt).toHaveBeenCalledTimes(1);
+    expect(hoisted.subscribe).not.toHaveBeenCalled();
+    expect(hoisted.showToast).not.toHaveBeenCalledWith(
+      "Please log in to join.",
+    );
   });
 
   it("renders the persisted Tiny CTA immediately on initial load", () => {

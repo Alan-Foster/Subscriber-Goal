@@ -14,6 +14,15 @@ describe("client subscribe attention styles", () => {
     expect(css).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sg-subscribe-attention\s*\{[\s\S]*animation:\s*none;/,
     );
+    expect(css).toMatch(
+      /\.sg-hover-grow\s*\{[^}]*transition:\s*transform 180ms ease-in-out;[^}]*transform-origin:\s*center;/s,
+    );
+    expect(css).toMatch(
+      /@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.sg-hover-grow:hover\s*\{[^}]*transform:\s*scale\(1\.05\);/,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sg-hover-grow\s*\{[^}]*transition:\s*none;/,
+    );
     expect(css).toContain("animation: sg-tiny-view-fade-in 250ms");
     expect(css).toContain("animation: sg-tiny-view-fade-out 250ms");
     expect(css).toMatch(
