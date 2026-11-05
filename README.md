@@ -41,6 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- 2.4.3 - Goal Success pages now have a toggle to provide static backgrounds to make screenshots easier to read.
 - 2.4.2 - Responsive Header, Join and CTA button text sizing scales from 18px to 12px and wraps appropriately. Improved missing goal data fallback and error reporting.
 - 2.4.1 - UI improvements. Login prompt for non-users. Local install metrics for 24h and 7d for subbed vs unsubbed app loads, clicks, click success. Devvit 0.15.2
 - 2.3.3 - Improved auto-goal system on app upgrades to prevent duplicate goals. 

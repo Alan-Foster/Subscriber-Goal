@@ -1,5 +1,9 @@
+// @vitest-environment jsdom
+
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { createRoot } from "react-dom/client";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SubscriberGoalState } from "../../../shared/types/api";
 
 vi.mock("@devvit/web/client", () => ({
@@ -36,6 +40,12 @@ const baseState: SubscriberGoalState = {
 };
 
 describe("CompletedPage", () => {
+  beforeAll(() => {
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
   const commonProps = {
     onVisitPromoSub: vi.fn(),
   };
@@ -163,6 +173,85 @@ describe("CompletedPage", () => {
     );
 
     expect(html).toContain("Goal reached just now!");
+  });
+
+  it("toggles Camera Mode instantly and resets it after remounting", async () => {
+    const container = document.createElement("div");
+    let root = createRoot(container);
+    const renderPage = () =>
+      root.render(<CompletedPage state={baseState} {...commonProps} />);
+
+    await act(async () => renderPage());
+
+    let toggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Enable Camera Mode"]',
+    );
+    let blocks = container.querySelectorAll<HTMLElement>(
+      "[data-camera-mode-block]",
+    );
+    expect(toggle?.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle?.title).toBe("Enable Camera Mode");
+    expect(toggle?.className).toContain("right-4");
+    expect(toggle?.className).toContain("bottom-4");
+    expect(
+      toggle?.querySelector("[data-camera-mode-slash='true']"),
+    ).not.toBeNull();
+    expect(blocks).toHaveLength(2);
+    blocks.forEach((block) => {
+      expect(block.className).not.toContain("bg-[color:var(--sg-bg)]");
+      expect(block.className).not.toContain("px-2");
+      expect(block.className).not.toContain("py-1");
+    });
+
+    await act(async () => toggle?.click());
+
+    toggle = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Disable Camera Mode"]',
+    );
+    blocks = container.querySelectorAll<HTMLElement>(
+      "[data-camera-mode-block]",
+    );
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle?.title).toBe("Disable Camera Mode");
+    expect(toggle?.querySelector("[data-camera-mode-slash='true']")).toBeNull();
+    blocks.forEach((block) => {
+      expect(block.className).toContain("bg-[color:var(--sg-bg)]");
+      expect(block.className).toContain("px-2");
+      expect(block.className).toContain("py-1");
+    });
+
+    await act(async () => toggle?.click());
+    expect(
+      container
+        .querySelector('button[aria-label="Enable Camera Mode"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Enable Camera Mode"]',
+        )
+        ?.click();
+      root.unmount();
+    });
+    root = createRoot(container);
+    await act(async () => renderPage());
+
+    expect(
+      container
+        .querySelector('button[aria-label="Enable Camera Mode"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+
+    await act(async () => root.unmount());
+  });
+
+  it("uses the English Camera Mode fallback label in localized posts", () => {
+    const html = renderCompletedPage("es");
+
+    expect(html).toContain('aria-label="Enable Camera Mode"');
+    expect(html).toContain('title="Enable Camera Mode"');
   });
 
   it("hides the subreddit logo for short posts", () => {
