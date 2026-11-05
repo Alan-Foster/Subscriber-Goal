@@ -55,6 +55,10 @@ import {
   recordStatisticsJoinClick,
   recordStatisticsLoad,
 } from "../data/statisticsAnalytics";
+import {
+  isUsableSubscriberGoal,
+  recoverEmergencySubscriberGoal,
+} from "../utils/emergencyGoalRecovery";
 
 const refreshPermissionDiagnosticKey =
   "refresh_permission_denied_diagnostic_v1";
@@ -142,6 +146,8 @@ type BuildStateDependencies = {
   userContextPromise?: Promise<CurrentUserContext>;
   subredditIconPromise?: Promise<string>;
   timings?: InitTimings;
+  recoveryWorkflow?: string;
+  recoveryRoute?: string;
 };
 
 const loadCurrentUser = async (
@@ -247,6 +253,23 @@ const buildState = async (
   const [subreddit, subredditIcon, userContext, subscribed] = await Promise.all(
     [subredditPromise, iconPromise, userPromise, subscribedPromise],
   );
+  let goal = subGoalData.goal;
+  let subscribers =
+    options?.subscribersOverride ?? subreddit.numberOfSubscribers;
+  if (!isUsableSubscriberGoal(goal)) {
+    const recovery = await recoverEmergencySubscriberGoal({
+      redis,
+      postId,
+      workflow: dependencies.recoveryWorkflow ?? "subscriber_goal_state",
+      ...(dependencies.recoveryRoute
+        ? { route: dependencies.recoveryRoute }
+        : {}),
+      currentSubscribers: subscribers,
+      completed: subGoalData.completedTime > 0,
+    });
+    goal = recovery.goal;
+    subscribers = recovery.subscribers;
+  }
   const appSettings = getPublicAppSettings();
   const canViewStatistics = await canViewCurrentSubredditStatistics(
     reddit,
@@ -262,7 +285,7 @@ const buildState = async (
   );
 
   return {
-    goal: subGoalData.goal > 0 ? subGoalData.goal : null,
+    goal,
     recentSubscriber:
       options?.recentSubscriberOverride ??
       (subGoalData.recentSubscriber && subGoalData.recentSubscriber.length > 0
@@ -284,8 +307,7 @@ const buildState = async (
       id: subreddit.id,
       name: subGoalData.subredditDisplayName ?? subreddit.name,
       icon: subredditIcon,
-      subscribers:
-        options?.subscribersOverride ?? subreddit.numberOfSubscribers,
+      subscribers,
       isNsfw: getCurrentSubredditNsfw(subreddit) === true,
     },
   };
@@ -903,6 +925,8 @@ export function registerPublicApiRoutes(router: Router): void {
               subredditIconPromise: Promise.resolve(subredditIconResult.value),
             }),
         timings: initTimings,
+        recoveryWorkflow: "init",
+        recoveryRoute: apiRoutes.init,
       });
       setInitServerTiming(res, initTimings, initStartedAt);
       res.json({
@@ -1026,7 +1050,10 @@ export function registerPublicApiRoutes(router: Router): void {
         }
       }
 
-      const state = await buildState(postId);
+      const state = await buildState(postId, undefined, {
+        recoveryWorkflow: "refresh",
+        recoveryRoute: apiRoutes.refresh,
+      });
       res.json({
         type: "refresh",
         postId,
@@ -1264,12 +1291,19 @@ export function registerPublicApiRoutes(router: Router): void {
         );
       }
 
-      const state = await buildState(postId, {
-        subscribersOverride: displayedSubscriberCount,
-        ...(subscriberCreated && effectiveShareUsername
-          ? { recentSubscriberOverride: username }
-          : {}),
-      });
+      const state = await buildState(
+        postId,
+        {
+          subscribersOverride: displayedSubscriberCount,
+          ...(subscriberCreated && effectiveShareUsername
+            ? { recentSubscriberOverride: username }
+            : {}),
+        },
+        {
+          recoveryWorkflow: "subscribe",
+          recoveryRoute: apiRoutes.subscribe,
+        },
+      );
       logSubscribePhase(operationId, postId, "state_built");
 
       const journeyTelemetryHandled = recordServerSubscribeSuccess(

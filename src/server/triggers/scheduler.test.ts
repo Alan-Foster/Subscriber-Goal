@@ -63,6 +63,7 @@ const hoisted = vi.hoisted(() => ({
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
   observeDailySubscriberCount: vi.fn(),
+  getLastKnownSubscriberCount: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppAccountRecovery: vi.fn(),
@@ -109,6 +110,7 @@ vi.mock("../data/subscriberStats", () => ({
 
 vi.mock("../data/subscriberDailyStats", () => ({
   observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
+  getLastKnownSubscriberCount: hoisted.getLastKnownSubscriberCount,
 }));
 
 vi.mock("../data/ctaActivity", () => ({
@@ -222,6 +224,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.removeSubscriberGoalPost.mockReset();
     hoisted.observeDailySubscriberCount.mockReset();
+    hoisted.getLastKnownSubscriberCount.mockReset();
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppAccountRecovery.mockReset();
     hoisted.processDueAppRepair.mockReset();
@@ -292,6 +295,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.observeDailySubscriberCount.mockResolvedValue({
       growth: { count: 1, period: "week" },
     });
+    hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
     hoisted.processDueAppAccountHealthCheck.mockResolvedValue(undefined);
     hoisted.processDueAppAccountRecovery.mockResolvedValue({ status: "stale" });
     hoisted.processDueAppRepair.mockResolvedValue("not_due");
@@ -657,10 +661,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.reddit.getPostById).not.toHaveBeenCalled();
   });
 
-  it("cleans up posts with missing goal data", async () => {
+  it("renders and requeues posts with emergency goal data", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     hoisted.context.subredditName = "CorporateGifts";
     hoisted.getQueuedUpdates.mockResolvedValue(["t3_no_goal"]);
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_no_goal" });
     hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
       goal: 0,
       recentSubscriber: "",
       completedTime: 0,
@@ -673,18 +682,22 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     await onPostsUpdaterJob();
 
-    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+    expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
+    expect(hoisted.untrackPost).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+    expect(hoisted.applyTextFallback).toHaveBeenCalledWith(
+      { id: "t3_no_goal" },
+      expect.objectContaining({ goal: 15, subscribers: 10 }),
+    );
+    expect(hoisted.queueUpdate).toHaveBeenCalledWith(
       expect.anything(),
       "t3_no_goal",
+      expect.any(Date),
     );
-    expect(hoisted.untrackPost).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_no_goal",
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /subscriber_goal_emergency_fallback.*post_update.*t3_no_goal.*"recoveredGoal":15/,
+      ),
     );
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_no_goal",
-    );
-    expect(hoisted.reddit.getPostById).not.toHaveBeenCalled();
   });
 });

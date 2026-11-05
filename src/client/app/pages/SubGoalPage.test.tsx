@@ -112,6 +112,23 @@ describe("SubGoalPage", () => {
     expect(tinyHtml).not.toContain('role="progressbar"');
   });
 
+  it("renders complete progress text from emergency recovered state", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{
+          ...baseState,
+          goal: 75,
+          subreddit: { ...baseState.subreddit, subscribers: 74 },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain('aria-valuenow="74"');
+    expect(html).toContain('aria-valuemax="75"');
+    expect(html).toContain("74 / 75");
+  });
+
   it("renders Spanish post text", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage state={{ ...baseState, language: "es" }} {...commonProps} />,

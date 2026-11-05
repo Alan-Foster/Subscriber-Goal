@@ -32,6 +32,7 @@ const hoisted = vi.hoisted(() => ({
   getSubGoalData: vi.fn(),
   getSubredditIcon: vi.fn(),
   observeDailySubscriberCount: vi.fn(),
+  getLastKnownSubscriberCount: vi.fn(),
   isTrackedSubscriber: vi.fn(),
   setNewSubscriber: vi.fn(),
   hasSubscriptionAttemptReceipt: vi.fn(),
@@ -90,6 +91,7 @@ vi.mock("../data/subscriptionAttempt", async (importOriginal) => {
 
 vi.mock("../data/subscriberDailyStats", () => ({
   observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
+  getLastKnownSubscriberCount: hoisted.getLastKnownSubscriberCount,
 }));
 
 vi.mock("../utils/redditUtils", () => ({
@@ -169,6 +171,7 @@ describe("publicApi routes", () => {
     hoisted.observeDailySubscriberCount.mockResolvedValue({
       growth: { count: 5, period: "today" },
     });
+    hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
     hoisted.setNewSubscriber.mockResolvedValue(true);
     hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
@@ -211,6 +214,133 @@ describe("publicApi routes", () => {
         url: "https://discord.com/invite/example",
         colorTheme: "pink",
       },
+    });
+  });
+
+  it("recovers missing goals for init, refresh, and subscribe responses", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.userId = "t2_user";
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      goal: 0,
+      recentSubscriber: null,
+      completedTime: 0,
+      subredditDisplayName: "ExampleSub",
+      headerText: null,
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: false,
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const initJson = vi.fn();
+    const refreshJson = vi.fn();
+    const subscribeJson = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json: initJson } as unknown as Response,
+    );
+    await routes.get(apiRoutes.refresh)?.(
+      {} as Request,
+      { json: refreshJson } as unknown as Response,
+    );
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: {} } as Request,
+      { json: subscribeJson } as unknown as Response,
+    );
+
+    expect((initJson.mock.calls[0]?.[0] as InitResponse).state).toMatchObject({
+      goal: 150,
+      subreddit: { subscribers: 100 },
+    });
+    expect(
+      (refreshJson.mock.calls[0]?.[0] as RefreshResponse).state,
+    ).toMatchObject({
+      goal: 150,
+      subreddit: { subscribers: 100 },
+    });
+    expect(
+      (subscribeJson.mock.calls[0]?.[0] as SubscribeResponse).state,
+    ).toMatchObject({
+      goal: 150,
+      subreddit: { subscribers: 101 },
+    });
+    expect(errorSpy).toHaveBeenCalledTimes(3);
+    expect(errorSpy.mock.calls.map(([line]) => line)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('"workflow":"init"'),
+        expect.stringContaining('"workflow":"refresh"'),
+        expect.stringContaining('"workflow":"subscribe"'),
+      ]),
+    );
+  });
+
+  it("uses a last-known count when the live count is invalid", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: Number.NaN,
+      nsfw: false,
+    });
+    hoisted.getLastKnownSubscriberCount.mockResolvedValue(74);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      goal: 0,
+      recentSubscriber: null,
+      completedTime: 0,
+      subredditDisplayName: "ExampleSub",
+      headerText: null,
+      colorTheme: "red",
+      postHeight: "short",
+      autoCreateNextGoal: false,
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect((json.mock.calls[0]?.[0] as InitResponse).state).toMatchObject({
+      goal: 75,
+      subreddit: { subscribers: 74 },
+    });
+  });
+
+  it("preserves completed state while recovering its reached count", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      goal: 0,
+      recentSubscriber: null,
+      completedTime: 1_700_000_000_000,
+      subredditDisplayName: "ExampleSub",
+      headerText: null,
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: false,
+      language: "en",
+      afterSubscribeAction: { type: "disabled" },
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(apiRoutes.init)?.(
+      {} as Request,
+      { json } as unknown as Response,
+    );
+
+    expect((json.mock.calls[0]?.[0] as InitResponse).state).toMatchObject({
+      goal: 100,
+      completedTime: 1_700_000_000_000,
     });
   });
 

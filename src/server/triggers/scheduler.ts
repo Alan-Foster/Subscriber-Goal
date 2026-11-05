@@ -45,6 +45,11 @@ import {
   savePostOperationalState,
 } from "../data/postOperationalState";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
+import {
+  isUsableSubscriberGoal,
+  recoverEmergencySubscriberGoal,
+} from "../utils/emergencyGoalRecovery";
+import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 
 async function cleanupInactivePost(
   postId: string,
@@ -302,20 +307,29 @@ export async function onPostsUpdaterJob(): Promise<void> {
   for (const postId of postIds) {
     try {
       const subGoalData = await getSubGoalData(redis, postId);
-      if (!subGoalData.goal) {
-        logDiagnostic("error", "scheduler_post_update_failed", {
-          workflow: "post_update",
-          phase: "missing_state",
-          postId,
-        });
-        await cleanupInactivePost(postId, "missing_goal_data");
+      if (
+        !isUsableSubscriberGoal(subGoalData.goal) &&
+        (subGoalData.postKind === subscribeOnlyPostKind ||
+          subGoalData.postKind === ctaOnlyPostKind)
+      ) {
         continue;
       }
 
-      if (
-        subreddit.numberOfSubscribers >= subGoalData.goal &&
-        !subGoalData.completedTime
-      ) {
+      let effectiveGoal = subGoalData.goal;
+      let effectiveSubscribers = subreddit.numberOfSubscribers;
+      if (!isUsableSubscriberGoal(effectiveGoal)) {
+        const recovery = await recoverEmergencySubscriberGoal({
+          redis,
+          postId,
+          workflow: "post_update",
+          currentSubscribers: effectiveSubscribers,
+          completed: subGoalData.completedTime > 0,
+        });
+        effectiveGoal = recovery.goal;
+        effectiveSubscribers = recovery.subscribers;
+      }
+
+      if (effectiveSubscribers >= effectiveGoal && !subGoalData.completedTime) {
         subGoalData.completedTime = await checkCompletionStatus(
           reddit,
           redis,
@@ -396,8 +410,8 @@ export async function onPostsUpdaterJob(): Promise<void> {
         await clearPostOperationalState(redis, postId);
       }
       await applyTextFallback(post, {
-        goal: subGoalData.goal,
-        subscribers: subreddit.numberOfSubscribers,
+        goal: effectiveGoal,
+        subscribers: effectiveSubscribers,
         subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
         completedTime,
         language: subGoalData.language,

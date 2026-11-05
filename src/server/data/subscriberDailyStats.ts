@@ -22,6 +22,46 @@ const parseSubscriberCount = (value: string | undefined): number | null => {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 };
 
+/**
+ * Returns the newest trustworthy subscriber count retained by the daily stats
+ * store. This is intentionally read-only and is used only when Reddit's live
+ * count cannot support emergency rendering.
+ */
+export async function getLastKnownSubscriberCount(
+  redis: RedisClient,
+): Promise<number | null> {
+  const fields = await redis.hGetAll(subscriberDailyStatsKey);
+  const summarizedLatest = parseSubscriberCount(fields.latestSubscribers);
+  if (summarizedLatest !== null) return summarizedLatest;
+
+  const newestTimestampedCount = Object.entries(fields)
+    .flatMap(([field, value]) => {
+      const match = /^(latest|recoveredBaseline|baseline):(\d+)$/.exec(field);
+      const count = parseSubscriberCount(value);
+      return match && count !== null
+        ? [
+            {
+              timestamp: Number(match[2]),
+              priority:
+                match[1] === "latest"
+                  ? 2
+                  : match[1] === "recoveredBaseline"
+                    ? 1
+                    : 0,
+              count,
+            },
+          ]
+        : [];
+    })
+    .sort(
+      (left, right) =>
+        right.timestamp - left.timestamp || right.priority - left.priority,
+    )[0]?.count;
+  if (newestTimestampedCount !== undefined) return newestTimestampedCount;
+
+  return parseSubscriberCount(fields.baselineSubscribers);
+}
+
 const normalizeSubscriberCount = (value: number): number => {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`Invalid subscriber count: ${String(value)}`);

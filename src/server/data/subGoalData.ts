@@ -108,6 +108,16 @@ const recentSubscriberIndexBatchSize = 25;
 const recentSubscriberIndexCooldownMinMs = 5 * 60 * 1000;
 const recentSubscriberIndexCooldownMaxMs = 15 * 60 * 1000;
 
+export const parsePersistedSubscriberGoal = (
+  value: string | null | undefined,
+): number => {
+  const numericGoal =
+    value === null || value === undefined || value.trim() === ""
+      ? 0
+      : Number(value);
+  return Number.isSafeInteger(numericGoal) && numericGoal > 0 ? numericGoal : 0;
+};
+
 export type SubGoalData = {
   postKind: PostKind;
   goal: number;
@@ -322,7 +332,7 @@ export async function getSubGoalData(
     string | null,
     string | null,
   ];
-  const parsedGoal = goal ? parseInt(goal, 10) || 0 : 0;
+  const parsedGoal = parsePersistedSubscriberGoal(goal);
   const postDataKind = resolvePostKindFromPostData(customPostData);
   const persistedKind = resolvePostKind(storedPostKind);
   const rawHeight = resolveSubGoalPostHeight(postHeight);

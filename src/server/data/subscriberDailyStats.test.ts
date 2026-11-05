@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getLastKnownSubscriberCount,
   getUtcDayStartMs,
   observeDailySubscriberCount,
   subscriberDailyStatsKey,
@@ -46,6 +47,43 @@ const asRedis = (redis: InMemoryRedis) =>
   redis as unknown as Parameters<typeof observeDailySubscriberCount>[0];
 
 describe("subscriberDailyStats", () => {
+  it("reads the newest valid last-known count from summary and retained fields", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberDailyStatsKey, {
+      latestSubscribers: "invalid",
+      baselineSubscribers: "50",
+      "latest:100": "60",
+      "baseline:200": "70",
+      "recoveredBaseline:200": "71",
+      "latest:200": "72",
+    });
+
+    await expect(getLastKnownSubscriberCount(asRedis(redis))).resolves.toBe(72);
+  });
+
+  it("prefers a valid summarized latest count", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberDailyStatsKey, {
+      latestSubscribers: "80",
+      "latest:200": "72",
+    });
+
+    await expect(getLastKnownSubscriberCount(asRedis(redis))).resolves.toBe(80);
+  });
+
+  it("returns null when no retained subscriber count is trustworthy", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberDailyStatsKey, {
+      latestSubscribers: "NaN",
+      baselineSubscribers: "-1",
+      "latest:200": "12.5",
+    });
+
+    await expect(
+      getLastKnownSubscriberCount(asRedis(redis)),
+    ).resolves.toBeNull();
+  });
+
   it("uses the first observation as the UTC-day baseline", async () => {
     const redis = new InMemoryRedis();
     const nowMs = Date.UTC(2026, 7, 31, 12);
