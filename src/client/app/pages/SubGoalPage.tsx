@@ -10,6 +10,7 @@ import { TinyActionLayout } from "../components/TinyActionLayout";
 import { getGoalJourneyContext } from "../../analytics/goalJourneyAnalytics";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
 import { LoggedOutAuthButtons } from "../components/LoggedOutAuthButtons";
+import { ResponsiveHeaderText } from "../components/ResponsiveHeaderText";
 
 type SubGoalPageProps = {
   state: Exclude<SubGoalState, CtaOnlyState>;
@@ -143,7 +144,7 @@ export const SubGoalPage = ({
             showNotice ? "opacity-0" : "opacity-100"
           } sg-hover-grow border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
         >
-          <span className="w-full truncate text-center">{welcomeText}</span>
+          <ResponsiveHeaderText text={welcomeText} />
         </button>
         <div
           className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${
