@@ -948,7 +948,7 @@ export const useSubGoal = () => {
         };
       }
       setSubmitting(true);
-      const attemptId = createSubscriptionAttemptId();
+      const attemptId = payload?.attemptId ?? createSubscriptionAttemptId();
       const subscriptionController = new AbortController();
       subscriptionAbortRef.current = subscriptionController;
       try {

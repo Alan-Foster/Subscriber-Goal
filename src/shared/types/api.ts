@@ -140,6 +140,7 @@ export type StatisticsResponse = {
   coverage: {
     trafficAndVisitors: StatisticsCoverage;
     sessionsAndInteractions: StatisticsCoverage;
+    ctrInvariants: StatisticsCoverage;
   };
   methodology: {
     formulas: Record<string, string>;
@@ -149,7 +150,10 @@ export type StatisticsResponse = {
     anonymousIdentity: string;
     membership: string;
     retentionDays: 30;
+    dedupeWindowHours: 48;
+    approximationLimits: string;
     sessionDefinition: string;
+    ctrCoverageDefinition: string;
   };
 };
 

@@ -167,6 +167,12 @@ describe("App", () => {
         current: { status: "complete", coveredHours: 24, requestedHours: 24 },
         previous: { status: "complete", coveredHours: 24, requestedHours: 24 },
       },
+      ctrInvariants: {
+        firstKnownAt: "2026-10-01T00:00:00.000Z",
+        inferredFromLegacyData: false,
+        current: { status: "complete", coveredHours: 24, requestedHours: 24 },
+        previous: { status: "complete", coveredHours: 24, requestedHours: 24 },
+      },
     },
     methodology: {
       formulas: {},
@@ -176,7 +182,10 @@ describe("App", () => {
       anonymousIdentity: "browser based.",
       membership: "App-tracked membership.",
       retentionDays: 30,
+      dedupeWindowHours: 48,
+      approximationLimits: "approximate bitmaps",
       sessionDefinition: "hourly",
+      ctrCoverageDefinition: "repaired",
     },
   };
   const useWideViewportWithoutReducedMotion = () => {
@@ -196,6 +205,9 @@ describe("App", () => {
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
+    hoisted.recordStatisticsEvent.mockReturnValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
     hoisted.state = hoisted.createState() as SubGoalState;
     hoisted.prohibited = false;
     hoisted.notificationSettingsEntryEnabled = true;
@@ -303,6 +315,14 @@ describe("App", () => {
       container.querySelector('[data-statistics-page="true"]'),
     ).not.toBeNull();
     expect(container.textContent).toContain("Unique visitors");
+    expect(container.textContent).toContain("Returning visitors");
+    expect(container.textContent).not.toContain("New visitors");
+    expect(container.textContent).toContain("CTR invariant coverage:");
+    expect(
+      container.querySelector<HTMLInputElement>(
+        'input[aria-label="Statistics JSON"]',
+      )?.value,
+    ).toContain('"new"');
     const exportControls = container.querySelector(
       '[data-statistics-export-controls="true"]',
     );
@@ -1179,7 +1199,9 @@ describe("App", () => {
       );
     });
 
-    expect(hoisted.subscribe).toHaveBeenCalledWith(undefined);
+    expect(hoisted.subscribe).toHaveBeenCalledWith({
+      attemptId: "11111111-1111-4111-8111-111111111111",
+    });
     expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(container.textContent).toContain("r/SubGoal");
     expect(

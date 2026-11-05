@@ -570,6 +570,18 @@ export function registerPublicApiRoutes(router: Router): void {
           res.status(400).json(localizedError("errors.api.postIdRequired"));
           return;
         }
+        const data = await getSubGoalData(redis, postId, context.postData);
+        const trackedSubscriber = context.userId
+          ? await isTrackedSubscriber(redis, context.userId)
+          : false;
+        const joinEligible =
+          data.postKind !== ctaOnlyPostKind &&
+          !trackedSubscriber &&
+          (data.postKind === subscribeOnlyPostKind || !data.completedTime);
+        if (!joinEligible) {
+          res.status(400).json(localizedError("errors.join.unsupported"));
+          return;
+        }
         const identity = visitorIdentity(req);
         await recordStatisticsJoinClick(redis, {
           eventId: body.eventId,
@@ -589,12 +601,23 @@ export function registerPublicApiRoutes(router: Router): void {
             .json(localizedError("errors.api.ctaActivityUnsupported"));
           return;
         }
+        const ctaOnly = data.postKind === ctaOnlyPostKind;
+        if (
+          !ctaOnly &&
+          (!context.userId ||
+            !(await isTrackedSubscriber(redis, context.userId)))
+        ) {
+          res
+            .status(400)
+            .json(localizedError("errors.api.ctaActivityUnsupported"));
+          return;
+        }
         const identity = visitorIdentity(req);
         await recordStatisticsCtaClick(redis, {
           eventId: body.eventId,
           postId,
           label: data.afterSubscribeAction.buttonText,
-          kind: data.postKind === ctaOnlyPostKind ? "cta_only" : "secondary",
+          kind: ctaOnly ? "cta_only" : "secondary",
           ...(identity ? { visitorIdentity: identity } : {}),
         });
       }

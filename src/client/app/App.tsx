@@ -220,7 +220,7 @@ export const App = () => {
       return;
     }
     subscribeAttemptRef.current = true;
-    recordStatisticsEvent("join_click");
+    const activationId = recordStatisticsEvent("join_click");
     const authenticated =
       state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
     const analyticsContext = getGoalJourneyContext(state);
@@ -233,8 +233,11 @@ export const App = () => {
     }
     const payload =
       state.postHeight === "tiny"
-        ? undefined
-        : { shareUsername: state.subreddit.isNsfw ? false : shareUsername };
+        ? { attemptId: activationId }
+        : {
+            shareUsername: state.subreddit.isNsfw ? false : shareUsername,
+            attemptId: activationId,
+          };
     const {
       state: updatedState,
       error: subscribeError,

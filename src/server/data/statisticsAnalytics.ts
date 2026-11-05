@@ -9,6 +9,7 @@ import type { RedisClient } from "../types";
 const hourMs = 3_600_000;
 const retentionHours = 720;
 const retentionSeconds = 2_592_000;
+const dedupeRetentionSeconds = 172_800;
 const bitmapBits = 16_384;
 const bitmapBytes = bitmapBits / 8;
 const dedupeBits = 1_048_576;
@@ -37,8 +38,11 @@ const ctaSessionKey = (id: string, hour: number) =>
   `statistics:v2:cta-sessions:${id}:${hour}`;
 const dedupeKey = (type: EventType, day: number) =>
   `statistics:v1:dedupe:${type}:${day}`;
-const coverageKey = (family: "traffic" | "sessions") =>
-  `statistics:v2:coverage:${family}`;
+type CoverageFamily = "traffic" | "sessions" | "ctr-invariants";
+const coverageKey = (family: CoverageFamily) =>
+  family === "ctr-invariants"
+    ? "statistics:v3:coverage:ctr-invariants"
+    : `statistics:v2:coverage:${family}`;
 
 function hash32(value: string, seed = 0x811c9dc5): number {
   let hash = seed >>> 0;
@@ -59,6 +63,7 @@ async function mark(
   key: string,
   identity: string,
   size = bitmapBits,
+  ttlSeconds = retentionSeconds,
 ): Promise<boolean> {
   const [previous = 0] = await redis.bitfield(
     key,
@@ -67,12 +72,12 @@ async function mark(
     hash32(identity) % size,
     1,
   );
-  await redis.expire(key, retentionSeconds);
+  await redis.expire(key, ttlSeconds);
   return previous === 0;
 }
 async function ensureCoverage(
   redis: RedisClient,
-  family: "traffic" | "sessions",
+  family: CoverageFamily,
   now: number,
 ): Promise<void> {
   const key = coverageKey(family);
@@ -85,11 +90,25 @@ async function claim(
   eventId: string,
   now: number,
 ): Promise<boolean> {
+  const offset = hash32(`${type}:${eventId}`) % dedupeBits;
+  const wasRecentlyClaimed = await Promise.all(
+    [0, 1, 2].map(async (daysAgo) => {
+      const [value = 0] = await redis.bitfield(
+        dedupeKey(type, dayStart(now) - daysAgo * 24 * hourMs),
+        "get",
+        "u1",
+        offset,
+      );
+      return value === 1;
+    }),
+  );
+  if (wasRecentlyClaimed.some(Boolean)) return false;
   return await mark(
     redis,
     dedupeKey(type, dayStart(now)),
     `${type}:${eventId}`,
     dedupeBits,
+    dedupeRetentionSeconds,
   );
 }
 async function increment(
@@ -146,6 +165,7 @@ export async function recordStatisticsLoad(
     markSessions(redis, hour, options.visitorIdentity, options.postId, kinds),
     ensureCoverage(redis, "traffic", now),
     ensureCoverage(redis, "sessions", now),
+    ensureCoverage(redis, "ctr-invariants", now),
   ]);
   return true;
 }
@@ -165,10 +185,13 @@ export async function recordStatisticsJoinClick(
   await Promise.all([
     increment(redis, hour, ["join_clicks"]),
     markSessions(redis, hour, options.visitorIdentity, options.postId, [
+      "join_eligible",
+      "interaction_eligible",
       "join_click",
       "interaction",
     ]),
     ensureCoverage(redis, "sessions", now),
+    ensureCoverage(redis, "ctr-invariants", now),
   ]);
   return true;
 }
@@ -184,6 +207,14 @@ export async function recordStatisticsConfirmedJoin(
   },
 ): Promise<boolean> {
   const now = options.nowMs ?? Date.now();
+  await recordStatisticsJoinClick(redis, {
+    eventId: options.attemptId,
+    postId: options.postId,
+    ...(options.visitorIdentity
+      ? { visitorIdentity: options.visitorIdentity }
+      : {}),
+    nowMs: now,
+  });
   if (!(await claim(redis, "join_confirmed", options.attemptId, now)))
     return false;
   const hour = hourStart(now);
@@ -197,6 +228,7 @@ export async function recordStatisticsConfirmedJoin(
         ])
       : Promise.resolve(),
     ensureCoverage(redis, "sessions", now),
+    ensureCoverage(redis, "ctr-invariants", now),
   ]);
   return true;
 }
@@ -233,10 +265,13 @@ export async function recordStatisticsCtaClick(
         )
       : Promise.resolve(false),
     markSessions(redis, hour, options.visitorIdentity, options.postId, [
+      secondary ? "secondary_eligible" : "cta_only_eligible",
+      "interaction_eligible",
       secondary ? "secondary_click" : "cta_only_click",
       "interaction",
     ]),
     ensureCoverage(redis, "sessions", now),
+    ensureCoverage(redis, "ctr-invariants", now),
   ]);
   return true;
 }
@@ -283,12 +318,12 @@ function bitCount(bitmap: Uint8Array): number {
   }
   return count;
 }
-function estimate(bitmap: Uint8Array): number {
+function estimate(bitmap: Uint8Array): number | null {
   const occupied = bitCount(bitmap);
   return occupied === 0
     ? 0
     : occupied >= bitmapBits
-      ? bitmapBits
+      ? null
       : Math.round(-bitmapBits * Math.log(1 - occupied / bitmapBits));
 }
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -328,8 +363,10 @@ export function compareStatisticsValues(
             : "unchanged",
   };
 }
-const rate = (numerator: number, denominator: number) =>
-  denominator > 0 ? round((numerator / denominator) * 100) : null;
+const rate = (numerator: number | null, denominator: number | null) =>
+  numerator !== null && denominator !== null && denominator > 0
+    ? round((numerator / denominator) * 100)
+    : null;
 const range = (start: number, count: number) =>
   Array.from({ length: count }, (_, index) => start + index * hourMs);
 async function bitmapRows(
@@ -341,12 +378,18 @@ async function bitmapRows(
     hours.map(async (hour) => union([await redis.getBuffer(key(hour))])),
   );
 }
-async function bitmapUnion(
+async function hourlyEstimateSum(
   redis: RedisClient,
   hours: number[],
   key: (hour: number) => string,
-): Promise<Uint8Array> {
-  return union(await bitmapRows(redis, hours, key));
+): Promise<number | null> {
+  let total = 0;
+  for (const row of await bitmapRows(redis, hours, key)) {
+    const value = estimate(row);
+    if (value === null) return null;
+    total += value;
+  }
+  return total;
 }
 function cohorts(history: Uint8Array, rows: Uint8Array[]) {
   let prior = union([history]);
@@ -386,7 +429,7 @@ const coveragePeriod = (
 };
 async function coverage(
   redis: RedisClient,
-  family: "traffic" | "sessions",
+  family: CoverageFamily,
   inferred: number | null,
   currentStart: number,
   previousStart: number,
@@ -475,13 +518,22 @@ export async function getStatisticsReport(
     nowMs,
     hours,
   );
+  const ctrCoverage = await coverage(
+    redis,
+    "ctr-invariants",
+    null,
+    currentStart,
+    previousStart,
+    nowMs,
+    hours,
+  );
 
   const sessionPair = async (kind: SessionKind) => {
     const [current, previous] = await Promise.all([
-      bitmapUnion(redis, currentHours, (hour) => sessionKey(kind, hour)),
-      bitmapUnion(redis, previousHours, (hour) => sessionKey(kind, hour)),
+      hourlyEstimateSum(redis, currentHours, (hour) => sessionKey(kind, hour)),
+      hourlyEstimateSum(redis, previousHours, (hour) => sessionKey(kind, hour)),
     ]);
-    return [estimate(current), estimate(previous)] as const;
+    return [current, previous] as const;
   };
   const [
     sessions,
@@ -525,8 +577,12 @@ export async function getStatisticsReport(
       .sort((a, b) => a[1].localeCompare(b[1]))
       .map(async ([id, label]) => {
         const [current, previous] = await Promise.all([
-          bitmapUnion(redis, currentHours, (hour) => ctaSessionKey(id, hour)),
-          bitmapUnion(redis, previousHours, (hour) => ctaSessionKey(id, hour)),
+          hourlyEstimateSum(redis, currentHours, (hour) =>
+            ctaSessionKey(id, hour),
+          ),
+          hourlyEstimateSum(redis, previousHours, (hour) =>
+            ctaSessionKey(id, hour),
+          ),
         ]);
         return {
           label,
@@ -535,11 +591,7 @@ export async function getStatisticsReport(
             sumField(previousRows, `secondary_cta_click:${id}`),
             sessionCoverage,
           ),
-          uniqueSessions: comparable(
-            estimate(current),
-            estimate(previous),
-            sessionCoverage,
-          ),
+          uniqueSessions: comparable(current, previous, sessionCoverage),
         };
       }),
   );
@@ -615,7 +667,7 @@ export async function getStatisticsReport(
         ctr: comparable(
           rate(joinSessions[0], joinEligible[0]),
           rate(joinSessions[1], joinEligible[1]),
-          sessionCoverage,
+          ctrCoverage,
         ),
       },
       ctas: {
@@ -633,7 +685,7 @@ export async function getStatisticsReport(
         ctr: comparable(
           rate(secondarySessions[0], secondaryEligible[0]),
           rate(secondarySessions[1], secondaryEligible[1]),
-          sessionCoverage,
+          ctrCoverage,
         ),
         byLabel,
       },
@@ -652,7 +704,7 @@ export async function getStatisticsReport(
         ctr: comparable(
           rate(ctaOnlySessions[0], ctaOnlyEligible[0]),
           rate(ctaOnlySessions[1], ctaOnlyEligible[1]),
-          sessionCoverage,
+          ctrCoverage,
         ),
       },
       interactions: {
@@ -669,7 +721,7 @@ export async function getStatisticsReport(
         ctr: comparable(
           rate(interactions[0], interactionEligible[0]),
           rate(interactions[1], interactionEligible[1]),
-          sessionCoverage,
+          ctrCoverage,
         ),
       },
       legacy: {
@@ -683,6 +735,7 @@ export async function getStatisticsReport(
     coverage: {
       trafficAndVisitors: trafficCoverage,
       sessionsAndInteractions: sessionCoverage,
+      ctrInvariants: ctrCoverage,
     },
     methodology: {
       formulas: {
@@ -700,9 +753,9 @@ export async function getStatisticsReport(
           "Unique sessions with any tracked interaction / unique eligible interaction sessions.",
       },
       uniqueCounting:
-        "Approximate linear-counting bitmaps aggregated into UTC hourly buckets.",
+        "Approximate 16,384-bit linear-counting bitmaps aggregated into UTC hourly buckets; fully saturated buckets are reported as unavailable rather than capped.",
       newVisitorDefinition:
-        "A visitor whose first observed session in retained history occurs in the selected period.",
+        "Deprecated compatibility field: a visitor whose first observed session in retained history occurs in the selected period; it can overlap Returning Visitors.",
       returningVisitorDefinition:
         "A visitor with a selected-period session after an earlier retained session; new and returning can overlap within one period.",
       anonymousIdentity:
@@ -710,8 +763,13 @@ export async function getStatisticsReport(
       membership:
         "Membership means app-tracked subscription state, not verified complete Reddit community membership.",
       retentionDays: 30,
+      dedupeWindowHours: 48,
+      approximationLimits:
+        "Unique counts use one-hash linear counting. Accuracy degrades as a 16,384-bit hourly bucket fills, bitmap intersections remain collision-biased, and fully saturated buckets are unavailable.",
       sessionDefinition:
-        "One anonymous visitor plus post per fixed UTC hour; different posts remain separate sessions.",
+        "One anonymous visitor plus post per fixed UTC hour. Same-hour retries and remounts are deduplicated, separate hours and different posts count independently, and multiple genuine same-post openings within one hour cannot be distinguished.",
+      ctrCoverageDefinition:
+        "CTR denominator-repair invariants apply from coverage.ctrInvariants.firstKnownAt; earlier retained session data remains available but may have incomplete eligible-session denominators.",
     },
   };
 }

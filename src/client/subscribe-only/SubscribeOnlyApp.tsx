@@ -211,7 +211,7 @@ export const SubscribeOnlyApp = () => {
   const performSubscribe = async () => {
     if (subscribeAttemptRef.current) return;
     subscribeAttemptRef.current = true;
-    recordStatisticsEvent("join_click");
+    const activationId = recordStatisticsEvent("join_click");
     const analyticsContext = getGoalJourneyContext(state);
     goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!state.authenticated) {
@@ -221,7 +221,7 @@ export const SubscribeOnlyApp = () => {
       return;
     }
     interactionStartedRef.current = true;
-    const result = await subscribe();
+    const result = await subscribe({ attemptId: activationId });
     if (result.error) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "api_error");
       interactionStartedRef.current = false;

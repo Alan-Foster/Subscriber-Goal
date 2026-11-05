@@ -134,6 +134,9 @@ describe("SubscribeOnlyApp", () => {
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetAllMocks();
+    hoisted.recordStatisticsEvent.mockReturnValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
     hoisted.state = createTinyState();
     hoisted.prohibited = false;
     hoisted.subscribe.mockResolvedValue({
@@ -430,6 +433,9 @@ describe("SubscribeOnlyApp", () => {
     expect(container.textContent).toContain("Join r/ExampleSub");
     expect(container.textContent).toContain("Joined r/ExampleSub");
     expect(hoisted.recordStatisticsEvent).toHaveBeenCalledWith("join_click");
+    expect(hoisted.subscribe).toHaveBeenCalledWith({
+      attemptId: "11111111-1111-4111-8111-111111111111",
+    });
     expect(
       container.querySelector('[data-tiny-transition-outgoing="true"]'),
     ).not.toBeNull();

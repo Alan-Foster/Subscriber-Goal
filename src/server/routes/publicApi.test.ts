@@ -371,6 +371,8 @@ describe("publicApi routes", () => {
   });
 
   it("resolves CTA analytics labels from server configuration", async () => {
+    hoisted.context.userId = "t2_subscriber";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
     const routes = createRouteHarness();
     const json = vi.fn();
     await routes.get(apiRoutes.statisticsEvent)?.(
@@ -392,10 +394,52 @@ describe("publicApi routes", () => {
       hoisted.redis,
       expect.objectContaining({
         label: "Join the Discord",
-        visitorIdentity: "22222222-2222-4222-8222-222222222222",
+        visitorIdentity: "t2_subscriber",
       }),
     );
     expect(json).toHaveBeenCalledWith({ status: "ok" });
+  });
+
+  it("rejects Join statistics events for ineligible tracked subscribers", async () => {
+    hoisted.context.userId = "t2_subscriber";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.statisticsEvent)?.(
+      {
+        body: {
+          type: "join_click",
+          eventId: "11111111-1111-4111-8111-111111111111",
+        },
+      } as unknown as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(hoisted.recordStatisticsJoinClick).not.toHaveBeenCalled();
+  });
+
+  it("rejects secondary CTA statistics events without tracked membership", async () => {
+    hoisted.context.userId = "t2_untracked";
+    hoisted.isTrackedSubscriber.mockResolvedValue(false);
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.statisticsEvent)?.(
+      {
+        body: {
+          type: "cta_click",
+          eventId: "11111111-1111-4111-8111-111111111111",
+        },
+      } as unknown as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(status).toHaveBeenCalledWith(400);
+    expect(hoisted.recordStatisticsCtaClick).not.toHaveBeenCalled();
   });
 
   it("reports init phase durations through Server-Timing", async () => {

@@ -131,7 +131,6 @@ export const StatisticsPage = ({ onReturn }: Props) => {
           name: "Visitors",
           rows: [
             { label: "Unique visitors", value: report.metrics.visitors.unique },
-            { label: "New visitors", value: report.metrics.visitors.new },
             {
               label: "Returning visitors",
               value: report.metrics.visitors.returning,
@@ -343,10 +342,10 @@ export const StatisticsPage = ({ onReturn }: Props) => {
             </div>
             <div className="text-[10px] leading-4 text-[color:var(--sg-text-muted)]">
               <div>
-                {`Traffic coverage: ${report.coverage.trafficAndVisitors.current.status} (${report.coverage.trafficAndVisitors.current.coveredHours}/${report.coverage.trafficAndVisitors.current.requestedHours} hours). Session coverage: ${report.coverage.sessionsAndInteractions.current.status} (${report.coverage.sessionsAndInteractions.current.coveredHours}/${report.coverage.sessionsAndInteractions.current.requestedHours} hours).`}
+                {`Traffic coverage: ${report.coverage.trafficAndVisitors.current.status} (${report.coverage.trafficAndVisitors.current.coveredHours}/${report.coverage.trafficAndVisitors.current.requestedHours} hours). Session coverage: ${report.coverage.sessionsAndInteractions.current.status} (${report.coverage.sessionsAndInteractions.current.coveredHours}/${report.coverage.sessionsAndInteractions.current.requestedHours} hours). CTR invariant coverage: ${report.coverage.ctrInvariants.current.status} (${report.coverage.ctrInvariants.current.coveredHours}/${report.coverage.ctrInvariants.current.requestedHours} hours).`}
               </div>
               <div>
-                {`Rates show — when no eligible denominator exists. ${report.methodology.membership} ${report.methodology.anonymousIdentity}`}
+                {`Rates show — when no eligible denominator exists. ${report.methodology.sessionDefinition} ${report.methodology.membership} ${report.methodology.anonymousIdentity}`}
               </div>
             </div>
             <div

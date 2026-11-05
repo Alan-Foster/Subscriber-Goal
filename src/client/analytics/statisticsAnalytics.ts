@@ -5,11 +5,15 @@ import { logDiagnostic } from "../../shared/diagnostics";
 const visitorStorageKey = "subscriber-goal:statistics-visitor-v1";
 
 export const createStatisticsEventId = (): string => {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto?.getRandomValues !== "function") {
+    throw new Error("Secure random values are unavailable.");
   }
   const bytes = new Uint8Array(16);
-  globalThis.crypto?.getRandomValues?.(bytes);
+  crypto.getRandomValues(bytes);
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
@@ -41,10 +45,11 @@ export const statisticsRequestHeaders = (
 
 export const recordStatisticsEvent = (
   type: StatisticsEventRequest["type"],
-): void => {
+  eventId = createStatisticsEventId(),
+): string => {
   const request: StatisticsEventRequest = {
     type,
-    eventId: createStatisticsEventId(),
+    eventId,
   };
   void Promise.resolve(
     fetch(apiRoutes.statisticsEvent, {
@@ -74,4 +79,5 @@ export const recordStatisticsEvent = (
         error,
       );
     });
+  return eventId;
 };
