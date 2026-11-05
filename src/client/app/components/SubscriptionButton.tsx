@@ -56,7 +56,11 @@ export const SubscriptionButton = ({
             label
           )}
         </span>
-        {mode === "subscribe" ? <JoinArrowIcon /> : null}
+        {mode === "subscribe" ? (
+          <span className="hidden shrink-0 sm:inline-flex">
+            <JoinArrowIcon />
+          </span>
+        ) : null}
       </button>
     </span>
   );

@@ -32,12 +32,14 @@ describe("SubscriptionButton", () => {
       expect(html).not.toContain('disabled=""');
       if (mode === "subscribe") {
         expect(html).toContain('data-subgoal-primary-cta="true"');
+        expect(html).toContain('<span class="hidden shrink-0 sm:inline-flex">');
         expect(html).toContain('viewBox="0 0 20 20"');
         expect(html).toContain('d="M2.5 10h15m-6-6 6 6-6 6"');
         expect(html).toContain('stroke-width="2.5"');
         expect(html).toContain('aria-hidden="true"');
       } else {
         expect(html).not.toContain("data-subgoal-primary-cta");
+        expect(html).not.toContain("hidden shrink-0 sm:inline-flex");
         expect(html).not.toContain('viewBox="0 0 20 20"');
       }
     },

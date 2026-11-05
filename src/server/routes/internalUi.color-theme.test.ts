@@ -1403,7 +1403,7 @@ describe("internalUi color theme create goal routes", () => {
     ["wiki", "Leer la Wiki", true, "blue"],
     ["create-post", "Crear una publicación", false, "blue"],
     ["share-picture", "Compartir una imagen", false, "blue"],
-    ["newest-post", "Ver la publicación más reciente de hoy", false, "blue"],
+    ["newest-post", "Ver la publicación más reciente", false, "blue"],
   ] as const)(
     "builds the %s preset follow-up fields and localized defaults",
     async (preset, buttonText, showUrl, colorTheme) => {
@@ -1904,7 +1904,7 @@ describe("internalUi color theme create goal routes", () => {
 
   it.each([
     ["top-post-day", "View the Top Post Today"],
-    ["newest-post", "View the Most Recent Post Today"],
+    ["newest-post", "View the Most Recent Post"],
   ] as const)(
     "persists the URL-free %s dynamic action",
     async (afterSubscribePreset, buttonText) => {

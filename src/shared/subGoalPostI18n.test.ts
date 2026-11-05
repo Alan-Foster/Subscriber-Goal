@@ -50,6 +50,40 @@ const expectedJoinButtons: Record<SubGoalLanguage, string> = {
   yo: "Darapọ̀ mọ́ r/ExampleSub",
 };
 
+const expectedMostRecentPostButtons: Record<SubGoalLanguage, string> = {
+  id: "Lihat Postingan Terbaru",
+  bs: "Pogledaj najnoviju objavu",
+  ca: "Mira la publicació més recent",
+  da: "Se det nyeste opslag",
+  de: "Neuesten Beitrag ansehen",
+  en: "View the Most Recent Post",
+  hi: "सबसे हाल की पोस्ट देखें",
+  pa: "ਸਭ ਤੋਂ ਨਵੀਂ ਪੋਸਟ ਵੇਖੋ",
+  mr: "सर्वात नवीन पोस्ट पाहा",
+  es: "Ver la publicación más reciente",
+  et: "Vaata uusimat postitust",
+  fr: "Voir la publication la plus récente",
+  hr: "Pogledaj najnoviju objavu",
+  is: "Skoða nýjasta innleggið",
+  it: "Vedi il post più recente",
+  lv: "Skatīt jaunāko ierakstu",
+  lt: "Žiūrėti naujausią įrašą",
+  hu: "A legfrissebb bejegyzés megtekintése",
+  nl: "Bekijk het nieuwste bericht",
+  nb: "Se det nyeste innlegget",
+  pl: "Zobacz najnowszy post",
+  pt: "Ver a publicação mais recente",
+  ro: "Vezi cea mai nouă postare",
+  sq: "Shiko postimin më të ri",
+  sk: "Zobraziť najnovší príspevok",
+  sl: "Oglej si najnovejšo objavo",
+  fi: "Katso uusin julkaisu",
+  sv: "Visa det senaste inlägget",
+  tl: "Tingnan ang Pinakabagong Post",
+  tr: "En Yeni Gönderiyi Gör",
+  yo: "Wo ìfìwéránṣẹ́ tuntun jù",
+};
+
 describe("subGoalPostI18n", () => {
   it("exposes enumerable lazy language accessors with stable cached values", () => {
     expect(Object.keys(subGoalPostMessages)).toEqual(subGoalLanguages);
@@ -289,6 +323,18 @@ describe("subGoalPostI18n", () => {
     }
   });
 
+  it("uses timeless most-recent-post wording in every supported language", () => {
+    expect(Object.keys(expectedMostRecentPostButtons)).toHaveLength(
+      subGoalLanguages.length,
+    );
+    for (const language of subGoalLanguages) {
+      expect(
+        getAfterSubscribePresetMessages(language).viewMostRecentPostToday,
+        language,
+      ).toBe(expectedMostRecentPostButtons[language]);
+    }
+  });
+
   it("returns localized preset defaults and navigation errors", () => {
     expect(getAfterSubscribePresetMessages("es")).toMatchObject({
       joinDiscord: "Únete al Discord",
@@ -296,7 +342,7 @@ describe("subGoalPostI18n", () => {
       readWiki: "Leer la Wiki",
       createNewPost: "Crear una publicación",
       sharePicture: "Compartir una imagen",
-      viewMostRecentPostToday: "Ver la publicación más reciente de hoy",
+      viewMostRecentPostToday: "Ver la publicación más reciente",
       dynamicPostUnavailable: "No hay ninguna publicación disponible.",
     });
     expect(getAfterSubscribePresetMessages("unsupported")).toBe(
