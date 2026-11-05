@@ -109,18 +109,6 @@
       "placeholders": {},
       "protectedTokens": []
     },
-    "cameraMode.disable": {
-      "description": "Completion page control: Disable Camera Mode",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
-    "cameraMode.enable": {
-      "description": "Completion page control: Enable Camera Mode",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
     "errors.join.failedReference": {
       "description": "User-facing error: Join failed Reference",
       "policy": "fallback",
@@ -2170,8 +2158,6 @@
         "moderator.setup.short": "Short Subscriber Goal (No Logo)",
         "moderator.setup.tiny": "Subscribe Button and Call to Action Button (No Goal)",
         "moderator.setup.title": "Sub Goal - Step 1/3 - Choose Post Type",
-        "cameraMode.disable": "Disable Camera Mode",
-        "cameraMode.enable": "Enable Camera Mode",
         "notifications.alertsLabel": "Goal completion alerts",
         "notifications.backAriaLabel": "Return to previous page",
         "notifications.description": "Get notified when the subscriber goal is completed",
