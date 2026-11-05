@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import type { SubGoalColorTheme } from "../../../shared/subGoalColorTheme";
+import { useCompactTextFit } from "./CompactTextFitContext";
 import { JoinArrowIcon } from "./JoinArrowIcon";
 
 const defaultLabelFontSizePx = 18;
@@ -43,6 +44,8 @@ export const SubscriptionButton = ({
   onClick,
   colorTheme,
 }: SubscriptionButtonProps) => {
+  const compactTextFit = useCompactTextFit();
+  const usesCompactTextFit = compactTextFit !== null;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
   const lastFitRef = useRef<LabelFit | null>(null);
@@ -52,6 +55,7 @@ export const SubscriptionButton = ({
   const showAttention = mode === "subscribe" || mode === "link";
 
   useLayoutEffect(() => {
+    if (usesCompactTextFit) return;
     const button = buttonRef.current;
     const labelElement = labelRef.current;
     if (!button || !labelElement) return;
@@ -227,7 +231,7 @@ export const SubscriptionButton = ({
       fontSet?.removeEventListener("loadingdone", handleFontsLoaded);
       if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
-  }, [label, mobileLabel, mode]);
+  }, [label, mobileLabel, mode, usesCompactTextFit]);
 
   return (
     <span
@@ -255,6 +259,16 @@ export const SubscriptionButton = ({
           ref={labelRef}
           className="min-w-0 whitespace-nowrap [overflow-wrap:normal]"
           data-subscription-button-label="true"
+          style={
+            compactTextFit
+              ? {
+                  fontSize: `${compactTextFit.fontSizePx}px`,
+                  lineHeight: compactTextFit.wrapCta ? 1.25 : undefined,
+                  overflowWrap: compactTextFit.wrapCta ? "anywhere" : "normal",
+                  whiteSpace: compactTextFit.wrapCta ? "normal" : "nowrap",
+                }
+              : undefined
+          }
         >
           {mobileLabel ? (
             <>
