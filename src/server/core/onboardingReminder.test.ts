@@ -12,6 +12,7 @@ const hoisted = vi.hoisted(() => ({
   saveOnboardingState: vi.fn(),
   checkAppAccountHealth: vi.fn(),
   reconcileCompletedGoal: vi.fn(),
+  findLiveHighlightedSubscriberGoalCandidates: vi.fn(),
 }));
 
 vi.mock("./onboardingSubscriberGoal", () => ({
@@ -73,6 +74,11 @@ vi.mock("./completedGoalReconciliation", () => ({
 
 vi.mock("./appAccountHealth", () => ({
   checkAppAccountHealth: hoisted.checkAppAccountHealth,
+}));
+
+vi.mock("../data/liveSubscriberGoalHighlights", () => ({
+  findLiveHighlightedSubscriberGoalCandidates:
+    hoisted.findLiveHighlightedSubscriberGoalCandidates,
 }));
 
 import {
@@ -212,6 +218,8 @@ describe("onboarding reminder", () => {
       permissions: ["posts"],
       notification: "not_needed",
     });
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockReset();
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([]);
   });
 
   it("builds an accurate staggered upgrade warning", () => {
@@ -468,6 +476,122 @@ describe("onboarding reminder", () => {
       }),
     ).resolves.toMatchObject({ status: "complete" });
     expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["classic", "tiny", "cta", "ambiguous"] as const)(
+    "suppresses warning dispatch when a highlighted %s experience appears after reconciliation",
+    async (classification) => {
+      const infoSpy = vi
+        .spyOn(console, "info")
+        .mockImplementation(() => undefined);
+      await scheduleOnboardingReminder(redis as never, { nowMs });
+      hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+        {
+          postId: "t3_late_highlight",
+          post: { id: "t3_late_highlight" },
+          classification,
+          classificationConfidence:
+            classification === "ambiguous" ? "ambiguous" : "explicit",
+          discoveryOrder: 0,
+        },
+      ]);
+
+      await expect(
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + onboardingReminderDelayMs,
+        }),
+      ).resolves.toMatchObject({
+        status: "failed",
+        errorMessage: expect.stringContaining("t3_late_highlight"),
+      });
+
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+      await expect(
+        redis.hGetAll(onboardingReminderStateKey),
+      ).resolves.toMatchObject({
+        status: "pending",
+        result: "failed",
+        attempts: "1",
+      });
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"event":"onboarding_modmail_suppressed"'),
+      );
+    },
+  );
+
+  it("allows an orphaned-goal warning when the only live highlight is its expected completed source", async () => {
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      version: "onboarding_subscriber_goal_v4",
+      status: "awaiting_warning",
+      lifecycleSource: "upgrade",
+      armedAt: nowMs,
+      creationStaggerMinutes: 10,
+      operationId: "onboarding:orphan",
+      intent: "orphaned_completed_goal",
+      replacementSourcePostId: "t3_expected_completed",
+    });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "completed",
+      postId: "t3_expected_completed",
+      source: "highlighted",
+      classification: "classic",
+      completedTime: nowMs - 60_000,
+      candidateCount: 1,
+    });
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+      {
+        postId: "t3_expected_completed",
+        post: { id: "t3_expected_completed" },
+        classification: "classic",
+        classificationConfidence: "explicit",
+        discoveryOrder: 0,
+      },
+    ]);
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    expect(
+      hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      nowMs + onboardingReminderDelayMs,
+    );
+  });
+
+  it("retries without dispatch when the final live Highlights read fails", async () => {
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockRejectedValue(
+      new Error("final Highlights read unavailable"),
+    );
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      errorMessage: "Error: final Highlights read unavailable",
+    });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      result: "failed",
+      attempts: "1",
+    });
   });
 
   it.each([

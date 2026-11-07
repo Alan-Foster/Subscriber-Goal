@@ -4,7 +4,7 @@ import { onAppChanged } from "../triggers/appChanged";
 import { onModAction, type ModActionEvent } from "../triggers/modAction";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
 import { recordCommunityPostCreated } from "../data/ctaActivity";
-import { context, reddit, redis, scheduler } from "@devvit/web/server";
+import { reddit, redis, scheduler } from "@devvit/web/server";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getSubGoalData } from "../data/subGoalData";
 import {
@@ -12,11 +12,6 @@ import {
   isMilestoneNotificationJob,
   processMilestoneNotificationBatch,
 } from "../core/milestoneNotifications";
-import {
-  processInviteNewSubsDelivery,
-  processInviteNewSubsPoll,
-  processInviteNewSubsReport,
-} from "../core/inviteNewSubs";
 import { processAppAccountRecovery } from "../core/appAccountRecovery";
 
 export function registerInternalSystemRoutes(router: Router): void {
@@ -253,100 +248,6 @@ export function registerInternalSystemRoutes(router: Router): void {
         res.status(503).json({
           status: "error",
           message: "Failed to process milestone notification batch",
-        });
-      }
-    },
-  );
-
-  router.post(
-    internalRoutes.scheduler.inviteNewSubsPollJob,
-    async (_req, res): Promise<void> => {
-      try {
-        const subredditName =
-          context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-        const result = await processInviteNewSubsPoll({
-          reddit,
-          redis,
-          scheduler,
-          subredditName,
-        });
-        res.json(result);
-      } catch (error) {
-        logDiagnostic(
-          "error",
-          "scheduler_route_failed",
-          {
-            route: internalRoutes.scheduler.inviteNewSubsPollJob,
-            workflow: "invite_new_subs",
-          },
-          error,
-        );
-        res.status(503).json({
-          status: "error",
-          message: "Failed to process new-subreddit discovery",
-        });
-      }
-    },
-  );
-
-  router.post(
-    internalRoutes.scheduler.inviteNewSubsDeliveryJob,
-    async (req, res): Promise<void> => {
-      const payload = req.body?.data ?? req.body;
-      try {
-        const result = await processInviteNewSubsDelivery({
-          reddit,
-          redis,
-          job: payload,
-        });
-        if (result === "invalid") {
-          res.status(400).json({
-            status: "error",
-            message: "Invalid new-subreddit delivery job payload.",
-          });
-          return;
-        }
-        res.json({ status: result });
-      } catch (error) {
-        logDiagnostic(
-          "error",
-          "scheduler_route_failed",
-          {
-            route: internalRoutes.scheduler.inviteNewSubsDeliveryJob,
-            workflow: "invite_new_subs",
-          },
-          error,
-        );
-        res.json({ status: "dm_failed" });
-      }
-    },
-  );
-
-  router.post(
-    internalRoutes.scheduler.inviteNewSubsReportJob,
-    async (_req, res): Promise<void> => {
-      try {
-        const subredditName =
-          context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-        const result = await processInviteNewSubsReport({
-          reddit,
-          redis,
-          subredditName,
-        });
-        res.json(result);
-      } catch (error) {
-        logDiagnostic(
-          "error",
-          "scheduler_route_failed",
-          {
-            route: internalRoutes.scheduler.inviteNewSubsReportJob,
-            workflow: "invite_new_subs_report",
-          },
-          error,
-        );
-        res.status(503).json({
-          status: "error",
-          message: "Failed to send new-subreddit DM report",
         });
       }
     },

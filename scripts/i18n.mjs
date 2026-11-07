@@ -204,7 +204,7 @@ const contextualVisibleProperties = new Set([
   "placeholder",
 ]);
 const visibleContextFiles =
-  /(?:routes\/internalUi|routes\/publicApi|requestErrorBoundary|onboardingReminder|appAccountHealth|highlightFailureNotifications|milestoneNotifications|inviteNewSubs|components\/|pages\/|App\.tsx|SubscribeOnlyApp\.tsx)$/u;
+  /(?:routes\/internalUi|routes\/publicApi|requestErrorBoundary|onboardingReminder|appAccountHealth|highlightFailureNotifications|milestoneNotifications|components\/|pages\/|App\.tsx|SubscribeOnlyApp\.tsx)$/u;
 
 function literalText(node) {
   if (ts.isJsxText(node)) {

@@ -32,6 +32,7 @@ import {
   onboardingReminderStaggerMaxMinutes,
   onboardingReminderStaggerMinMinutes,
 } from "./onboardingConfig";
+import { findLiveHighlightedSubscriberGoalCandidates } from "../data/liveSubscriberGoalHighlights";
 
 function isExpectedCompletedReplacement(
   state:
@@ -764,6 +765,38 @@ export async function processDueOnboardingReminder({
         pausedAt: nowMs,
       });
       return { status: "paused", ...inspected };
+    }
+
+    // The full reconciliation above establishes the workflow decision. Read
+    // Community Highlights once more at the dispatch boundary so a goal that
+    // appeared during permission/state work cannot make this warning stale.
+    // Any lookup failure is handled by the existing pre-dispatch retry path.
+    const finalHighlightedCandidates =
+      await findLiveHighlightedSubscriberGoalCandidates({
+        reddit,
+        redis,
+        subreddit,
+        nowMs,
+      });
+    const expectedCompletedSourcePostId =
+      activeGoalState?.intent === "orphaned_completed_goal"
+        ? activeGoalState.replacementSourcePostId
+        : undefined;
+    const unexpectedHighlightedCandidate = finalHighlightedCandidates.find(
+      (candidate) => candidate.postId !== expectedCompletedSourcePostId,
+    );
+    if (unexpectedHighlightedCandidate) {
+      logDiagnostic("info", "onboarding_modmail_suppressed", {
+        workflow: "onboarding_reminder",
+        phase: "final_highlight_check",
+        lifecycleSource: reloaded.lifecycleSource,
+        reason: "live_highlight_appeared",
+        postId: unexpectedHighlightedCandidate.postId,
+        classification: unexpectedHighlightedCandidate.classification,
+      });
+      throw new Error(
+        `A highlighted Subscriber Goal appeared before warning dispatch: ${unexpectedHighlightedCandidate.postId}.`,
+      );
     }
 
     const message = buildOnboardingReminderMessage(

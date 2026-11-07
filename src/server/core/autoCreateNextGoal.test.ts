@@ -32,6 +32,7 @@ const successfulHighlightResult = {
 const hoisted = vi.hoisted(() => ({
   cancelAllAutoCreateNextGoals: vi.fn(),
   cancelAutoCreateNextGoal: vi.fn(),
+  checkCompletionStatus: vi.fn(),
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
   markAutoCreateNextGoalExhausted: vi.fn(),
@@ -41,6 +42,7 @@ const hoisted = vi.hoisted(() => ({
   retireSubscriberGoalPost: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   checkAppAccountHealth: vi.fn(),
+  findLiveHighlightedSubscriberGoalCandidates: vi.fn(),
   reddit: {
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock("../data/subGoalData", () => ({
   postHeightSuffix: "_post_height",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
+  checkCompletionStatus: hoisted.checkCompletionStatus,
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
   getSubGoalData: hoisted.getSubGoalData,
   markAutoCreateNextGoalExhausted: hoisted.markAutoCreateNextGoalExhausted,
@@ -104,6 +107,11 @@ vi.mock("./appAccountHealth", () => ({
   checkAppAccountHealth: hoisted.checkAppAccountHealth,
 }));
 
+vi.mock("../data/liveSubscriberGoalHighlights", () => ({
+  findLiveHighlightedSubscriberGoalCandidates:
+    hoisted.findLiveHighlightedSubscriberGoalCandidates,
+}));
+
 vi.mock("../utils/highlightFailureNotifications", () => ({
   getPostUrl: vi.fn((post: { permalink?: string; url?: string }) =>
     post.permalink ? `https://reddit.com${post.permalink}` : post.url,
@@ -118,6 +126,8 @@ describe("processDueAutoCreateNextGoals", () => {
     hoisted.redisHashes.clear();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([]);
+    hoisted.checkCompletionStatus.mockResolvedValue(undefined);
     hoisted.checkAppAccountHealth.mockResolvedValue({
       status: "healthy",
       healthy: true,
@@ -341,6 +351,177 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
     );
+  });
+
+  it("adopts an untracked incomplete highlighted classic as the live successor", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+      {
+        postId: "t3_live",
+        post: { id: "t3_live", postData: { goal: 20 } },
+        source: "highlighted",
+        createdAtMs: 2_000,
+        classification: "classic",
+        classificationConfidence: "explicit",
+        discoveryOrder: 0,
+      },
+    ]);
+    hoisted.getSubGoalData.mockImplementation(async (_redis, postId) =>
+      postId === "t3_live"
+        ? { goal: 20, completedTime: 0 }
+        : {
+            goal: 5,
+            completedTime: 1_000,
+            autoCreateNextGoal: true,
+            language: "en",
+          },
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
+
+    expect(
+      hoisted.redisHashes
+        .get("auto_create_next_goal_v1_successors")
+        ?.get("t3_source"),
+    ).toBe("t3_live");
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
+      hoisted.redis,
+      "t3_source",
+    );
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tiny", "explicit"],
+    ["cta", "explicit"],
+    ["ambiguous", "ambiguous"],
+  ] as const)(
+    "preserves a highlighted %s app-owned experience without mapping a classic successor",
+    async (classification, classificationConfidence) => {
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+        {
+          postId: "t3_live",
+          post: { id: "t3_live" },
+          source: "highlighted",
+          classification,
+          classificationConfidence,
+          discoveryOrder: 0,
+        },
+      ]);
+
+      await expect(
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+        }),
+      ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
+
+      expect(
+        hoisted.redisHashes.get("auto_create_next_goal_v1_successors"),
+      ).toBeUndefined();
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows creation when the live highlighted classic is complete", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+      {
+        postId: "t3_completed",
+        post: { id: "t3_completed" },
+        source: "highlighted",
+        classification: "classic",
+        classificationConfidence: "explicit",
+        discoveryOrder: 0,
+      },
+    ]);
+    hoisted.getSubGoalData.mockImplementation(async (_redis, postId) =>
+      postId === "t3_completed"
+        ? { goal: 10, completedTime: 2_000 }
+        : {
+            goal: 5,
+            completedTime: 1_000,
+            autoCreateNextGoal: true,
+            language: "en",
+          },
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ created: 1, skipped: 0, failed: 0 });
+  });
+
+  it("reconciles a stale highlighted goal as complete before allowing creation", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
+      {
+        postId: "t3_reached",
+        post: { id: "t3_reached" },
+        source: "highlighted",
+        classification: "classic",
+        classificationConfidence: "explicit",
+        discoveryOrder: 0,
+      },
+    ]);
+    hoisted.getSubGoalData.mockImplementation(async (_redis, postId) =>
+      postId === "t3_reached"
+        ? { goal: 10, completedTime: 0 }
+        : {
+            goal: 5,
+            completedTime: 1_000,
+            autoCreateNextGoal: true,
+            language: "en",
+          },
+    );
+    hoisted.checkCompletionStatus.mockResolvedValue(3_000);
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ created: 1, skipped: 0, failed: 0 });
+
+    expect(hoisted.checkCompletionStatus).toHaveBeenCalledWith(
+      hoisted.reddit,
+      hoisted.redis,
+      "t3_reached",
+      expect.objectContaining({ scheduleAutomaticSuccessor: false }),
+    );
+  });
+
+  it("reschedules when the live Highlights check fails", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockRejectedValue(
+      new Error("highlights unavailable"),
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({
+      created: 0,
+      failed: 1,
+      rescheduled: 1,
+    });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.recordAutoCreateNextGoalFailure).toHaveBeenCalled();
   });
 
   it("inherits the source goal language instead of re-detecting the subreddit language", async () => {

@@ -20,10 +20,6 @@ export const internalRoutes = {
     postsUpdaterJob: "/internal/scheduler/posts-updater-job",
     appAccountRecoveryJob: "/internal/scheduler/app-account-recovery-job",
     milestoneNotificationJob: "/internal/scheduler/milestone-notification-job",
-    inviteNewSubsPollJob: "/internal/scheduler/invite-new-subs-poll-job",
-    inviteNewSubsDeliveryJob:
-      "/internal/scheduler/invite-new-subs-delivery-job",
-    inviteNewSubsReportJob: "/internal/scheduler/invite-new-subs-report-job",
   },
   menu: {
     createGoal: "/internal/menu/create-goal",

@@ -1359,18 +1359,6 @@
       },
       "protectedTokens": ["SubGoal"]
     },
-    "outbound.invite.subject": {
-      "description": "Outbound moderator or member message: Invite subject",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
-    "outbound.invite.reportSubject": {
-      "description": "Outbound moderator or member message: Invite report Subject",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
     "accessibility.document.appTitle": {
       "description": "Accessibility and document metadata: Document app Title",
       "policy": "fallback",
@@ -1794,18 +1782,6 @@
         "subredditName": "Subreddit display name without r/"
       },
       "protectedTokens": ["Subscriber Goal"]
-    },
-    "outbound.invite.reportBody": {
-      "description": "Outbound moderator report: twelve-hour new-subreddit DM totals",
-      "policy": "fallback",
-      "placeholders": {
-        "windowStart": "ISO-8601 report window start",
-        "windowEnd": "ISO-8601 report window end",
-        "total": "Display-formatted attempted-delivery count",
-        "successful": "Display-formatted successful-delivery count",
-        "failed": "Display-formatted failed-delivery count"
-      },
-      "protectedTokens": []
     },
     "metric.subscribersCommunity": {
       "description": "Localized subscriber-count phrase as used in the Thanks community sentence",
@@ -2308,8 +2284,6 @@
         "outbound.health.removalBody": "Hi u/{moderatorName},\n\nYou removed u/subscriber-goal from the moderator team of r/{subredditName}.\n\nSubscriber Goal requires its app account to have moderator permissions to work correctly.\n\nIf you want to remove Subscriber Goal, please uninstall it from your community's App Installation Page:\n\n[{installationUrl}]({installationUrl})\n\nIf you removed the account by accident, please invite u/subscriber-goal back to the moderator team with the required permissions. Subscriber Goal will automatically accept the invitation.\n\nThis is an automated message.",
         "outbound.highlight.subjectAttention": "Action Required - SubGoal Highlight Needs Attention in r/{subredditName}",
         "outbound.highlight.subjectMissing": "Action Required - SubGoal Not Highlighted in r/{subredditName}",
-        "outbound.invite.subject": "Tool for Growing your New Subreddit",
-        "outbound.invite.reportSubject": "New Subreddit DM Report — 12 Hours",
         "accessibility.document.appTitle": "Subscriber Goal",
         "accessibility.document.joinTitle": "Join",
         "outbound.onboarding.installIntro": "Welcome to Subscriber Goal for r/{subredditName}!",
@@ -2370,7 +2344,6 @@
         "errors.create.inProgress": "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
         "errors.create.permissionVerification": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}.",
         "errors.create.permissionVerificationRetry": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}. Please try again shortly.",
-        "outbound.invite.reportBody": "New-subreddit DM report\n\nWindow start: {windowStart}\nWindow end: {windowEnd}\nTotal attempted: {total}\nSuccessful: {successful}\nFailed: {failed}",
         "metric.subscribersCommunity": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",
         "metric.subscribersReached": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}"
       }

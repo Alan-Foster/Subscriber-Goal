@@ -4,6 +4,7 @@ import {
   autoCreateNextGoalSuccessorsKey,
   cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal,
+  checkCompletionStatus,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   markAutoCreateNextGoalExhausted,
@@ -35,6 +36,10 @@ import { retireSubscriberGoalPost } from "./postRetirement";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import {
+  findLiveHighlightedSubscriberGoalCandidates,
+  type LiveHighlightedSubscriberGoalCandidate,
+} from "../data/liveSubscriberGoalHighlights";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -253,6 +258,36 @@ export async function processDueAutoCreateNextGoals({
         });
         continue;
       }
+
+      // Redis remains an early duplicate-prevention signal, but Community
+      // Highlights are the live authority immediately before automatic post
+      // creation. Any failure in this check is handled by the outer retry path.
+      const highlightedPrimary = await findLiveHighlightedPrimary({
+        reddit,
+        redis,
+        subreddit,
+        sourcePostId,
+        nowMs,
+        mutationLease,
+      });
+      if (highlightedPrimary) {
+        if (highlightedPrimary.kind === "active_classic") {
+          await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+            [sourcePostId]: highlightedPrimary.postId,
+          });
+        }
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "live_highlight_primary",
+          postId: sourcePostId,
+          protectedPostId: highlightedPrimary.postId,
+          reason: highlightedPrimary.kind,
+        });
+        continue;
+      }
+
       const subredditDisplayName =
         sourceGoalData.subredditDisplayName ?? subreddit.name;
       const messages = getSubGoalPostMessages(sourceGoalData.language);
@@ -403,6 +438,95 @@ export async function processDueAutoCreateNextGoals({
   }
 
   return summary;
+}
+
+type LiveHighlightedPrimary = {
+  postId: `t3_${string}`;
+  kind: "active_classic" | "protected_experience" | "ambiguous";
+};
+
+async function findLiveHighlightedPrimary({
+  reddit,
+  redis,
+  subreddit,
+  sourcePostId,
+  nowMs,
+  mutationLease,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  subreddit: Awaited<ReturnType<RedditClient["getCurrentSubreddit"]>>;
+  sourcePostId: `t3_${string}`;
+  nowMs: number;
+  mutationLease: CommunityGoalMutationLease;
+}): Promise<LiveHighlightedPrimary | undefined> {
+  const candidates = await findLiveHighlightedSubscriberGoalCandidates({
+    reddit,
+    redis,
+    nowMs,
+    subreddit,
+  });
+  const blockers: Array<{
+    candidate: LiveHighlightedSubscriberGoalCandidate;
+    kind: LiveHighlightedPrimary["kind"];
+  }> = [];
+
+  for (const candidate of candidates) {
+    if (candidate.postId === sourcePostId) {
+      continue;
+    }
+    if (
+      candidate.classification === "tiny" ||
+      candidate.classification === "cta"
+    ) {
+      blockers.push({ candidate, kind: "protected_experience" });
+      continue;
+    }
+    if (
+      candidate.classification !== "classic" ||
+      candidate.classificationConfidence === "ambiguous"
+    ) {
+      blockers.push({ candidate, kind: "ambiguous" });
+      continue;
+    }
+
+    const goalData = await getSubGoalData(
+      redis,
+      candidate.postId,
+      candidate.post.postData ?? candidate.post.customPostData,
+    );
+    if (!(goalData.goal > 0)) {
+      blockers.push({ candidate, kind: "ambiguous" });
+      continue;
+    }
+
+    let completedTime = goalData.completedTime;
+    if (!completedTime && subreddit.numberOfSubscribers >= goalData.goal) {
+      completedTime = await checkCompletionStatus(
+        reddit,
+        redis,
+        candidate.postId,
+        {
+          now: () => nowMs,
+          scheduleAutomaticSuccessor: false,
+          mutationLease,
+        },
+      );
+    }
+    if (!completedTime) {
+      blockers.push({ candidate, kind: "active_classic" });
+    }
+  }
+
+  const selected = blockers.sort(
+    (a, b) =>
+      (b.candidate.createdAtMs ?? Number.NEGATIVE_INFINITY) -
+        (a.candidate.createdAtMs ?? Number.NEGATIVE_INFINITY) ||
+      a.candidate.discoveryOrder - b.candidate.discoveryOrder,
+  )[0];
+  return selected
+    ? { postId: selected.candidate.postId, kind: selected.kind }
+    : undefined;
 }
 
 async function findProtectedPrimaryGoal({
