@@ -1,6 +1,8 @@
 import type { Request, Response, Router } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getLanguageMetadata } from "../../shared/i18n/catalog";
 import { formNames, internalRoutes } from "../../shared/routes";
+import { subGoalLanguages } from "../../shared/subGoalPostI18n";
 
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
@@ -658,39 +660,10 @@ describe("internalUi color theme create goal routes", () => {
     expect(fields.find((field) => field.name === "language")).toMatchObject({
       type: "select",
       defaultValue: ["en"],
-      options: [
-        { label: "Bahasa Indonesia", value: "id" },
-        { label: "Bosanski", value: "bs" },
-        { label: "Català", value: "ca" },
-        { label: "Dansk", value: "da" },
-        { label: "Deutsch", value: "de" },
-        { label: "English", value: "en" },
-        { label: "हिन्दी", value: "hi" },
-        { label: "ਪੰਜਾਬੀ", value: "pa" },
-        { label: "मराठी", value: "mr" },
-        { label: "Español", value: "es" },
-        { label: "Eesti", value: "et" },
-        { label: "Français", value: "fr" },
-        { label: "Hrvatski", value: "hr" },
-        { label: "Íslenska", value: "is" },
-        { label: "Italiano", value: "it" },
-        { label: "Latviešu", value: "lv" },
-        { label: "Lietuvių", value: "lt" },
-        { label: "Magyar", value: "hu" },
-        { label: "Nederlands", value: "nl" },
-        { label: "Norsk Bokmål", value: "nb" },
-        { label: "Polski", value: "pl" },
-        { label: "Português (Brasil)", value: "pt" },
-        { label: "Română", value: "ro" },
-        { label: "Shqip", value: "sq" },
-        { label: "Slovenčina", value: "sk" },
-        { label: "Slovenščina", value: "sl" },
-        { label: "Suomi", value: "fi" },
-        { label: "Svenska", value: "sv" },
-        { label: "Tagalog", value: "tl" },
-        { label: "Türkçe", value: "tr" },
-        { label: "Yorùbá", value: "yo" },
-      ],
+      options: subGoalLanguages.map((language) => ({
+        label: getLanguageMetadata(language).label,
+        value: language,
+      })),
     });
     expect(fields.map((field) => field.name)).toEqual([
       "language",
