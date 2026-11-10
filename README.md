@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.5.2 - Adjusted how subscriber counts are displayed on Tiny subscribe and CTA posts. Devvit 0.15.3
+- 2.5.2 - Adjusted how subscriber counts are displayed on Tiny subscribe and CTA posts. Compressed Changelog. Devvit 0.15.3
 - 2.5.1 - Reordered language selection items. AutoGoal now checks highlights properly. Removed unused New Subreddit Invite system, tailwind code.
 - 2.4.3 - Goal Success page text blocks now have static backgrounds to make screenshots easier to read. 
 - 2.4.2 - Responsive Header, Join and CTA button text sizing scales from 18px to 12px and wraps appropriately. Improved missing goal data fallback and error reporting.
@@ -55,57 +55,5 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - 2.1.3 - Automatic goals now require public, SFW communities. Corrected NSFW crosspost and username-sharing safeguards.
 - 2.1.1 - Fixed Top post Today fallback. Scroll trap compliance. More Notifications prep. Staggered upgrade auto-goals (public, >1k subscribers). Devvit 0.14.4
 - 2.0.1 - Various fixes and data hardening. Fixed CTA Confetti not firing. Added interface setup for SubGoal Milestone Alerts. Devvit 0.14.3
-- 1.8.5 - Subscriber Goal now uses the subreddit language to select default menu form settings and auto-goals. Improved ReadMe Images.
-- 1.8.3 - Fixed error-catching for failed JSON RPC Error on subscribe with retry system. More robust console error logging.
-- 1.8.1 - Default non-sub button is now "Create a New Post". Added a CTA button option with no subscriber feature.
-- 1.7.2 - Hotfix for "Most Upvoted Today" buttons not supporting crossposts and self-referencing SubGoals.
-- 1.7.1 - Improved tiny subscriber post on desktop. Colored Borders on all posts. SubGoal post flairs. Auto-goals on subs above 1m members default to tiny.
-- 1 6.3 - Creation of SubGoal blacklist. Blacklisted subreddits can't create new goals or load existing goals. Devvit 0.14.2
-- 1.6.1 - Release of Tiny-Height Goals (call to action Subscribe button only). Improved Create New Goal menu flow. Automatic 24h goal creation fallback. Devvit 0.14.1
-- 1.5.1 - Release of Small-Height Goals (goals without subreddit icons). Every logged-in user can remove their own data from the subreddit menu. Devvit 0.13.8
-- 1.4.4 - Fixed a bug with sticky not replacing completed goals. Devvit 0.13.6. Updated Overrides.
-- 1.4.3 - Added more developer special code commands.
-- 1.4.1 - Subscriber Goal provides a warning via Modmail and DM when it cannot pin a post. Menu item developer special-code field. Devvit 0.13.2
-- 1.3.1 - Fixed issue with cron trying to update deleted / removed goals. Updated overrides. Devvit 0.12.24
-- 1.2.3 - Subscriber Goal is now available in 28 total languages! Wow!
-- 1.2.1 - Subscriber Goal is now available in 7 other languages.
-- 1.1.1 - Added Auto-Launch New Goal toggle that can create a new goal 24 hours after success.
-- 1.0.1 - Official Launch - all previous installations force-updated to 1.0.1.
-- 0.14.1 - UI Cleanup. New ReadMe Images. Removal of bug-testing App Settings. Fixed package drift. Devvit 0.12.22
-- 0.13.1 - Reduce scheduler work on non-authority installs, removed full Redis scans from admin erasure paths. Devvit 0.12.21
-- 0.13.0 - Final conversion from zrange to hget for data lookup. Custom button colors.
-- 0.12.5 - Add a subscribe button glow to drive higher button engagement. Share username is now opt-out.
-- 0.12.3 - Removal of decimals on any value below 9999 and 10k+ does not use hundreds decimals.
-- 0.12.2 - Adjusted subreddit icon scale to not be blurry. Devvit 0.12.20
-- 0.12.0 - Proper utilization of App Settings. Fixed stale-posts preventing crossposting. Devvit 0.12.19
-- 0.11.10 - Removed unused code, added app icon.
-- 0.11.9 - Experimental fixes for broken crossposting.
-- 0.11.8 - Fixed devvit.json scripts entries. Fixed lint errors
-- 0.11.6 - Fixed critical redis error preventing crossposts, Devvit 0.12.18
-- 0.11.3 - Share username is now enabled by default (opt-out).
-- 0.11.2 - Customize subreddit name capitalization across app.
-- 0.11.1 - Double Crosspost Errors, fixed WSL and Github linter
-- 0.11.0 - Harden crosspost replay prevention and dedupe
-- 0.10.7 - Missing-post crosspost error handling
-- 0.10.6 - Crosspost bookkeeping cleanup and hardening
-- 0.10.5 - Data Retry for Missing Data Load utility. Locally hosted fallback subreddit logo.
-- 0.10.4 - Removed NSFW crossposting, fixed subscriber-stats scale issue, fixed sticky cleanup.
-- 0.10.3 - Major lint / type-checking fixes. Color changes. Crossposting working again! Updated to Devvit 0.12.17
-- 0.10.2 - Updated to Devvit 0.12.15
-- 0.10.1 - Removed canRunAsUser permissions.
-- 0.10.0 - Devvit Web Migration. Users must opt-in to broadcast name. Devvit 0.12.10
-- 0.9.2 - Added images and installation instructions to the ReadMe file. Devvit 0.11.17
-- 0.9.0 - SubGoal data structure reworked - preparation for Milestone Announcement Messages, Devvit 0.11.15
-- - PLEASE NOTE - 0.9.0 is not compatible with old subscriber goals. All members will need to re-click the button.
-- 0.8.1 - SubGoal now removes old pins before making new goals. Self-approves posts to fix AutoMod platform bug.
-- 0.8.0 - Realtime subscriber name messages and progress updates (mostly) fixed. Launch of Private Beta.
-- 0.7.3 - Major refactoring. Announcements in r/SubGoal removed for refactoring.
-- 0.7.1 - Adding / testing realtime subscriber names, announces new goals in r/SubGoal. Minor refactoring, Devvit 0.11.10.
-- 0.7.0 - Fixed critical form.0 error related to dynamic forms not passing data properly. Devvit 0.11.9.
-- 0.6.0 - Fixed Redis storage to store data under postID. Headers inside posts customizable.
-- 0.5.0 - Large subreddit goals and subscriber counts are rounded eg 400000 to 400k or 12m
-- 0.4.0 - Subscriber goals are automatically stickied and announced in r/SubGoal
-- 0.3.0 - Default suggested sub goal based on current sub count. 'X more to reach' can't go negative.
-- 0.2.0 - Text reformatting. Added progress bar.
-- 0.1.0 - First official publish, pending approval for Subscribe Button functionality
-- 0.0.1 - First app launch and early testing
+
+Notes from before 2.0.1 can be found on the SubGoal wiki: [https://www.reddit.com/r/SubGoal/wiki/readme-archive](https://www.reddit.com/r/SubGoal/wiki/readme-archive)
