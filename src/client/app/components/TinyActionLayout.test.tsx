@@ -241,6 +241,24 @@ describe("TinyActionLayout coordinated text fitting", () => {
     expect(getCtaLabel().style.whiteSpace).toBe("nowrap");
   });
 
+  it("rounds only the compact subscriber total to one decimal", async () => {
+    await renderLayout("Compact CTA", {
+      ...subscribeOnlyState,
+      subreddit: {
+        ...subscribeOnlyState.subreddit,
+        subscribers: 3_326_878,
+      },
+      ctaActivity: { kind: "posts", count: 15_421, period: "week" },
+    });
+
+    expect(
+      container.querySelector("[data-subscriber-count='true']")?.textContent,
+    ).toBe("3.3m subscribers");
+    expect(
+      container.querySelector("[data-compact-activity='true']")?.textContent,
+    ).toBe("15421 new posts this week");
+  });
+
   it("shrinks long translated labels to the same largest fitting size", async () => {
     containerWidth = 600;
     leftNaturalWidth = 140;

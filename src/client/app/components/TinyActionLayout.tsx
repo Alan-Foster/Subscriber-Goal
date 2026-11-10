@@ -1,5 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { formatSubscriberCount } from "../../../shared/numberFormat";
+import {
+  formatRoundedSubscriberCount,
+  formatSubscriberCount,
+} from "../../../shared/numberFormat";
 import {
   formatLocalizedSubscriberGrowth,
   formatLocalizedSubscriberCount,
@@ -80,7 +83,7 @@ export const TinyActionLayout = ({
   const subscriberLabel = formatLocalizedSubscriberCount(
     state.language,
     state.subreddit.subscribers,
-    formatSubscriberCount(state.subreddit.subscribers),
+    formatRoundedSubscriberCount(state.subreddit.subscribers),
   );
   const activityLabel = showCtaActivity
     ? formatLocalizedCtaActivity(

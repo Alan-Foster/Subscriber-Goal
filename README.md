@@ -41,6 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- 2.5.2 - Adjusted how subscriber counts are displayed on Tiny subscribe and CTA posts. Devvit 0.15.3
 - 2.5.1 - Reordered language selection items. AutoGoal now checks highlights properly. Removed unused New Subreddit Invite system, tailwind code.
 - 2.4.3 - Goal Success page text blocks now have static backgrounds to make screenshots easier to read. 
 - 2.4.2 - Responsive Header, Join and CTA button text sizing scales from 18px to 12px and wraps appropriately. Improved missing goal data fallback and error reporting.
