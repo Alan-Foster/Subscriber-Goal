@@ -768,6 +768,13 @@ export async function getDueAutoCreateNextGoalPostIds(
     .map((entry) => entry.member);
 }
 
+export async function getAutoCreateNextGoalRunAt(
+  redis: RedisClient,
+  postId: string,
+): Promise<number | undefined> {
+  return redis.zScore(autoCreateNextGoalQueueKey, postId);
+}
+
 export async function setSubredditDisplayNameForPost(
   redis: RedisClient,
   postId: string,

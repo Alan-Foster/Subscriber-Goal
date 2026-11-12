@@ -8,6 +8,7 @@ import {
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
   eraseFromRecentSubscribers,
+  getAutoCreateNextGoalRunAt,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
@@ -123,6 +124,10 @@ class InMemoryRedis {
       .sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
     const normalizedEnd = end < 0 ? sorted.length - 1 : end;
     return sorted.slice(start, normalizedEnd + 1);
+  }
+
+  async zScore(key: string, member: string): Promise<number | undefined> {
+    return this.sortedSets.get(key)?.get(member);
   }
 
   async zRem(key: string, members: string[]): Promise<void> {
@@ -714,6 +719,12 @@ describe("subGoalData subreddit display name", () => {
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
       { member: "t3_auto", score: 86_401_000 },
     ]);
+    await expect(
+      getAutoCreateNextGoalRunAt(
+        redis as unknown as Parameters<typeof getAutoCreateNextGoalRunAt>[0],
+        "t3_auto",
+      ),
+    ).resolves.toBe(86_401_000);
     await expect(
       getDueAutoCreateNextGoalPostIds(
         redis as unknown as Parameters<

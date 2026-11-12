@@ -11,7 +11,10 @@ import {
   processDueAutoCreateNextGoals,
 } from "./autoCreateNextGoal";
 import type { OnboardingLifecycleSource } from "./onboardingSubscriberGoal";
-import type { CommunityGoalMutationLease } from "./communityGoalMutation";
+import {
+  withCommunityGoalMutationLease,
+  type CommunityGoalMutationLease,
+} from "./communityGoalMutation";
 
 export type CompletedGoalReconciliationOutcome =
   | "completed_no_recovery"
@@ -56,6 +59,42 @@ export async function reconcileCompletedGoal({
     return { outcome: "completed_auto_disabled", sourcePostId };
   }
 
+  return withCommunityGoalMutationLease(
+    redis,
+    (heldMutationLease) =>
+      reconcileCompletedGoalUnderLease({
+        reddit,
+        redis,
+        lifecycleSource,
+        sourcePostId,
+        completedTime,
+        nowMs,
+        appSettings,
+        mutationLease: heldMutationLease,
+      }),
+    mutationLease,
+  );
+}
+
+async function reconcileCompletedGoalUnderLease({
+  reddit,
+  redis,
+  lifecycleSource,
+  sourcePostId,
+  completedTime,
+  nowMs,
+  appSettings,
+  mutationLease,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  lifecycleSource: Extract<OnboardingLifecycleSource, "upgrade" | "install">;
+  sourcePostId: string;
+  completedTime: number;
+  nowMs: number;
+  appSettings: ServerAppSettings;
+  mutationLease: CommunityGoalMutationLease;
+}): Promise<CompletedGoalReconciliationResult> {
   const existingSuccessor = await redis.hGet(
     autoCreateNextGoalSuccessorsKey,
     sourcePostId,
@@ -109,7 +148,7 @@ export async function reconcileCompletedGoal({
     redis,
     appSettings,
     nowMs,
-    ...(mutationLease ? { mutationLease } : {}),
+    mutationLease,
   });
   const mappedSuccessor = await redis.hGet(
     autoCreateNextGoalSuccessorsKey,

@@ -912,6 +912,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         completedTime: existing.completedTime,
         autoCreateNextGoal: existing.autoCreateNextGoal ?? false,
         nowMs,
+        mutationLease,
       });
       const terminalPostId = completed.successorPostId ?? existing.postId;
       await saveOnboardingState(redis, {
@@ -1100,6 +1101,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         completedTime: finalExisting.completedTime,
         autoCreateNextGoal: finalExisting.autoCreateNextGoal ?? false,
         nowMs,
+        mutationLease,
       });
       const terminalPostId = completed.successorPostId ?? finalExisting.postId;
       await saveOnboardingState(redis, {

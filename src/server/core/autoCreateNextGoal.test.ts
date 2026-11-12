@@ -33,6 +33,7 @@ const hoisted = vi.hoisted(() => ({
   cancelAllAutoCreateNextGoals: vi.fn(),
   cancelAutoCreateNextGoal: vi.fn(),
   checkCompletionStatus: vi.fn(),
+  getAutoCreateNextGoalRunAt: vi.fn(),
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
   markAutoCreateNextGoalExhausted: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock("../data/subGoalData", () => ({
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   checkCompletionStatus: hoisted.checkCompletionStatus,
+  getAutoCreateNextGoalRunAt: hoisted.getAutoCreateNextGoalRunAt,
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
   getSubGoalData: hoisted.getSubGoalData,
   markAutoCreateNextGoalExhausted: hoisted.markAutoCreateNextGoalExhausted,
@@ -125,6 +127,7 @@ describe("processDueAutoCreateNextGoals", () => {
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue([]);
+    hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(0);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([]);
     hoisted.checkCompletionStatus.mockResolvedValue(undefined);
@@ -200,6 +203,66 @@ describe("processDueAutoCreateNextGoals", () => {
     });
 
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+  });
+
+  it("skips a stale due snapshot after another worker moves the source into retry backoff", async () => {
+    const queueState = { score: 301_000, failureCount: 2 };
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockImplementation(
+      async () => queueState.score,
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 10_000,
+      }),
+    ).resolves.toMatchObject({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
+    });
+
+    expect(queueState).toEqual({ score: 301_000, failureCount: 2 });
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getPostById).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.redis.set).not.toHaveBeenCalledWith(
+      "auto_create_next_goal_v1_lock:t3_source",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("skips a stale due snapshot after another worker removes the source", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(undefined);
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 10_000,
+      }),
+    ).resolves.toMatchObject({
+      due: 1,
+      created: 0,
+      skipped: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
+    });
+
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
   it("suppresses a due successor while orphaned-goal onboarding owns it", async () => {

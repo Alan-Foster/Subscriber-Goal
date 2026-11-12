@@ -5,6 +5,7 @@ import {
   cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
+  getAutoCreateNextGoalRunAt,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   markAutoCreateNextGoalExhausted,
@@ -103,6 +104,17 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
       acquiredMutationLease = existingMutationLease === undefined;
+
+      const currentRunAt = await getAutoCreateNextGoalRunAt(
+        redis,
+        sourcePostId,
+      );
+      if (currentRunAt === undefined || currentRunAt > nowMs) {
+        // The initial due list is only a snapshot. Another serialized worker
+        // may have removed the source or moved it into retry backoff.
+        summary.skipped += 1;
+        continue;
+      }
 
       await redis.set(lockKey, lockToken, {
         nx: true,

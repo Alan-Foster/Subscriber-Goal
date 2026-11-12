@@ -97,6 +97,7 @@ import {
   onboardingGoalStaggerMaxMinutes,
   onboardingGoalStaggerMinMinutes,
 } from "./onboardingConfig";
+import { CommunityGoalMutationInProgressError } from "./communityGoalMutation";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
@@ -689,6 +690,75 @@ describe("onboarding reminder", () => {
     );
     expect(hoisted.markOnboardingSubscriberGoalCompleted).toHaveBeenCalled();
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps completed-goal reconciliation retryable when the community mutation lease contends", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await scheduleOnboardingReminder(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "completed",
+      candidateCount: 1,
+      highlightedClassicCount: 0,
+      highlightedProtectedCount: 0,
+      highlightedAmbiguousCount: 0,
+      classicPostsUnhighlighted: [],
+      protectedPinsPreserved: [],
+      postId: "t3_completed",
+      source: "recent",
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+      autoCreateNextGoal: true,
+      registeredInspected: 0,
+      trackedInspected: 0,
+      queuedInspected: 0,
+      persistedInspected: 0,
+      highlightedInspected: 0,
+      searchInspected: 0,
+      recentInspected: 1,
+      validated: 1,
+      stalePruned: 0,
+      failed: 0,
+    });
+    hoisted.reconcileCompletedGoal.mockRejectedValueOnce(
+      new CommunityGoalMutationInProgressError(),
+    );
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: nowMs + onboardingReminderDelayMs,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+
+    const pending = await redis.hGetAll(onboardingReminderStateKey);
+    expect(pending).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      result: "failed",
+    });
+    expect(
+      hoisted.markOnboardingSubscriberGoalCompleted,
+    ).not.toHaveBeenCalled();
+
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: Number(pending.nextRunAt),
+      }),
+    ).resolves.toMatchObject({ status: "existing", postId: "t3_completed" });
+
+    expect(hoisted.reconcileCompletedGoal).toHaveBeenCalledTimes(2);
+    expect(
+      hoisted.markOnboardingSubscriberGoalCompleted,
+    ).toHaveBeenCalledOnce();
+    await expect(
+      redis.hGetAll(onboardingReminderStateKey),
+    ).resolves.toMatchObject({ status: "complete" });
   });
 
   it("does not send duplicate modmail while another scheduler run holds the lock", async () => {
