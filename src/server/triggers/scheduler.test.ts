@@ -41,6 +41,9 @@ const hoisted = vi.hoisted(() => ({
     getCurrentSubreddit: vi.fn(),
     getPostById: vi.fn(),
   },
+  redis: {
+    hGet: vi.fn(),
+  },
   getAppSettings: vi.fn(),
   processCrosspostDispatchQueue: vi.fn(),
   countPendingCrossposts: vi.fn(),
@@ -59,6 +62,8 @@ const hoisted = vi.hoisted(() => ({
   cancelAutoCreateNextGoal: vi.fn(),
   getSubGoalData: vi.fn(),
   checkCompletionStatus: vi.fn(),
+  repairAutoCreateNextGoal: vi.fn(),
+  withCommunityGoalMutationLease: vi.fn(),
   applyTextFallback: vi.fn(),
   applyGoalPostFrameStyle: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
@@ -78,7 +83,7 @@ const hoisted = vi.hoisted(() => ({
 vi.mock("@devvit/web/server", () => ({
   context: hoisted.context,
   reddit: hoisted.reddit,
-  redis: {},
+  redis: hoisted.redis,
   scheduler: {},
 }));
 
@@ -132,9 +137,11 @@ vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
 }));
 
 vi.mock("../data/subGoalData", () => ({
+  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   checkCompletionStatus: hoisted.checkCompletionStatus,
   getSubGoalData: hoisted.getSubGoalData,
+  repairAutoCreateNextGoal: hoisted.repairAutoCreateNextGoal,
   processRecentSubscriberIndexMigrationBatch:
     hoisted.processRecentSubscriberIndexMigrationBatch,
 }));
@@ -159,8 +166,12 @@ vi.mock("../core/autoCreateNextGoal", () => ({
 }));
 
 vi.mock("../core/onboardingSubscriberGoal", () => ({
+  onboardingSubscriberGoalStateKey: "onboarding_subscriber_goal_v4_state",
   processDueOnboardingSubscriberGoal:
     hoisted.processDueOnboardingSubscriberGoal,
+}));
+vi.mock("../core/communityGoalMutation", () => ({
+  withCommunityGoalMutationLease: hoisted.withCommunityGoalMutationLease,
 }));
 vi.mock("../core/postRetirement", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../core/postRetirement")>()),
@@ -202,6 +213,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.context.subredditName = undefined;
     hoisted.reddit.getCurrentSubreddit.mockReset();
     hoisted.reddit.getPostById.mockReset();
+    hoisted.redis.hGet.mockReset();
     hoisted.getAppSettings.mockReset();
     hoisted.processCrosspostDispatchQueue.mockReset();
     hoisted.countPendingCrossposts.mockReset();
@@ -220,6 +232,8 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.cancelAutoCreateNextGoal.mockReset();
     hoisted.getSubGoalData.mockReset();
     hoisted.checkCompletionStatus.mockReset();
+    hoisted.repairAutoCreateNextGoal.mockReset();
+    hoisted.withCommunityGoalMutationLease.mockReset();
     hoisted.applyTextFallback.mockReset();
     hoisted.applyGoalPostFrameStyle.mockReset();
     hoisted.removeSubscriberGoalPost.mockReset();
@@ -287,6 +301,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       autoCreateNextGoal: true,
       language: "en",
     });
+    hoisted.repairAutoCreateNextGoal.mockResolvedValue({
+      status: "scheduled",
+      runAt: 86_401_000,
+      failureCount: 0,
+    });
+    hoisted.withCommunityGoalMutationLease.mockImplementation(
+      async (_redis: unknown, operation: () => Promise<unknown>) => operation(),
+    );
+    hoisted.redis.hGet.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: "CorporateGifts",
       type: "public",
@@ -699,5 +722,219 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         /subscriber_goal_emergency_fallback.*post_update.*t3_no_goal.*"recoveredGoal":15/,
       ),
     );
+  });
+
+  it("repairs successor work for a goal completed on the current tick before cleanup", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      name: "CorporateGifts",
+      type: "public",
+      numberOfSubscribers: 12,
+    });
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_completed_now"]);
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_completed_now" });
+    hoisted.checkCompletionStatus.mockResolvedValue(1_000);
+    hoisted.getSubGoalData
+      .mockResolvedValueOnce({
+        goal: 12,
+        completedTime: 0,
+        autoCreateNextGoal: true,
+        postHeight: "regular",
+        colorTheme: "red",
+        language: "en",
+      })
+      .mockResolvedValue({
+        goal: 12,
+        completedTime: 1_000,
+        autoCreateNextGoal: true,
+        postHeight: "regular",
+        colorTheme: "red",
+        language: "en",
+      });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_completed_now",
+      1_000,
+    );
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_completed_now",
+    );
+  });
+
+  it("keeps a completed source queued after repair failure and cleans it on a successful tick", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_stranded"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 12,
+      completedTime: 1_000,
+      autoCreateNextGoal: true,
+      postHeight: "regular",
+      colorTheme: "red",
+      language: "en",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_stranded" });
+    hoisted.repairAutoCreateNextGoal
+      .mockRejectedValueOnce(new Error("redis unavailable"))
+      .mockResolvedValueOnce({
+        status: "scheduled",
+        runAt: 86_401_000,
+        failureCount: 0,
+      });
+
+    await onPostsUpdaterJob();
+    expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /scheduler_post_update_failed.*auto_successor_repair.*t3_stranded.*redis unavailable.*stack/,
+      ),
+    );
+
+    await onPostsUpdaterJob();
+    expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledTimes(2);
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_stranded",
+    );
+  });
+
+  it("rechecks repaired work when completed-source cleanup fails", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_cleanup_retry"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 12,
+      completedTime: 1_000,
+      autoCreateNextGoal: true,
+      postHeight: "regular",
+      colorTheme: "red",
+      language: "en",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_cleanup_retry" });
+    hoisted.cancelUpdates
+      .mockRejectedValueOnce(new Error("cleanup unavailable"))
+      .mockResolvedValueOnce(undefined);
+
+    await onPostsUpdaterJob();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /scheduler_post_update_failed.*completed_update_cleanup.*t3_cleanup_retry.*cleanup unavailable.*stack/,
+      ),
+    );
+    await onPostsUpdaterJob();
+
+    expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledTimes(2);
+    expect(hoisted.cancelUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["disabled", false, undefined, undefined],
+    ["superseded", true, "t3_successor", undefined],
+    [
+      "onboarding takeover",
+      true,
+      undefined,
+      {
+        intent: "orphaned_completed_goal",
+        replacementSourcePostId: "t3_terminal",
+        status: "pending",
+      },
+    ],
+  ])(
+    "respects %s completed-source decisions",
+    async (_label, autoCreateNextGoal, successor, onboarding) => {
+      hoisted.context.subredditName = "CorporateGifts";
+      hoisted.getQueuedUpdates.mockResolvedValue(["t3_terminal"]);
+      hoisted.getSubGoalData.mockResolvedValue({
+        goal: 12,
+        completedTime: 1_000,
+        autoCreateNextGoal,
+        postHeight: "regular",
+        colorTheme: "red",
+        language: "en",
+      });
+      hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_terminal" });
+      hoisted.redis.hGet.mockImplementation(
+        async (key: string, field: string) => {
+          if (key === "auto_create_next_goal_v1_successors") return successor;
+          return onboarding?.[field as keyof typeof onboarding];
+        },
+      );
+
+      await onPostsUpdaterJob();
+
+      expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+      expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+        expect.anything(),
+        "t3_terminal",
+      );
+    },
+  );
+
+  it("preserves exhausted successor state while cleaning the completed source", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_exhausted"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 12,
+      completedTime: 1_000,
+      autoCreateNextGoal: true,
+      postHeight: "regular",
+      colorTheme: "red",
+      language: "en",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_exhausted" });
+    hoisted.repairAutoCreateNextGoal.mockResolvedValue({
+      status: "exhausted",
+      failureCount: 6,
+    });
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      "t3_exhausted",
+    );
+  });
+
+  it("does not perform a stale repair after overlapping work maps a successor", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_overlap"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 12,
+      completedTime: 1_000,
+      autoCreateNextGoal: true,
+      postHeight: "regular",
+      colorTheme: "red",
+      language: "en",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_overlap" });
+    hoisted.withCommunityGoalMutationLease
+      .mockRejectedValueOnce(new Error("community mutation in progress"))
+      .mockImplementationOnce(
+        async (_redis: unknown, operation: () => Promise<unknown>) =>
+          operation(),
+      );
+
+    await onPostsUpdaterJob();
+    expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
+
+    hoisted.redis.hGet.mockImplementation(async (key: string) =>
+      key === "auto_create_next_goal_v1_successors"
+        ? "t3_newer_successor"
+        : undefined,
+    );
+    await onPostsUpdaterJob();
+
+    expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+    expect(hoisted.cancelUpdates).toHaveBeenCalledOnce();
   });
 });

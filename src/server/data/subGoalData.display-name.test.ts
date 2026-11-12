@@ -965,6 +965,113 @@ describe("subGoalData subreddit display name", () => {
     expect(scheduleMilestoneNotification).toHaveBeenCalledOnce();
   });
 
+  it("repairs the original due time after completion persistence outlives a queue-write failure", async () => {
+    const redis = new InMemoryRedis();
+    const originalZAdd = redis.zAdd.bind(redis);
+    redis.zAdd = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("queue unavailable"))
+      .mockImplementation(originalZAdd);
+    await setSubGoalData(redis as never, "t3_recover_queue", {
+      goal: 10,
+      recentSubscriber: "",
+      completedTime: 0,
+      subredditDisplayName: "subscriber_goal_dev",
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+
+    await expect(
+      checkCompletionStatus(
+        {
+          getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+        } as never,
+        redis as never,
+        "t3_recover_queue",
+        {
+          now: () => 1_000,
+          scheduleMilestoneNotification: vi
+            .fn()
+            .mockResolvedValue("suppressed"),
+        },
+      ),
+    ).resolves.toBe(1_000);
+    await expect(
+      getSubGoalData(redis as never, "t3_recover_queue"),
+    ).resolves.toMatchObject({ completedTime: 1_000 });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+
+    await expect(
+      repairAutoCreateNextGoal(
+        redis as never,
+        "t3_recover_queue",
+        1_000,
+        200_000_000,
+      ),
+    ).resolves.toEqual({
+      status: "scheduled",
+      runAt: 86_401_000,
+      failureCount: 0,
+    });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: "t3_recover_queue", score: 86_401_000 },
+    ]);
+    await expect(
+      getSubGoalData(redis as never, "t3_recover_queue"),
+    ).resolves.toMatchObject({ completedTime: 1_000 });
+  });
+
+  it("preserves a queued original due time when successor metadata cleanup fails", async () => {
+    const redis = new InMemoryRedis();
+    const originalHDel = redis.hDel.bind(redis);
+    redis.hDel = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("metadata unavailable"))
+      .mockImplementation(originalHDel);
+    await setSubGoalData(redis as never, "t3_recover_metadata", {
+      goal: 10,
+      recentSubscriber: "",
+      completedTime: 0,
+      subredditDisplayName: "subscriber_goal_dev",
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+
+    await expect(
+      checkCompletionStatus(
+        {
+          getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+        } as never,
+        redis as never,
+        "t3_recover_metadata",
+        {
+          now: () => 1_000,
+          scheduleMilestoneNotification: vi
+            .fn()
+            .mockResolvedValue("suppressed"),
+        },
+      ),
+    ).resolves.toBe(1_000);
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: "t3_recover_metadata", score: 86_401_000 },
+    ]);
+
+    await expect(
+      repairAutoCreateNextGoal(redis as never, "t3_recover_metadata", 1_000),
+    ).resolves.toEqual({
+      status: "queued",
+      runAt: 86_401_000,
+      failureCount: 0,
+    });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: "t3_recover_metadata", score: 86_401_000 },
+    ]);
+  });
+
   it("clears indexed recent subscriber fields without scanning all goal records", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(subscriberGoalsKey, {

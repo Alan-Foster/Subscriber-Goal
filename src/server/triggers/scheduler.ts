@@ -1,9 +1,11 @@
 import { context, reddit, redis, scheduler } from "@devvit/web/server";
 import {
+  autoCreateNextGoalSuccessorsKey,
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
+  repairAutoCreateNextGoal,
 } from "../data/subGoalData";
 import {
   cancelUpdates,
@@ -24,7 +26,10 @@ import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { processNsfwAfterSubscribeActionMigrationBatch } from "../data/nsfwAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
-import { processDueOnboardingSubscriberGoal } from "../core/onboardingSubscriberGoal";
+import {
+  onboardingSubscriberGoalStateKey,
+  processDueOnboardingSubscriberGoal,
+} from "../core/onboardingSubscriberGoal";
 import { processDueOnboardingReminder } from "../core/onboardingReminder";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
@@ -50,6 +55,89 @@ import {
   recoverEmergencySubscriberGoal,
 } from "../utils/emergencyGoalRecovery";
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
+import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
+
+type CompletedUpdateCleanupPreparation =
+  | "auto_disabled"
+  | "onboarding_takeover"
+  | "successor_mapped"
+  | "scheduled"
+  | "queued"
+  | "retrying"
+  | "exhausted";
+
+async function prepareCompletedUpdateCleanup(
+  postId: string,
+): Promise<CompletedUpdateCleanupPreparation> {
+  return withCommunityGoalMutationLease(redis, async () => {
+    // Re-read under the same lease used by completion, onboarding, manual goal
+    // creation, and the AutoGoal worker. This makes the decision current and
+    // prevents a repair from overwriting a newer retry or supersession decision.
+    const latest = await getSubGoalData(redis, postId);
+    if (!latest.completedTime) {
+      throw new Error("Completed goal lost its persisted completion time.");
+    }
+    if (!latest.autoCreateNextGoal) return "auto_disabled";
+
+    const [successor, onboardingIntent, replacementSourcePostId, status] =
+      await Promise.all([
+        redis.hGet(autoCreateNextGoalSuccessorsKey, postId),
+        redis.hGet(onboardingSubscriberGoalStateKey, "intent"),
+        redis.hGet(onboardingSubscriberGoalStateKey, "replacementSourcePostId"),
+        redis.hGet(onboardingSubscriberGoalStateKey, "status"),
+      ]);
+    if (successor) return "successor_mapped";
+    if (
+      onboardingIntent === "orphaned_completed_goal" &&
+      replacementSourcePostId === postId &&
+      status !== "complete"
+    ) {
+      return "onboarding_takeover";
+    }
+
+    const repaired = await repairAutoCreateNextGoal(
+      redis,
+      postId,
+      latest.completedTime,
+    );
+    return repaired.status;
+  });
+}
+
+async function cleanupCompletedUpdate(postId: string): Promise<boolean> {
+  try {
+    await prepareCompletedUpdateCleanup(postId);
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_post_update_failed",
+      {
+        workflow: "post_update",
+        phase: "auto_successor_repair",
+        postId,
+      },
+      error,
+    );
+    return false;
+  }
+
+  try {
+    await cancelUpdates(redis, postId);
+    return true;
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_post_update_failed",
+      {
+        workflow: "post_update",
+        phase: "completed_update_cleanup",
+        postId,
+      },
+      error,
+    );
+    return false;
+  }
+}
 
 async function cleanupInactivePost(
   postId: string,
@@ -382,7 +470,9 @@ export async function onPostsUpdaterJob(): Promise<void> {
           postId,
           locked,
         });
-        if (subGoalData.completedTime) await cancelUpdates(redis, postId);
+        if (subGoalData.completedTime) {
+          await cleanupCompletedUpdate(postId);
+        }
         continue;
       }
       if (previousOperationalState?.archived) {
@@ -419,7 +509,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
       await applyGoalPostFrameStyle(post, subGoalData.postHeight);
 
       if (subGoalData.completedTime) {
-        await cancelUpdates(redis, postId);
+        await cleanupCompletedUpdate(postId);
         continue;
       }
 
