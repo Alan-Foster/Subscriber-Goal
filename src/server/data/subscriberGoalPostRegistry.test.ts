@@ -43,7 +43,7 @@ describe("subscriber goal post registry", () => {
 
     await expect(
       getRegisteredSubscriberGoalPosts(redis as never),
-    ).resolves.toEqual(["t3_tiny", "t3_regular"]);
+    ).resolves.toEqual(["t3_regular", "t3_tiny"]);
 
     await removeSubscriberGoalPost(redis as never, "t3_tiny");
     await expect(

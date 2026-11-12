@@ -416,6 +416,36 @@ describe("processDueAutoCreateNextGoals", () => {
     );
   });
 
+  it("does not map or cancel follow-up work for a superseded creation retry", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.createSubscriberGoal.mockResolvedValue({
+      outcome: "superseded",
+      post: { id: "t3_stale" },
+      supersedingPostId: "t3_newer",
+      crosspostDispatchResult: { status: "skipped" },
+      highlightResult: successfulHighlightResult,
+    });
+    hoisted.redisHashes.set(
+      "auto_create_next_goal_v1_successors",
+      new Map([["t3_unrelated", "t3_newer"]]),
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 86_401_000,
+      }),
+    ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
+
+    expect(
+      hoisted.redisHashes.get("auto_create_next_goal_v1_successors"),
+    ).toEqual(new Map([["t3_unrelated", "t3_newer"]]));
+    expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+  });
+
   it("adopts an untracked incomplete highlighted classic as the live successor", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([

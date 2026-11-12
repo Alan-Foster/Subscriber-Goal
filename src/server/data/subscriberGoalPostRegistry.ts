@@ -7,6 +7,10 @@ export async function registerSubscriberGoalPost(
   postId: string,
   createdAt: Date | number,
 ): Promise<void> {
+  const registered = await redis.zRange(subscriberGoalPostRegistryKey, 0, -1);
+  if (registered.some(({ member }) => member === postId)) {
+    return;
+  }
   const score = createdAt instanceof Date ? createdAt.getTime() : createdAt;
   await redis.zAdd(subscriberGoalPostRegistryKey, {
     member: postId,

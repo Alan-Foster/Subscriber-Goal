@@ -308,7 +308,7 @@ export async function processDueAutoCreateNextGoals({
         appSettings.promoSubreddit,
       );
 
-      const { post, highlightResult } = await createSubscriberGoal({
+      const creation = await createSubscriberGoal({
         reddit,
         redis,
         appSettings,
@@ -333,6 +333,19 @@ export async function processDueAutoCreateNextGoals({
           mutationLease,
         },
       });
+      if (creation.outcome === "superseded" || creation.outcome === "retired") {
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_recovery_stopped", {
+          workflow: "auto_create_next_goal",
+          phase: "creation_recovery",
+          postId: creation.post.id,
+          sourcePostId,
+          outcome: creation.outcome,
+          supersedingPostId: creation.supersedingPostId ?? "none",
+        });
+        break;
+      }
+      const { post, highlightResult } = creation;
       if (highlightResult.issues.length > 0) {
         logDiagnostic("warn", "auto_create_goal_degraded", {
           workflow: "auto_create_next_goal",

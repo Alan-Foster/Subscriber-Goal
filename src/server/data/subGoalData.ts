@@ -24,7 +24,7 @@ import {
   type PostKind,
 } from "../../shared/postKind";
 import { dispatchNewPost } from "./crosspostData";
-import { postsKey, queueUpdate, trackPost } from "./updaterData";
+import { ensureUpdateQueued, postsKey, trackPost } from "./updaterData";
 import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
@@ -985,24 +985,43 @@ export async function registerNewSubGoalPost(
   afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
   afterSubscribePreset?: AfterSubscribePreset,
 ): Promise<CrosspostDispatchResult> {
-  await setSubGoalData(redis, post.id, {
-    goal,
-    recentSubscriber: "",
-    completedTime: 0,
-    subredditDisplayName,
-    headerText: headerText ?? null,
-    colorTheme,
-    autoCreateNextGoal,
-    language,
-    postHeight,
-    afterSubscribeAction,
-    afterSubscribePreset:
-      afterSubscribePreset ??
-      resolveAfterSubscribePreset(undefined, afterSubscribeAction),
+  if (await isRetiredRegistration(redis, post.id)) {
+    return { status: "skipped" };
+  }
+  const resolvedPreset =
+    afterSubscribePreset ??
+    resolveAfterSubscribePreset(undefined, afterSubscribeAction);
+  await initializePostFields(redis, post.id, {
+    [`${post.id}${postKindSuffix}`]: subscriberGoalPostKind,
+    [`${post.id}${postGoalSuffix}`]: goal.toString(),
+    [`${post.id}${postRecentSubscriberSuffix}`]: "",
+    [`${post.id}${postCompletedTimeSuffix}`]: "0",
+    [`${post.id}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
+    [`${post.id}${postHeaderTextSuffix}`]: headerText ?? "",
+    [`${post.id}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(colorTheme),
+    [`${post.id}${postAutoCreateNextGoalSuffix}`]: autoCreateNextGoal
+      ? "true"
+      : "false",
+    [`${post.id}${postAutomaticSuccessorSuppressionSuffix}`]: "",
+    [`${post.id}${postLanguageSuffix}`]: resolveSubGoalLanguage(language),
+    [`${post.id}${postHeightSuffix}`]: resolveSubGoalPostHeight(postHeight),
+    ...serializeInitialAfterSubscribeAction(
+      post.id,
+      afterSubscribeAction,
+      colorTheme,
+      resolvedPreset,
+    ),
   });
   await registerSubscriberGoalPost(redis, post.id, post.createdAt);
-  await trackPost(redis, post.id, post.createdAt);
-  await queueUpdate(redis, post.id, post.createdAt);
+  const [completedTime, successor, retired] = await Promise.all([
+    redis.hGet(subscriberGoalsKey, `${post.id}${postCompletedTimeSuffix}`),
+    redis.hGet(autoCreateNextGoalSuccessorsKey, post.id),
+    redis.get(`retired_subscriber_goal_v1:${post.id}`),
+  ]);
+  if (!(Number(completedTime) > 0) && !successor && !retired) {
+    await trackPost(redis, post.id, post.createdAt);
+    await ensureUpdateQueued(redis, post.id, post.createdAt);
+  }
   if (!crosspost) {
     logCrosspostEvent({
       event: "crosspost_attempt_skipped",
@@ -1073,12 +1092,22 @@ export async function registerNewSubscribeOnlyPost(
   afterSubscribeAction: AfterSubscribeAction = defaultAfterSubscribeAction,
   afterSubscribePreset?: AfterSubscribePreset,
 ): Promise<CrosspostDispatchResult> {
-  await setSubscribeOnlyPostData(redis, post.id, {
-    subredditDisplayName,
-    colorTheme,
-    language,
-    afterSubscribeAction,
-    ...(afterSubscribePreset ? { afterSubscribePreset } : {}),
+  if (await isRetiredRegistration(redis, post.id)) {
+    return { status: "skipped" };
+  }
+  await initializePostFields(redis, post.id, {
+    [`${post.id}${postKindSuffix}`]: subscribeOnlyPostKind,
+    [`${post.id}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
+    [`${post.id}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(colorTheme),
+    [`${post.id}${postLanguageSuffix}`]: resolveSubGoalLanguage(language),
+    [`${post.id}${postHeightSuffix}`]: "tiny",
+    ...serializeInitialAfterSubscribeAction(
+      post.id,
+      afterSubscribeAction,
+      colorTheme,
+      afterSubscribePreset ??
+        resolveAfterSubscribePreset(undefined, afterSubscribeAction),
+    ),
   });
   await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   logCrosspostEvent({
@@ -1100,12 +1129,21 @@ export async function registerNewCtaOnlyPost(
   action: Exclude<AfterSubscribeAction, { type: "disabled" }>,
   afterSubscribePreset?: AfterSubscribePreset,
 ): Promise<CrosspostDispatchResult> {
-  await setCtaOnlyPostData(redis, post.id, {
-    subredditDisplayName,
-    colorTheme,
-    language,
-    action,
-    ...(afterSubscribePreset ? { afterSubscribePreset } : {}),
+  if (await isRetiredRegistration(redis, post.id)) {
+    return { status: "skipped" };
+  }
+  await initializePostFields(redis, post.id, {
+    [`${post.id}${postKindSuffix}`]: ctaOnlyPostKind,
+    [`${post.id}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
+    [`${post.id}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(colorTheme),
+    [`${post.id}${postLanguageSuffix}`]: resolveSubGoalLanguage(language),
+    [`${post.id}${postHeightSuffix}`]: "cta",
+    ...serializeInitialAfterSubscribeAction(
+      post.id,
+      action,
+      colorTheme,
+      afterSubscribePreset ?? resolveAfterSubscribePreset(undefined, action),
+    ),
   });
   await registerSubscriberGoalPost(redis, post.id, post.createdAt);
   logCrosspostEvent({
@@ -1115,6 +1153,57 @@ export async function registerNewCtaOnlyPost(
     reason: "cta_only_post",
   });
   return { status: "skipped" };
+}
+
+async function isRetiredRegistration(
+  redis: RedisClient,
+  postId: string,
+): Promise<boolean> {
+  return (
+    (await redis.get(`retired_subscriber_goal_v1:${postId}`)) !== undefined
+  );
+}
+
+async function initializePostFields(
+  redis: RedisClient,
+  postId: string,
+  fields: Record<string, string>,
+): Promise<void> {
+  for (const [field, value] of Object.entries(fields)) {
+    const client = redis as RedisClient & {
+      hSetNX?: (key: string, field: string, value: string) => Promise<number>;
+    };
+    if (typeof client.hSetNX === "function") {
+      await client.hSetNX(subscriberGoalsKey, field, value);
+    } else if ((await redis.hGet(subscriberGoalsKey, field)) === undefined) {
+      // Compatibility for older test and development clients. The production
+      // client always takes the atomic HSETNX branch above.
+      await redis.hSet(subscriberGoalsKey, { [field]: value });
+    }
+  }
+  logDiagnostic("info", "subscriber_goal_initialization_reconciled", {
+    workflow: "sub_goal_registration",
+    phase: "initialize_missing_fields",
+    postId,
+  });
+}
+
+function serializeInitialAfterSubscribeAction(
+  postId: string,
+  action: AfterSubscribeAction,
+  fallbackColorTheme: SubGoalColorTheme,
+  preset: AfterSubscribePreset | null | undefined,
+): Record<string, string> {
+  return {
+    [`${postId}${postAfterSubscribeActionSuffix}`]: action.type,
+    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
+      action.type !== "disabled" ? action.buttonText : "",
+    [`${postId}${postAfterSubscribeUrlSuffix}`]:
+      action.type === "link" ? action.url : "",
+    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
+      action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
+    [`${postId}${postAfterSubscribePresetSuffix}`]: preset ?? "",
+  };
 }
 
 export async function initializeRecentSubscriberIndexMigration(

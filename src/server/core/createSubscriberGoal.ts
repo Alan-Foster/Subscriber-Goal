@@ -10,6 +10,7 @@ import {
   autoCreateNextGoalSuccessorsKey,
   postHeightSuffix,
   postKindSuffix,
+  postCompletedTimeSuffix,
   registerNewCtaOnlyPost,
   registerNewSubGoalPost,
   registerNewSubscribeOnlyPost,
@@ -58,11 +59,17 @@ import {
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
 import {
+  getHighlightManagementBaseline,
   saveHighlightManagementBaseline,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
 import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
+import {
+  isSubscriberGoalPostRetired,
+  retireSubscriberGoalPost,
+} from "./postRetirement";
+import { getTerminalRemovedByCategory } from "../utils/postStatus";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -86,10 +93,12 @@ type CreateSubscriberGoalOptions = {
 };
 
 export type CreateSubscriberGoalResult = {
+  outcome: "created" | "superseded" | "retired";
   post: Awaited<ReturnType<typeof createGoalPost>>;
   crosspostDispatchResult: CrosspostDispatchResult;
   highlightResult: HighlightResult;
   flairResult: SubscriberGoalFlairResult;
+  supersedingPostId?: `t3_${string}`;
 };
 
 export type SubscriberGoalFlairResult =
@@ -178,6 +187,7 @@ async function recoverCompletedCreation(
       ReturnType<typeof createGoalPost>
     >;
     return {
+      outcome: "created",
       post,
       crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
       highlightResult: normalizeStoredHighlightResult(
@@ -201,8 +211,32 @@ async function recoverCompletedCreation(
   }
 }
 
+function recoverTerminalCreation(
+  raw: StoredCreationOperation,
+): CreateSubscriberGoalResult | undefined {
+  const postId = raw.postId ?? "";
+  if (
+    (raw.status !== "superseded" && raw.status !== "retired") ||
+    !isLinkId(postId)
+  ) {
+    return undefined;
+  }
+  return createTerminalCreationResult(
+    raw.status,
+    postId,
+    isLinkId(raw.supersedingPostId ?? "")
+      ? (raw.supersedingPostId as `t3_${string}`)
+      : undefined,
+  );
+}
+
 export type SubscriberGoalCreationRecovery =
   | { status: "complete"; result: CreateSubscriberGoalResult }
+  | {
+      status: "superseded" | "retired";
+      postId: `t3_${string}`;
+      supersedingPostId?: `t3_${string}`;
+    }
   | { status: "unknown" }
   | { status: "missing" };
 
@@ -217,6 +251,16 @@ export async function recoverSubscriberGoalCreation({
 }): Promise<SubscriberGoalCreationRecovery> {
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
   const raw = await redis.hGetAll(operationKey);
+  const terminal = recoverTerminalCreation(raw);
+  if (terminal) {
+    return {
+      status: terminal.outcome as "superseded" | "retired",
+      postId: terminal.post.id,
+      ...(terminal.supersedingPostId
+        ? { supersedingPostId: terminal.supersedingPostId }
+        : {}),
+    };
+  }
   const completed = await recoverCompletedCreation(reddit, raw);
   if (completed) return { status: "complete", result: completed };
   if (
@@ -297,6 +341,8 @@ async function createSubscriberGoalUnderCommunityLease({
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
   const lockKey = `${operationKey}:lock`;
   const existing = await redis.hGetAll(operationKey);
+  const existingTerminal = recoverTerminalCreation(existing);
+  if (existingTerminal) return existingTerminal;
   const completed = await recoverCompletedCreation(reddit, existing);
   if (completed) return completed;
   if (
@@ -318,6 +364,8 @@ async function createSubscriberGoalUnderCommunityLease({
 
   try {
     const reloaded = await redis.hGetAll(operationKey);
+    const reloadedTerminal = recoverTerminalCreation(reloaded);
+    if (reloadedTerminal) return reloadedTerminal;
     const recoveredComplete = await recoverCompletedCreation(reddit, reloaded);
     if (recoveredComplete) return recoveredComplete;
     if (
@@ -332,15 +380,53 @@ async function createSubscriberGoalUnderCommunityLease({
       updatedAt: String(nowMs),
     });
     const submittedPostId = reloaded.postId ?? "";
-    const recoveredPost = isLinkId(submittedPostId)
-      ? ((await reddit.getPostById(submittedPostId)) as unknown as Awaited<
-          ReturnType<typeof createGoalPost>
-        >)
-      : undefined;
+    let recoveredPost: Awaited<ReturnType<typeof createGoalPost>> | undefined;
+    if (isLinkId(submittedPostId)) {
+      if (await isSubscriberGoalPostRetired(redis, submittedPostId)) {
+        const retired = createTerminalCreationResult(
+          "retired",
+          submittedPostId,
+        );
+        await persistTerminalCreationOutcome(redis, operationKey, retired);
+        return retired;
+      }
+      try {
+        recoveredPost = (await reddit.getPostById(
+          submittedPostId,
+        )) as unknown as Awaited<ReturnType<typeof createGoalPost>>;
+      } catch (error) {
+        const message = toErrorMessage(error);
+        if (
+          /not[\s-]?found|does not exist|deleted|no longer exists|\b404\b|\b410\b/i.test(
+            message,
+          )
+        ) {
+          await retireSubscriberGoalPost(
+            redis,
+            submittedPostId,
+            "creation_retry_post_missing",
+          );
+          const retired = createTerminalCreationResult(
+            "retired",
+            submittedPostId,
+          );
+          await persistTerminalCreationOutcome(redis, operationKey, retired);
+          return retired;
+        }
+        throw error;
+      }
+    }
     const result = await createSubscriberGoalInternal(
       { reddit, redis, appSettings, options },
       {
         ...(recoveredPost ? { recoveredPost } : {}),
+        ...(reloaded.crosspostDispatchResult
+          ? {
+              recoveredCrosspostDispatchResult: JSON.parse(
+                reloaded.crosspostDispatchResult,
+              ) as CrosspostDispatchResult,
+            }
+          : {}),
         onSubmissionStarted: async () => {
           await writeCreationOperation(redis, operationKey, {
             status: "submitting",
@@ -360,8 +446,20 @@ async function createSubscriberGoalUnderCommunityLease({
             updatedAt: String(Date.now()),
           });
         },
+        onRegistrationCompleted: async (postId, crosspostDispatchResult) => {
+          await writeCreationOperation(redis, operationKey, {
+            status: "registered",
+            postId,
+            crosspostDispatchResult: JSON.stringify(crosspostDispatchResult),
+            updatedAt: String(Date.now()),
+          });
+        },
       },
     );
+    if (result.outcome !== "created") {
+      await persistTerminalCreationOutcome(redis, operationKey, result);
+      return result;
+    }
     await writeCreationOperation(redis, operationKey, {
       status: "complete",
       postId: result.post.id,
@@ -391,9 +489,14 @@ async function createSubscriberGoalInternal(
   },
   recovery?: {
     recoveredPost?: Awaited<ReturnType<typeof createGoalPost>>;
+    recoveredCrosspostDispatchResult?: CrosspostDispatchResult;
     onSubmissionStarted: () => Promise<void>;
     onPostSubmitted: (postId: string) => Promise<void>;
     onSubmissionUnknown: () => Promise<void>;
+    onRegistrationCompleted: (
+      postId: `t3_${string}`,
+      result: CrosspostDispatchResult,
+    ) => Promise<void>;
   },
 ): Promise<CreateSubscriberGoalResult> {
   const subreddit = await reddit.getCurrentSubreddit();
@@ -415,6 +518,21 @@ async function createSubscriberGoalInternal(
       options.afterSubscribeAction.type === "disabled")
   ) {
     throw new Error("CTA-only posts require an actionable CTA.");
+  }
+
+  let existingGoalPostIds: string[] = [];
+  let existingClassicGoalPostIds: Array<`t3_${string}`> = [];
+
+  if (recovery?.recoveredPost) {
+    [existingGoalPostIds, existingClassicGoalPostIds] =
+      await getExistingGoalPostIds(redis);
+    const terminal = await revalidateRecoveredCreation({
+      reddit,
+      redis,
+      post: recovery.recoveredPost,
+      candidatePostIds: existingGoalPostIds,
+    });
+    if (terminal) return terminal;
   }
 
   const health = await checkAppAccountHealth({
@@ -463,21 +581,10 @@ async function createSubscriberGoalInternal(
     appUsername,
     canManageFlair: hasAllPermissions || permissions.includes("flair"),
   });
-  const existingGoalPostIds = await getSubscriberGoalCandidatePostIds(redis);
-  const existingClassicGoalPostIds = [] as Array<`t3_${string}`>;
-  for (const postId of existingGoalPostIds) {
-    const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
-      `${postId}${postKindSuffix}`,
-      `${postId}${postHeightSuffix}`,
-    ]);
-    if (
-      postKind === "subscriber-goal-v1" &&
-      (postHeight === "regular" || postHeight === "short")
-    ) {
-      if (isLinkId(postId)) existingClassicGoalPostIds.push(postId);
-    }
+  if (!recovery?.recoveredPost) {
+    [existingGoalPostIds, existingClassicGoalPostIds] =
+      await getExistingGoalPostIds(redis);
   }
-
   const textFallback = isCtaOnlyPost
     ? ctaOnlyTextFallbackMaker(
         (
@@ -526,8 +633,10 @@ async function createSubscriberGoalInternal(
   if (!recovery?.recoveredPost) await recovery?.onPostSubmitted(post.id);
   await applyGoalPostFrameStyle(post, options.postHeight);
 
-  await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
-  const crosspostDispatchResult = isCtaOnlyPost
+  if (!recovery?.recoveredPost) {
+    await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
+  }
+  const replayedRegistrationResult = isCtaOnlyPost
     ? await registerNewCtaOnlyPost(
         redis,
         appSettings,
@@ -558,7 +667,9 @@ async function createSubscriberGoalInternal(
           appSettings,
           post,
           options.goal as number,
-          options.crosspost,
+          recovery?.recoveredCrosspostDispatchResult
+            ? false
+            : options.crosspost,
           options.subredditDisplayName,
           options.colorTheme,
           options.autoCreateNextGoal,
@@ -568,6 +679,11 @@ async function createSubscriberGoalInternal(
           options.afterSubscribeAction ?? defaultAfterSubscribeAction,
           ...afterSubscribePresetArgs,
         );
+  const crosspostDispatchResult =
+    recovery?.recoveredCrosspostDispatchResult ?? replayedRegistrationResult;
+  if (!recovery?.recoveredCrosspostDispatchResult) {
+    await recovery?.onRegistrationCompleted(post.id, crosspostDispatchResult);
+  }
 
   if (!isCompactActionPost) {
     for (const olderPostId of existingClassicGoalPostIds) {
@@ -579,8 +695,12 @@ async function createSubscriberGoalInternal(
     }
   }
 
-  const trackedPosts = await getTrackedPosts(redis);
-  const queuedPosts = await getQueuedUpdates(redis);
+  const trackedPosts = recovery?.recoveredPost
+    ? []
+    : await getTrackedPosts(redis);
+  const queuedPosts = recovery?.recoveredPost
+    ? []
+    : await getQueuedUpdates(redis);
   const activePostIds = [...new Set([...trackedPosts, ...queuedPosts])];
   for (const activePostId of activePostIds) {
     if (!isLinkId(activePostId)) {
@@ -679,11 +799,146 @@ async function createSubscriberGoalInternal(
     });
   }
 
-  if (options.cancelPendingAutoCreateGoals) {
+  if (options.cancelPendingAutoCreateGoals && !recovery?.recoveredPost) {
     await cancelAllAutoCreateNextGoals(redis);
   }
 
-  return { post, crosspostDispatchResult, highlightResult, flairResult };
+  return {
+    outcome: "created",
+    post,
+    crosspostDispatchResult,
+    highlightResult,
+    flairResult,
+  };
+}
+
+async function getExistingGoalPostIds(
+  redis: RedisClient,
+): Promise<[string[], Array<`t3_${string}`>]> {
+  const postIds = await getSubscriberGoalCandidatePostIds(redis);
+  const classicPostIds: Array<`t3_${string}`> = [];
+  for (const postId of postIds) {
+    const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
+      `${postId}${postKindSuffix}`,
+      `${postId}${postHeightSuffix}`,
+    ]);
+    if (
+      postKind === "subscriber-goal-v1" &&
+      (postHeight === "regular" || postHeight === "short") &&
+      isLinkId(postId)
+    ) {
+      classicPostIds.push(postId);
+    }
+  }
+  return [postIds, classicPostIds];
+}
+
+async function revalidateRecoveredCreation({
+  reddit,
+  redis,
+  post,
+  candidatePostIds,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  post: Awaited<ReturnType<typeof createGoalPost>>;
+  candidatePostIds: string[];
+}): Promise<CreateSubscriberGoalResult | undefined> {
+  if (await isSubscriberGoalPostRetired(redis, post.id)) {
+    return createTerminalCreationResult("retired", post.id);
+  }
+  const removedByCategory = getTerminalRemovedByCategory(post);
+  if (removedByCategory) {
+    await retireSubscriberGoalPost(
+      redis,
+      post.id,
+      `creation_retry_removed:${removedByCategory}`,
+    );
+    return createTerminalCreationResult("retired", post.id);
+  }
+  const [successor, completedTime, baseline] = await Promise.all([
+    redis.hGet(autoCreateNextGoalSuccessorsKey, post.id),
+    redis.hGet(subscriberGoalsKey, `${post.id}${postCompletedTimeSuffix}`),
+    getHighlightManagementBaseline(redis),
+  ]);
+  if (isLinkId(successor ?? "")) {
+    return createTerminalCreationResult(
+      "superseded",
+      post.id,
+      successor as `t3_${string}`,
+    );
+  }
+  if (Number(completedTime) > 0) {
+    return createTerminalCreationResult("superseded", post.id);
+  }
+
+  const recoveredCreatedAt = new Date(post.createdAt).getTime();
+  const possibleNewerIds = new Set(candidatePostIds);
+  if (baseline?.canonicalPostId) possibleNewerIds.add(baseline.canonicalPostId);
+  for (const candidateId of possibleNewerIds) {
+    if (candidateId === post.id || !isLinkId(candidateId)) continue;
+    try {
+      const candidate = await reddit.getPostById(candidateId);
+      const candidateCreatedAt = new Date(candidate.createdAt).getTime();
+      if (
+        Number.isFinite(candidateCreatedAt) &&
+        (!Number.isFinite(recoveredCreatedAt) ||
+          candidateCreatedAt > recoveredCreatedAt)
+      ) {
+        return createTerminalCreationResult("superseded", post.id, candidateId);
+      }
+    } catch (error) {
+      // Candidate cleanup is owned by normal reconciliation; an unavailable
+      // candidate must not make a valid recovery destructive.
+      logDiagnostic(
+        "warn",
+        "goal_creation_revalidation_candidate_unavailable",
+        {
+          workflow: "create_subscriber_goal",
+          phase: "revalidation",
+          postId: post.id,
+          candidatePostId: candidateId,
+        },
+        error,
+      );
+    }
+  }
+  return undefined;
+}
+
+function createTerminalCreationResult(
+  outcome: "superseded" | "retired",
+  postId: `t3_${string}`,
+  supersedingPostId?: `t3_${string}`,
+): CreateSubscriberGoalResult {
+  return {
+    outcome,
+    post: { id: postId } as Awaited<ReturnType<typeof createGoalPost>>,
+    crosspostDispatchResult: { status: "skipped" },
+    highlightResult: createFailedHighlightResult(
+      postId,
+      "write",
+      outcome === "retired"
+        ? "The recovered post is retired."
+        : "The recovered post was superseded by newer community state.",
+    ),
+    flairResult: { status: "omitted", reason: "preparation_failed" },
+    ...(supersedingPostId ? { supersedingPostId } : {}),
+  };
+}
+
+async function persistTerminalCreationOutcome(
+  redis: RedisClient,
+  operationKey: string,
+  result: CreateSubscriberGoalResult,
+): Promise<void> {
+  await writeCreationOperation(redis, operationKey, {
+    status: result.outcome,
+    postId: result.post.id,
+    supersedingPostId: result.supersedingPostId ?? "",
+    completedAt: String(Date.now()),
+    updatedAt: String(Date.now()),
+  });
 }
 
 async function prepareSubscriberGoalFlair({

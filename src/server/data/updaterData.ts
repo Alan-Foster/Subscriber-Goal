@@ -1,19 +1,44 @@
-import type { RedisClient } from '../types';
+import type { RedisClient } from "../types";
 
-export const postsKey = 'posts';
-export const updatesKey = 'updater';
+export const postsKey = "posts";
+export const updatesKey = "updater";
 
 export async function trackPost(
   redis: RedisClient,
   postId: string,
-  created: Date
+  created: Date,
 ): Promise<void> {
+  if (
+    (await redis.zRange(postsKey, 0, -1)).some(
+      ({ member }) => member === postId,
+    )
+  ) {
+    return;
+  }
   await redis.zAdd(postsKey, { member: postId, score: created.getTime() });
+}
+
+export async function ensureUpdateQueued(
+  redis: RedisClient,
+  postId: string,
+  initialUpdate: Date,
+): Promise<void> {
+  if (
+    (await redis.zRange(updatesKey, 0, -1)).some(
+      ({ member }) => member === postId,
+    )
+  ) {
+    return;
+  }
+  await redis.zAdd(updatesKey, {
+    member: postId,
+    score: initialUpdate.getTime(),
+  });
 }
 
 export async function untrackPost(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<void> {
   await redis.zRem(postsKey, [postId]);
 }
@@ -31,14 +56,14 @@ export async function getQueuedUpdates(redis: RedisClient): Promise<string[]> {
 export async function queueUpdate(
   redis: RedisClient,
   postId: string,
-  lastUpdate: Date
+  lastUpdate: Date,
 ): Promise<void> {
   await redis.zAdd(updatesKey, { member: postId, score: lastUpdate.getTime() });
 }
 
 export async function queueUpdates(
   redis: RedisClient,
-  postIds: string[]
+  postIds: string[],
 ): Promise<void> {
   const members = postIds.map((postId) => ({
     member: postId,
@@ -49,7 +74,7 @@ export async function queueUpdates(
 
 export async function cancelUpdates(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<void> {
   await redis.zRem(updatesKey, [postId]);
 }

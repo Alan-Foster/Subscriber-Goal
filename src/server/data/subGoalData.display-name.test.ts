@@ -33,6 +33,9 @@ import {
   postHeaderTextSuffix,
   postHeightSuffix,
   postKindSuffix,
+  postRecentSubscriberSuffix,
+  postCompletedTimeSuffix,
+  postAutoCreateNextGoalSuffix,
   postSubredditDisplayNameSuffix,
 } from "./subGoalData";
 import {
@@ -79,6 +82,14 @@ class InMemoryRedis {
   async hMGet(key: string, fields: string[]): Promise<Array<string | null>> {
     const map = this.hashes.get(key) ?? new Map<string, string>();
     return fields.map((field) => map.get(field) ?? null);
+  }
+
+  async hSetNX(key: string, field: string, value: string): Promise<number> {
+    const current = this.hashes.get(key) ?? new Map<string, string>();
+    if (current.has(field)) return 0;
+    current.set(field, value);
+    this.hashes.set(key, current);
+    return 1;
   }
 
   async hGet(key: string, field: string): Promise<string | undefined> {
@@ -158,6 +169,141 @@ class InMemoryRedis {
 }
 
 describe("subGoalData subreddit display name", () => {
+  it("replays regular registration without resetting live state or valid updater scores", async () => {
+    const redis = new InMemoryRedis();
+    const post = {
+      id: "t3_replayed",
+      subredditName: "ExampleSub",
+      createdAt: new Date(100),
+    };
+    const reddit = {
+      getCurrentSubreddit: vi.fn(async () => ({ nsfw: false })),
+    };
+    const settings = { promoSubreddit: "SubGoal" };
+
+    await registerNewSubGoalPost(
+      reddit as never,
+      redis as never,
+      settings as never,
+      post as never,
+      200,
+      false,
+      "Original Name",
+      "red",
+      true,
+      "en",
+    );
+    await redis.hSet(subscriberGoalsKey, {
+      [`${post.id}${postRecentSubscriberSuffix}`]: "live-user",
+      [`${post.id}${postCompletedTimeSuffix}`]: "1234",
+      [`${post.id}${postAutomaticSuccessorSuppressionSuffix}`]:
+        "auto_goal_reconciliation",
+      [`${post.id}${postSubredditDisplayNameSuffix}`]: "Newer Name",
+      [`${post.id}${postAutoCreateNextGoalSuffix}`]: "false",
+      [`${post.id}${postColorThemeSuffix}`]: "blue",
+    });
+    await redis.zAdd(postsKey, { member: post.id, score: 900 });
+    await redis.zAdd(updatesKey, { member: post.id, score: 950 });
+
+    await registerNewSubGoalPost(
+      reddit as never,
+      redis as never,
+      settings as never,
+      post as never,
+      200,
+      false,
+      "Original Name",
+      "red",
+      true,
+      "en",
+    );
+
+    await expect(
+      getSubGoalData(redis as never, post.id),
+    ).resolves.toMatchObject({
+      recentSubscriber: "live-user",
+      completedTime: 1234,
+      automaticSuccessorSuppression: "auto_goal_reconciliation",
+      subredditDisplayName: "Newer Name",
+      autoCreateNextGoal: false,
+      colorTheme: "blue",
+    });
+    await expect(redis.zScore(postsKey, post.id)).resolves.toBe(900);
+    await expect(redis.zScore(updatesKey, post.id)).resolves.toBe(950);
+  });
+
+  it("repairs a completed legacy goal's registry without reviving updater work", async () => {
+    const redis = new InMemoryRedis();
+    const post = {
+      id: "t3_completed_replay",
+      subredditName: "ExampleSub",
+      createdAt: new Date(100),
+    };
+    await redis.hSet(subscriberGoalsKey, {
+      [`${post.id}${postKindSuffix}`]: subscriberGoalPostKind,
+      [`${post.id}${postCompletedTimeSuffix}`]: "4321",
+      [`${post.id}${postAutomaticSuccessorSuppressionSuffix}`]:
+        "onboarding_reconciliation",
+    });
+
+    await registerNewSubGoalPost(
+      { getCurrentSubreddit: vi.fn() } as never,
+      redis as never,
+      { promoSubreddit: "SubGoal" } as never,
+      post as never,
+      200,
+      false,
+      "ExampleSub",
+      "red",
+      true,
+      "en",
+    );
+
+    await expect(
+      redis.zScore(subscriberGoalPostRegistryKey, post.id),
+    ).resolves.toBe(100);
+    await expect(redis.zScore(postsKey, post.id)).resolves.toBeUndefined();
+    await expect(redis.zScore(updatesKey, post.id)).resolves.toBeUndefined();
+    await expect(
+      getSubGoalData(redis as never, post.id),
+    ).resolves.toMatchObject({
+      completedTime: 4321,
+      automaticSuccessorSuppression: "onboarding_reconciliation",
+    });
+  });
+
+  it("does not revive a retired post during registration replay", async () => {
+    const redis = new InMemoryRedis();
+    const post = {
+      id: "t3_retired_replay",
+      subredditName: "ExampleSub",
+      createdAt: new Date(100),
+    };
+    await redis.set(
+      `retired_subscriber_goal_v1:${post.id}`,
+      JSON.stringify({ reason: "deleted", retiredAt: 100 }),
+    );
+
+    await expect(
+      registerNewSubGoalPost(
+        { getCurrentSubreddit: vi.fn() } as never,
+        redis as never,
+        { promoSubreddit: "SubGoal" } as never,
+        post as never,
+        200,
+        false,
+        "ExampleSub",
+      ),
+    ).resolves.toEqual({ status: "skipped" });
+
+    await expect(redis.hGetAll(subscriberGoalsKey)).resolves.toEqual({});
+    await expect(
+      redis.zScore(subscriberGoalPostRegistryKey, post.id),
+    ).resolves.toBeUndefined();
+    await expect(redis.zScore(postsKey, post.id)).resolves.toBeUndefined();
+    await expect(redis.zScore(updatesKey, post.id)).resolves.toBeUndefined();
+  });
+
   it("persists subreddit display name via setSubGoalData/getSubGoalData", async () => {
     const redis = new InMemoryRedis();
     await setSubGoalData(

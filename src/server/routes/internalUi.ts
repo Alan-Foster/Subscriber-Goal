@@ -1488,6 +1488,15 @@ async function submitCreateGoalFollowUp(
               });
               return;
             }
+            if (
+              recovery.status === "superseded" ||
+              recovery.status === "retired"
+            ) {
+              res.json({
+                showToast: translate(draft?.language, "moderator.form.expired"),
+              });
+              return;
+            }
           }
           res.json({
             showToast: translate(draft?.language, "moderator.form.expired"),
@@ -1597,42 +1606,54 @@ async function submitCreateGoalFollowUp(
           draft.details.kind === "subscriber-goal" &&
           draft.details.crosspost &&
           crosspostEligible;
-        const { post, crosspostDispatchResult, highlightResult, flairResult } =
-          await createSubscriberGoal({
-            reddit,
-            redis,
-            appSettings,
-            options: {
-              title: draft.details.postTitle,
-              ...(draft.details.kind === "subscriber-goal"
-                ? { goal: draft.details.subscriberGoal }
-                : {}),
-              subredditDisplayName: draft.subredditDisplayName,
-              crosspost,
-              colorTheme:
-                draft.details.kind === "cta-only" &&
-                afterSubscribeResult.action.type !== "disabled"
-                  ? afterSubscribeResult.action.colorTheme
-                  : draft.details.kind === "cta-only"
-                    ? defaultAfterSubscribeColorTheme
-                    : draft.details.colorTheme,
-              postHeight: draft.postHeight,
-              autoCreateNextGoal,
-              language: draft.language,
-              afterSubscribeAction: afterSubscribeResult.action,
-              afterSubscribePreset: persistedAfterSubscribePreset,
-              cancelPendingAutoCreateGoals: true,
-              operationId: manualCreationOperationId(
-                subreddit.id,
-                userId,
-                draft.creationAttemptId,
-              ),
-              submitAsUser: developerCommands.submitAsUser,
-              ...(developerCommands.headerText
-                ? { headerText: developerCommands.headerText }
-                : {}),
-            },
+        const creation = await createSubscriberGoal({
+          reddit,
+          redis,
+          appSettings,
+          options: {
+            title: draft.details.postTitle,
+            ...(draft.details.kind === "subscriber-goal"
+              ? { goal: draft.details.subscriberGoal }
+              : {}),
+            subredditDisplayName: draft.subredditDisplayName,
+            crosspost,
+            colorTheme:
+              draft.details.kind === "cta-only" &&
+              afterSubscribeResult.action.type !== "disabled"
+                ? afterSubscribeResult.action.colorTheme
+                : draft.details.kind === "cta-only"
+                  ? defaultAfterSubscribeColorTheme
+                  : draft.details.colorTheme,
+            postHeight: draft.postHeight,
+            autoCreateNextGoal,
+            language: draft.language,
+            afterSubscribeAction: afterSubscribeResult.action,
+            afterSubscribePreset: persistedAfterSubscribePreset,
+            cancelPendingAutoCreateGoals: true,
+            operationId: manualCreationOperationId(
+              subreddit.id,
+              userId,
+              draft.creationAttemptId,
+            ),
+            submitAsUser: developerCommands.submitAsUser,
+            ...(developerCommands.headerText
+              ? { headerText: developerCommands.headerText }
+              : {}),
+          },
+        });
+
+        if (
+          creation.outcome === "superseded" ||
+          creation.outcome === "retired"
+        ) {
+          await safelyDeleteCreateGoalDraft(userId, draft.creationAttemptId);
+          res.json({
+            showToast: translate(draft.language, "moderator.form.expired"),
           });
+          return;
+        }
+        const { post, crosspostDispatchResult, highlightResult, flairResult } =
+          creation;
 
         await safelyDeleteCreateGoalDraft(userId, draft.creationAttemptId);
         console.info(

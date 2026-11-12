@@ -9,6 +9,7 @@ const hoisted = vi.hoisted(() => ({
   getModPermissionsForSubreddit: vi.fn(),
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
+  state: { failCompleteWrite: false },
   highlightedIds: new Set<string>(),
   redis: {
     set: vi.fn(
@@ -26,12 +27,19 @@ const hoisted = vi.hoisted(() => ({
       Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     ),
     hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+      if (fields.status === "complete" && hoisted.state.failCompleteWrite) {
+        hoisted.state.failCompleteWrite = false;
+        throw new Error("final operation write failed");
+      }
       const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
       Object.entries(fields).forEach(([field, value]) =>
         hash.set(field, value),
       );
       hoisted.redisHashes.set(key, hash);
     }),
+    hGet: vi.fn(async (key: string, field: string) =>
+      hoisted.redisHashes.get(key)?.get(field),
+    ),
     expire: vi.fn(),
     hMGet: vi.fn(async (key: string, fields: string[]) => {
       const hash = hoisted.redisHashes.get(key);
@@ -66,6 +74,7 @@ vi.mock("../data/subGoalData", () => ({
   subscriberGoalsKey: "subscriber_goals",
   postKindSuffix: "_post_kind",
   postHeightSuffix: "_post_height",
+  postCompletedTimeSuffix: "_completed_time",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
@@ -159,6 +168,7 @@ describe("createSubscriberGoal highlight handling", () => {
     vi.resetAllMocks();
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
+    hoisted.state.failCompleteWrite = false;
     hoisted.highlightedIds.clear();
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -363,6 +373,103 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getPostById).toHaveBeenCalledWith("t3_newpost");
+  });
+
+  it("returns superseded without replaying community-wide writes after a newer goal replaces the recovered post", async () => {
+    const postA = createPost();
+    const postB = {
+      ...createPost(),
+      id: "t3_newer",
+      createdAt: new Date("2026-01-02T00:00:00.000Z"),
+    };
+    postA.approve.mockRejectedValueOnce(new Error("approval failed"));
+    hoisted.createGoalPost.mockResolvedValue(postA);
+    hoisted.reddit.getPostById.mockImplementation(async (postId: string) =>
+      postId === postB.id ? postB : postA,
+    );
+
+    await expect(createGoal({ operationId: "manual:late-a" })).rejects.toThrow(
+      "approval failed",
+    );
+    const successorMap =
+      hoisted.redisHashes.get("auto_create_next_goal_v1_successors") ??
+      new Map<string, string>();
+    successorMap.set(postA.id, postB.id);
+    hoisted.redisHashes.set(
+      "auto_create_next_goal_v1_successors",
+      successorMap,
+    );
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
+      postA.id,
+      postB.id,
+    ]);
+
+    await expect(
+      createGoal({ operationId: "manual:late-a" }),
+    ).resolves.toMatchObject({
+      outcome: "superseded",
+      post: { id: postA.id },
+      supersedingPostId: postB.id,
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(successorMap.get(postA.id)).toBe(postB.id);
+    expect(successorMap.get(postB.id)).toBeUndefined();
+    expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.setSavedSubredditDisplayName).toHaveBeenCalledOnce();
+    expect(postA.approve).toHaveBeenCalledOnce();
+  });
+
+  it("recovers the same Reddit post when the final operation write fails", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.state.failCompleteWrite = true;
+
+    await expect(
+      createGoal({ operationId: "manual:final-write" }),
+    ).rejects.toThrow("final operation write failed");
+    await expect(
+      createGoal({ operationId: "manual:final-write" }),
+    ).resolves.toMatchObject({
+      outcome: "created",
+      post: { id: post.id },
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getPostById).toHaveBeenCalledWith(post.id);
+  });
+
+  it("returns superseded when a recovered goal completed before retry", async () => {
+    const post = createPost();
+    post.approve.mockRejectedValueOnce(new Error("approval failed"));
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+
+    await expect(
+      createGoal({ operationId: "manual:completed-a" }),
+    ).rejects.toThrow("approval failed");
+    const goals =
+      hoisted.redisHashes.get("subscriber_goals") ?? new Map<string, string>();
+    goals.set(`${post.id}_completed_time`, "1234");
+    goals.set(
+      `${post.id}_automatic_successor_suppression`,
+      "auto_goal_reconciliation",
+    );
+    hoisted.redisHashes.set("subscriber_goals", goals);
+
+    await expect(
+      createGoal({ operationId: "manual:completed-a" }),
+    ).resolves.toMatchObject({
+      outcome: "superseded",
+      post: { id: post.id },
+    });
+    expect(
+      hoisted.redisHashes
+        .get("subscriber_goals")
+        ?.get(`${post.id}_automatic_successor_suppression`),
+    ).toBe("auto_goal_reconciliation");
+    expect(post.approve).toHaveBeenCalledOnce();
   });
 
   it("makes zero Reddit submissions when the atomic operation claim fails", async () => {

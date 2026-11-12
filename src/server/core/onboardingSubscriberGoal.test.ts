@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
-import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
+import {
+  autoCreateNextGoalQueueKey,
+  autoCreateNextGoalSuccessorsKey,
+} from "../data/subGoalData";
 
 const hoisted = vi.hoisted(() => ({
   getTrackedPosts: vi.fn(),
@@ -619,6 +622,73 @@ describe("onboarding subscriber goal", () => {
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, predecessor.id),
     ).resolves.toBe("t3_created");
+  });
+
+  it("does not remap or cancel onboarding follow-up work for a superseded retry", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "upgrade",
+      nowMs,
+    });
+    const predecessor = {
+      id: "t3_stale_predecessor",
+      authorName: "subscriber-goal",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      stickied: true,
+      createdAt: new Date(nowMs - 60_000),
+      postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+    };
+    await redis.hSet(onboardingSubscriberGoalStateKey, {
+      intent: "orphaned_completed_goal",
+      replacementSourcePostId: predecessor.id,
+    });
+    await redis.hSet("subscriber_goals", {
+      [`${predecessor.id}_goal`]: "1000",
+      [`${predecessor.id}_completed_time`]: String(nowMs - 60_000),
+      [`${predecessor.id}_auto_create_next_goal`]: "true",
+      [`${predecessor.id}_post_kind`]: "subscriber-goal-v1",
+      [`${predecessor.id}_post_height`]: "regular",
+    });
+    await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+      [predecessor.id]: "t3_newer",
+    });
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: predecessor.id,
+      score: nowMs + 123_000,
+    });
+    reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([predecessor]),
+    });
+    reddit.getPostById.mockResolvedValue(predecessor);
+    hoisted.createSubscriberGoal.mockResolvedValue({
+      outcome: "superseded",
+      post: { id: "t3_stale_created" },
+      supersedingPostId: "t3_newer",
+      crosspostDispatchResult: { status: "skipped" },
+      highlightResult: {
+        status: "not_highlighted",
+        issues: [],
+      },
+    });
+    const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(state.nextRunAt),
+      }),
+    ).resolves.toMatchObject({ status: "complete", postId: "t3_newer" });
+    await expect(
+      redis.hGet(autoCreateNextGoalSuccessorsKey, predecessor.id),
+    ).resolves.toBe("t3_newer");
+    await expect(
+      redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+    ).resolves.toContainEqual({
+      member: predecessor.id,
+      score: nowMs + 123_000,
+    });
   });
 
   it("terminates orphan recovery when a different completed goal appears", async () => {

@@ -126,10 +126,7 @@ export const onboardingSubscriberGoalInitializationLockTtlMs = 60 * 1000;
 export const onboardingMaxAttempts = 3;
 
 type OnboardingStatus =
-  | "awaiting_warning"
-  | "pending"
-  | "processing"
-  | "complete";
+  "awaiting_warning" | "pending" | "processing" | "complete";
 
 type OnboardingResultStatus = "created" | "existing" | "ineligible" | "failed";
 const onboardingRetryBaseMs = 5 * 60 * 1000;
@@ -150,13 +147,9 @@ type ExtendedOnboardingResultStatus =
   | "completed_no_recovery";
 
 export type OnboardingLifecycleSource =
-  | "install"
-  | "upgrade"
-  | "recovery"
-  | "unknown";
+  "install" | "upgrade" | "recovery" | "unknown";
 export type OnboardingIneligibilityReason =
-  | "subscriber_count"
-  | AutomaticGoalIneligibilityReason;
+  "subscriber_count" | AutomaticGoalIneligibilityReason;
 export type OnboardingEligibility = {
   eligible: boolean;
   subscriberCount: number;
@@ -174,14 +167,9 @@ export type OnboardingExistingSource =
   | "search"
   | "recent";
 export type OnboardingGoalClassification =
-  | "classic"
-  | "tiny"
-  | "cta"
-  | "ambiguous";
+  "classic" | "tiny" | "cta" | "ambiguous";
 export type GoalClassificationConfidence =
-  | "explicit"
-  | "migrated_consistent"
-  | "ambiguous";
+  "explicit" | "migrated_consistent" | "ambiguous";
 
 export type OnboardingDetectionDiagnostics = {
   registeredInspected: number;
@@ -277,10 +265,7 @@ type CandidatePost = {
   highlight?: (options?: {
     highlightUntil?: Date;
     highlightLabelType?:
-      | "ANNOUNCEMENT"
-      | "EVENT"
-      | "MEGATHREAD"
-      | "SHOW_POST_FLAIR";
+      "ANNOUNCEMENT" | "EVENT" | "MEGATHREAD" | "SHOW_POST_FLAIR";
   }) => Promise<void>;
   unhighlight?: () => Promise<void>;
   title?: string;
@@ -1173,7 +1158,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       startedAt: nowMs,
       startedAtIso: new Date(nowMs).toISOString(),
     });
-    const { post, highlightResult } = await createSubscriberGoal({
+    const creation = await createSubscriberGoal({
       reddit,
       redis,
       appSettings,
@@ -1200,6 +1185,31 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         mutationLease,
       },
     });
+    if (creation.outcome === "superseded" || creation.outcome === "retired") {
+      const resolvedPostId = creation.supersedingPostId ?? creation.post.id;
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        postId: resolvedPostId,
+        resultStatus: "existing",
+      });
+      logDiagnostic("info", "onboarding_goal_recovery_stopped", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "creation_recovery",
+        operationId: reloaded.operationId,
+        postId: creation.post.id,
+        outcome: creation.outcome,
+        supersedingPostId: creation.supersedingPostId ?? "none",
+      });
+      return {
+        status: "complete",
+        postId: resolvedPostId,
+        lifecycleSource: reloaded.lifecycleSource,
+        ...inspected,
+      };
+    }
+    const { post, highlightResult } = creation;
     if (reloaded.replacementSourcePostId) {
       await redis.hSet(autoCreateNextGoalSuccessorsKey, {
         [reloaded.replacementSourcePostId]: post.id,
@@ -1435,8 +1445,7 @@ export async function findValidSubscriberGoals(
       incrementInspected(diagnostics, source);
       try {
         const fetched = (await reddit.getPostById(postId)) as
-          | CandidatePost
-          | undefined;
+          CandidatePost | undefined;
         if (!fetched) {
           throw new Error(
             `Reddit returned no post and no confirmed missing-post response for ${postId}.`,
@@ -2109,8 +2118,7 @@ async function reconcileCanonicalClassicGoal({
   }
 
   let moderatorOverride:
-    | Exclude<HighlightModeratorOverride, "none">
-    | undefined;
+    Exclude<HighlightModeratorOverride, "none"> | undefined;
   if (sameCanonical && baseline) {
     moderatorOverride =
       baseline.moderatorOverride !== "none"
