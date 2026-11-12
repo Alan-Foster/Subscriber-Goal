@@ -392,7 +392,7 @@ async function createSubscriberGoalUnderCommunityLease({
       reloaded.status === "submitting" ||
       reloaded.status === "submission_unknown"
     ) {
-      recoveredPost = await reconcileAmbiguousSubmissionUnderLock({
+      const reconciliation = await reconcileAmbiguousSubmissionUnderLock({
         reddit,
         redis,
         operationKey,
@@ -400,11 +400,34 @@ async function createSubscriberGoalUnderCommunityLease({
         language: options.language,
         nowMs: options.reconciliationNowMs ?? Date.now(),
       });
-      await writeCreationOperation(redis, operationKey, {
-        status: "post_submitted",
-        postId: recoveredPost.id,
-        updatedAt: String(Date.now()),
-      });
+      recoveredPost = reconciliation.post;
+      try {
+        await writeCreationOperation(redis, operationKey, {
+          status: "post_submitted",
+          postId: recoveredPost.id,
+          updatedAt: String(Date.now()),
+        });
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "goal_creation_recovered_post_id_persistence_failed",
+          {
+            workflow: "create_subscriber_goal",
+            phase: "recovered_post_id_persistence",
+            postId: recoveredPost.id,
+          },
+          error,
+        );
+        const safeNextAt =
+          reconciliation.reservation.nextAt ??
+          (options.reconciliationNowMs ?? Date.now()) +
+            submissionReconciliationDelayMs[0];
+        throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
+          status: "pending",
+          attempts: reconciliation.reservation.attempts,
+          nextAt: safeNextAt,
+        });
+      }
     }
     const submissionMarker = reloaded.submissionMarker || crypto.randomUUID();
     await writeCreationOperation(redis, operationKey, {
@@ -462,11 +485,12 @@ async function createSubscriberGoalUnderCommunityLease({
           : {}),
         submissionMarker,
         onSubmissionStarted: async (subredditName, subredditId) => {
+          const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
           await writeCreationOperation(redis, operationKey, {
             status: "submitting",
             subredditName,
             subredditId,
-            updatedAt: String(Date.now()),
+            updatedAt: String(reconciliationNowMs),
           });
         },
         onPostSubmitted: async (postId) => {
@@ -674,8 +698,20 @@ async function createSubscriberGoalInternal(
       });
     } catch (error) {
       if (recovery) {
-        await recovery.onSubmissionUnknown();
         const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
+        try {
+          await recovery.onSubmissionUnknown();
+        } catch (bookkeepingError) {
+          logDiagnostic(
+            "warn",
+            "goal_creation_submission_unknown_persistence_failed",
+            {
+              workflow: "create_subscriber_goal",
+              phase: "submission_unknown_persistence",
+            },
+            bookkeepingError,
+          );
+        }
         throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
           status: "pending",
           attempts: 0,
@@ -699,7 +735,20 @@ async function createSubscriberGoalInternal(
         },
         error,
       );
-      await recovery.onSubmissionUnknown();
+      try {
+        await recovery.onSubmissionUnknown();
+      } catch (bookkeepingError) {
+        logDiagnostic(
+          "warn",
+          "goal_creation_submission_unknown_persistence_failed",
+          {
+            workflow: "create_subscriber_goal",
+            phase: "post_id_fallback_persistence",
+            postId: post.id,
+          },
+          bookkeepingError,
+        );
+      }
       throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
         status: "pending",
         attempts: 0,
@@ -904,7 +953,10 @@ async function reconcileAmbiguousSubmissionUnderLock({
   raw: StoredCreationOperation;
   language?: SubGoalLanguage;
   nowMs: number;
-}): Promise<Awaited<ReturnType<typeof createGoalPost>>> {
+}): Promise<{
+  post: Awaited<ReturnType<typeof createGoalPost>>;
+  reservation: SubmissionReconciliationReservation;
+}> {
   const marker = raw.submissionMarker;
   const expectedSubredditName = raw.subredditName;
   const expectedSubredditId = raw.subredditId;
@@ -920,13 +972,25 @@ async function reconcileAmbiguousSubmissionUnderLock({
     });
   };
   if (!marker || !expectedSubredditName || !expectedSubredditId) {
-    await writeCreationOperation(redis, operationKey, {
-      reconciliationStatus: "exhausted",
-      reconciliationAttempts: String(attempts),
-      reconciliationNextAt: "",
-      reconciliationCompletedAt: String(nowMs),
-      updatedAt: String(Date.now()),
-    });
+    try {
+      await writeCreationOperation(redis, operationKey, {
+        reconciliationStatus: "exhausted",
+        reconciliationAttempts: String(attempts),
+        reconciliationNextAt: "",
+        reconciliationCompletedAt: String(nowMs),
+        updatedAt: String(Date.now()),
+      });
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "goal_creation_legacy_reconciliation_persistence_failed",
+        {
+          workflow: "create_subscriber_goal",
+          phase: "legacy_submission_reconciliation",
+        },
+        error,
+      );
+    }
     return throwUnknown("exhausted");
   }
   if (raw.reconciliationStatus === "exhausted") {
@@ -934,17 +998,76 @@ async function reconcileAmbiguousSubmissionUnderLock({
   }
   const persistedNextAt = Number(raw.reconciliationNextAt);
   if (!Number.isFinite(persistedNextAt) || persistedNextAt <= 0) {
-    const nextAt = nowMs + submissionReconciliationDelayMs[0];
+    const submissionStartedAt = Number(raw.updatedAt);
+    const nextAt =
+      (Number.isFinite(submissionStartedAt) && submissionStartedAt > 0
+        ? submissionStartedAt
+        : nowMs) + submissionReconciliationDelayMs[0];
+    if (nowMs < nextAt) {
+      try {
+        await writeCreationOperation(redis, operationKey, {
+          reconciliationStatus: "pending",
+          reconciliationAttempts: String(attempts),
+          reconciliationStartedAt:
+            raw.reconciliationStartedAt || String(submissionStartedAt || nowMs),
+          reconciliationNextAt: String(nextAt),
+          updatedAt: String(Date.now()),
+        });
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "goal_creation_reconciliation_schedule_persistence_failed",
+          {
+            workflow: "create_subscriber_goal",
+            phase: "submission_reconciliation_schedule",
+          },
+          error,
+        );
+      }
+      return throwUnknown("pending", nextAt);
+    }
+  }
+  if (
+    Number.isFinite(persistedNextAt) &&
+    persistedNextAt > 0 &&
+    nowMs < persistedNextAt
+  ) {
+    return throwUnknown("pending", persistedNextAt);
+  }
+
+  const reservation = createSubmissionReconciliationReservation(
+    attempts + 1,
+    nowMs,
+  );
+  try {
     await writeCreationOperation(redis, operationKey, {
-      reconciliationStatus: "pending",
-      reconciliationAttempts: String(attempts),
-      reconciliationStartedAt: raw.reconciliationStartedAt || String(nowMs),
-      reconciliationNextAt: String(nextAt),
+      reconciliationStatus: reservation.status,
+      reconciliationAttempts: String(reservation.attempts),
+      reconciliationNextAt: String(reservation.nextAt ?? ""),
+      ...(reservation.status === "exhausted"
+        ? { reconciliationCompletedAt: String(nowMs) }
+        : {}),
       updatedAt: String(Date.now()),
     });
-    return throwUnknown("pending", nextAt);
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "goal_creation_reconciliation_reservation_failed",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "submission_reconciliation_reservation",
+        reconciliationAttempts: reservation.attempts,
+      },
+      error,
+    );
+    const safeNextAt =
+      reservation.nextAt ?? nowMs + submissionReconciliationDelayMs[0];
+    throw new SubscriberGoalCreationOutcomeUnknownError(language, {
+      status: "pending",
+      attempts: reservation.attempts,
+      nextAt: safeNextAt,
+    });
   }
-  if (nowMs < persistedNextAt) return throwUnknown("pending", persistedNextAt);
 
   let match: Awaited<ReturnType<typeof createGoalPost>> | undefined;
   try {
@@ -966,35 +1089,29 @@ async function reconcileAmbiguousSubmissionUnderLock({
       error,
     );
   }
-  if (match) return match;
+  if (match) return { post: match, reservation };
 
-  const nextAttempts = attempts + 1;
-  const nextDelay = submissionReconciliationDelayMs[nextAttempts];
-  if (nextDelay === undefined) {
-    await writeCreationOperation(redis, operationKey, {
-      reconciliationStatus: "exhausted",
-      reconciliationAttempts: String(nextAttempts),
-      reconciliationNextAt: "",
-      reconciliationCompletedAt: String(nowMs),
-      updatedAt: String(Date.now()),
-    });
-    throw new SubscriberGoalCreationOutcomeUnknownError(language, {
-      status: "exhausted",
-      attempts: nextAttempts,
-    });
-  }
-  const nextAt = nowMs + nextDelay;
-  await writeCreationOperation(redis, operationKey, {
-    reconciliationStatus: "pending",
-    reconciliationAttempts: String(nextAttempts),
-    reconciliationNextAt: String(nextAt),
-    updatedAt: String(Date.now()),
-  });
   throw new SubscriberGoalCreationOutcomeUnknownError(language, {
-    status: "pending",
-    attempts: nextAttempts,
-    nextAt,
+    status: reservation.status,
+    attempts: reservation.attempts,
+    ...(reservation.nextAt === undefined ? {} : { nextAt: reservation.nextAt }),
   });
+}
+
+type SubmissionReconciliationReservation = {
+  status: "pending" | "exhausted";
+  attempts: number;
+  nextAt?: number;
+};
+
+function createSubmissionReconciliationReservation(
+  attempts: number,
+  nowMs: number,
+): SubmissionReconciliationReservation {
+  const nextDelay = submissionReconciliationDelayMs[attempts];
+  return nextDelay === undefined
+    ? { status: "exhausted", attempts }
+    : { status: "pending", attempts, nextAt: nowMs + nextDelay };
 }
 
 async function findSubmissionMarkerMatch({

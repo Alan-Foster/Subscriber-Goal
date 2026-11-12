@@ -11,7 +11,14 @@ const hoisted = vi.hoisted(() => ({
   getModPermissionsForSubreddit: vi.fn(),
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
-  state: { failCompleteWrite: false, failPostSubmittedWrite: false },
+  state: {
+    failCompleteWrite: false,
+    failPostSubmittedWrite: false,
+    commitPostSubmittedBeforeThrow: false,
+    failSubmissionUnknownWrites: 0,
+    failReservationWrites: 0,
+    failSubmittingWrite: false,
+  },
   highlightedIds: new Set<string>(),
   redis: {
     set: vi.fn(
@@ -29,22 +36,45 @@ const hoisted = vi.hoisted(() => ({
       Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     ),
     hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+      const commit = () => {
+        const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
+        Object.entries(fields).forEach(([field, value]) =>
+          hash.set(field, value),
+        );
+        hoisted.redisHashes.set(key, hash);
+      };
+      if (fields.status === "submitting" && hoisted.state.failSubmittingWrite) {
+        hoisted.state.failSubmittingWrite = false;
+        throw new Error("submitting write failed");
+      }
+      if (
+        fields.status === "submission_unknown" &&
+        hoisted.state.failSubmissionUnknownWrites > 0
+      ) {
+        hoisted.state.failSubmissionUnknownWrites -= 1;
+        throw new Error("ambiguity write failed");
+      }
+      if (
+        fields.status === undefined &&
+        fields.reconciliationAttempts !== undefined &&
+        hoisted.state.failReservationWrites > 0
+      ) {
+        hoisted.state.failReservationWrites -= 1;
+        throw new Error("reservation write failed");
+      }
       if (
         fields.status === "post_submitted" &&
         hoisted.state.failPostSubmittedWrite
       ) {
         hoisted.state.failPostSubmittedWrite = false;
+        if (hoisted.state.commitPostSubmittedBeforeThrow) commit();
         throw new Error("post ID write failed");
       }
       if (fields.status === "complete" && hoisted.state.failCompleteWrite) {
         hoisted.state.failCompleteWrite = false;
         throw new Error("final operation write failed");
       }
-      const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
-      Object.entries(fields).forEach(([field, value]) =>
-        hash.set(field, value),
-      );
-      hoisted.redisHashes.set(key, hash);
+      commit();
     }),
     hGet: vi.fn(async (key: string, field: string) =>
       hoisted.redisHashes.get(key)?.get(field),
@@ -179,6 +209,10 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.redisHashes.clear();
     hoisted.state.failCompleteWrite = false;
     hoisted.state.failPostSubmittedWrite = false;
+    hoisted.state.commitPostSubmittedBeforeThrow = false;
+    hoisted.state.failSubmissionUnknownWrites = 0;
+    hoisted.state.failReservationWrites = 0;
+    hoisted.state.failSubmittingWrite = false;
     hoisted.highlightedIds.clear();
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -645,6 +679,148 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
   });
 
+  it("makes a failed scan reservation lookup-free and does not reuse a reserved slot", async () => {
+    const operationKey =
+      "subscriber_goal_creation_v1:auto-next:t3_reservation-failure";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-reservation"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "0"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+    hoisted.state.failReservationWrites = 1;
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_reservation-failure",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+      reconciliationStatus: "pending",
+      reconciliationAttempts: 1,
+      reconciliationNextAt: 301_000,
+    });
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    expect(
+      hoisted.redisHashes.get(operationKey)?.get("reconciliationAttempts"),
+    ).toBe("0");
+
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => {
+        throw new Error("scan interrupted");
+      }),
+    });
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_reservation-failure",
+        reconciliationNowMs: 301_000,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationAttempts: 1,
+      reconciliationNextAt: 601_000,
+    });
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_reservation-failure",
+        reconciliationNowMs: 301_000,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationAttempts: 1,
+      reconciliationNextAt: 601_000,
+    });
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(
+      hoisted.redisHashes.get(operationKey)?.get("reconciliationAttempts"),
+    ).toBe("1");
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("keeps submission ambiguity typed when its bookkeeping write fails", async () => {
+    hoisted.createGoalPost.mockRejectedValue(new Error("timeout after create"));
+    hoisted.state.failSubmissionUnknownWrites = 1;
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_submit-fallback",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+      reconciliationNextAt: 61_000,
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(
+      hoisted.redisHashes
+        .get("subscriber_goal_creation_v1:auto-next:t3_submit-fallback")
+        ?.get("status"),
+    ).toBe("submitting");
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_submit-fallback",
+        reconciliationNowMs: 61_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+      reconciliationAttempts: 1,
+    });
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("keeps returned-ID ambiguity typed when both persistence writes fail", async () => {
+    hoisted.createGoalPost.mockResolvedValue(createPost());
+    hoisted.state.failPostSubmittedWrite = true;
+    hoisted.state.failSubmissionUnknownWrites = 1;
+
+    await expect(
+      createGoal({
+        operationId: "onboarding:returned-id-fallback",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+      reconciliationNextAt: 61_000,
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(
+      hoisted.redisHashes
+        .get("subscriber_goal_creation_v1:onboarding:returned-id-fallback")
+        ?.get("status"),
+    ).toBe("submitting");
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+
+    await expect(
+      createGoal({
+        operationId: "onboarding:returned-id-fallback",
+        reconciliationNowMs: 61_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+      reconciliationAttempts: 1,
+    });
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("does not submit when the pre-submit submitting write fails", async () => {
+    hoisted.state.failSubmittingWrite = true;
+
+    await expect(
+      createGoal({ operationId: "auto-next:t3_pre-submit-write" }),
+    ).rejects.toThrow("submitting write failed");
+
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
   it("stops scanning after the sixth inconclusive reconciliation", async () => {
     const operationKey =
       "subscriber_goal_creation_v1:auto-next:t3_reconciliation-cutoff";
@@ -682,6 +858,79 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(
       hoisted.redisHashes.get(operationKey)?.get("reconciliationStatus"),
     ).toBe("exhausted");
+  });
+
+  it("lets the reserved sixth scan recover an exact marker match", async () => {
+    const post = createPost();
+    const operationKey = "subscriber_goal_creation_v1:auto-next:t3_sixth-match";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-sixth"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "5"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      submissionMarker: "marker-sixth",
+    });
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_sixth-match",
+        reconciliationNowMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.redisHashes.get(operationKey)?.get("postId")).toBe(post.id);
+  });
+
+  it("never scans again after an interrupted reserved sixth scan", async () => {
+    const operationKey =
+      "subscriber_goal_creation_v1:auto-next:t3_sixth-interrupted";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-sixth-interrupted"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "5"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => {
+        throw new Error("worker interrupted");
+      }),
+    });
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_sixth-interrupted",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({ reconciliationStatus: "exhausted" });
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_sixth-interrupted",
+        reconciliationNowMs: 99_999_999,
+      }),
+    ).rejects.toMatchObject({ reconciliationStatus: "exhausted" });
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
   it.each(["multiple", "lookup-failure", "unrelated", "legacy"] as const)(
@@ -768,6 +1017,116 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
       1,
     );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("waits for the next reserved slot when a recovered ID write does not commit", async () => {
+    const post = createPost();
+    const unrelated = { ...createPost(), id: "t3_unrelated" };
+    const operationKey =
+      "subscriber_goal_creation_v1:auto-next:t3_recovered-id-no-commit";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-recovered-id"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "0"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [unrelated, post]),
+    });
+    hoisted.reddit.getPostData.mockImplementation(async (postId: string) => ({
+      submissionMarker:
+        postId === post.id ? "marker-recovered-id" : "unrelated-marker",
+    }));
+    hoisted.state.failPostSubmittedWrite = true;
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_recovered-id-no-commit",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationStatus: "pending",
+      reconciliationNextAt: 301_000,
+    });
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(
+      hoisted.redisHashes.get(operationKey)?.get("postId"),
+    ).toBeUndefined();
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_recovered-id-no-commit",
+        reconciliationNowMs: 300_999,
+      }),
+    ).rejects.toMatchObject({ reconciliationNextAt: 301_000 });
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_recovered-id-no-commit",
+        reconciliationNowMs: 301_000,
+      }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledTimes(2);
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("uses the known-post path when a recovered ID write commits before throwing", async () => {
+    const post = createPost();
+    const operationKey =
+      "subscriber_goal_creation_v1:onboarding:recovered-id-committed";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-committed-id"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "0"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      submissionMarker: "marker-committed-id",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.state.failPostSubmittedWrite = true;
+    hoisted.state.commitPostSubmittedBeforeThrow = true;
+
+    await expect(
+      createGoal({
+        operationId: "onboarding:recovered-id-committed",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+    expect(hoisted.redisHashes.get(operationKey)?.get("status")).toBe(
+      "post_submitted",
+    );
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+
+    await expect(
+      createGoal({
+        operationId: "onboarding:recovered-id-committed",
+        reconciliationNowMs: 301_000,
+      }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getPostById).toHaveBeenCalledWith(post.id);
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
   });
