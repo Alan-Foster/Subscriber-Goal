@@ -1,5 +1,6 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
+  clearAutomaticSuccessorSuppression,
   repairAutoCreateNextGoal,
   type AutoCreateNextGoalRepairResult,
 } from "../data/subGoalData";
@@ -66,6 +67,10 @@ export async function reconcileCompletedGoal({
       successorPostId: existingSuccessor,
     };
   }
+
+  // Install/upgrade reconciliation has explicitly elected recovery, so it
+  // supersedes the temporary ownership decision persisted by discovery.
+  await clearAutomaticSuccessorSuppression(redis, sourcePostId);
 
   const repaired = await repairAutoCreateNextGoal(
     redis,

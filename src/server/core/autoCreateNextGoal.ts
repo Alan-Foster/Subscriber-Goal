@@ -509,6 +509,7 @@ async function findLiveHighlightedPrimary({
         {
           now: () => nowMs,
           scheduleAutomaticSuccessor: false,
+          automaticSuccessorSuppression: "auto_goal_reconciliation",
           mutationLease,
         },
       );

@@ -904,6 +904,32 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     );
   });
 
+  it.each(["onboarding_reconciliation", "unknown"])(
+    "does not repair a completed source with %s successor suppression",
+    async (automaticSuccessorSuppression) => {
+      hoisted.context.subredditName = "CorporateGifts";
+      hoisted.getQueuedUpdates.mockResolvedValue(["t3_suppressed"]);
+      hoisted.getSubGoalData.mockResolvedValue({
+        goal: 12,
+        completedTime: 1_000,
+        autoCreateNextGoal: true,
+        automaticSuccessorSuppression,
+        postHeight: "regular",
+        colorTheme: "red",
+        language: "en",
+      });
+      hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_suppressed" });
+
+      await onPostsUpdaterJob();
+
+      expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+      expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
+        expect.anything(),
+        "t3_suppressed",
+      );
+    },
+  );
+
   it("does not perform a stale repair after overlapping work maps a successor", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     hoisted.context.subredditName = "CorporateGifts";

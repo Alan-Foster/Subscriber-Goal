@@ -22,6 +22,7 @@ import {
   setSubGoalData,
   setSubredditDisplayNameForPost,
   subscriberGoalsKey,
+  postAutomaticSuccessorSuppressionSuffix,
   postColorThemeSuffix,
   postAfterSubscribeActionSuffix,
   postAfterSubscribeButtonTextSuffix,
@@ -898,6 +899,90 @@ describe("subGoalData subreddit display name", () => {
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
   });
 
+  it("persists intentional successor suppression atomically with completion", async () => {
+    const redis = new InMemoryRedis();
+    await setSubGoalData(redis as never, "t3_suppressed", {
+      goal: 10,
+      recentSubscriber: "",
+      completedTime: 0,
+      subredditDisplayName: "subscriber_goal_dev",
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+
+    await expect(
+      checkCompletionStatus(
+        {
+          getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+        } as never,
+        redis as never,
+        "t3_suppressed",
+        {
+          now: () => 1_000,
+          scheduleAutomaticSuccessor: false,
+          automaticSuccessorSuppression: "auto_goal_reconciliation",
+          scheduleMilestoneNotification: vi
+            .fn()
+            .mockResolvedValue("suppressed"),
+        },
+      ),
+    ).resolves.toBe(1_000);
+    await expect(
+      getSubGoalData(redis as never, "t3_suppressed"),
+    ).resolves.toMatchObject({
+      completedTime: 1_000,
+      automaticSuccessorSuppression: "auto_goal_reconciliation",
+    });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+
+    await redis.hSet(subscriberGoalsKey, {
+      [`t3_suppressed${postAutomaticSuccessorSuppressionSuffix}`]:
+        "future_suppression_reason",
+    });
+    await expect(
+      getSubGoalData(redis as never, "t3_suppressed"),
+    ).resolves.toMatchObject({ automaticSuccessorSuppression: "unknown" });
+  });
+
+  it("clears stale suppression during an ordinary completion transition", async () => {
+    const redis = new InMemoryRedis();
+    await setSubGoalData(redis as never, "t3_normal_completion", {
+      goal: 10,
+      recentSubscriber: "",
+      completedTime: 0,
+      subredditDisplayName: "subscriber_goal_dev",
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+    await redis.hSet(subscriberGoalsKey, {
+      [`t3_normal_completion${postAutomaticSuccessorSuppressionSuffix}`]:
+        "onboarding_reconciliation",
+    });
+
+    await checkCompletionStatus(
+      {
+        getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
+      } as never,
+      redis as never,
+      "t3_normal_completion",
+      {
+        now: () => 1_000,
+        scheduleMilestoneNotification: vi.fn().mockResolvedValue("suppressed"),
+      },
+    );
+
+    await expect(
+      getSubGoalData(redis as never, "t3_normal_completion"),
+    ).resolves.toMatchObject({ automaticSuccessorSuppression: null });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
+      { member: "t3_normal_completion", score: 86_401_000 },
+    ]);
+  });
+
   it("allows only one concurrent completion caller to start the campaign", async () => {
     const redis = new InMemoryRedis();
     const reddit = {
@@ -1000,7 +1085,10 @@ describe("subGoalData subreddit display name", () => {
     ).resolves.toBe(1_000);
     await expect(
       getSubGoalData(redis as never, "t3_recover_queue"),
-    ).resolves.toMatchObject({ completedTime: 1_000 });
+    ).resolves.toMatchObject({
+      completedTime: 1_000,
+      automaticSuccessorSuppression: null,
+    });
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
 
     await expect(

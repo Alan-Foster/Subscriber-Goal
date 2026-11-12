@@ -4,6 +4,7 @@ import {
   autoCreateNextGoalQueueKey,
   autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalSuccessorsKey,
+  postAutomaticSuccessorSuppressionSuffix,
   subscriberGoalsKey,
 } from "../data/subGoalData";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
@@ -94,6 +95,8 @@ describe("subscriber goal post retirement", () => {
     await redis.hSet(subscriberGoalsKey, {
       [`${postId}_goal`]: "1000",
       [`${postId}_post_kind`]: "subscriber-goal-v1",
+      [`${postId}${postAutomaticSuccessorSuppressionSuffix}`]:
+        "auto_goal_reconciliation",
     });
     await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { [postId]: "2" });
     await redis.hSet(autoCreateNextGoalExhaustedKey, { [postId]: "5" });
@@ -124,6 +127,11 @@ describe("subscriber goal post retirement", () => {
     expect(redis.hashes.get(subscriberGoalsKey)?.has(`${postId}_goal`)).toBe(
       false,
     );
+    expect(
+      redis.hashes
+        .get(subscriberGoalsKey)
+        ?.has(`${postId}${postAutomaticSuccessorSuppressionSuffix}`),
+    ).toBe(false);
     expect(redis.hashes.get(autoCreateNextGoalSuccessorsKey)?.size).toBe(0);
     expect(redis.hashes.has(highlightManagementStateKey)).toBe(false);
     expect(redis.hashes.get(appRepairStateKey)?.get("status")).toBe("pending");

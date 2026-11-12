@@ -51,6 +51,8 @@ export const postSubredditDisplayNameSuffix = "_subreddit_display_name";
 export const postHeaderTextSuffix = "_header_text";
 export const postColorThemeSuffix = "_color_theme";
 export const postAutoCreateNextGoalSuffix = "_auto_create_next_goal";
+export const postAutomaticSuccessorSuppressionSuffix =
+  "_automatic_successor_suppression";
 export const postLanguageSuffix = "_language";
 export const postHeightSuffix = "_post_height";
 export const postKindSuffix = "_post_kind";
@@ -94,6 +96,7 @@ export const subscriberGoalPostFieldSuffixes = [
   postHeaderTextSuffix,
   postColorThemeSuffix,
   postAutoCreateNextGoalSuffix,
+  postAutomaticSuccessorSuppressionSuffix,
   postLanguageSuffix,
   postHeightSuffix,
   postKindSuffix,
@@ -129,11 +132,18 @@ export type SubGoalData = {
   autoCreateNextGoal: boolean;
   /** Distinguishes an explicit opt-out from posts created before this setting existed. */
   autoCreateNextGoalConfigured: boolean;
+  automaticSuccessorSuppression: PersistedAutomaticSuccessorSuppression | null;
   language: SubGoalLanguage;
   postHeight: SubGoalPostHeight;
   afterSubscribeAction: AfterSubscribeAction;
   afterSubscribePreset: AfterSubscribePreset | null;
 };
+
+export type AutomaticSuccessorSuppressionReason =
+  "auto_goal_reconciliation" | "onboarding_reconciliation";
+
+export type PersistedAutomaticSuccessorSuppression =
+  AutomaticSuccessorSuppressionReason | "unknown";
 
 type RedditPost = Awaited<ReturnType<RedditClient["submitCustomPost"]>>;
 
@@ -291,6 +301,7 @@ export async function getSubGoalData(
     headerText,
     colorTheme,
     autoCreateNextGoal,
+    automaticSuccessorSuppression,
     language,
     postHeight,
     storedPostKind,
@@ -307,6 +318,7 @@ export async function getSubGoalData(
     `${postId}${postHeaderTextSuffix}`,
     `${postId}${postColorThemeSuffix}`,
     `${postId}${postAutoCreateNextGoalSuffix}`,
+    `${postId}${postAutomaticSuccessorSuppressionSuffix}`,
     `${postId}${postLanguageSuffix}`,
     `${postId}${postHeightSuffix}`,
     `${postId}${postKindSuffix}`,
@@ -331,8 +343,23 @@ export async function getSubGoalData(
     string | null,
     string | null,
     string | null,
+    string | null,
   ];
   const parsedGoal = parsePersistedSubscriberGoal(goal);
+  const resolvedAutomaticSuccessorSuppression =
+    automaticSuccessorSuppression === "auto_goal_reconciliation" ||
+    automaticSuccessorSuppression === "onboarding_reconciliation"
+      ? automaticSuccessorSuppression
+      : automaticSuccessorSuppression?.trim()
+        ? "unknown"
+        : null;
+  if (resolvedAutomaticSuccessorSuppression === "unknown") {
+    logDiagnostic("warn", "stored_state_conflict", {
+      workflow: "sub_goal_data",
+      phase: "automatic_successor_suppression_resolution",
+      postId,
+    });
+  }
   const postDataKind = resolvePostKindFromPostData(customPostData);
   const persistedKind = resolvePostKind(storedPostKind);
   const rawHeight = resolveSubGoalPostHeight(postHeight);
@@ -416,6 +443,7 @@ export async function getSubGoalData(
     autoCreateNextGoal: autoCreateNextGoal === "true",
     autoCreateNextGoalConfigured:
       autoCreateNextGoal === "true" || autoCreateNextGoal === "false",
+    automaticSuccessorSuppression: resolvedAutomaticSuccessorSuppression,
     language: resolvedLanguage,
     postHeight: resolvedHeight,
     afterSubscribeAction,
@@ -435,10 +463,12 @@ export async function setSubGoalData(
     | "afterSubscribeAction"
     | "afterSubscribePreset"
     | "autoCreateNextGoalConfigured"
+    | "automaticSuccessorSuppression"
   > & {
     postKind?: PostKind;
     afterSubscribeAction?: AfterSubscribeAction;
     afterSubscribePreset?: AfterSubscribePreset | null;
+    automaticSuccessorSuppression?: PersistedAutomaticSuccessorSuppression | null;
   },
 ): Promise<void> {
   const afterSubscribeAction =
@@ -457,6 +487,8 @@ export async function setSubGoalData(
     [`${postId}${postAutoCreateNextGoalSuffix}`]: data.autoCreateNextGoal
       ? "true"
       : "false",
+    [`${postId}${postAutomaticSuccessorSuppressionSuffix}`]:
+      data.automaticSuccessorSuppression ?? "",
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
     [`${postId}${postHeightSuffix}`]: resolveSubGoalPostHeight(data.postHeight),
     [`${postId}${postAfterSubscribeActionSuffix}`]: afterSubscribeAction.type,
@@ -746,17 +778,39 @@ export async function setSubredditDisplayNameForPost(
   });
 }
 
+export async function clearAutomaticSuccessorSuppression(
+  redis: RedisClient,
+  postId: string,
+): Promise<void> {
+  await redis.hDel(subscriberGoalsKey, [
+    `${postId}${postAutomaticSuccessorSuppressionSuffix}`,
+  ]);
+}
+
+type CheckCompletionStatusBaseOptions = {
+  now?: () => number;
+  wait?: (delayMs: number) => Promise<void>;
+  scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
+  mutationLease?: CommunityGoalMutationLease;
+};
+
+type CheckCompletionStatusOptions = CheckCompletionStatusBaseOptions &
+  (
+    | {
+        scheduleAutomaticSuccessor?: true;
+        automaticSuccessorSuppression?: never;
+      }
+    | {
+        scheduleAutomaticSuccessor: false;
+        automaticSuccessorSuppression: AutomaticSuccessorSuppressionReason;
+      }
+  );
+
 export async function checkCompletionStatus(
   reddit: RedditClient,
   redis: RedisClient,
   postId: string,
-  options: {
-    now?: () => number;
-    wait?: (delayMs: number) => Promise<void>;
-    scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
-    scheduleAutomaticSuccessor?: boolean;
-    mutationLease?: CommunityGoalMutationLease;
-  } = {},
+  options: CheckCompletionStatusOptions = {},
 ): Promise<number> {
   try {
     return await withCommunityGoalMutationLease(
@@ -789,11 +843,7 @@ async function checkCompletionStatusUnderLease(
   reddit: RedditClient,
   redis: RedisClient,
   postId: string,
-  options: {
-    now?: () => number;
-    wait?: (delayMs: number) => Promise<void>;
-    scheduleMilestoneNotification?: typeof maybeScheduleMilestoneNotification;
-    scheduleAutomaticSuccessor?: boolean;
+  options: CheckCompletionStatusOptions & {
     mutationLease: CommunityGoalMutationLease;
   },
 ): Promise<number> {
@@ -848,6 +898,10 @@ async function checkCompletionStatusUnderLease(
     }
 
     lockedSubGoalData.completedTime = now();
+    lockedSubGoalData.automaticSuccessorSuppression =
+      options.scheduleAutomaticSuccessor === false
+        ? options.automaticSuccessorSuppression
+        : null;
     await setSubGoalData(redis, postId, lockedSubGoalData);
     if (isLinkId(postId)) {
       try {

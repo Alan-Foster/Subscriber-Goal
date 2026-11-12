@@ -499,7 +499,10 @@ describe("processDueAutoCreateNextGoals", () => {
       hoisted.reddit,
       hoisted.redis,
       "t3_reached",
-      expect.objectContaining({ scheduleAutomaticSuccessor: false }),
+      expect.objectContaining({
+        scheduleAutomaticSuccessor: false,
+        automaticSuccessorSuppression: "auto_goal_reconciliation",
+      }),
     );
   });
 

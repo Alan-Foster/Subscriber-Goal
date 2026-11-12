@@ -3,6 +3,7 @@ import {
   autoCreateNextGoalExhaustedKey,
   autoCreateNextGoalQueueKey,
   autoCreateNextGoalRetryAttemptsKey,
+  postAutomaticSuccessorSuppressionSuffix,
 } from "../data/subGoalData";
 import { autoCreateNextGoalSuccessorsKey } from "./autoCreateNextGoal";
 import {
@@ -660,6 +661,12 @@ describe("onboarding lifecycle reconciliation", () => {
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
     ).resolves.toBe(String(nowMs));
+    await expect(
+      redis.hGet(
+        "subscriber_goals",
+        `${post.id}${postAutomaticSuccessorSuppressionSuffix}`,
+      ),
+    ).resolves.toBe("onboarding_reconciliation");
     await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
   });
 
@@ -919,6 +926,12 @@ describe("onboarding lifecycle reconciliation", () => {
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
     ).resolves.toBe(String(nowMs));
+    await expect(
+      redis.hGet(
+        "subscriber_goals",
+        `${post.id}${postAutomaticSuccessorSuppressionSuffix}`,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("preserves successor opt-out during reinstall", async () => {

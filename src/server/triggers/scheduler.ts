@@ -59,6 +59,7 @@ import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
 
 type CompletedUpdateCleanupPreparation =
   | "auto_disabled"
+  | "intentionally_suppressed"
   | "onboarding_takeover"
   | "successor_mapped"
   | "scheduled"
@@ -78,6 +79,9 @@ async function prepareCompletedUpdateCleanup(
       throw new Error("Completed goal lost its persisted completion time.");
     }
     if (!latest.autoCreateNextGoal) return "auto_disabled";
+    if (latest.automaticSuccessorSuppression) {
+      return "intentionally_suppressed";
+    }
 
     const [successor, onboardingIntent, replacementSourcePostId, status] =
       await Promise.all([

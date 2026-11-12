@@ -1606,6 +1606,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
           {
             now: () => nowMs,
             scheduleAutomaticSuccessor: false,
+            automaticSuccessorSuppression: "onboarding_reconciliation",
             mutationLease,
           },
         );
