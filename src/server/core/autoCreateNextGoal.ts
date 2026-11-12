@@ -15,7 +15,10 @@ import {
   subscriberGoalsKey,
 } from "../data/subGoalData";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
-import { createSubscriberGoal } from "./createSubscriberGoal";
+import {
+  createSubscriberGoal,
+  SubscriberGoalCreationOutcomeUnknownError,
+} from "./createSubscriberGoal";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import {
   getTerminalRemovedByCategory,
@@ -49,6 +52,7 @@ export type AutoCreateNextGoalSummary = {
   failed: number;
   rescheduled: number;
   exhausted: number;
+  unresolved?: number;
 };
 
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
@@ -404,6 +408,16 @@ export async function processDueAutoCreateNextGoals({
       summary.created += 1;
       break;
     } catch (error) {
+      if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
+        summary.unresolved = (summary.unresolved ?? 0) + 1;
+        logDiagnostic("warn", "auto_create_goal_submission_unresolved", {
+          workflow: "auto_create_next_goal",
+          phase: "submission_reconciliation",
+          postId: sourcePostId,
+          operationId: `auto-next:${sourcePostId}`,
+        });
+        continue;
+      }
       logDiagnostic(
         "error",
         "auto_create_goal_failed",

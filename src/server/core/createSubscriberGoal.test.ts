@@ -5,11 +5,13 @@ const hoisted = vi.hoisted(() => ({
     getCurrentSubreddit: vi.fn(),
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
+    getNewPosts: vi.fn(),
+    getPostData: vi.fn(),
   },
   getModPermissionsForSubreddit: vi.fn(),
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
-  state: { failCompleteWrite: false },
+  state: { failCompleteWrite: false, failPostSubmittedWrite: false },
   highlightedIds: new Set<string>(),
   redis: {
     set: vi.fn(
@@ -27,6 +29,13 @@ const hoisted = vi.hoisted(() => ({
       Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     ),
     hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+      if (
+        fields.status === "post_submitted" &&
+        hoisted.state.failPostSubmittedWrite
+      ) {
+        hoisted.state.failPostSubmittedWrite = false;
+        throw new Error("post ID write failed");
+      }
       if (fields.status === "complete" && hoisted.state.failCompleteWrite) {
         hoisted.state.failCompleteWrite = false;
         throw new Error("final operation write failed");
@@ -169,6 +178,7 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
     hoisted.state.failCompleteWrite = false;
+    hoisted.state.failPostSubmittedWrite = false;
     hoisted.highlightedIds.clear();
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -227,6 +237,10 @@ describe("createSubscriberGoal highlight handling", () => {
       id: "flair_subgoal",
     });
     hoisted.reddit.getPostById.mockResolvedValue(undefined);
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => []),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue(undefined);
   });
 
   it.each(["regular", "tiny"] as const)(
@@ -505,6 +519,152 @@ describe("createSubscriberGoal highlight handling", () => {
         .get("subscriber_goal_creation_v1:manual:unknown")
         ?.get("status"),
     ).toBe("submission_unknown");
+  });
+
+  it("recovers the exact post created before a lost submission response", async () => {
+    const post = createPost();
+    let marker = "";
+    hoisted.createGoalPost.mockImplementationOnce(async (options) => {
+      marker = options.submissionMarker;
+      throw new Error("connection reset after create");
+    });
+
+    await expect(
+      createGoal({ operationId: "manual:lost-response" }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
+
+    await expect(
+      createGoal({ operationId: "manual:lost-response" }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("recovers when saving the returned post ID fails", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.state.failPostSubmittedWrite = true;
+
+    await expect(
+      createGoal({ operationId: "manual:id-write" }),
+    ).rejects.toThrow("post ID write failed");
+    const marker = hoisted.redisHashes
+      .get("subscriber_goal_creation_v1:manual:id-write")
+      ?.get("submissionMarker");
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
+
+    await expect(
+      createGoal({ operationId: "manual:id-write" }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a missing marker match blocked until it becomes visible", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockRejectedValueOnce(new Error("timeout"));
+    await expect(
+      createGoal({ operationId: "manual:eventual" }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+    await expect(
+      createGoal({ operationId: "manual:eventual" }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+
+    const marker = hoisted.redisHashes
+      .get("subscriber_goal_creation_v1:manual:eventual")
+      ?.get("submissionMarker");
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
+    await expect(
+      createGoal({ operationId: "manual:eventual" }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it.each(["multiple", "lookup-failure", "unrelated", "legacy"] as const)(
+    "does not adopt or resubmit an unresolved %s operation",
+    async (scenario) => {
+      const post = createPost();
+      const otherPost = { ...createPost(), id: "t3_other" };
+      const operationKey = `subscriber_goal_creation_v1:manual:${scenario}`;
+      hoisted.redisHashes.set(
+        operationKey,
+        new Map([
+          ["status", "submission_unknown"],
+          ["subredditName", "ExampleSub"],
+          ["subredditId", "t5_example"],
+          ...(scenario === "legacy"
+            ? []
+            : [["submissionMarker", "marker-1"] as [string, string]]),
+        ]),
+      );
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi.fn(async () =>
+          scenario === "multiple" ? [post, otherPost] : [post],
+        ),
+      });
+      if (scenario === "lookup-failure") {
+        hoisted.reddit.getPostData.mockRejectedValue(new Error("lookup down"));
+      } else {
+        hoisted.reddit.getPostData.mockResolvedValue({
+          submissionMarker:
+            scenario === "unrelated" ? "other-marker" : "marker-1",
+        });
+      }
+
+      await expect(
+        createGoal({ operationId: `manual:${scenario}` }),
+      ).rejects.toMatchObject({
+        name: "SubscriberGoalCreationOutcomeUnknownError",
+      });
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    },
+  );
+
+  it("serializes concurrent reconciliation and registers the recovered post once", async () => {
+    const post = createPost();
+    hoisted.redisHashes.set(
+      "subscriber_goal_creation_v1:manual:concurrent",
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-concurrent"],
+      ]),
+    );
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      submissionMarker: "marker-concurrent",
+    });
+
+    const results = await Promise.allSettled([
+      createGoal({ operationId: "manual:concurrent" }),
+      createGoal({ operationId: "manual:concurrent" }),
+    ]);
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(
+      1,
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
   });
 
   it("does not fail successful creation when operation expiration fails", async () => {

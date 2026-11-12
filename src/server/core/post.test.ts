@@ -53,6 +53,24 @@ describe("createGoalPost", () => {
     );
   });
 
+  it("stores an opaque submission marker alongside the post kind", async () => {
+    await createGoalPost({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: "Fallback text",
+      submissionMarker: "opaque-marker",
+    });
+
+    expect(hoisted.reddit.submitCustomPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postData: {
+          postKind: "subscriber-goal-v1",
+          submissionMarker: "opaque-marker",
+        },
+      }),
+    );
+  });
+
   it("uses runAs USER with required user generated content when submitAsUser is true", async () => {
     await createGoalPost({
       title: "Welcome!",

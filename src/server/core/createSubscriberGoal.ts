@@ -142,6 +142,7 @@ export class SubscriberGoalCreationOutcomeUnknownError extends Error {
 }
 
 export const subscriberGoalCreationOperationRetentionSeconds = 24 * 60 * 60;
+const submissionReconciliationListingLimit = 100;
 
 type StoredCreationOperation = Record<string, string>;
 
@@ -345,13 +346,6 @@ async function createSubscriberGoalUnderCommunityLease({
   if (existingTerminal) return existingTerminal;
   const completed = await recoverCompletedCreation(reddit, existing);
   if (completed) return completed;
-  if (
-    existing.status === "submitting" ||
-    existing.status === "submission_unknown"
-  ) {
-    throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
-  }
-
   const nowMs = Date.now();
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(lockKey, lockToken, {
@@ -368,20 +362,33 @@ async function createSubscriberGoalUnderCommunityLease({
     if (reloadedTerminal) return reloadedTerminal;
     const recoveredComplete = await recoverCompletedCreation(reddit, reloaded);
     if (recoveredComplete) return recoveredComplete;
+    let recoveredPost: Awaited<ReturnType<typeof createGoalPost>> | undefined;
     if (
       reloaded.status === "submitting" ||
       reloaded.status === "submission_unknown"
     ) {
-      throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+      recoveredPost = await reconcileAmbiguousSubmission({
+        reddit,
+        raw: reloaded,
+      });
+      if (!recoveredPost) {
+        throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+      }
+      await writeCreationOperation(redis, operationKey, {
+        status: "post_submitted",
+        postId: recoveredPost.id,
+        updatedAt: String(Date.now()),
+      });
     }
+    const submissionMarker = reloaded.submissionMarker || crypto.randomUUID();
     await writeCreationOperation(redis, operationKey, {
       status: "claimed",
       startedAt: reloaded.startedAt || String(nowMs),
       updatedAt: String(nowMs),
+      submissionMarker,
     });
-    const submittedPostId = reloaded.postId ?? "";
-    let recoveredPost: Awaited<ReturnType<typeof createGoalPost>> | undefined;
-    if (isLinkId(submittedPostId)) {
+    const submittedPostId = recoveredPost?.id ?? reloaded.postId ?? "";
+    if (isLinkId(submittedPostId) && !recoveredPost) {
       if (await isSubscriberGoalPostRetired(redis, submittedPostId)) {
         const retired = createTerminalCreationResult(
           "retired",
@@ -427,9 +434,12 @@ async function createSubscriberGoalUnderCommunityLease({
               ) as CrosspostDispatchResult,
             }
           : {}),
-        onSubmissionStarted: async () => {
+        submissionMarker,
+        onSubmissionStarted: async (subredditName, subredditId) => {
           await writeCreationOperation(redis, operationKey, {
             status: "submitting",
+            subredditName,
+            subredditId,
             updatedAt: String(Date.now()),
           });
         },
@@ -490,7 +500,11 @@ async function createSubscriberGoalInternal(
   recovery?: {
     recoveredPost?: Awaited<ReturnType<typeof createGoalPost>>;
     recoveredCrosspostDispatchResult?: CrosspostDispatchResult;
-    onSubmissionStarted: () => Promise<void>;
+    submissionMarker: string;
+    onSubmissionStarted: (
+      subredditName: string,
+      subredditId: string,
+    ) => Promise<void>;
     onPostSubmitted: (postId: string) => Promise<void>;
     onSubmissionUnknown: () => Promise<void>;
     onRegistrationCompleted: (
@@ -609,7 +623,7 @@ async function createSubscriberGoalInternal(
 
   let post = recovery?.recoveredPost;
   if (!post) {
-    await recovery?.onSubmissionStarted();
+    await recovery?.onSubmissionStarted(subreddit.name, subreddit.id);
     try {
       post = await createGoalPost({
         title: options.title,
@@ -617,6 +631,9 @@ async function createSubscriberGoalInternal(
         textFallback,
         postHeight: options.postHeight,
         language: options.language,
+        ...(recovery?.submissionMarker
+          ? { submissionMarker: recovery.submissionMarker }
+          : {}),
         ...(flairResult.status === "applied"
           ? { flairId: flairResult.flairId }
           : {}),
@@ -810,6 +827,56 @@ async function createSubscriberGoalInternal(
     highlightResult,
     flairResult,
   };
+}
+
+async function reconcileAmbiguousSubmission({
+  reddit,
+  raw,
+}: {
+  reddit: RedditClient;
+  raw: StoredCreationOperation;
+}): Promise<Awaited<ReturnType<typeof createGoalPost>> | undefined> {
+  const marker = raw.submissionMarker;
+  const expectedSubredditName = raw.subredditName;
+  const expectedSubredditId = raw.subredditId;
+  if (!marker || !expectedSubredditName || !expectedSubredditId)
+    return undefined;
+
+  try {
+    const posts = await reddit
+      .getNewPosts({
+        subredditName: expectedSubredditName,
+        limit: submissionReconciliationListingLimit,
+        pageSize: submissionReconciliationListingLimit,
+      })
+      .all();
+    const matches: typeof posts = [];
+    for (const post of posts) {
+      if (
+        post.subredditId !== expectedSubredditId ||
+        post.subredditName.toLowerCase() !== expectedSubredditName.toLowerCase()
+      ) {
+        continue;
+      }
+      const postData = await reddit.getPostData(post.id);
+      if (postData?.submissionMarker === marker) matches.push(post);
+    }
+    return matches.length === 1
+      ? (matches[0] as Awaited<ReturnType<typeof createGoalPost>>)
+      : undefined;
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "goal_creation_submission_reconciliation_failed",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "submission_reconciliation",
+        subredditName: expectedSubredditName,
+      },
+      error,
+    );
+    return undefined;
+  }
 }
 
 async function getExistingGoalPostIds(

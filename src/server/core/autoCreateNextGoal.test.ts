@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
 import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
+import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
 
 const baseSettings: ServerAppSettings = {
   promoSubreddit: "SubGoal",
@@ -103,6 +104,7 @@ vi.mock("./postRetirement", async (importOriginal) => ({
 
 vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
+  SubscriberGoalCreationOutcomeUnknownError: class extends Error {},
 }));
 
 vi.mock("./appAccountHealth", () => ({
@@ -443,6 +445,33 @@ describe("processDueAutoCreateNextGoals", () => {
       hoisted.redisHashes.get("auto_create_next_goal_v1_successors"),
     ).toEqual(new Map([["t3_unrelated", "t3_newer"]]));
     expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+  });
+
+  it("reports an unresolved submission without spending the ordinary retry budget", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new SubscriberGoalCreationOutcomeUnknownError(),
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 86_401_000,
+      }),
+    ).resolves.toMatchObject({
+      due: 1,
+      created: 0,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
+      unresolved: 1,
+    });
+
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 

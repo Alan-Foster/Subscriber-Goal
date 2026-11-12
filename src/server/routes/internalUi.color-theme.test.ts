@@ -2106,6 +2106,26 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
+  it("warns moderators that an unresolved submission may already exist", async () => {
+    seedCreateGoalDraft("regular", "en");
+    hoisted.createGoalPost.mockRejectedValue(
+      new Error("submission response lost"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast:
+        "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Check the community's newest posts before trying a newly opened form.",
+    });
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
   it("retains the draft when subscriber-goal validation fails", async () => {
     seedCreateGoalDraft("regular", "en", { stage: "details" });
     const routes = createRouteHarness();
@@ -2605,6 +2625,7 @@ describe("internalUi color theme create goal routes", () => {
       postHeight: "regular",
       language: "es",
       flairId: "flair_subgoal",
+      submissionMarker: expect.any(String),
     });
   });
 
@@ -2641,6 +2662,7 @@ describe("internalUi color theme create goal routes", () => {
       language: "en",
       flairId: "flair_subgoal",
       submitAsUser: true,
+      submissionMarker: expect.any(String),
     });
   });
 
@@ -2808,6 +2830,7 @@ describe("internalUi color theme create goal routes", () => {
       language: "en",
       flairId: "flair_subgoal",
       submitAsUser: true,
+      submissionMarker: expect.any(String),
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       hoisted.reddit,
@@ -2861,6 +2884,7 @@ describe("internalUi color theme create goal routes", () => {
       postHeight: "regular",
       language: "en",
       flairId: "flair_subgoal",
+      submissionMarker: expect.any(String),
     });
   });
 
@@ -2896,6 +2920,7 @@ describe("internalUi color theme create goal routes", () => {
       postHeight: "regular",
       language: "en",
       flairId: "flair_subgoal",
+      submissionMarker: expect.any(String),
     });
   });
 
@@ -2931,6 +2956,7 @@ describe("internalUi color theme create goal routes", () => {
       postHeight: "regular",
       language: "en",
       flairId: "flair_subgoal",
+      submissionMarker: expect.any(String),
     });
     expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
       hoisted.reddit,

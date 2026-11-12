@@ -21,6 +21,7 @@ type CreateGoalPostParams = {
   submitAsUser?: boolean;
   flairId?: string;
   language?: unknown;
+  submissionMarker?: string;
 };
 
 export const createGoalPost = async ({
@@ -31,6 +32,7 @@ export const createGoalPost = async ({
   submitAsUser = false,
   flairId,
   language,
+  submissionMarker,
 }: CreateGoalPostParams) => {
   const isCompactActionPost = postHeight === "tiny" || postHeight === "cta";
   return await reddit.submitCustomPost({
@@ -44,6 +46,7 @@ export const createGoalPost = async ({
           : postHeight === "tiny"
             ? subscribeOnlyPostKind
             : subscriberGoalPostKind,
+      ...(submissionMarker ? { submissionMarker } : {}),
     },
     styles: isCompactActionPost
       ? {
