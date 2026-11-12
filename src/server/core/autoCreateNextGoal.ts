@@ -9,7 +9,9 @@ import {
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
   markAutoCreateNextGoalExhausted,
+  markAutoCreateNextGoalReconciliationExhausted,
   recordAutoCreateNextGoalFailure,
+  scheduleAutoCreateNextGoalReconciliation,
   postHeightSuffix,
   postKindSuffix,
   subscriberGoalsKey,
@@ -53,6 +55,8 @@ export type AutoCreateNextGoalSummary = {
   rescheduled: number;
   exhausted: number;
   unresolved?: number;
+  reconciliationRescheduled?: number;
+  reconciliationExhausted?: number;
 };
 
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
@@ -335,6 +339,7 @@ export async function processDueAutoCreateNextGoals({
           operationId: `auto-next:${sourcePostId}`,
           reconciliationContext: "automatic_successor",
           mutationLease,
+          reconciliationNowMs: nowMs,
         },
       });
       if (creation.outcome === "superseded" || creation.outcome === "retired") {
@@ -410,11 +415,35 @@ export async function processDueAutoCreateNextGoals({
     } catch (error) {
       if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
         summary.unresolved = (summary.unresolved ?? 0) + 1;
+        const operationId = `auto-next:${sourcePostId}`;
+        if (
+          error.reconciliationStatus === "pending" &&
+          error.reconciliationNextAt !== undefined
+        ) {
+          await scheduleAutoCreateNextGoalReconciliation(
+            redis,
+            sourcePostId,
+            error.reconciliationNextAt,
+          );
+          summary.reconciliationRescheduled =
+            (summary.reconciliationRescheduled ?? 0) + 1;
+        } else {
+          await markAutoCreateNextGoalReconciliationExhausted(
+            redis,
+            sourcePostId,
+            operationId,
+          );
+          summary.reconciliationExhausted =
+            (summary.reconciliationExhausted ?? 0) + 1;
+        }
         logDiagnostic("warn", "auto_create_goal_submission_unresolved", {
           workflow: "auto_create_next_goal",
           phase: "submission_reconciliation",
           postId: sourcePostId,
-          operationId: `auto-next:${sourcePostId}`,
+          operationId,
+          reconciliationStatus: error.reconciliationStatus,
+          reconciliationAttempts: error.reconciliationAttempts,
+          reconciliationNextAt: error.reconciliationNextAt ?? "none",
         });
         continue;
       }

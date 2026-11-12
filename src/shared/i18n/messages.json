@@ -1773,6 +1773,12 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "errors.create.outcomeUnknownExpired": {
+      "description": "Moderator workflow: ambiguous Reddit submission after the original form draft expired",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "errors.create.permissionVerification": {
       "description": "Moderator workflow: Reddit could not verify app permissions",
       "policy": "fallback",
@@ -2348,7 +2354,8 @@
         "errors.network.failed": "Request failed",
         "errors.create.moderatorPermission": "{appAccount} must be a moderator of r/{subredditName} with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
         "errors.create.inProgress": "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
-        "errors.create.outcomeUnknown": "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Check the community's newest posts before trying a newly opened form.",
+        "errors.create.outcomeUnknown": "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Retry this same form while it remains open so the app can check again.",
+        "errors.create.outcomeUnknownExpired": "Reddit may have accepted this post, but this form has expired and can no longer finish registration. Check the subreddit's recent posts before starting a new form.",
         "errors.create.permissionVerification": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}.",
         "errors.create.permissionVerificationRetry": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}. Please try again shortly.",
         "metric.subscribersCommunity": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",

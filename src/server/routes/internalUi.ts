@@ -1483,7 +1483,7 @@ async function submitCreateGoalFollowUp(
               res.json({
                 showToast: translate(
                   draft?.language,
-                  "errors.create.outcomeUnknown",
+                  "errors.create.outcomeUnknownExpired",
                 ),
               });
               return;

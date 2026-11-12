@@ -530,7 +530,10 @@ describe("createSubscriberGoal highlight handling", () => {
     });
 
     await expect(
-      createGoal({ operationId: "manual:lost-response" }),
+      createGoal({
+        operationId: "manual:lost-response",
+        reconciliationNowMs: 1_000,
+      }),
     ).rejects.toMatchObject({
       name: "SubscriberGoalCreationOutcomeUnknownError",
     });
@@ -540,7 +543,10 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
 
     await expect(
-      createGoal({ operationId: "manual:lost-response" }),
+      createGoal({
+        operationId: "manual:lost-response",
+        reconciliationNowMs: 61_000,
+      }),
     ).resolves.toMatchObject({ post: { id: post.id } });
 
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
@@ -553,8 +559,13 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.state.failPostSubmittedWrite = true;
 
     await expect(
-      createGoal({ operationId: "manual:id-write" }),
-    ).rejects.toThrow("post ID write failed");
+      createGoal({
+        operationId: "manual:id-write",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
     const marker = hoisted.redisHashes
       .get("subscriber_goal_creation_v1:manual:id-write")
       ?.get("submissionMarker");
@@ -564,7 +575,10 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
 
     await expect(
-      createGoal({ operationId: "manual:id-write" }),
+      createGoal({
+        operationId: "manual:id-write",
+        reconciliationNowMs: 61_000,
+      }),
     ).resolves.toMatchObject({ post: { id: post.id } });
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
   });
@@ -573,12 +587,18 @@ describe("createSubscriberGoal highlight handling", () => {
     const post = createPost();
     hoisted.createGoalPost.mockRejectedValueOnce(new Error("timeout"));
     await expect(
-      createGoal({ operationId: "manual:eventual" }),
+      createGoal({
+        operationId: "manual:eventual",
+        reconciliationNowMs: 1_000,
+      }),
     ).rejects.toMatchObject({
       name: "SubscriberGoalCreationOutcomeUnknownError",
     });
     await expect(
-      createGoal({ operationId: "manual:eventual" }),
+      createGoal({
+        operationId: "manual:eventual",
+        reconciliationNowMs: 61_000,
+      }),
     ).rejects.toMatchObject({
       name: "SubscriberGoalCreationOutcomeUnknownError",
     });
@@ -591,9 +611,77 @@ describe("createSubscriberGoal highlight handling", () => {
     });
     hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
     await expect(
-      createGoal({ operationId: "manual:eventual" }),
+      createGoal({
+        operationId: "manual:eventual",
+        reconciliationNowMs: 361_000,
+      }),
     ).resolves.toMatchObject({ post: { id: post.id } });
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("does not scan before the persisted reconciliation due time", async () => {
+    hoisted.createGoalPost.mockRejectedValueOnce(new Error("timeout"));
+    await expect(
+      createGoal({
+        operationId: "manual:not-due",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationStatus: "pending",
+      reconciliationNextAt: 61_000,
+    });
+
+    await expect(
+      createGoal({
+        operationId: "manual:not-due",
+        reconciliationNowMs: 60_999,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationStatus: "pending",
+      reconciliationNextAt: 61_000,
+    });
+
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("stops scanning after the sixth inconclusive reconciliation", async () => {
+    const operationKey =
+      "subscriber_goal_creation_v1:auto-next:t3_reconciliation-cutoff";
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "submission_unknown"],
+        ["subredditName", "ExampleSub"],
+        ["subredditId", "t5_example"],
+        ["submissionMarker", "marker-cutoff"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "5"],
+        ["reconciliationNextAt", "1000"],
+      ]),
+    );
+
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_reconciliation-cutoff",
+        reconciliationNowMs: 1_000,
+      }),
+    ).rejects.toMatchObject({
+      reconciliationStatus: "exhausted",
+      reconciliationAttempts: 6,
+    });
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_reconciliation-cutoff",
+        reconciliationNowMs: 9_999_999,
+      }),
+    ).rejects.toMatchObject({ reconciliationStatus: "exhausted" });
+
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(
+      hoisted.redisHashes.get(operationKey)?.get("reconciliationStatus"),
+    ).toBe("exhausted");
   });
 
   it.each(["multiple", "lookup-failure", "unrelated", "legacy"] as const)(
@@ -610,7 +698,12 @@ describe("createSubscriberGoal highlight handling", () => {
           ["subredditId", "t5_example"],
           ...(scenario === "legacy"
             ? []
-            : [["submissionMarker", "marker-1"] as [string, string]]),
+            : [
+                ["submissionMarker", "marker-1"] as [string, string],
+                ["reconciliationStatus", "pending"] as [string, string],
+                ["reconciliationAttempts", "0"] as [string, string],
+                ["reconciliationNextAt", "1000"] as [string, string],
+              ]),
         ]),
       );
       hoisted.reddit.getNewPosts.mockReturnValue({
@@ -628,7 +721,10 @@ describe("createSubscriberGoal highlight handling", () => {
       }
 
       await expect(
-        createGoal({ operationId: `manual:${scenario}` }),
+        createGoal({
+          operationId: `manual:${scenario}`,
+          reconciliationNowMs: 1_000,
+        }),
       ).rejects.toMatchObject({
         name: "SubscriberGoalCreationOutcomeUnknownError",
       });
@@ -646,6 +742,9 @@ describe("createSubscriberGoal highlight handling", () => {
         ["subredditName", "ExampleSub"],
         ["subredditId", "t5_example"],
         ["submissionMarker", "marker-concurrent"],
+        ["reconciliationStatus", "pending"],
+        ["reconciliationAttempts", "0"],
+        ["reconciliationNextAt", "1000"],
       ]),
     );
     hoisted.reddit.getNewPosts.mockReturnValue({
@@ -656,8 +755,14 @@ describe("createSubscriberGoal highlight handling", () => {
     });
 
     const results = await Promise.allSettled([
-      createGoal({ operationId: "manual:concurrent" }),
-      createGoal({ operationId: "manual:concurrent" }),
+      createGoal({
+        operationId: "manual:concurrent",
+        reconciliationNowMs: 1_000,
+      }),
+      createGoal({
+        operationId: "manual:concurrent",
+        reconciliationNowMs: 1_000,
+      }),
     ]);
 
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(

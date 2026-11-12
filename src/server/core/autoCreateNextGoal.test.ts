@@ -38,7 +38,9 @@ const hoisted = vi.hoisted(() => ({
   getDueAutoCreateNextGoalPostIds: vi.fn(),
   getSubGoalData: vi.fn(),
   markAutoCreateNextGoalExhausted: vi.fn(),
+  markAutoCreateNextGoalReconciliationExhausted: vi.fn(),
   recordAutoCreateNextGoalFailure: vi.fn(),
+  scheduleAutoCreateNextGoalReconciliation: vi.fn(),
   createSubscriberGoal: vi.fn(),
   notifyHighlightFailure: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
@@ -90,7 +92,11 @@ vi.mock("../data/subGoalData", () => ({
   getDueAutoCreateNextGoalPostIds: hoisted.getDueAutoCreateNextGoalPostIds,
   getSubGoalData: hoisted.getSubGoalData,
   markAutoCreateNextGoalExhausted: hoisted.markAutoCreateNextGoalExhausted,
+  markAutoCreateNextGoalReconciliationExhausted:
+    hoisted.markAutoCreateNextGoalReconciliationExhausted,
   recordAutoCreateNextGoalFailure: hoisted.recordAutoCreateNextGoalFailure,
+  scheduleAutoCreateNextGoalReconciliation:
+    hoisted.scheduleAutoCreateNextGoalReconciliation,
 }));
 
 vi.mock("../data/subscriberGoalCandidates", () => ({
@@ -104,7 +110,25 @@ vi.mock("./postRetirement", async (importOriginal) => ({
 
 vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
-  SubscriberGoalCreationOutcomeUnknownError: class extends Error {},
+  SubscriberGoalCreationOutcomeUnknownError: class extends Error {
+    reconciliationStatus: "pending" | "exhausted";
+    reconciliationAttempts: number;
+    reconciliationNextAt?: number;
+
+    constructor(
+      _language?: unknown,
+      reconciliation = {
+        status: "pending" as const,
+        attempts: 0,
+        nextAt: 86_461_000,
+      },
+    ) {
+      super("submission unresolved");
+      this.reconciliationStatus = reconciliation.status;
+      this.reconciliationAttempts = reconciliation.attempts;
+      this.reconciliationNextAt = reconciliation.nextAt;
+    }
+  },
 }));
 
 vi.mock("./appAccountHealth", () => ({
@@ -408,6 +432,7 @@ describe("processDueAutoCreateNextGoals", () => {
         cancelPendingAutoCreateGoals: false,
         operationId: "auto-next:t3_source",
         reconciliationContext: "automatic_successor",
+        reconciliationNowMs: 86_401_000,
         mutationLease: expect.objectContaining({
           key: "subscriber_goal_community_mutation_v1_lock",
         }),
@@ -468,11 +493,81 @@ describe("processDueAutoCreateNextGoals", () => {
       rescheduled: 0,
       exhausted: 0,
       unresolved: 1,
+      reconciliationRescheduled: 1,
     });
 
     expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
     expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", 86_461_000);
+  });
+
+  it("honors the reconciliation score on a stale scheduler tick", async () => {
+    let runAt = 0;
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockImplementation(async () => runAt);
+    hoisted.scheduleAutoCreateNextGoalReconciliation.mockImplementation(
+      async (_redis, _postId, nextRunAt: number) => {
+        runAt = nextRunAt;
+      },
+    );
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new SubscriberGoalCreationOutcomeUnknownError(undefined, {
+        status: "pending",
+        attempts: 1,
+        nextAt: 90_000,
+      }),
+    );
+
+    await processDueAutoCreateNextGoals({
+      reddit: hoisted.reddit as never,
+      redis: hoisted.redis as never,
+      appSettings: baseSettings,
+      nowMs: 10_000,
+    });
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 89_999,
+      }),
+    ).resolves.toMatchObject({ skipped: 1, failed: 0 });
+
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+  });
+
+  it("removes an exhausted reconciliation without changing ordinary retries", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new SubscriberGoalCreationOutcomeUnknownError(undefined, {
+        status: "exhausted",
+        attempts: 6,
+      }),
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 86_401_000,
+      }),
+    ).resolves.toMatchObject({
+      unresolved: 1,
+      reconciliationExhausted: 1,
+      failed: 0,
+      rescheduled: 0,
+      exhausted: 0,
+    });
+
+    expect(
+      hoisted.markAutoCreateNextGoalReconciliationExhausted,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", "auto-next:t3_source");
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
   });
 
   it("adopts an untracked incomplete highlighted classic as the live successor", async () => {

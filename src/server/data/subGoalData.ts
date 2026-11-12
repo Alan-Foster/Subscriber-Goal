@@ -73,6 +73,8 @@ export const autoCreateNextGoalRetryAttemptsKey =
   "auto_create_next_goal_retry_attempts_v1";
 export const autoCreateNextGoalExhaustedKey =
   "auto_create_next_goal_exhausted_v1";
+export const autoCreateNextGoalReconciliationExhaustedKey =
+  "auto_create_next_goal_reconciliation_exhausted_v1";
 export const autoCreateNextGoalRetryDelayMs = [
   5 * 60 * 1000,
   15 * 60 * 1000,
@@ -654,12 +656,18 @@ export async function repairAutoCreateNextGoal(
   completedTime: number,
   nowMs = Date.now(),
 ): Promise<AutoCreateNextGoalRepairResult> {
-  const [pending, rawFailureCount, exhausted] = await Promise.all([
-    redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
-    redis.hGet(autoCreateNextGoalRetryAttemptsKey, postId),
-    redis.hGet(autoCreateNextGoalExhaustedKey, postId),
-  ]);
+  const [pending, rawFailureCount, exhausted, reconciliationExhausted] =
+    await Promise.all([
+      redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+      redis.hGet(autoCreateNextGoalRetryAttemptsKey, postId),
+      redis.hGet(autoCreateNextGoalExhaustedKey, postId),
+      redis.hGet(autoCreateNextGoalReconciliationExhaustedKey, postId),
+    ]);
   const failureCount = Number(rawFailureCount) || 0;
+  if (reconciliationExhausted) {
+    await redis.zRem(autoCreateNextGoalQueueKey, [postId]);
+    return { status: "exhausted", failureCount };
+  }
   const queued = pending.find((entry) => entry.member === postId);
   if (queued) {
     return {
@@ -696,6 +704,30 @@ export async function repairAutoCreateNextGoal(
     redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
   ]);
   return { status: "scheduled", runAt, failureCount: 0 };
+}
+
+export async function scheduleAutoCreateNextGoalReconciliation(
+  redis: RedisClient,
+  postId: string,
+  nextRunAt: number,
+): Promise<void> {
+  await redis.zAdd(autoCreateNextGoalQueueKey, {
+    member: postId,
+    score: nextRunAt,
+  });
+}
+
+export async function markAutoCreateNextGoalReconciliationExhausted(
+  redis: RedisClient,
+  postId: string,
+  operationId: string,
+): Promise<void> {
+  await Promise.all([
+    redis.zRem(autoCreateNextGoalQueueKey, [postId]),
+    redis.hSet(autoCreateNextGoalReconciliationExhaustedKey, {
+      [postId]: operationId,
+    }),
+  ]);
 }
 
 export async function markAutoCreateNextGoalExhausted(

@@ -17,6 +17,8 @@ const hoisted = vi.hoisted(() => ({
     getCurrentSubreddit: vi.fn(),
     getAppUser: vi.fn(),
     getPostById: vi.fn(),
+    getNewPosts: vi.fn(),
+    getPostData: vi.fn(),
     getCurrentUsername: vi.fn(),
     getUserById: vi.fn(),
     getUserByUsername: vi.fn(),
@@ -32,6 +34,8 @@ const hoisted = vi.hoisted(() => ({
     get: vi.fn(),
     del: vi.fn(),
     hGetAll: vi.fn(),
+    hGet: vi.fn(),
+    hMGet: vi.fn(),
     hSet: vi.fn(),
     expire: vi.fn(),
     watch: vi.fn(),
@@ -79,7 +83,13 @@ vi.mock("../core/post", () => ({
 }));
 
 vi.mock("../data/subGoalData", () => ({
+  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
+  subscriberGoalsKey: "subscriber_goals",
+  postKindSuffix: "_post_kind",
+  postHeightSuffix: "_post_height",
+  postCompletedTimeSuffix: "_completed_time",
   cancelAllAutoCreateNextGoals: hoisted.cancelAllAutoCreateNextGoals,
+  cancelAutoCreateNextGoal: vi.fn(),
   eraseFromRecentSubscribers: hoisted.eraseFromRecentSubscribers,
   registerNewSubGoalPost: hoisted.registerNewSubGoalPost,
   registerNewSubscribeOnlyPost: hoisted.registerNewSubscribeOnlyPost,
@@ -364,6 +374,12 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.redis.hGetAll.mockImplementation(async (key) =>
       Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     );
+    hoisted.redis.hGet.mockImplementation(async (key, field) =>
+      hoisted.redisHashes.get(key)?.get(field),
+    );
+    hoisted.redis.hMGet.mockImplementation(async (key, fields) =>
+      fields.map((field: string) => hoisted.redisHashes.get(key)?.get(field)),
+    );
     hoisted.redis.hSet.mockImplementation(async (key, fields) => {
       const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
       Object.entries(fields as Record<string, string>).forEach(
@@ -440,6 +456,10 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.reddit.getPostById.mockResolvedValue({
       delete: hoisted.deletePost,
     });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => []),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue(undefined);
     hoisted.dispatchPostAction.mockResolvedValue(undefined);
     hoisted.cancelUpdates.mockResolvedValue(undefined);
     hoisted.untrackPost.mockResolvedValue(undefined);
@@ -2071,6 +2091,86 @@ describe("internalUi color theme create goal routes", () => {
     );
   });
 
+  it("warns without resuming registration after an ambiguous form expires", async () => {
+    const creationAttemptId = "create-goal-expired-unknown12";
+    seedCreateGoalDraft("regular", "en", { creationAttemptId });
+    const routes = createRouteHarness();
+    hoisted.redisValues.delete(testDraftKey(creationAttemptId));
+    hoisted.redisHashes.set(
+      `subscriber_goal_creation_v1:manual-v2:t5_example:t2_mod:${creationAttemptId}`,
+      new Map([
+        ["status", "submission_unknown"],
+        ["submissionMarker", "marker-expired"],
+      ]),
+    );
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      {
+        body: {
+          [`afterSubscribeButtonText__creation_attempt__${creationAttemptId}`]:
+            "View the Top Post Today",
+        },
+      } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast:
+        "Reddit may have accepted this post, but this form has expired and can no longer finish registration. Check the subreddit's recent posts before starting a new form.",
+    });
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an ambiguous submission while the original draft is valid", async () => {
+    seedCreateGoalDraft("regular", "en");
+    const post = {
+      id: "t3_recovered",
+      subredditName: "ExampleSub",
+      subredditId: "t5_example",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      title: "Welcome!",
+      approve: vi.fn(),
+      highlight: vi.fn(async () => {
+        hoisted.highlightedPostIds.push("t3_recovered");
+      }),
+      isHighlighted: vi.fn(async () => true),
+    };
+    hoisted.createGoalPost.mockRejectedValueOnce(new Error("response lost"));
+    const routes = createRouteHarness();
+    const firstJson = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      { json: firstJson } as unknown as Response,
+    );
+    const operationKey =
+      "subscriber_goal_creation_v1:manual-v2:t5_example:t2_mod:create-goal-test123";
+    const operation = hoisted.redisHashes.get(operationKey)!;
+    const marker = operation.get("submissionMarker");
+    operation.set("reconciliationNextAt", "1");
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({ submissionMarker: marker });
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    const secondJson = vi.fn();
+
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      { body: {} } as Request,
+      { json: secondJson } as unknown as Response,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+    expect(secondJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_recovered",
+      }),
+    );
+  });
+
   it("rejects a Tiny draft submitted through the subscriber-goal form", async () => {
     seedCreateGoalDraft("tiny", "en");
     const routes = createRouteHarness();
@@ -2121,7 +2221,7 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(json).toHaveBeenCalledWith({
       showToast:
-        "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Check the community's newest posts before trying a newly opened form.",
+        "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Retry this same form while it remains open so the app can check again.",
     });
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
   });

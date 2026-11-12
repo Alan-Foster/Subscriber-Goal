@@ -46,7 +46,10 @@ import {
   getTerminalRemovedByCategory,
   isMissingPostError,
 } from "../utils/postStatus";
-import { createSubscriberGoal } from "./createSubscriberGoal";
+import {
+  createSubscriberGoal,
+  SubscriberGoalCreationOutcomeUnknownError,
+} from "./createSubscriberGoal";
 import {
   cleanupManagedHighlightsPreservingTarget,
   createFailedHighlightResult,
@@ -144,7 +147,9 @@ type ExtendedOnboardingResultStatus =
   | "replacement_retrying"
   | "replacement_exhausted"
   | "completed_auto_disabled"
-  | "completed_no_recovery";
+  | "completed_no_recovery"
+  | "submission_reconciliation_pending"
+  | "submission_reconciliation_exhausted";
 
 export type OnboardingLifecycleSource =
   "install" | "upgrade" | "recovery" | "unknown";
@@ -334,6 +339,18 @@ const emptySummary = (): Omit<OnboardingSubscriberGoalSummary, "status"> => ({
   stalePruned: 0,
   failed: 0,
 });
+
+const emptyHighlightEnsuranceResult =
+  (): OnboardingHighlightEnsuranceResult => ({
+    ...emptySummary(),
+    status: "missing",
+    candidateCount: 0,
+    highlightedClassicCount: 0,
+    highlightedProtectedCount: 0,
+    highlightedAmbiguousCount: 0,
+    classicPostsUnhighlighted: [],
+    protectedHighlightsPreserved: [],
+  });
 
 export function getOnboardingEligibility(subreddit: {
   numberOfSubscribers: number;
@@ -785,6 +802,8 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       return { status: "not_due", ...base };
     }
     activeState = reloaded;
+    const reconcilingSubmission =
+      reloaded.resultStatus === "submission_reconciliation_pending";
     console.info(
       `[onboardingSubscriberGoal] starting check: source=${reloaded.lifecycleSource} nextRunAt=${reloaded.nextRunAt} creationStaggerMinutes=${reloaded.creationStaggerMinutes} operationId=${reloaded.operationId} status=${reloaded.status}`,
     );
@@ -838,14 +857,16 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       };
     }
 
-    const existing = await ensureExistingSubscriberGoalHighlighted({
-      reddit,
-      redis,
-      nowMs,
-      notifyOnFailure: true,
-      mutationLease,
-      reconciliationContext: "onboarding",
-    });
+    const existing = reconcilingSubmission
+      ? emptyHighlightEnsuranceResult()
+      : await ensureExistingSubscriberGoalHighlighted({
+          reddit,
+          redis,
+          nowMs,
+          notifyOnFailure: true,
+          mutationLease,
+          reconciliationContext: "onboarding",
+        });
     inspected = {
       registeredInspected: existing.registeredInspected,
       trackedInspected: existing.trackedInspected,
@@ -1027,14 +1048,16 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       };
     }
 
-    const finalExisting = await ensureExistingSubscriberGoalHighlighted({
-      reddit,
-      redis,
-      nowMs,
-      notifyOnFailure: true,
-      mutationLease,
-      reconciliationContext: "onboarding",
-    });
+    const finalExisting = reconcilingSubmission
+      ? emptyHighlightEnsuranceResult()
+      : await ensureExistingSubscriberGoalHighlighted({
+          reddit,
+          redis,
+          nowMs,
+          notifyOnFailure: true,
+          mutationLease,
+          reconciliationContext: "onboarding",
+        });
     inspected = {
       registeredInspected: finalExisting.registeredInspected,
       trackedInspected: finalExisting.trackedInspected,
@@ -1183,6 +1206,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         automaticPermissionCheck: true,
         reconciliationContext: "onboarding",
         mutationLease,
+        reconciliationNowMs: nowMs,
       },
     });
     if (creation.outcome === "superseded" || creation.outcome === "retired") {
@@ -1278,6 +1302,42 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   } catch (error) {
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
+    if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
+      const pending =
+        error.reconciliationStatus === "pending" &&
+        error.reconciliationNextAt !== undefined;
+      await saveOnboardingState(redis, {
+        ...activeState,
+        status: pending ? "pending" : "complete",
+        ...(pending
+          ? { nextRunAt: error.reconciliationNextAt }
+          : { completedAt: nowMs }),
+        resultStatus: pending
+          ? "submission_reconciliation_pending"
+          : "submission_reconciliation_exhausted",
+        errorMessage,
+      });
+      logDiagnostic(
+        pending ? "warn" : "error",
+        "onboarding_goal_submission_unresolved",
+        {
+          workflow: "onboarding_subscriber_goal",
+          phase: "submission_reconciliation",
+          lifecycleSource: activeState.lifecycleSource,
+          operationId: activeState.operationId,
+          reconciliationStatus: error.reconciliationStatus,
+          reconciliationAttempts: error.reconciliationAttempts,
+          reconciliationNextAt: error.reconciliationNextAt ?? "none",
+        },
+        error,
+      );
+      return {
+        status: pending ? "failed" : "complete",
+        errorMessage,
+        lifecycleSource: activeState.lifecycleSource,
+        ...inspected,
+      };
+    }
     try {
       const attempts = (activeState.attempts ?? 0) + 1;
       const terminal =
@@ -2764,7 +2824,9 @@ function parseOnboardingState(
     raw.resultStatus === "replacement_retrying" ||
     raw.resultStatus === "replacement_exhausted" ||
     raw.resultStatus === "completed_auto_disabled" ||
-    raw.resultStatus === "completed_no_recovery"
+    raw.resultStatus === "completed_no_recovery" ||
+    raw.resultStatus === "submission_reconciliation_pending" ||
+    raw.resultStatus === "submission_reconciliation_exhausted"
   ) {
     state.resultStatus = raw.resultStatus;
   } else if (raw.resultStatus === "created_not_pinned") {

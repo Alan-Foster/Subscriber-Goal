@@ -25,6 +25,23 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("./createSubscriberGoal", () => ({
   createSubscriberGoal: hoisted.createSubscriberGoal,
+  SubscriberGoalCreationOutcomeUnknownError: class extends Error {
+    reconciliationStatus: "pending" | "exhausted";
+    reconciliationAttempts: number;
+    reconciliationNextAt?: number;
+
+    constructor(
+      _language?: unknown,
+      reconciliation = { status: "pending" as const, attempts: 0 },
+    ) {
+      super("submission unresolved");
+      this.reconciliationStatus = reconciliation.status;
+      this.reconciliationAttempts = reconciliation.attempts;
+      if ("nextAt" in reconciliation) {
+        this.reconciliationNextAt = reconciliation.nextAt as number;
+      }
+    }
+  },
 }));
 
 vi.mock("../utils/communityHighlights", () => ({
@@ -92,6 +109,7 @@ import {
   scheduleOnboardingReminder,
 } from "./onboardingReminder";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
+import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
 
 class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
@@ -1256,6 +1274,100 @@ describe("onboarding subscriber goal", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('"event":"onboarding_goal_retry_scheduled"'),
     );
+  });
+
+  it("uses a separate due time for ambiguous submission reconciliation", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    const firstRunAt = Number(initial.nextRunAt);
+    const reconciliationNextAt = firstRunAt + 60_000;
+    hoisted.createSubscriberGoal.mockRejectedValueOnce(
+      new SubscriberGoalCreationOutcomeUnknownError(undefined, {
+        status: "pending",
+        attempts: 0,
+        nextAt: reconciliationNextAt,
+      }),
+    );
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: firstRunAt,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "pending",
+      resultStatus: "submission_reconciliation_pending",
+      nextRunAt: String(reconciliationNextAt),
+      attempts: "0",
+    });
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: reconciliationNextAt - 1,
+      }),
+    ).resolves.toMatchObject({ status: "not_due" });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: reconciliationNextAt,
+      }),
+    ).resolves.toMatchObject({ status: "created", postId: "t3_created" });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(2);
+    expect(hoisted.getTrackedPosts).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes exhausted onboarding submission reconciliation terminal", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    const firstRunAt = Number(initial.nextRunAt);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new SubscriberGoalCreationOutcomeUnknownError(undefined, {
+        status: "exhausted",
+        attempts: 6,
+      }),
+    );
+
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: firstRunAt,
+      }),
+    ).resolves.toMatchObject({ status: "complete" });
+    await expect(
+      redis.hGetAll(onboardingSubscriberGoalStateKey),
+    ).resolves.toMatchObject({
+      status: "complete",
+      resultStatus: "submission_reconciliation_exhausted",
+      attempts: "0",
+    });
+
+    await processDueOnboardingSubscriberGoal({
+      reddit: reddit as never,
+      redis: redis as never,
+      appSettings: settings,
+      nowMs: firstRunAt + 24 * 60 * 60 * 1000,
+    });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
   });
 
   it("stops after three total creation-phase attempts", async () => {

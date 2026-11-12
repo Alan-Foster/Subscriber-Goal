@@ -9,16 +9,25 @@ continues through normal registration. A missing match, more than one match, a
 listing failure, or any unreadable candidate remains blocked; a miss never
 authorizes another submission.
 
-Manual `manual-v2` operation records are retained for 24 hours. During that
-window, reopening the same submitted form can reconcile and finish the original
-attempt. After the record expires, the marker and expected-subreddit evidence
-needed to connect that form attempt to an unregistered Reddit post are gone, so
-automatic recovery is no longer possible. The post itself may still exist. A
-moderator must inspect recent posts before starting a deliberate new form; a
-future moderator-assisted recovery tool would need the original marker (or
-other proof that uniquely verifies the post), the post ID, and the expected
-subreddit. Legacy ambiguous records without a marker remain blocked unless the
-original post can otherwise be verified.
+Manual form drafts expire after 30 minutes. While the original draft remains
+valid, retrying that same submitted form can reconcile and finish the original
+attempt. After the draft expires, the app must not reconstruct creation settings
+from stale callback values, so it cannot resume registration. The separate
+`manual-v2` operation record remains available for 24 hours only for status
+lookup and navigation when creation already completed. An ambiguous post may
+still exist: moderators must inspect recent posts before starting a deliberate
+new form. After the operation record expires, the marker and expected-subreddit
+evidence are also gone. A future moderator-assisted recovery tool would need the
+original marker (or other proof that uniquely verifies the post), the post ID,
+and the expected subreddit. Legacy ambiguous records without a marker remain
+blocked unless the original post can otherwise be verified.
+
+Automatic creation uses six bounded reconciliation scans, scheduled 1, 5, 15,
+30, 60, and 120 minutes after the preceding state transition or inconclusive
+scan. The operation record owns this schedule; AutoGoal mirrors `nextRunAt` into
+its existing queue and onboarding mirrors it into its existing state. After the
+sixth inconclusive scan, reconciliation is exhausted and automatic scans stop
+without changing ordinary creation retry counts.
 
 The installed Devvit SDK provides bounded subreddit listings through
 `getNewPosts` and marker reads through `getPostData`. Listings run through the

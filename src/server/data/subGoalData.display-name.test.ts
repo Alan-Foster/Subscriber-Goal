@@ -3,6 +3,7 @@ import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,
   autoCreateNextGoalExhaustedKey,
+  autoCreateNextGoalReconciliationExhaustedKey,
   autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalRetryDelayMs,
   cancelAutoCreateNextGoal,
@@ -970,6 +971,26 @@ describe("subGoalData subreddit display name", () => {
         1_000,
       ),
     ).resolves.toEqual({ status: "exhausted", failureCount: 6 });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+  });
+
+  it("does not let updater repair restart exhausted submission reconciliation", async () => {
+    const redis = new InMemoryRedis();
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: "t3_reconciliation_exhausted",
+      score: 1_000,
+    });
+    await redis.hSet(autoCreateNextGoalReconciliationExhaustedKey, {
+      t3_reconciliation_exhausted: "auto-next:t3_reconciliation_exhausted",
+    });
+
+    await expect(
+      repairAutoCreateNextGoal(
+        redis as unknown as Parameters<typeof repairAutoCreateNextGoal>[0],
+        "t3_reconciliation_exhausted",
+        1_000,
+      ),
+    ).resolves.toEqual({ status: "exhausted", failureCount: 0 });
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
   });
 

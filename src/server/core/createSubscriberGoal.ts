@@ -90,6 +90,7 @@ type CreateSubscriberGoalOptions = {
   highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext?: HighlightReconciliationContext;
   mutationLease?: CommunityGoalMutationLease;
+  reconciliationNowMs?: number;
 };
 
 export type CreateSubscriberGoalResult = {
@@ -135,14 +136,38 @@ export class SubscriberGoalCreationInProgressError extends Error {
 }
 
 export class SubscriberGoalCreationOutcomeUnknownError extends Error {
-  constructor(language?: SubGoalLanguage) {
+  readonly reconciliationStatus: "pending" | "exhausted";
+  readonly reconciliationAttempts: number;
+  readonly reconciliationNextAt?: number;
+
+  constructor(
+    language?: SubGoalLanguage,
+    reconciliation: {
+      status: "pending" | "exhausted";
+      attempts: number;
+      nextAt?: number;
+    } = { status: "pending", attempts: 0 },
+  ) {
     super(translate(language, "errors.create.outcomeUnknown"));
     this.name = "SubscriberGoalCreationOutcomeUnknownError";
+    this.reconciliationStatus = reconciliation.status;
+    this.reconciliationAttempts = reconciliation.attempts;
+    if (reconciliation.nextAt !== undefined) {
+      this.reconciliationNextAt = reconciliation.nextAt;
+    }
   }
 }
 
 export const subscriberGoalCreationOperationRetentionSeconds = 24 * 60 * 60;
 const submissionReconciliationListingLimit = 100;
+export const submissionReconciliationDelayMs = [
+  1 * 60 * 1000,
+  5 * 60 * 1000,
+  15 * 60 * 1000,
+  30 * 60 * 1000,
+  60 * 60 * 1000,
+  120 * 60 * 1000,
+] as const;
 
 type StoredCreationOperation = Record<string, string>;
 
@@ -367,13 +392,14 @@ async function createSubscriberGoalUnderCommunityLease({
       reloaded.status === "submitting" ||
       reloaded.status === "submission_unknown"
     ) {
-      recoveredPost = await reconcileAmbiguousSubmission({
+      recoveredPost = await reconcileAmbiguousSubmissionUnderLock({
         reddit,
+        redis,
+        operationKey,
         raw: reloaded,
+        language: options.language,
+        nowMs: options.reconciliationNowMs ?? Date.now(),
       });
-      if (!recoveredPost) {
-        throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
-      }
       await writeCreationOperation(redis, operationKey, {
         status: "post_submitted",
         postId: recoveredPost.id,
@@ -451,8 +477,15 @@ async function createSubscriberGoalUnderCommunityLease({
           });
         },
         onSubmissionUnknown: async () => {
+          const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
           await writeCreationOperation(redis, operationKey, {
             status: "submission_unknown",
+            reconciliationStatus: "pending",
+            reconciliationAttempts: "0",
+            reconciliationStartedAt: String(reconciliationNowMs),
+            reconciliationNextAt: String(
+              reconciliationNowMs + submissionReconciliationDelayMs[0],
+            ),
             updatedAt: String(Date.now()),
           });
         },
@@ -642,12 +675,40 @@ async function createSubscriberGoalInternal(
     } catch (error) {
       if (recovery) {
         await recovery.onSubmissionUnknown();
-        throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+        const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
+        throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
+          status: "pending",
+          attempts: 0,
+          nextAt: reconciliationNowMs + submissionReconciliationDelayMs[0],
+        });
       }
       throw error;
     }
   }
-  if (!recovery?.recoveredPost) await recovery?.onPostSubmitted(post.id);
+  if (!recovery?.recoveredPost && recovery) {
+    try {
+      await recovery.onPostSubmitted(post.id);
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "goal_creation_post_id_persistence_failed",
+        {
+          workflow: "create_subscriber_goal",
+          phase: "post_id_persistence",
+          postId: post.id,
+        },
+        error,
+      );
+      await recovery.onSubmissionUnknown();
+      throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
+        status: "pending",
+        attempts: 0,
+        nextAt:
+          (options.reconciliationNowMs ?? Date.now()) +
+          submissionReconciliationDelayMs[0],
+      });
+    }
+  }
   await applyGoalPostFrameStyle(post, options.postHeight);
 
   if (!recovery?.recoveredPost) {
@@ -829,41 +890,70 @@ async function createSubscriberGoalInternal(
   };
 }
 
-async function reconcileAmbiguousSubmission({
+async function reconcileAmbiguousSubmissionUnderLock({
   reddit,
+  redis,
+  operationKey,
   raw,
+  language,
+  nowMs,
 }: {
   reddit: RedditClient;
+  redis: RedisClient;
+  operationKey: string;
   raw: StoredCreationOperation;
-}): Promise<Awaited<ReturnType<typeof createGoalPost>> | undefined> {
+  language?: SubGoalLanguage;
+  nowMs: number;
+}): Promise<Awaited<ReturnType<typeof createGoalPost>>> {
   const marker = raw.submissionMarker;
   const expectedSubredditName = raw.subredditName;
   const expectedSubredditId = raw.subredditId;
-  if (!marker || !expectedSubredditName || !expectedSubredditId)
-    return undefined;
+  const attempts = Math.max(0, Number(raw.reconciliationAttempts) || 0);
+  const throwUnknown = (
+    status: "pending" | "exhausted",
+    nextAt?: number,
+  ): never => {
+    throw new SubscriberGoalCreationOutcomeUnknownError(language, {
+      status,
+      attempts,
+      ...(nextAt === undefined ? {} : { nextAt }),
+    });
+  };
+  if (!marker || !expectedSubredditName || !expectedSubredditId) {
+    await writeCreationOperation(redis, operationKey, {
+      reconciliationStatus: "exhausted",
+      reconciliationAttempts: String(attempts),
+      reconciliationNextAt: "",
+      reconciliationCompletedAt: String(nowMs),
+      updatedAt: String(Date.now()),
+    });
+    return throwUnknown("exhausted");
+  }
+  if (raw.reconciliationStatus === "exhausted") {
+    return throwUnknown("exhausted");
+  }
+  const persistedNextAt = Number(raw.reconciliationNextAt);
+  if (!Number.isFinite(persistedNextAt) || persistedNextAt <= 0) {
+    const nextAt = nowMs + submissionReconciliationDelayMs[0];
+    await writeCreationOperation(redis, operationKey, {
+      reconciliationStatus: "pending",
+      reconciliationAttempts: String(attempts),
+      reconciliationStartedAt: raw.reconciliationStartedAt || String(nowMs),
+      reconciliationNextAt: String(nextAt),
+      updatedAt: String(Date.now()),
+    });
+    return throwUnknown("pending", nextAt);
+  }
+  if (nowMs < persistedNextAt) return throwUnknown("pending", persistedNextAt);
 
+  let match: Awaited<ReturnType<typeof createGoalPost>> | undefined;
   try {
-    const posts = await reddit
-      .getNewPosts({
-        subredditName: expectedSubredditName,
-        limit: submissionReconciliationListingLimit,
-        pageSize: submissionReconciliationListingLimit,
-      })
-      .all();
-    const matches: typeof posts = [];
-    for (const post of posts) {
-      if (
-        post.subredditId !== expectedSubredditId ||
-        post.subredditName.toLowerCase() !== expectedSubredditName.toLowerCase()
-      ) {
-        continue;
-      }
-      const postData = await reddit.getPostData(post.id);
-      if (postData?.submissionMarker === marker) matches.push(post);
-    }
-    return matches.length === 1
-      ? (matches[0] as Awaited<ReturnType<typeof createGoalPost>>)
-      : undefined;
+    match = await findSubmissionMarkerMatch({
+      reddit,
+      marker,
+      expectedSubredditName,
+      expectedSubredditId,
+    });
   } catch (error) {
     logDiagnostic(
       "warn",
@@ -875,8 +965,70 @@ async function reconcileAmbiguousSubmission({
       },
       error,
     );
-    return undefined;
   }
+  if (match) return match;
+
+  const nextAttempts = attempts + 1;
+  const nextDelay = submissionReconciliationDelayMs[nextAttempts];
+  if (nextDelay === undefined) {
+    await writeCreationOperation(redis, operationKey, {
+      reconciliationStatus: "exhausted",
+      reconciliationAttempts: String(nextAttempts),
+      reconciliationNextAt: "",
+      reconciliationCompletedAt: String(nowMs),
+      updatedAt: String(Date.now()),
+    });
+    throw new SubscriberGoalCreationOutcomeUnknownError(language, {
+      status: "exhausted",
+      attempts: nextAttempts,
+    });
+  }
+  const nextAt = nowMs + nextDelay;
+  await writeCreationOperation(redis, operationKey, {
+    reconciliationStatus: "pending",
+    reconciliationAttempts: String(nextAttempts),
+    reconciliationNextAt: String(nextAt),
+    updatedAt: String(Date.now()),
+  });
+  throw new SubscriberGoalCreationOutcomeUnknownError(language, {
+    status: "pending",
+    attempts: nextAttempts,
+    nextAt,
+  });
+}
+
+async function findSubmissionMarkerMatch({
+  reddit,
+  marker,
+  expectedSubredditName,
+  expectedSubredditId,
+}: {
+  reddit: RedditClient;
+  marker: string;
+  expectedSubredditName: string;
+  expectedSubredditId: string;
+}): Promise<Awaited<ReturnType<typeof createGoalPost>> | undefined> {
+  const posts = await reddit
+    .getNewPosts({
+      subredditName: expectedSubredditName,
+      limit: submissionReconciliationListingLimit,
+      pageSize: submissionReconciliationListingLimit,
+    })
+    .all();
+  const matches: typeof posts = [];
+  for (const post of posts) {
+    if (
+      post.subredditId !== expectedSubredditId ||
+      post.subredditName.toLowerCase() !== expectedSubredditName.toLowerCase()
+    ) {
+      continue;
+    }
+    const postData = await reddit.getPostData(post.id);
+    if (postData?.submissionMarker === marker) matches.push(post);
+  }
+  return matches.length === 1
+    ? (matches[0] as Awaited<ReturnType<typeof createGoalPost>>)
+    : undefined;
 }
 
 async function getExistingGoalPostIds(
