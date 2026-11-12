@@ -31,13 +31,18 @@ import { getLanguageMetadata } from "../../shared/i18n/catalog";
 import { formNames, internalRoutes } from "../../shared/routes";
 import {
   createSubscriberGoal,
+  recoverSubscriberGoalCreation,
   SubscriberGoalCreationInProgressError,
+  SubscriberGoalCreationOutcomeUnknownError,
   SubscriberGoalModeratorPermissionError,
 } from "../core/createSubscriberGoal";
 import {
+  CreateGoalDraftLeaseInProgressError,
   deleteCreateGoalDraft,
   getCreateGoalDraft,
+  isCreationAttemptId,
   saveCreateGoalDraft,
+  withCreateGoalDraftLease,
   type CreateGoalDraft,
   type CreateGoalDraftDetails,
 } from "../data/createGoalDraft";
@@ -74,16 +79,42 @@ import {
   type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 
-function stableDraftFingerprint(value: unknown): string {
-  const input = JSON.stringify(value);
-  let first = 0x811c9dc5;
-  let second = 0x9e3779b9;
-  for (let index = 0; index < input.length; index += 1) {
-    const code = input.charCodeAt(index);
-    first = Math.imul(first ^ code, 0x01000193);
-    second = Math.imul(second ^ code, 0x85ebca6b);
-  }
-  return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
+const creationAttemptFieldMarker = "__creation_attempt__";
+
+function creationAttemptFieldName(
+  fieldName: string,
+  creationAttemptId: string,
+): string {
+  return `${fieldName}${creationAttemptFieldMarker}${creationAttemptId}`;
+}
+
+function readCreationAttemptCallback<T extends Record<string, unknown>>(
+  rawValues: T,
+  carrierFieldName: string,
+): { creationAttemptId: string; values: T } | undefined {
+  const prefix = `${carrierFieldName}${creationAttemptFieldMarker}`;
+  const matches = Object.keys(rawValues).filter((key) =>
+    key.startsWith(prefix),
+  );
+  if (matches.length !== 1) return undefined;
+  const encodedFieldName = matches[0]!;
+  const creationAttemptId = encodedFieldName.slice(prefix.length);
+  if (!isCreationAttemptId(creationAttemptId)) return undefined;
+  return {
+    creationAttemptId,
+    values: {
+      ...rawValues,
+      [carrierFieldName]: rawValues[encodedFieldName],
+    },
+  };
+}
+
+function manualCreationOperationId(
+  subredditId: string,
+  userId: string,
+  creationAttemptId: string,
+): string {
+  return `manual-v2:${subredditId}:${userId}:${creationAttemptId}`;
 }
 
 async function resolveCurrentSubredditLanguage(): Promise<SubGoalLanguage> {
@@ -103,21 +134,19 @@ export function registerInternalUiRoutes(router: Router): void {
     defaultPostHeight: "regular" | "cta",
   ): void => {
     router.post(route, async (_req, res: Response<UiResponse>) => {
-      if (context.userId) {
-        try {
-          await deleteCreateGoalDraft(redis, context.userId);
-        } catch (error) {
-          logDiagnostic(
-            "warn",
-            "create_goal_draft_cleanup_failed",
-            { workflow: "create_goal", phase: "previous_draft_cleanup" },
-            error,
-          );
-        }
-      }
       try {
+        const creationAttemptId = createOperationId("create-goal");
+        if (context.userId) {
+          await saveCreateGoalDraft(redis, context.userId, {
+            stage: "setup",
+            creationAttemptId,
+          });
+        }
         res.json({
-          showForm: await buildCreateGoalSetupForm(defaultPostHeight),
+          showForm: await buildCreateGoalSetupForm(
+            defaultPostHeight,
+            creationAttemptId,
+          ),
         });
       } catch (error) {
         logDiagnostic(
@@ -142,12 +171,18 @@ export function registerInternalUiRoutes(router: Router): void {
   router.post(
     internalRoutes.forms.createGoalSetup,
     async (req, res: Response<UiResponse>) => {
-      const values = req.body as CreateGoalSetupFormValues;
-      const language = values.language?.[0];
-      const postHeight = values.postHeight?.[0];
-      const subredditDisplayName = values.subredditDisplayName?.trim();
+      const callback = readCreationAttemptCallback(
+        req.body as Record<string, unknown>,
+        "postHeight",
+      );
+      const values = callback?.values as CreateGoalSetupFormValues | undefined;
+      const creationAttemptId = callback?.creationAttemptId;
+      const language = values?.language?.[0];
+      const postHeight = values?.postHeight?.[0];
+      const subredditDisplayName = values?.subredditDisplayName?.trim();
       const userId = context.userId;
       if (
+        !values ||
         !language ||
         !subGoalLanguages.includes(
           language as (typeof subGoalLanguages)[number],
@@ -172,28 +207,71 @@ export function registerInternalUiRoutes(router: Router): void {
         return;
       }
       try {
-        const subreddit = await reddit.getCurrentSubreddit();
-        const displayNameError = validateSubredditDisplayName(
-          subredditDisplayName,
-          subreddit.name,
-          language,
-        );
-        if (displayNameError) {
-          res.json({ showToast: displayNameError });
+        if (!creationAttemptId) {
+          res.json({
+            showToast: translate(language, "moderator.form.expired"),
+          });
           return;
         }
-        const draft = {
-          stage: "details" as const,
-          language: language as (typeof subGoalLanguages)[number],
-          postHeight: postHeight as (typeof subGoalPostHeights)[number],
-          subredditDisplayName: subredditDisplayName ?? subreddit.name,
-          customDeveloperField: "",
-        };
-        await saveCreateGoalDraft(redis, userId, draft);
-        res.json({
-          showForm: buildCreateGoalDetailsForm(draft, subreddit),
-        });
+        await withCreateGoalDraftLease(
+          redis,
+          userId,
+          creationAttemptId,
+          async () => {
+            const existingDraft = await getCreateGoalDraft(
+              redis,
+              userId,
+              creationAttemptId,
+            );
+            if (!existingDraft) {
+              res.json({
+                showToast: translate(language, "moderator.form.expired"),
+              });
+              return;
+            }
+            const subreddit = await reddit.getCurrentSubreddit();
+            if (existingDraft.stage === "details") {
+              res.json({
+                showForm: buildCreateGoalDetailsForm(existingDraft, subreddit),
+              });
+              return;
+            }
+            if (existingDraft.stage === "follow-up") {
+              res.json({
+                showForm: buildCreateGoalFollowUpForm(existingDraft),
+              });
+              return;
+            }
+            const displayNameError = validateSubredditDisplayName(
+              subredditDisplayName,
+              subreddit.name,
+              language,
+            );
+            if (displayNameError) {
+              res.json({ showToast: displayNameError });
+              return;
+            }
+            const draft = {
+              stage: "details" as const,
+              creationAttemptId,
+              language: language as (typeof subGoalLanguages)[number],
+              postHeight: postHeight as (typeof subGoalPostHeights)[number],
+              subredditDisplayName: subredditDisplayName ?? subreddit.name,
+              customDeveloperField: "",
+            };
+            await saveCreateGoalDraft(redis, userId, draft);
+            res.json({
+              showForm: buildCreateGoalDetailsForm(draft, subreddit),
+            });
+          },
+        );
       } catch (error) {
+        if (error instanceof CreateGoalDraftLeaseInProgressError) {
+          res.json({
+            showToast: translate(language, "errors.create.inProgress"),
+          });
+          return;
+        }
         logDiagnostic(
           "error",
           "internal_ui_failed",
@@ -692,6 +770,7 @@ type CreateGoalFollowUpValues =
 
 async function buildCreateGoalSetupForm(
   initialPostHeight: "regular" | "cta" = "regular",
+  creationAttemptId = createOperationId("create-goal"),
 ): Promise<NonNullable<UiResponse["showForm"]>> {
   const subreddit = await reddit.getCurrentSubreddit();
   const defaultLanguage = resolveSubGoalLanguage(subreddit.language);
@@ -728,7 +807,7 @@ async function buildCreateGoalSetupForm(
           required: true,
         },
         {
-          name: "postHeight",
+          name: creationAttemptFieldName("postHeight", creationAttemptId),
           label: translate(defaultLanguage, "moderator.setup.postHeight"),
           type: "select",
           defaultValue: [initialPostHeight],
@@ -761,7 +840,7 @@ async function buildCreateGoalSetupForm(
 function buildCreateGoalDetailsForm(
   draft: Pick<
     Extract<CreateGoalDraft, { stage: "details" }>,
-    "language" | "postHeight" | "subredditDisplayName"
+    "creationAttemptId" | "language" | "postHeight" | "subredditDisplayName"
   >,
   subreddit: {
     name: string;
@@ -775,7 +854,7 @@ function buildCreateGoalDetailsForm(
   ).defaultPostTitle({ subredditName: draft.subredditDisplayName });
   const commonFields = {
     postTitle: {
-      name: "postTitle",
+      name: creationAttemptFieldName("postTitle", draft.creationAttemptId),
       label: translate(draft.language, "moderator.details.postTitle"),
       type: "string" as const,
       defaultValue: defaultPostTitle,
@@ -937,7 +1016,10 @@ function buildCreateGoalFollowUpForm(
   const submittedDeveloperField = submittedValues?.customDeveloperField;
   const sharedFields = [
     {
-      name: "afterSubscribeButtonText",
+      name: creationAttemptFieldName(
+        "afterSubscribeButtonText",
+        draft.creationAttemptId,
+      ),
       label: isCtaOnly
         ? translate(draft.language, "moderator.followUp.ctaText")
         : translate(draft.language, "moderator.followUp.buttonText"),
@@ -1171,7 +1253,7 @@ function getAfterSubscribePresetDefaults(
 }
 
 async function submitCreateGoalStepTwo(
-  values: CreateGoalDetailsValues,
+  rawValues: CreateGoalDetailsValues,
   expectedKind: CreateGoalPostKind,
   res: Response<UiResponse>,
 ): Promise<void> {
@@ -1185,101 +1267,136 @@ async function submitCreateGoalStepTwo(
     return;
   }
   try {
-    const draft = await getCreateGoalDraft(redis, userId);
-    requestLanguage = draft?.language ?? requestLanguage;
-    const draftKind =
-      draft?.postHeight === "tiny"
-        ? "subscribe-only"
-        : draft?.postHeight === "cta"
-          ? "cta-only"
-          : "subscriber-goal";
-    if (!draft || draft.stage !== "details" || draftKind !== expectedKind) {
-      await respondWithCreateGoalRestart(
-        res,
-        translate(draft?.language, "moderator.form.expired"),
-      );
-      return;
-    }
-
-    const subreddit = await reddit.getCurrentSubreddit();
-    const postTitle = values.postTitle?.trim();
-    if (!postTitle) {
+    const callback = readCreationAttemptCallback(
+      rawValues as Record<string, unknown>,
+      "postTitle",
+    );
+    const values = callback?.values as CreateGoalDetailsValues | undefined;
+    if (!callback || !values) {
       res.json({
-        showToast: translate(
-          draft.language,
-          "moderator.form.postTitleRequired",
-        ),
+        showToast: translate(requestLanguage, "moderator.form.expired"),
       });
       return;
     }
-    const colorTheme = resolveSubGoalColorTheme(
-      "colorTheme" in values ? values.colorTheme?.[0] : undefined,
-    );
-    const requestedPreset = values.afterSubscribePreset?.[0];
-    const selectedPreset = isAfterSubscribePreset(requestedPreset)
-      ? requestedPreset
-      : getDefaultAfterSubscribePreset(subreddit.type);
-    const afterSubscribePreset = normalizeAfterSubscribePresetForNsfw(
-      selectedPreset,
-      getCurrentSubredditNsfw(subreddit) === true,
-    );
-    let details: CreateGoalDraftDetails;
-    if (expectedKind === "subscribe-only") {
-      details = {
-        kind: "subscribe-only",
-        postTitle,
-        colorTheme,
-        afterSubscribePreset,
-      };
-    } else if (expectedKind === "cta-only") {
-      details = {
-        kind: "cta-only",
-        postTitle,
-        afterSubscribePreset,
-      };
-    } else {
-      const subscriberGoal =
-        "subscriberGoal" in values ? values.subscriberGoal : undefined;
-      if (!subscriberGoal || subreddit.numberOfSubscribers >= subscriberGoal) {
-        res.json({
-          showToast: translate(draft.language, "moderator.form.goalInvalid"),
-        });
-        return;
-      }
-      const appSettings = getAppSettings();
-      const crosspostEligible = isCrosspostEligible(
-        subreddit,
-        appSettings.promoSubreddit,
-      );
-      details = {
-        kind: "subscriber-goal",
-        postTitle,
-        subscriberGoal,
-        colorTheme,
-        crosspost:
-          crosspostEligible &&
-          "crosspost" in values &&
-          values.crosspost === true,
-        afterSubscribePreset,
-        autoCreateNextGoal:
-          !("autoCreateNextGoal" in values) ||
-          values.autoCreateNextGoal !== false,
-      };
-    }
+    await withCreateGoalDraftLease(
+      redis,
+      userId,
+      callback.creationAttemptId,
+      async () => {
+        const savedDraft = await getCreateGoalDraft(
+          redis,
+          userId,
+          callback.creationAttemptId,
+        );
+        const draft = savedDraft?.stage === "details" ? savedDraft : undefined;
+        requestLanguage = draft?.language ?? requestLanguage;
+        const draftKind =
+          draft?.postHeight === "tiny"
+            ? "subscribe-only"
+            : draft?.postHeight === "cta"
+              ? "cta-only"
+              : "subscriber-goal";
+        if (!draft || draftKind !== expectedKind) {
+          res.json({
+            showToast: translate(draft?.language, "moderator.form.expired"),
+          });
+          return;
+        }
 
-    const nextDraft = {
-      stage: "follow-up" as const,
-      language: draft.language,
-      postHeight: draft.postHeight,
-      subredditDisplayName: draft.subredditDisplayName,
-      customDeveloperField: draft.customDeveloperField,
-      details,
-    };
-    await saveCreateGoalDraft(redis, userId, nextDraft);
-    res.json({
-      showForm: buildCreateGoalFollowUpForm({ version: 4, ...nextDraft }),
-    });
+        const subreddit = await reddit.getCurrentSubreddit();
+        const postTitle = values.postTitle?.trim();
+        if (!postTitle) {
+          res.json({
+            showToast: translate(
+              draft.language,
+              "moderator.form.postTitleRequired",
+            ),
+          });
+          return;
+        }
+        const colorTheme = resolveSubGoalColorTheme(
+          "colorTheme" in values ? values.colorTheme?.[0] : undefined,
+        );
+        const requestedPreset = values.afterSubscribePreset?.[0];
+        const selectedPreset = isAfterSubscribePreset(requestedPreset)
+          ? requestedPreset
+          : getDefaultAfterSubscribePreset(subreddit.type);
+        const afterSubscribePreset = normalizeAfterSubscribePresetForNsfw(
+          selectedPreset,
+          getCurrentSubredditNsfw(subreddit) === true,
+        );
+        let details: CreateGoalDraftDetails;
+        if (expectedKind === "subscribe-only") {
+          details = {
+            kind: "subscribe-only",
+            postTitle,
+            colorTheme,
+            afterSubscribePreset,
+          };
+        } else if (expectedKind === "cta-only") {
+          details = {
+            kind: "cta-only",
+            postTitle,
+            afterSubscribePreset,
+          };
+        } else {
+          const subscriberGoal =
+            "subscriberGoal" in values ? values.subscriberGoal : undefined;
+          if (
+            !subscriberGoal ||
+            subreddit.numberOfSubscribers >= subscriberGoal
+          ) {
+            res.json({
+              showToast: translate(
+                draft.language,
+                "moderator.form.goalInvalid",
+              ),
+            });
+            return;
+          }
+          const appSettings = getAppSettings();
+          const crosspostEligible = isCrosspostEligible(
+            subreddit,
+            appSettings.promoSubreddit,
+          );
+          details = {
+            kind: "subscriber-goal",
+            postTitle,
+            subscriberGoal,
+            colorTheme,
+            crosspost:
+              crosspostEligible &&
+              "crosspost" in values &&
+              values.crosspost === true,
+            afterSubscribePreset,
+            autoCreateNextGoal:
+              !("autoCreateNextGoal" in values) ||
+              values.autoCreateNextGoal !== false,
+          };
+        }
+
+        const nextDraft = {
+          stage: "follow-up" as const,
+          creationAttemptId: draft.creationAttemptId,
+          language: draft.language,
+          postHeight: draft.postHeight,
+          subredditDisplayName: draft.subredditDisplayName,
+          customDeveloperField: draft.customDeveloperField,
+          details,
+        };
+        await saveCreateGoalDraft(redis, userId, nextDraft);
+        res.json({
+          showForm: buildCreateGoalFollowUpForm({ version: 5, ...nextDraft }),
+        });
+      },
+    );
   } catch (error) {
+    if (error instanceof CreateGoalDraftLeaseInProgressError) {
+      res.json({
+        showToast: translate(requestLanguage, "errors.create.inProgress"),
+      });
+      return;
+    }
     logDiagnostic(
       "error",
       "internal_ui_failed",
@@ -1296,7 +1413,7 @@ async function submitCreateGoalStepTwo(
 }
 
 async function submitCreateGoalFollowUp(
-  values: CreateGoalFollowUpValues,
+  rawValues: CreateGoalFollowUpValues,
   expectedKind: CreateGoalPostKind,
   res: Response<UiResponse>,
 ): Promise<void> {
@@ -1310,222 +1427,285 @@ async function submitCreateGoalFollowUp(
     return;
   }
   try {
-    const draft = await getCreateGoalDraft(redis, userId);
-    requestLanguage = draft?.language ?? requestLanguage;
-    if (
-      !draft ||
-      draft.stage !== "follow-up" ||
-      draft.details.kind !== expectedKind
-    ) {
-      await respondWithCreateGoalRestart(
-        res,
-        translate(draft?.language, "moderator.form.expired"),
-      );
-      return;
-    }
-
-    const developerCommands = parseDeveloperCommands(
-      values.customDeveloperField ?? "",
+    const callback = readCreationAttemptCallback(
+      rawValues as Record<string, unknown>,
+      "afterSubscribeButtonText",
     );
-    for (const command of developerCommands.ignoredCommands) {
-      console.info(
-        `[developerField] ignored unknown create-goal command: command=${command}`,
-      );
-    }
-    for (const warning of developerCommands.warnings) {
-      logDiagnostic("warn", "developer_command_warning", {
-        workflow: "developer_command",
-        phase: "validation",
-        category: warning,
-      });
-    }
-
-    const subreddit = await reddit.getCurrentSubreddit();
-    const displayNameError = validateSubredditDisplayName(
-      draft.subredditDisplayName,
-      subreddit.name,
-      draft.language,
-    );
-    if (displayNameError) {
-      res.json({ showToast: displayNameError });
-      return;
-    }
-    if (
-      draft.details.kind === "subscriber-goal" &&
-      subreddit.numberOfSubscribers >= draft.details.subscriberGoal
-    ) {
+    const values = callback?.values as CreateGoalFollowUpValues | undefined;
+    if (!callback || !values) {
       res.json({
-        showToast: translate(draft.language, "moderator.form.goalInvalid"),
+        showToast: translate(requestLanguage, "moderator.form.expired"),
       });
       return;
     }
-    if (developerCommands.selfPost) {
-      const submitted = await submitExperimentalSelfPost(subreddit, res);
-      if (submitted) {
-        await safelyDeleteCreateGoalDraft(userId);
-      }
-      return;
-    }
-
-    const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
-    const normalizedPreset = normalizeAfterSubscribePresetForNsfw(
-      draft.details.afterSubscribePreset,
-      isNsfw,
-    );
-    const replacedNsfwDynamicPreset =
-      normalizedPreset !== draft.details.afterSubscribePreset;
-    const presetDefaults = getAfterSubscribePresetDefaults(
-      normalizedPreset,
-      draft.language,
-    );
-    const resolvedActionInput = resolvePresetActionInput(
-      normalizedPreset,
-      subreddit.name,
-      values.afterSubscribeUrl,
-    );
-    const afterSubscribeResult = resolveAfterSubscribeAction({
-      type: resolvedActionInput.type,
-      buttonText: replacedNsfwDynamicPreset
-        ? presetDefaults.buttonText
-        : (values.afterSubscribeButtonText ?? presetDefaults.buttonText),
-      url: resolvedActionInput.url,
-      colorTheme: replacedNsfwDynamicPreset
-        ? presetDefaults.colorTheme
-        : (values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme),
-      fallbackColorTheme:
-        draft.details.kind === "cta-only"
-          ? defaultAfterSubscribeColorTheme
-          : draft.details.colorTheme,
-    });
-    if (afterSubscribeResult.invalidConfiguration) {
-      res.json({
-        showToast: translate(
-          draft.language,
-          "moderator.form.actionConfigurationInvalid",
-        ),
-        showForm: buildCreateGoalFollowUpForm(draft, values),
-      });
-      return;
-    }
-    const persistedAfterSubscribePreset = normalizedPreset;
-    const appSettings = getAppSettings();
-    const autoCreateNextGoal =
-      draft.details.kind === "subscriber-goal"
-        ? draft.details.autoCreateNextGoal
-        : false;
-    const crosspostEligible = isCrosspostEligible(
-      subreddit,
-      appSettings.promoSubreddit,
-    );
-    const crosspostBecameIneligible =
-      draft.details.kind === "subscriber-goal" &&
-      draft.details.crosspost &&
-      !crosspostEligible;
-    const crosspost =
-      draft.details.kind === "subscriber-goal" &&
-      draft.details.crosspost &&
-      crosspostEligible;
-    const { post, crosspostDispatchResult, highlightResult, flairResult } =
-      await createSubscriberGoal({
-        reddit,
-        redis,
-        appSettings,
-        options: {
-          title: draft.details.postTitle,
-          ...(draft.details.kind === "subscriber-goal"
-            ? { goal: draft.details.subscriberGoal }
-            : {}),
-          subredditDisplayName: draft.subredditDisplayName,
-          crosspost,
-          colorTheme:
-            draft.details.kind === "cta-only" &&
-            afterSubscribeResult.action.type !== "disabled"
-              ? afterSubscribeResult.action.colorTheme
-              : draft.details.kind === "cta-only"
-                ? defaultAfterSubscribeColorTheme
-                : draft.details.colorTheme,
-          postHeight: draft.postHeight,
-          autoCreateNextGoal,
-          language: draft.language,
-          afterSubscribeAction: afterSubscribeResult.action,
-          afterSubscribePreset: persistedAfterSubscribePreset,
-          cancelPendingAutoCreateGoals: true,
-          operationId: `manual:${subreddit.id}:${userId}:${stableDraftFingerprint(
-            {
-              draft,
-              afterSubscribeAction: afterSubscribeResult.action,
-              submitAsUser: developerCommands.submitAsUser,
-              headerText: developerCommands.headerText,
-            },
-          )}`,
-          submitAsUser: developerCommands.submitAsUser,
-          ...(developerCommands.headerText
-            ? { headerText: developerCommands.headerText }
-            : {}),
-        },
-      });
-
-    await safelyDeleteCreateGoalDraft(userId);
-    console.info(
-      `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${crosspost}`,
-    );
-    if (highlightResult.issues.length > 0) {
-      logDiagnostic("warn", "manual_goal_highlight_degraded", {
-        workflow: "internal_ui",
-        phase: "highlight",
-        postId: post.id,
-        failureCategories: highlightResult.issues
-          .map(({ category }) => category)
-          .join(","),
-        capacityOutcome: highlightResult.capacityOutcome,
-        cleanupOutcome: highlightResult.cleanupOutcome,
-        rollbackOutcome: highlightResult.rollbackOutcome,
-        reorderOutcome: highlightResult.reorderOutcome,
-      });
-      const moderatorUsername = await resolveCurrentUsername();
-      await notifyHighlightFailure({
-        reddit,
-        subredditId: subreddit.id,
-        subredditName: subreddit.name,
-        moderatorUsername,
-        postTitle: post.title ?? draft.details.postTitle,
-        postUrl: getPostUrl(post),
-        errorMessage: highlightResult.errorMessage,
-        highlightResult,
-        language: draft.language,
-      });
-    }
-
-    const createdPostLabel =
-      draft.details.kind === "cta-only"
-        ? translate(draft.language, "moderator.create.ctaLabel")
-        : translate(draft.language, "moderator.create.goalLabel");
-    const baseToast =
-      highlightResult.issues.length > 0
-        ? translate(draft.language, "moderator.create.degraded", {
-            postType: createdPostLabel,
-            details: describeHighlightResult(highlightResult, draft.language),
-          })
-        : crosspostDispatchResult.status === "failed"
-          ? translate(draft.language, "moderator.create.crosspostFailed", {
-              postType: createdPostLabel,
-              subredditName: appSettings.promoSubreddit,
-            })
-          : translate(draft.language, "moderator.create.success", {
-              postType: createdPostLabel,
+    await withCreateGoalDraftLease(
+      redis,
+      userId,
+      callback.creationAttemptId,
+      async () => {
+        const savedDraft = await getCreateGoalDraft(
+          redis,
+          userId,
+          callback.creationAttemptId,
+        );
+        const draft =
+          savedDraft?.stage === "follow-up" ? savedDraft : undefined;
+        requestLanguage = draft?.language ?? requestLanguage;
+        if (!draft || draft.details.kind !== expectedKind) {
+          if (callback) {
+            const subreddit = await reddit.getCurrentSubreddit();
+            const recovery = await recoverSubscriberGoalCreation({
+              reddit,
+              redis,
+              operationId: manualCreationOperationId(
+                subreddit.id,
+                userId,
+                callback.creationAttemptId,
+              ),
             });
-    const flairWarning =
-      flairResult.status === "omitted"
-        ? ` ${translate(draft.language, "moderator.create.flairWarning")}`
-        : "";
-    const crosspostEligibilityWarning = crosspostBecameIneligible
-      ? ` ${translate(draft.language, "moderator.create.crosspostIneligible")}`
-      : "";
-    res.json({
-      showToast: `${baseToast}${flairWarning}${crosspostEligibilityWarning}`,
-      navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
-    });
+            if (recovery.status === "complete") {
+              res.json({
+                showToast: translate(
+                  draft?.language,
+                  "moderator.create.success",
+                  {
+                    postType: translate(
+                      draft?.language,
+                      "moderator.create.goalLabel",
+                    ),
+                  },
+                ),
+                navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${recovery.result.post.id}`,
+              });
+              return;
+            }
+            if (recovery.status === "unknown") {
+              res.json({
+                showToast: translate(
+                  draft?.language,
+                  "errors.create.outcomeUnknown",
+                ),
+              });
+              return;
+            }
+          }
+          res.json({
+            showToast: translate(draft?.language, "moderator.form.expired"),
+          });
+          return;
+        }
+
+        const developerCommands = parseDeveloperCommands(
+          values.customDeveloperField ?? "",
+        );
+        for (const command of developerCommands.ignoredCommands) {
+          console.info(
+            `[developerField] ignored unknown create-goal command: command=${command}`,
+          );
+        }
+        for (const warning of developerCommands.warnings) {
+          logDiagnostic("warn", "developer_command_warning", {
+            workflow: "developer_command",
+            phase: "validation",
+            category: warning,
+          });
+        }
+
+        const subreddit = await reddit.getCurrentSubreddit();
+        const displayNameError = validateSubredditDisplayName(
+          draft.subredditDisplayName,
+          subreddit.name,
+          draft.language,
+        );
+        if (displayNameError) {
+          res.json({ showToast: displayNameError });
+          return;
+        }
+        if (
+          draft.details.kind === "subscriber-goal" &&
+          subreddit.numberOfSubscribers >= draft.details.subscriberGoal
+        ) {
+          res.json({
+            showToast: translate(draft.language, "moderator.form.goalInvalid"),
+          });
+          return;
+        }
+        if (developerCommands.selfPost) {
+          const submitted = await submitExperimentalSelfPost(subreddit, res);
+          if (submitted) {
+            await safelyDeleteCreateGoalDraft(userId, draft.creationAttemptId);
+          }
+          return;
+        }
+
+        const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
+        const normalizedPreset = normalizeAfterSubscribePresetForNsfw(
+          draft.details.afterSubscribePreset,
+          isNsfw,
+        );
+        const replacedNsfwDynamicPreset =
+          normalizedPreset !== draft.details.afterSubscribePreset;
+        const presetDefaults = getAfterSubscribePresetDefaults(
+          normalizedPreset,
+          draft.language,
+        );
+        const resolvedActionInput = resolvePresetActionInput(
+          normalizedPreset,
+          subreddit.name,
+          values.afterSubscribeUrl,
+        );
+        const afterSubscribeResult = resolveAfterSubscribeAction({
+          type: resolvedActionInput.type,
+          buttonText: replacedNsfwDynamicPreset
+            ? presetDefaults.buttonText
+            : (values.afterSubscribeButtonText ?? presetDefaults.buttonText),
+          url: resolvedActionInput.url,
+          colorTheme: replacedNsfwDynamicPreset
+            ? presetDefaults.colorTheme
+            : (values.afterSubscribeColorTheme?.[0] ??
+              presetDefaults.colorTheme),
+          fallbackColorTheme:
+            draft.details.kind === "cta-only"
+              ? defaultAfterSubscribeColorTheme
+              : draft.details.colorTheme,
+        });
+        if (afterSubscribeResult.invalidConfiguration) {
+          res.json({
+            showToast: translate(
+              draft.language,
+              "moderator.form.actionConfigurationInvalid",
+            ),
+            showForm: buildCreateGoalFollowUpForm(draft, values),
+          });
+          return;
+        }
+        const persistedAfterSubscribePreset = normalizedPreset;
+        const appSettings = getAppSettings();
+        const autoCreateNextGoal =
+          draft.details.kind === "subscriber-goal"
+            ? draft.details.autoCreateNextGoal
+            : false;
+        const crosspostEligible = isCrosspostEligible(
+          subreddit,
+          appSettings.promoSubreddit,
+        );
+        const crosspostBecameIneligible =
+          draft.details.kind === "subscriber-goal" &&
+          draft.details.crosspost &&
+          !crosspostEligible;
+        const crosspost =
+          draft.details.kind === "subscriber-goal" &&
+          draft.details.crosspost &&
+          crosspostEligible;
+        const { post, crosspostDispatchResult, highlightResult, flairResult } =
+          await createSubscriberGoal({
+            reddit,
+            redis,
+            appSettings,
+            options: {
+              title: draft.details.postTitle,
+              ...(draft.details.kind === "subscriber-goal"
+                ? { goal: draft.details.subscriberGoal }
+                : {}),
+              subredditDisplayName: draft.subredditDisplayName,
+              crosspost,
+              colorTheme:
+                draft.details.kind === "cta-only" &&
+                afterSubscribeResult.action.type !== "disabled"
+                  ? afterSubscribeResult.action.colorTheme
+                  : draft.details.kind === "cta-only"
+                    ? defaultAfterSubscribeColorTheme
+                    : draft.details.colorTheme,
+              postHeight: draft.postHeight,
+              autoCreateNextGoal,
+              language: draft.language,
+              afterSubscribeAction: afterSubscribeResult.action,
+              afterSubscribePreset: persistedAfterSubscribePreset,
+              cancelPendingAutoCreateGoals: true,
+              operationId: manualCreationOperationId(
+                subreddit.id,
+                userId,
+                draft.creationAttemptId,
+              ),
+              submitAsUser: developerCommands.submitAsUser,
+              ...(developerCommands.headerText
+                ? { headerText: developerCommands.headerText }
+                : {}),
+            },
+          });
+
+        await safelyDeleteCreateGoalDraft(userId, draft.creationAttemptId);
+        console.info(
+          `[crosspost] goal post created: postId=${post.id} subreddit=${subreddit.name} promoSubreddit=${appSettings.promoSubreddit} crosspost=${crosspost}`,
+        );
+        if (highlightResult.issues.length > 0) {
+          logDiagnostic("warn", "manual_goal_highlight_degraded", {
+            workflow: "internal_ui",
+            phase: "highlight",
+            postId: post.id,
+            failureCategories: highlightResult.issues
+              .map(({ category }) => category)
+              .join(","),
+            capacityOutcome: highlightResult.capacityOutcome,
+            cleanupOutcome: highlightResult.cleanupOutcome,
+            rollbackOutcome: highlightResult.rollbackOutcome,
+            reorderOutcome: highlightResult.reorderOutcome,
+          });
+          const moderatorUsername = await resolveCurrentUsername();
+          await notifyHighlightFailure({
+            reddit,
+            subredditId: subreddit.id,
+            subredditName: subreddit.name,
+            moderatorUsername,
+            postTitle: post.title ?? draft.details.postTitle,
+            postUrl: getPostUrl(post),
+            errorMessage: highlightResult.errorMessage,
+            highlightResult,
+            language: draft.language,
+          });
+        }
+
+        const createdPostLabel =
+          draft.details.kind === "cta-only"
+            ? translate(draft.language, "moderator.create.ctaLabel")
+            : translate(draft.language, "moderator.create.goalLabel");
+        const baseToast =
+          highlightResult.issues.length > 0
+            ? translate(draft.language, "moderator.create.degraded", {
+                postType: createdPostLabel,
+                details: describeHighlightResult(
+                  highlightResult,
+                  draft.language,
+                ),
+              })
+            : crosspostDispatchResult.status === "failed"
+              ? translate(draft.language, "moderator.create.crosspostFailed", {
+                  postType: createdPostLabel,
+                  subredditName: appSettings.promoSubreddit,
+                })
+              : translate(draft.language, "moderator.create.success", {
+                  postType: createdPostLabel,
+                });
+        const flairWarning =
+          flairResult.status === "omitted"
+            ? ` ${translate(draft.language, "moderator.create.flairWarning")}`
+            : "";
+        const crosspostEligibilityWarning = crosspostBecameIneligible
+          ? ` ${translate(draft.language, "moderator.create.crosspostIneligible")}`
+          : "";
+        res.json({
+          showToast: `${baseToast}${flairWarning}${crosspostEligibilityWarning}`,
+          navigateTo: `https://reddit.com/r/${subreddit.name}/comments/${post.id}`,
+        });
+      },
+    );
   } catch (error) {
+    if (error instanceof CreateGoalDraftLeaseInProgressError) {
+      res.json({
+        showToast: translate(requestLanguage, "errors.create.inProgress"),
+      });
+      return;
+    }
     logDiagnostic(
       "error",
       "create_goal_failed",
@@ -1540,7 +1720,8 @@ async function submitCreateGoalFollowUp(
       showToast:
         error instanceof ProhibitedSubredditError ||
         error instanceof SubscriberGoalModeratorPermissionError ||
-        error instanceof SubscriberGoalCreationInProgressError
+        error instanceof SubscriberGoalCreationInProgressError ||
+        error instanceof SubscriberGoalCreationOutcomeUnknownError
           ? error.message
           : translate(requestLanguage, "moderator.form.creationFailed"),
     });
@@ -1572,7 +1753,17 @@ async function respondWithCreateGoalRestart(
   showToast: string,
 ): Promise<void> {
   try {
-    res.json({ showToast, showForm: await buildCreateGoalSetupForm() });
+    const creationAttemptId = createOperationId("create-goal");
+    if (context.userId) {
+      await saveCreateGoalDraft(redis, context.userId, {
+        stage: "setup",
+        creationAttemptId,
+      });
+    }
+    res.json({
+      showToast,
+      showForm: await buildCreateGoalSetupForm("regular", creationAttemptId),
+    });
   } catch (error) {
     logDiagnostic(
       "error",
@@ -1584,9 +1775,12 @@ async function respondWithCreateGoalRestart(
   }
 }
 
-async function safelyDeleteCreateGoalDraft(userId: string): Promise<void> {
+async function safelyDeleteCreateGoalDraft(
+  userId: string,
+  creationAttemptId: string,
+): Promise<void> {
   try {
-    await deleteCreateGoalDraft(redis, userId);
+    await deleteCreateGoalDraft(redis, userId, creationAttemptId);
   } catch (error) {
     logDiagnostic(
       "warn",

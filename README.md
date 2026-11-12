@@ -41,6 +41,8 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- 2.6.1 - Fixed several edge cases including 
+- 2.5.3 - Fixed a bug related to idempotency keys preventing new goals from being created.
 - 2.5.2 - Adjusted how subscriber counts are displayed on Tiny subscribe and CTA posts. Compressed Changelog. Devvit 0.15.3
 - 2.5.1 - Reordered language selection items. AutoGoal now checks highlights properly. Removed unused New Subreddit Invite system, tailwind code.
 - 2.4.3 - Goal Success page text blocks now have static backgrounds to make screenshots easier to read. 

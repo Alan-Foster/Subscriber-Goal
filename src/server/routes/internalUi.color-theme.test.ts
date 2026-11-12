@@ -33,6 +33,8 @@ const hoisted = vi.hoisted(() => ({
     del: vi.fn(),
     hGetAll: vi.fn(),
     hSet: vi.fn(),
+    expire: vi.fn(),
+    watch: vi.fn(),
   },
   getAppSettings: vi.fn(),
   getSavedSubredditDisplayName: vi.fn(),
@@ -132,15 +134,145 @@ import { registerInternalUiRoutes } from "./internalUi";
 
 type RouteHandler = (req: Request, res: Response) => void | Promise<void>;
 
+function testDraftKey(creationAttemptId = "create-goal-test123"): string {
+  return `create_goal_draft_v5:t2_mod:${creationAttemptId}`;
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function finishTinyDraft(
+  routes: Map<string, RouteHandler>,
+  creationAttemptId: string,
+): Promise<ReturnType<typeof vi.fn>> {
+  await routes.get(internalRoutes.forms.createSubscribeOnly)?.(
+    {
+      body: {
+        [`postTitle__creation_attempt__${creationAttemptId}`]: "Welcome!",
+        colorTheme: ["red"],
+        afterSubscribePreset: ["top-post-day"],
+      },
+    } as Request,
+    { json: vi.fn() } as unknown as Response,
+  );
+  const finalJson = vi.fn();
+  await routes.get(internalRoutes.forms.createSubscribeOnlyFollowUp)?.(
+    {
+      body: {
+        [`afterSubscribeButtonText__creation_attempt__${creationAttemptId}`]:
+          "View the Top Post Today",
+      },
+    } as Request,
+    { json: finalJson } as unknown as Response,
+  );
+  return finalJson;
+}
+
 function createRouteHarness(): Map<string, RouteHandler> {
   const userId = hoisted.context.userId;
-  if (userId && !hoisted.redisValues.has(`create_goal_draft:${userId}`)) {
+  if (
+    userId &&
+    ![...hoisted.redisValues.keys()].some((key) =>
+      key.startsWith(`create_goal_draft_v5:${userId}:`),
+    )
+  ) {
     seedCreateGoalDraft("regular", "en");
   }
   const routes = new Map<string, RouteHandler>();
   const router = {
     post: (path: string, handler: RouteHandler) => {
-      routes.set(path, handler);
+      routes.set(path, async (req, res) => {
+        const carrierByPath: Record<string, string> = {
+          [internalRoutes.forms.createGoalSetup]: "postHeight",
+          [internalRoutes.forms.createSubscriberGoal]: "postTitle",
+          [internalRoutes.forms.createSubscribeOnly]: "postTitle",
+          [internalRoutes.forms.createCtaOnly]: "postTitle",
+          [internalRoutes.forms.createSubscriberGoalFollowUp]:
+            "afterSubscribeButtonText",
+          [internalRoutes.forms.createSubscribeOnlyFollowUp]:
+            "afterSubscribeButtonText",
+          [internalRoutes.forms.createCtaOnlyFollowUp]:
+            "afterSubscribeButtonText",
+        };
+        const carrier = carrierByPath[path];
+        const body = req.body as Record<string, unknown> | undefined;
+        if (path === internalRoutes.forms.createGoalSetup) {
+          const encodedAttempt = Object.keys(body ?? {})
+            .find((key) => key.startsWith("postHeight__creation_attempt__"))
+            ?.split("postHeight__creation_attempt__")[1];
+          const draftKey = encodedAttempt
+            ? `create_goal_draft_v5:${hoisted.context.userId}:${encodedAttempt}`
+            : [...hoisted.redisValues.keys()].find(
+                (key) =>
+                  key.startsWith(
+                    `create_goal_draft_v5:${hoisted.context.userId}:`,
+                  ) && !key.endsWith(":lease"),
+              );
+          const rawDraft = draftKey
+            ? hoisted.redisValues.get(draftKey)
+            : undefined;
+          if (rawDraft && !encodedAttempt) {
+            const draft = JSON.parse(rawDraft) as {
+              creationAttemptId?: string;
+            };
+            hoisted.redisValues.set(
+              draftKey!,
+              JSON.stringify({
+                version: 5,
+                stage: "setup",
+                creationAttemptId: draft.creationAttemptId,
+              }),
+            );
+          }
+        }
+        if (
+          carrier &&
+          body &&
+          !Object.keys(body).some((key) =>
+            key.startsWith(`${carrier}__creation_attempt__`),
+          )
+        ) {
+          const draftKey = [...hoisted.redisValues.keys()].find(
+            (key) =>
+              key.startsWith(
+                `create_goal_draft_v5:${hoisted.context.userId}:`,
+              ) && !key.endsWith(":lease"),
+          );
+          const rawDraft = draftKey
+            ? hoisted.redisValues.get(draftKey)
+            : undefined;
+          const attemptId = rawDraft
+            ? (JSON.parse(rawDraft).creationAttemptId as string | undefined)
+            : undefined;
+          if (attemptId) {
+            body[`${carrier}__creation_attempt__${attemptId}`] = body[carrier];
+            delete body[carrier];
+          }
+        }
+        const testResponse = {
+          ...res,
+          json: (payload: unknown) => {
+            const response = payload as {
+              showForm?: { form?: { fields?: Array<{ name?: string }> } };
+            };
+            for (const field of response.showForm?.form?.fields ?? []) {
+              if (field.name?.includes("__creation_attempt__")) {
+                field.name = field.name.split("__creation_attempt__", 1)[0];
+              }
+            }
+            return res.json(payload);
+          },
+        } as Response;
+        await handler(req, testResponse);
+      });
     },
   } as unknown as Router;
   registerInternalUiRoutes(router);
@@ -165,13 +297,15 @@ function seedCreateGoalDraft(
       | "newest-post";
     autoCreateNextGoal?: boolean;
     customDeveloperField?: string;
-    stage?: "details" | "follow-up";
+    stage?: "setup" | "details" | "follow-up";
     subredditDisplayName?: string;
+    creationAttemptId?: string;
   } = {},
 ): void {
   const base = {
-    version: 4,
+    version: 5,
     stage: options.stage ?? "follow-up",
+    creationAttemptId: options.creationAttemptId ?? "create-goal-test123",
     postHeight,
     language,
     subredditDisplayName: options.subredditDisplayName ?? "ExampleSub",
@@ -203,8 +337,8 @@ function seedCreateGoalDraft(
             autoCreateNextGoal: options.autoCreateNextGoal ?? true,
           };
   hoisted.redisValues.set(
-    `create_goal_draft:${hoisted.context.userId}`,
-    JSON.stringify(base.stage === "details" ? base : { ...base, details }),
+    `create_goal_draft_v5:${hoisted.context.userId}:${base.creationAttemptId}`,
+    JSON.stringify(base.stage === "follow-up" ? { ...base, details } : base),
   );
 }
 
@@ -236,6 +370,24 @@ describe("internalUi color theme create goal routes", () => {
         ([field, value]) => hash.set(field, value),
       );
       hoisted.redisHashes.set(key, hash);
+    });
+    hoisted.redis.expire.mockResolvedValue(undefined);
+    hoisted.redis.watch.mockImplementation(async () => {
+      let queuedDelete: string | undefined;
+      const transaction = {
+        multi: vi.fn(async () => undefined),
+        del: vi.fn(async (key: string) => {
+          queuedDelete = key;
+          return transaction;
+        }),
+        exec: vi.fn(async () => {
+          if (queuedDelete) hoisted.redisValues.delete(queuedDelete);
+          return queuedDelete ? [1] : [];
+        }),
+        discard: vi.fn(async () => undefined),
+        unwatch: vi.fn(async () => transaction),
+      };
+      return transaction;
     });
     hoisted.context.subredditName = "ExampleSub";
     hoisted.context.postId = "t3_post";
@@ -612,6 +764,7 @@ describe("internalUi color theme create goal routes", () => {
 
   it("opens the numbered setup form with language, capitalization, and height", async () => {
     const routes = createRouteHarness();
+    hoisted.redisValues.clear();
     const json = vi.fn();
     const res = { json } as unknown as Response;
 
@@ -671,7 +824,14 @@ describe("internalUi color theme create goal routes", () => {
       "postHeight",
     ]);
     expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalled();
-    expect(hoisted.redis.del).toHaveBeenCalledWith("create_goal_draft:t2_mod");
+    const createdDraft = [...hoisted.redisValues.entries()].find(([key]) =>
+      key.startsWith("create_goal_draft_v5:t2_mod:"),
+    )?.[1];
+    expect(JSON.parse(createdDraft!)).toMatchObject({
+      version: 5,
+      stage: "setup",
+      creationAttemptId: expect.any(String),
+    });
   });
 
   it("pre-selects a supported subreddit language in the setup form", async () => {
@@ -774,6 +934,106 @@ describe("internalUi color theme create goal routes", () => {
     expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
       defaultValue: ["cta"],
     });
+  });
+
+  it("reuses one attempt ID when the initial setup form is double-submitted", async () => {
+    const routes = createRouteHarness();
+    hoisted.redisValues.clear();
+    const menuJson = vi.fn();
+    await routes.get(internalRoutes.menu.createGoal)?.(
+      {} as Request,
+      { json: menuJson } as unknown as Response,
+    );
+    const openedDraft = [...hoisted.redisValues.values()]
+      .map((value) => JSON.parse(value) as { creationAttemptId?: string })
+      .find((draft) => draft.creationAttemptId) as {
+      creationAttemptId: string;
+    };
+    const submit = () => {
+      const json = vi.fn();
+      return routes
+        .get(internalRoutes.forms.createGoalSetup)?.(
+          {
+            body: {
+              language: ["en"],
+              subredditDisplayName: "ExampleSub",
+              postHeight: ["tiny"],
+            },
+          } as Request,
+          { json } as unknown as Response,
+        )
+        ?.then(() => json);
+    };
+
+    const firstJson = await submit();
+    const secondJson = await submit();
+    const savedDraft = JSON.parse(
+      hoisted.redisValues.get(testDraftKey(openedDraft.creationAttemptId))!,
+    ) as { creationAttemptId: string; stage: string };
+
+    expect(savedDraft).toMatchObject({
+      creationAttemptId: openedDraft.creationAttemptId,
+      stage: "details",
+    });
+    expect(firstJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showForm: expect.objectContaining({
+          name: formNames.createSubscribeOnly,
+        }),
+      }),
+    );
+    expect(secondJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showForm: expect.objectContaining({
+          name: formNames.createSubscribeOnly,
+        }),
+      }),
+    );
+  });
+
+  it("gives each newly opened setup form a new attempt ID", async () => {
+    const routes = createRouteHarness();
+    hoisted.redisValues.clear();
+    const response = { json: vi.fn() } as unknown as Response;
+
+    await routes.get(internalRoutes.menu.createGoal)?.({} as Request, response);
+    const firstKey = [...hoisted.redisValues.keys()].find((key) =>
+      key.startsWith("create_goal_draft_v5:t2_mod:"),
+    )!;
+    await routes.get(internalRoutes.menu.createGoal)?.({} as Request, response);
+    const keys = [...hoisted.redisValues.keys()].filter((key) =>
+      key.startsWith("create_goal_draft_v5:t2_mod:"),
+    );
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(firstKey);
+  });
+
+  it("rejects a stale setup callback without replacing the newer draft", async () => {
+    const routes = createRouteHarness();
+    hoisted.redisValues.clear();
+    const response = { json: vi.fn() } as unknown as Response;
+    await routes.get(internalRoutes.menu.createGoal)?.({} as Request, response);
+    const currentKey = [...hoisted.redisValues.keys()].find((key) =>
+      key.startsWith("create_goal_draft_v5:t2_mod:"),
+    )!;
+    const currentDraft = hoisted.redisValues.get(currentKey)!;
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      {
+        body: {
+          language: ["en"],
+          subredditDisplayName: "ExampleSub",
+          "postHeight__creation_attempt__create-goal-stale12": ["tiny"],
+        },
+      } as Request,
+      response,
+    );
+
+    expect(response.json).toHaveBeenLastCalledWith({
+      showToast: expect.stringContaining("no longer matches"),
+    });
+    expect(hoisted.redisValues.get(currentKey)).toBe(currentDraft);
   });
 
   it("falls back to English for an unsupported subreddit language", async () => {
@@ -894,10 +1154,11 @@ describe("internalUi color theme create goal routes", () => {
       ),
     ).toMatchObject({ defaultValue: true });
     expect(hoisted.redis.set).toHaveBeenCalledWith(
-      "create_goal_draft:t2_mod",
+      testDraftKey(),
       JSON.stringify({
-        version: 4,
+        version: 5,
         stage: "details",
+        creationAttemptId: "create-goal-test123",
         language: "es",
         postHeight: "short",
         subredditDisplayName: "EXAMPLEsub",
@@ -1167,10 +1428,8 @@ describe("internalUi color theme create goal routes", () => {
       helpText:
         "This field is for developers and testing only. Please leave this field empty.",
     });
-    expect(
-      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
-    ).toMatchObject({
-      version: 4,
+    expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
+      version: 5,
       stage: "follow-up",
       details: {
         kind: "subscriber-goal",
@@ -1209,9 +1468,9 @@ describe("internalUi color theme create goal routes", () => {
       { json } as unknown as Response,
     );
 
-    expect(
-      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
-    ).toMatchObject({ details: { crosspost: false } });
+    expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
+      details: { crosspost: false },
+    });
   });
 
   it("treats an omitted eligible crosspost value as disabled", async () => {
@@ -1231,9 +1490,9 @@ describe("internalUi color theme create goal routes", () => {
       { json } as unknown as Response,
     );
 
-    expect(
-      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
-    ).toMatchObject({ details: { crosspost: false } });
+    expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
+      details: { crosspost: false },
+    });
   });
 
   it("skips crossposting with a warning when eligibility changes before creation", async () => {
@@ -1308,10 +1567,8 @@ describe("internalUi color theme create goal routes", () => {
       "afterSubscribeColorTheme",
       "customDeveloperField",
     ]);
-    expect(
-      JSON.parse(hoisted.redisValues.get("create_goal_draft:t2_mod")!),
-    ).toMatchObject({
-      version: 4,
+    expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
+      version: 5,
       stage: "follow-up",
       details: {
         kind: "subscribe-only",
@@ -1494,6 +1751,239 @@ describe("internalUi color theme create goal routes", () => {
     },
   );
 
+  it("keeps a newer attempt unchanged when an older setup callback resumes", async () => {
+    const attemptA = "create-goal-race-a12";
+    seedCreateGoalDraft("regular", "en", {
+      stage: "setup",
+      creationAttemptId: attemptA,
+    });
+    const routes = createRouteHarness();
+    const pausedSubreddit = deferred<{
+      id: string;
+      name: string;
+      numberOfSubscribers: number;
+      type: string;
+      nsfw: boolean;
+    }>();
+    hoisted.reddit.getCurrentSubreddit.mockImplementationOnce(
+      () => pausedSubreddit.promise,
+    );
+
+    const submissionA = routes.get(internalRoutes.forms.createGoalSetup)?.(
+      {
+        body: {
+          language: ["en"],
+          subredditDisplayName: "ExampleSub",
+          [`postHeight__creation_attempt__${attemptA}`]: ["regular"],
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const existingKeys = new Set(hoisted.redisValues.keys());
+    await routes.get(internalRoutes.menu.createGoal)?.(
+      {} as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    const keyB = [...hoisted.redisValues.keys()].find(
+      (key) =>
+        key.startsWith("create_goal_draft_v5:t2_mod:") &&
+        !key.endsWith(":lease") &&
+        !existingKeys.has(key),
+    )!;
+    const draftBBefore = hoisted.redisValues.get(keyB)!;
+
+    pausedSubreddit.resolve({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      nsfw: false,
+    });
+    await submissionA;
+
+    expect(hoisted.redisValues.get(keyB)).toBe(draftBBefore);
+    const attemptB = keyB.split(":").at(-1)!;
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      {
+        body: {
+          language: ["en"],
+          subredditDisplayName: "ExampleSub",
+          [`postHeight__creation_attempt__${attemptB}`]: ["tiny"],
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    expect(JSON.parse(hoisted.redisValues.get(keyB)!)).toMatchObject({
+      creationAttemptId: attemptB,
+      stage: "details",
+    });
+    const finalJson = await finishTinyDraft(routes, attemptB);
+    expect(finalJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        navigateTo: expect.stringContaining("/comments/t3_newpost"),
+      }),
+    );
+  });
+
+  it("successful cleanup removes only its attempt while a newer draft survives", async () => {
+    const attemptA = "create-goal-final-a12";
+    seedCreateGoalDraft("tiny", "en", { creationAttemptId: attemptA });
+    const routes = createRouteHarness();
+    const pausedSubreddit = deferred<{
+      id: string;
+      name: string;
+      numberOfSubscribers: number;
+      type: string;
+      nsfw: boolean;
+    }>();
+    const subreddit = {
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      nsfw: false,
+    };
+    hoisted.reddit.getCurrentSubreddit
+      .mockResolvedValueOnce(subreddit)
+      .mockImplementationOnce(() => pausedSubreddit.promise);
+
+    const submissionA = routes.get(
+      internalRoutes.forms.createSubscribeOnlyFollowUp,
+    )?.(
+      {
+        body: {
+          [`afterSubscribeButtonText__creation_attempt__${attemptA}`]:
+            "View the Top Post Today",
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    await vi.waitFor(() =>
+      expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledTimes(2),
+    );
+
+    const existingKeys = new Set(hoisted.redisValues.keys());
+    await routes.get(internalRoutes.menu.createGoal)?.(
+      {} as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    const keyB = [...hoisted.redisValues.keys()].find(
+      (key) =>
+        key.startsWith("create_goal_draft_v5:t2_mod:") &&
+        !key.endsWith(":lease") &&
+        !existingKeys.has(key),
+    )!;
+    const draftBBefore = hoisted.redisValues.get(keyB)!;
+
+    pausedSubreddit.resolve(subreddit);
+    await submissionA;
+
+    expect(hoisted.redisValues.has(testDraftKey(attemptA))).toBe(false);
+    expect(hoisted.redisValues.get(keyB)).toBe(draftBBefore);
+    const attemptB = keyB.split(":").at(-1)!;
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      {
+        body: {
+          language: ["en"],
+          subredditDisplayName: "ExampleSub",
+          [`postHeight__creation_attempt__${attemptB}`]: ["tiny"],
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    expect(JSON.parse(hoisted.redisValues.get(keyB)!)).toMatchObject({
+      stage: "details",
+    });
+    const finalJson = await finishTinyDraft(routes, attemptB);
+    expect(finalJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        navigateTo: expect.stringContaining("/comments/t3_newpost"),
+      }),
+    );
+  });
+
+  it("serializes same-attempt callbacks and prevents a late stage replay", async () => {
+    const attempt = "create-goal-order-a12";
+    seedCreateGoalDraft("regular", "en", {
+      stage: "setup",
+      creationAttemptId: attempt,
+    });
+    const routes = createRouteHarness();
+    const pausedSubreddit = deferred<{
+      id: string;
+      name: string;
+      numberOfSubscribers: number;
+      type: string;
+      nsfw: boolean;
+    }>();
+    hoisted.reddit.getCurrentSubreddit.mockImplementationOnce(
+      () => pausedSubreddit.promise,
+    );
+    const setupBody = {
+      language: ["en"],
+      subredditDisplayName: "ExampleSub",
+      [`postHeight__creation_attempt__${attempt}`]: ["regular"],
+    };
+
+    const first = routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { ...setupBody } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    const secondJson = vi.fn();
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { ...setupBody } } as Request,
+      { json: secondJson } as unknown as Response,
+    );
+
+    expect(secondJson).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("already in progress"),
+    });
+    expect(
+      JSON.parse(hoisted.redisValues.get(testDraftKey(attempt))!),
+    ).toMatchObject({
+      stage: "setup",
+    });
+
+    pausedSubreddit.resolve({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+      nsfw: false,
+    });
+    await first;
+    expect(
+      JSON.parse(hoisted.redisValues.get(testDraftKey(attempt))!),
+    ).toMatchObject({
+      stage: "details",
+    });
+
+    await routes.get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          [`postTitle__creation_attempt__${attempt}`]: "Welcome!",
+          subscriberGoal: 200,
+          colorTheme: ["red"],
+          afterSubscribePreset: ["top-post-day"],
+        },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    const followUpDraft = hoisted.redisValues.get(testDraftKey(attempt))!;
+    expect(JSON.parse(followUpDraft)).toMatchObject({ stage: "follow-up" });
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      { body: { ...setupBody } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    expect(hoisted.redisValues.get(testDraftKey(attempt))).toBe(followUpDraft);
+  });
+
   it("rejects invalid setup selections without storing a draft", async () => {
     const routes = createRouteHarness();
     const json = vi.fn();
@@ -1510,7 +2000,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.redis.set).not.toHaveBeenCalled();
   });
 
-  it("reopens setup when a details draft is missing", async () => {
+  it("rejects an expired callback when no operation can be recovered", async () => {
     const routes = createRouteHarness();
     hoisted.redisValues.clear();
     const json = vi.fn();
@@ -1528,13 +2018,57 @@ describe("internalUi color theme create goal routes", () => {
       res,
     );
 
-    expect(json).toHaveBeenCalledWith(
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("expired"),
+    });
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("lets an expired callback recover its completed operation without resubmitting", async () => {
+    vi.useFakeTimers();
+    const creationAttemptId = "create-goal-recover12";
+    seedCreateGoalDraft("tiny", "en", { creationAttemptId });
+    const post = {
+      id: "t3_newpost",
+      subredditName: "ExampleSub",
+      subredditId: "t5_example",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      title: "Welcome!",
+      approve: vi.fn(),
+      highlight: vi.fn(),
+      isHighlighted: vi.fn(async () => true),
+    };
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    const routes = createRouteHarness();
+    const firstJson = vi.fn();
+    const secondJson = vi.fn();
+
+    const firstResponse = routes.get(
+      internalRoutes.forms.createSubscribeOnlyFollowUp,
+    )?.({ body: {} } as Request, { json: firstJson } as unknown as Response);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await firstResponse;
+    expect(hoisted.redisValues.has(testDraftKey(creationAttemptId))).toBe(
+      false,
+    );
+
+    await routes.get(internalRoutes.forms.createSubscribeOnlyFollowUp)?.(
+      {
+        body: {
+          [`afterSubscribeButtonText__creation_attempt__${creationAttemptId}`]:
+            "View the Top Post Today",
+        },
+      } as Request,
+      { json: secondJson } as unknown as Response,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(secondJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        showToast: expect.stringContaining("expired"),
-        showForm: expect.objectContaining({ name: formNames.createGoalSetup }),
+        navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
       }),
     );
-    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
   it("rejects a Tiny draft submitted through the subscriber-goal form", async () => {
@@ -1548,11 +2082,9 @@ describe("internalUi color theme create goal routes", () => {
       res,
     );
 
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        showForm: expect.objectContaining({ name: formNames.createGoalSetup }),
-      }),
-    );
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("expired"),
+    });
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
@@ -1592,7 +2124,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(hoisted.redis.del).not.toHaveBeenCalled();
-    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(true);
+    expect(hoisted.redisValues.has(testDraftKey())).toBe(true);
   });
 
   it("passes the selected color theme when creating a goal post", async () => {
@@ -1641,8 +2173,8 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
       hoisted.redis,
     );
-    expect(hoisted.redis.del).toHaveBeenCalledWith("create_goal_draft:t2_mod");
-    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(false);
+    expect(hoisted.redis.del).toHaveBeenCalledWith(testDraftKey());
+    expect(hoisted.redisValues.has(testDraftKey())).toBe(false);
   });
 
   it("persists a trimmed HTTPS follow-up CTA and its secondary Pink color", async () => {
@@ -1814,7 +2346,7 @@ describe("internalUi color theme create goal routes", () => {
         }),
       }),
     );
-    expect(hoisted.redisValues.has("create_goal_draft:t2_mod")).toBe(true);
+    expect(hoisted.redisValues.has(testDraftKey())).toBe(true);
   });
 
   it.each([

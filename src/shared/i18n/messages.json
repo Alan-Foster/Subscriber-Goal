@@ -1767,6 +1767,12 @@
       "placeholders": {},
       "protectedTokens": ["Subscriber Goal"]
     },
+    "errors.create.outcomeUnknown": {
+      "description": "Moderator workflow: Reddit submission outcome could not be confirmed",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "errors.create.permissionVerification": {
       "description": "Moderator workflow: Reddit could not verify app permissions",
       "policy": "fallback",
@@ -2342,6 +2348,7 @@
         "errors.network.failed": "Request failed",
         "errors.create.moderatorPermission": "{appAccount} must be a moderator of r/{subredditName} with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
         "errors.create.inProgress": "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
+        "errors.create.outcomeUnknown": "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Check the community's newest posts before trying a newly opened form.",
         "errors.create.permissionVerification": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}.",
         "errors.create.permissionVerificationRetry": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}. Please try again shortly.",
         "metric.subscribersCommunity": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",

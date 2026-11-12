@@ -32,6 +32,7 @@ const hoisted = vi.hoisted(() => ({
       );
       hoisted.redisHashes.set(key, hash);
     }),
+    expire: vi.fn(),
     hMGet: vi.fn(async (key: string, fields: string[]) => {
       const hash = hoisted.redisHashes.get(key);
       return fields.map((field) => hash?.get(field));
@@ -159,6 +160,7 @@ describe("createSubscriberGoal highlight handling", () => {
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
     hoisted.highlightedIds.clear();
+    hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -361,6 +363,77 @@ describe("createSubscriberGoal highlight handling", () => {
 
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getPostById).toHaveBeenCalledWith("t3_newpost");
+  });
+
+  it("makes zero Reddit submissions when the atomic operation claim fails", async () => {
+    hoisted.redisValues.set(
+      "subscriber_goal_creation_v1:manual:test:lock",
+      "another-request",
+    );
+
+    await expect(
+      createGoal({ operationId: "manual:test" }),
+    ).rejects.toMatchObject({ name: "SubscriberGoalCreationInProgressError" });
+
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("blocks retries when a Reddit submission outcome is unknown", async () => {
+    hoisted.createGoalPost.mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      createGoal({ operationId: "manual:unknown" }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+    await expect(
+      createGoal({ operationId: "manual:unknown" }),
+    ).rejects.toMatchObject({
+      name: "SubscriberGoalCreationOutcomeUnknownError",
+    });
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(
+      hoisted.redisHashes
+        .get("subscriber_goal_creation_v1:manual:unknown")
+        ?.get("status"),
+    ).toBe("submission_unknown");
+  });
+
+  it("does not fail successful creation when operation expiration fails", async () => {
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.redis.expire.mockRejectedValue(new Error("quota unavailable"));
+
+    await expect(
+      createGoal({ operationId: "manual-v2:ttl-warning" }),
+    ).resolves.toMatchObject({ post: { id: "t3_newpost" } });
+
+    expect(hoisted.redis.expire).toHaveBeenCalledWith(
+      "subscriber_goal_creation_v1:manual-v2:ttl-warning",
+      86_400,
+    );
+  });
+
+  it("creates distinct posts for separate attempts with identical settings", async () => {
+    const firstPost = { ...createPost(), id: "t3_first" };
+    const secondPost = { ...createPost(), id: "t3_second" };
+    hoisted.createGoalPost
+      .mockResolvedValueOnce(firstPost)
+      .mockResolvedValueOnce(secondPost);
+
+    const first = await createGoal({
+      operationId: "manual-v2:attempt-one",
+      ...noRetryHighlightVerification,
+    });
+    const second = await createGoal({
+      operationId: "manual-v2:attempt-two",
+      ...noRetryHighlightVerification,
+    });
+
+    expect(first.post.id).toBe("t3_first");
+    expect(second.post.id).toBe("t3_second");
+    expect(hoisted.createGoalPost).toHaveBeenCalledTimes(2);
   });
 
   it("removes an authoritative old classic highlight only after the replacement is registered and approved", async () => {

@@ -125,6 +125,110 @@ export class SubscriberGoalCreationInProgressError extends Error {
   }
 }
 
+export class SubscriberGoalCreationOutcomeUnknownError extends Error {
+  constructor(language?: SubGoalLanguage) {
+    super(translate(language, "errors.create.outcomeUnknown"));
+    this.name = "SubscriberGoalCreationOutcomeUnknownError";
+  }
+}
+
+export const subscriberGoalCreationOperationRetentionSeconds = 24 * 60 * 60;
+
+type StoredCreationOperation = Record<string, string>;
+
+async function writeCreationOperation(
+  redis: RedisClient,
+  operationKey: string,
+  fields: Record<string, string>,
+): Promise<void> {
+  await redis.hSet(operationKey, fields);
+  if (!operationKey.includes(":manual-v2:")) return;
+  try {
+    await redis.expire(
+      operationKey,
+      subscriberGoalCreationOperationRetentionSeconds,
+    );
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "goal_creation_retention_failed",
+      { workflow: "create_subscriber_goal", phase: "operation_retention" },
+      error,
+    );
+  }
+}
+
+async function recoverCompletedCreation(
+  reddit: RedditClient,
+  raw: StoredCreationOperation,
+): Promise<CreateSubscriberGoalResult | undefined> {
+  const postId = raw.postId ?? "";
+  if (
+    raw.status !== "complete" ||
+    !isLinkId(postId) ||
+    !raw.crosspostDispatchResult ||
+    !(raw.highlightResult || raw.stickyResult) ||
+    !raw.flairResult
+  ) {
+    return undefined;
+  }
+  try {
+    const storedHighlightResult = raw.highlightResult || raw.stickyResult;
+    const post = (await reddit.getPostById(postId)) as unknown as Awaited<
+      ReturnType<typeof createGoalPost>
+    >;
+    return {
+      post,
+      crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
+      highlightResult: normalizeStoredHighlightResult(
+        JSON.parse(storedHighlightResult!),
+        postId,
+      ),
+      flairResult: JSON.parse(raw.flairResult),
+    } as CreateSubscriberGoalResult;
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "goal_creation_recovery_failed",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "completed_operation",
+        postId,
+      },
+      error,
+    );
+    return undefined;
+  }
+}
+
+export type SubscriberGoalCreationRecovery =
+  | { status: "complete"; result: CreateSubscriberGoalResult }
+  | { status: "unknown" }
+  | { status: "missing" };
+
+export async function recoverSubscriberGoalCreation({
+  reddit,
+  redis,
+  operationId,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  operationId: string;
+}): Promise<SubscriberGoalCreationRecovery> {
+  const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+  const raw = await redis.hGetAll(operationKey);
+  const completed = await recoverCompletedCreation(reddit, raw);
+  if (completed) return { status: "complete", result: completed };
+  if (
+    raw.status === "submitting" ||
+    raw.status === "submission_unknown" ||
+    raw.status === "post_submitted"
+  ) {
+    return { status: "unknown" };
+  }
+  return { status: "missing" };
+}
+
 export class SubscriberGoalPermissionVerificationError extends Error {
   constructor(subredditName: string, language?: SubGoalLanguage) {
     super(
@@ -192,51 +296,15 @@ async function createSubscriberGoalUnderCommunityLease({
 
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
   const lockKey = `${operationKey}:lock`;
-  const recoverComplete = async (
-    raw: Record<string, string>,
-  ): Promise<CreateSubscriberGoalResult | undefined> => {
-    const postId = raw.postId ?? "";
-    if (
-      raw.status !== "complete" ||
-      !isLinkId(postId) ||
-      !raw.crosspostDispatchResult ||
-      !(raw.highlightResult || raw.stickyResult) ||
-      !raw.flairResult
-    ) {
-      return undefined;
-    }
-    try {
-      const storedHighlightResult = raw.highlightResult || raw.stickyResult;
-      const post = (await reddit.getPostById(postId)) as unknown as Awaited<
-        ReturnType<typeof createGoalPost>
-      >;
-      return {
-        post,
-        crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
-        highlightResult: normalizeStoredHighlightResult(
-          JSON.parse(storedHighlightResult!),
-          postId,
-        ),
-        flairResult: JSON.parse(raw.flairResult),
-      } as CreateSubscriberGoalResult;
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "goal_creation_recovery_failed",
-        {
-          workflow: "create_subscriber_goal",
-          phase: "completed_operation",
-          postId,
-        },
-        error,
-      );
-      return undefined;
-    }
-  };
-
   const existing = await redis.hGetAll(operationKey);
-  const completed = await recoverComplete(existing);
+  const completed = await recoverCompletedCreation(reddit, existing);
   if (completed) return completed;
+  if (
+    existing.status === "submitting" ||
+    existing.status === "submission_unknown"
+  ) {
+    throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+  }
 
   const nowMs = Date.now();
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
@@ -250,10 +318,16 @@ async function createSubscriberGoalUnderCommunityLease({
 
   try {
     const reloaded = await redis.hGetAll(operationKey);
-    const recoveredComplete = await recoverComplete(reloaded);
+    const recoveredComplete = await recoverCompletedCreation(reddit, reloaded);
     if (recoveredComplete) return recoveredComplete;
-    await redis.hSet(operationKey, {
-      status: reloaded.status || "pending",
+    if (
+      reloaded.status === "submitting" ||
+      reloaded.status === "submission_unknown"
+    ) {
+      throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+    }
+    await writeCreationOperation(redis, operationKey, {
+      status: "claimed",
       startedAt: reloaded.startedAt || String(nowMs),
       updatedAt: String(nowMs),
     });
@@ -267,16 +341,28 @@ async function createSubscriberGoalUnderCommunityLease({
       { reddit, redis, appSettings, options },
       {
         ...(recoveredPost ? { recoveredPost } : {}),
+        onSubmissionStarted: async () => {
+          await writeCreationOperation(redis, operationKey, {
+            status: "submitting",
+            updatedAt: String(Date.now()),
+          });
+        },
         onPostSubmitted: async (postId) => {
-          await redis.hSet(operationKey, {
+          await writeCreationOperation(redis, operationKey, {
             status: "post_submitted",
             postId,
             updatedAt: String(Date.now()),
           });
         },
+        onSubmissionUnknown: async () => {
+          await writeCreationOperation(redis, operationKey, {
+            status: "submission_unknown",
+            updatedAt: String(Date.now()),
+          });
+        },
       },
     );
-    await redis.hSet(operationKey, {
+    await writeCreationOperation(redis, operationKey, {
       status: "complete",
       postId: result.post.id,
       completedAt: String(Date.now()),
@@ -305,7 +391,9 @@ async function createSubscriberGoalInternal(
   },
   recovery?: {
     recoveredPost?: Awaited<ReturnType<typeof createGoalPost>>;
+    onSubmissionStarted: () => Promise<void>;
     onPostSubmitted: (postId: string) => Promise<void>;
+    onSubmissionUnknown: () => Promise<void>;
   },
 ): Promise<CreateSubscriberGoalResult> {
   const subreddit = await reddit.getCurrentSubreddit();
@@ -412,19 +500,29 @@ async function createSubscriberGoalInternal(
           language: options.language,
         });
 
-  const post =
-    recovery?.recoveredPost ??
-    (await createGoalPost({
-      title: options.title,
-      subredditName: subreddit.name,
-      textFallback,
-      postHeight: options.postHeight,
-      language: options.language,
-      ...(flairResult.status === "applied"
-        ? { flairId: flairResult.flairId }
-        : {}),
-      ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
-    }));
+  let post = recovery?.recoveredPost;
+  if (!post) {
+    await recovery?.onSubmissionStarted();
+    try {
+      post = await createGoalPost({
+        title: options.title,
+        subredditName: subreddit.name,
+        textFallback,
+        postHeight: options.postHeight,
+        language: options.language,
+        ...(flairResult.status === "applied"
+          ? { flairId: flairResult.flairId }
+          : {}),
+        ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
+      });
+    } catch (error) {
+      if (recovery) {
+        await recovery.onSubmissionUnknown();
+        throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+      }
+      throw error;
+    }
+  }
   if (!recovery?.recoveredPost) await recovery?.onPostSubmitted(post.id);
   await applyGoalPostFrameStyle(post, options.postHeight);
 
