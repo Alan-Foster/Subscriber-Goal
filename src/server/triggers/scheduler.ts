@@ -56,6 +56,7 @@ import {
 } from "../utils/emergencyGoalRecovery";
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
+import { processSubscriberTrackingRepairs } from "../data/subscriberTracking";
 
 type CompletedUpdateCleanupPreparation =
   | "auto_disabled"
@@ -313,6 +314,16 @@ export async function onPostsUpdaterJob(): Promise<void> {
       "error",
       "scheduler_task_failed",
       { workflow: "subscriber_stats_migration" },
+      error,
+    );
+  }
+  try {
+    await processSubscriberTrackingRepairs(redis);
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "subscriber_tracking_repair" },
       error,
     );
   }

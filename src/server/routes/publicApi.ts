@@ -23,7 +23,7 @@ import type {
 import { apiRoutes } from "../../shared/routes";
 import { getPublicAppSettings } from "../settings";
 import { checkCompletionStatus, getSubGoalData } from "../data/subGoalData";
-import { isTrackedSubscriber, setNewSubscriber } from "../data/subscriberStats";
+import { isTrackedSubscriber } from "../data/subscriberStats";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
@@ -40,9 +40,17 @@ import {
 } from "../data/ctaActivity";
 import {
   hasSubscriptionAttemptReceipt,
+  getSubscriptionAcceptanceEvidence,
   isValidSubscriptionAttemptId,
   storeSubscriptionAttemptReceipt,
 } from "../data/subscriptionAttempt";
+import {
+  applySubscriberTracking,
+  cleanupSubscriberTracking,
+  getPendingSubscriberTracking,
+  getSubscriberTrackingGeneration,
+  persistAcceptedSubscriberTracking,
+} from "../data/subscriberTracking";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import { translate, type MessageKey } from "../../shared/i18n/catalog";
@@ -1089,6 +1097,8 @@ export function registerPublicApiRoutes(router: Router): void {
     const { postId, userId } = context;
     const journeyId = getRequestJourneyId(req);
     const operationId = createOperationId("subscribe");
+    let redditAccepted = false;
+    let acceptanceDurable = false;
     if (!postId) {
       res.status(400).json(localizedError("errors.api.postIdMissing"));
       return;
@@ -1116,107 +1126,65 @@ export function registerPublicApiRoutes(router: Router): void {
         res.status(401).json(localizedError("errors.join.loginRequired"));
         return;
       }
-      if (subGoalData.postKind === subscribeOnlyPostKind) {
-        const username = await reddit.getCurrentUsername();
-        if (!username) {
-          res
-            .status(400)
-            .json(localizedError("errors.api.usernameUnavailable"));
-          return;
-        }
-
-        await reddit.subscribeToCurrentSubreddit();
-        logSubscribePhase(operationId, postId, "reddit_subscribed");
-        if (attemptId) {
-          await runSubscribeSideEffect(
-            operationId,
-            postId,
-            "statistics_confirmed_join",
-            () =>
-              recordStatisticsConfirmedJoin(redis, {
-                attemptId,
-                postId,
-                ...(visitorIdentity(req)
-                  ? { visitorIdentity: visitorIdentity(req) }
-                  : {}),
-                secondaryCtaEligible:
-                  subGoalData.afterSubscribeAction.type !== "disabled",
-              }),
-          );
-        }
-        if (attemptId) {
-          await storeSubscriptionAttemptReceipt(
-            redis,
-            attemptId,
-            postId,
-            userId,
-          );
-          logSubscribePhase(operationId, postId, "attempt_receipt_stored");
-        }
-        const subreddit = await reddit.getCurrentSubreddit();
-        const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
-        const newSubscriberCount = subreddit.numberOfSubscribers + 1;
-        const shareUsername = sourceSubredditNsfw === false;
-
-        const subscriberCreated = await setNewSubscriber(
-          redis,
-          postId,
-          newSubscriberCount,
-          { id: userId, username },
-          shareUsername,
-        );
-        logSubscribePhase(operationId, postId, "tracking_complete", {
-          subscriberCreated,
-        });
-
-        const displayedSubscriberCount = subscriberCreated
-          ? newSubscriberCount
-          : subreddit.numberOfSubscribers;
-
-        if (subscriberCreated) {
-          const realtimeMessage: RealtimeMessage = {
-            type: "sub",
-            newSubscriberCount,
-            ...(shareUsername ? { recentSubscriber: username } : {}),
-          };
-          await runSubscribeSideEffect(
-            operationId,
-            postId,
-            "realtime_publish",
-            () => realtime.send("subscriber_updates", realtimeMessage),
-          );
-        }
-
-        const state = await buildSubscribeOnlyState(postId, subGoalData, {
-          subscribersOverride: displayedSubscriberCount,
-          observedSubscribers: subreddit.numberOfSubscribers,
-        });
-        logSubscribePhase(operationId, postId, "state_built");
-        const journeyTelemetryHandled = recordServerSubscribeSuccess(
-          journeyId,
-          state,
-        );
-        res.json({
-          type: "subscribe",
-          postId,
-          state,
-          journeyTelemetryHandled,
-        } satisfies SubscribeResponse);
-        logSubscribePhase(operationId, postId, "response_sent");
-        return;
-      }
-
-      const username = await reddit.getCurrentUsername();
+      const [username, subreddit, erasureGeneration] = await Promise.all([
+        reddit.getCurrentUsername(),
+        reddit.getCurrentSubreddit(),
+        getSubscriberTrackingGeneration(redis, userId),
+      ]);
       if (!username) {
         res.status(400).json(localizedError("errors.api.usernameUnavailable"));
         return;
       }
+      const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
+      const shareUsername =
+        subGoalData.postKind === subscribeOnlyPostKind
+          ? sourceSubredditNsfw === false
+          : resolveShareUsername(
+              body?.shareUsername === true,
+              sourceSubredditNsfw !== false,
+            );
+      const newSubscriberCount = subreddit.numberOfSubscribers + 1;
+      const acceptance = attemptId
+        ? await getSubscriptionAcceptanceEvidence(
+            redis,
+            attemptId,
+            postId,
+            userId,
+          )
+        : undefined;
+      acceptanceDurable = acceptance !== undefined;
+      let pending = acceptance
+        ? await getPendingSubscriberTracking(redis, userId)
+        : undefined;
+      let trackingCreated = false;
 
-      const shareUsername = body?.shareUsername === true;
+      if (!acceptance) {
+        await reddit.subscribeToCurrentSubreddit();
+        redditAccepted = true;
+        logSubscribePhase(operationId, postId, "reddit_subscribed");
+        const acceptedAt = Date.now();
+        const persisted = await persistAcceptedSubscriberTracking(redis, {
+          operationId,
+          userId,
+          postId,
+          username,
+          subscribers: newSubscriberCount,
+          timestamp: acceptedAt,
+          shareUsername,
+          erasureGeneration,
+          ...(attemptId ? { attemptId } : {}),
+        });
+        pending = persisted.operation;
+        trackingCreated = persisted.created;
+        acceptanceDurable = true;
+        logSubscribePhase(operationId, postId, "tracking_persisted", {
+          trackingCreated,
+        });
+      } else {
+        logSubscribePhase(operationId, postId, "acceptance_replayed");
+      }
 
-      await reddit.subscribeToCurrentSubreddit();
-      logSubscribePhase(operationId, postId, "reddit_subscribed");
-      if (attemptId) {
+      if (attemptId && !acceptance) {
         await runSubscribeSideEffect(
           operationId,
           postId,
@@ -1234,28 +1202,28 @@ export function registerPublicApiRoutes(router: Router): void {
         );
       }
       if (attemptId) {
-        await storeSubscriptionAttemptReceipt(redis, attemptId, postId, userId);
+        await storeSubscriptionAttemptReceipt(
+          redis,
+          attemptId,
+          postId,
+          userId,
+          ...(acceptance ? [acceptance.expiresAt] : []),
+        );
         logSubscribePhase(operationId, postId, "attempt_receipt_stored");
       }
-
-      const subreddit = await reddit.getCurrentSubreddit();
-      const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
-      const effectiveShareUsername = resolveShareUsername(
-        shareUsername,
-        sourceSubredditNsfw !== false,
-      );
-      const newSubscriberCount = subreddit.numberOfSubscribers + 1;
-
-      const subscriberCreated = await setNewSubscriber(
-        redis,
-        postId,
-        newSubscriberCount,
-        {
-          id: userId,
-          username,
-        },
-        effectiveShareUsername,
-      );
+      const trackingResult = pending
+        ? await applySubscriberTracking(redis, pending)
+        : "complete";
+      const subscriberCreated =
+        trackingCreated &&
+        trackingResult !== "obsolete" &&
+        trackingResult !== "invalidated";
+      if (trackingCreated && pending) {
+        await cleanupSubscriberTracking(redis, {
+          ...pending,
+          phase: "complete",
+        });
+      }
       logSubscribePhase(operationId, postId, "tracking_complete", {
         subscriberCreated,
       });
@@ -1266,6 +1234,7 @@ export function registerPublicApiRoutes(router: Router): void {
 
       if (
         subscriberCreated &&
+        subGoalData.postKind !== subscribeOnlyPostKind &&
         subGoalData.goal &&
         newSubscriberCount >= subGoalData.goal
       ) {
@@ -1281,7 +1250,7 @@ export function registerPublicApiRoutes(router: Router): void {
         const realtimeMessage: RealtimeMessage = {
           type: "sub",
           newSubscriberCount,
-          ...(effectiveShareUsername ? { recentSubscriber: username } : {}),
+          ...(shareUsername ? { recentSubscriber: username } : {}),
         };
         await runSubscribeSideEffect(
           operationId,
@@ -1291,19 +1260,27 @@ export function registerPublicApiRoutes(router: Router): void {
         );
       }
 
-      const state = await buildState(
-        postId,
-        {
-          subscribersOverride: displayedSubscriberCount,
-          ...(subscriberCreated && effectiveShareUsername
-            ? { recentSubscriberOverride: username }
-            : {}),
-        },
-        {
-          recoveryWorkflow: "subscribe",
-          recoveryRoute: apiRoutes.subscribe,
-        },
-      );
+      const state =
+        subGoalData.postKind === subscribeOnlyPostKind
+          ? await buildSubscribeOnlyState(postId, subGoalData, {
+              subscribersOverride: displayedSubscriberCount,
+              observedSubscribers: subreddit.numberOfSubscribers,
+            })
+          : await buildState(
+              postId,
+              {
+                subscribersOverride: displayedSubscriberCount,
+                ...(subscriberCreated && shareUsername
+                  ? { recentSubscriberOverride: username }
+                  : {}),
+              },
+              {
+                subGoalData,
+                subredditPromise: Promise.resolve(subreddit),
+                recoveryWorkflow: "subscribe",
+                recoveryRoute: apiRoutes.subscribe,
+              },
+            );
       logSubscribePhase(operationId, postId, "state_built");
 
       const journeyTelemetryHandled = recordServerSubscribeSuccess(
@@ -1330,9 +1307,17 @@ export function registerPublicApiRoutes(router: Router): void {
         },
         error,
       );
-      res
-        .status(503)
-        .json(localizedError("errors.join.failedReference", { operationId }));
+      const response = localizedError("errors.join.failedReference", {
+        operationId,
+      });
+      res.status(503).json(
+        redditAccepted && !acceptanceDurable
+          ? {
+              ...response,
+              message: `Reddit may have accepted the join, but confirmation could not be saved. Check your membership before trying again. Reference: ${operationId}`,
+            }
+          : response,
+      );
     }
   });
 }

@@ -3,7 +3,9 @@ import type { RedisClient } from "../types";
 import {
   hasSubscriptionAttemptReceipt,
   isValidSubscriptionAttemptId,
+  serializeSubscriptionAcceptanceEvidence,
   storeSubscriptionAttemptReceipt,
+  subscriptionAcceptanceKey,
   subscriptionAttemptReceiptTtlMs,
 } from "./subscriptionAttempt";
 
@@ -56,6 +58,38 @@ describe("subscription attempt receipts", () => {
     await expect(
       hasSubscriptionAttemptReceipt(redis, attemptId, "t3_post", null),
     ).resolves.toBe(false);
+  });
+
+  it("uses durable acceptance evidence when the receipt is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const evidence = serializeSubscriptionAcceptanceEvidence(
+      "t3_post",
+      "t2_user",
+      1_000,
+    );
+    const get = vi.fn(async (key: string) =>
+      key === subscriptionAcceptanceKey(attemptId) ? evidence.value : undefined,
+    );
+
+    await expect(
+      hasSubscriptionAttemptReceipt(
+        { get } as unknown as RedisClient,
+        attemptId,
+        "t3_post",
+        "t2_user",
+      ),
+    ).resolves.toBe(true);
+    vi.setSystemTime(evidence.expiresAt + 1);
+    await expect(
+      hasSubscriptionAttemptReceipt(
+        { get } as unknown as RedisClient,
+        attemptId,
+        "t3_post",
+        "t2_user",
+      ),
+    ).resolves.toBe(false);
+    vi.useRealTimers();
   });
 
   it("treats an expired or malformed receipt as unconfirmed", async () => {

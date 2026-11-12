@@ -7,6 +7,7 @@ import {
   postRecentSubscriberSuffix,
   subscriberGoalsKey,
 } from "./subGoalData";
+import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 
 export const subscriberStatsKey = "subscriber_stats";
 export const subscriberStatsByUserIdKey = "subscriber_stats_by_user_id";
@@ -421,25 +422,63 @@ export async function processSubscriberStatsMigrationBatch(
       continue;
     }
 
-    await redis.hSet(subscriberStatsUsernameToUserIdKey, {
-      [normalizeUsername(parsed.username)]: parsed.id,
+    const serialized = serializeSubscriberStats({
+      id: parsed.id,
+      username: parsed.username,
+      subscribers: parsed.subscribers,
+      timestamp: parsed.timestamp ?? record.score,
     });
-    await addLegacySubscriberMemberIndex(redis, parsed.id, record.member);
-
-    const stored = await redis.hSetNX(
-      subscriberStatsByUserIdKey,
-      parsed.id,
-      serializeSubscriberStats({
-        id: parsed.id,
-        username: parsed.username,
-        subscribers: parsed.subscribers,
-        timestamp: parsed.timestamp ?? record.score,
-      }),
-    );
-    if (stored === 1) {
-      migratedThisRun += 1;
+    if (typeof (redis as Partial<RedisClient>).watch === "function") {
+      const generationKey = subscriberTrackingGenerationKey(parsed.id);
+      const tx = await redis.watch(
+        generationKey,
+        subscriberStatsByUserIdKey,
+        subscriberStatsUsernameToUserIdKey,
+        subscriberStatsLegacyMembersByUserIdKey,
+      );
+      const [generation, existingStats, existingLegacyRaw] = await Promise.all([
+        redis.get(generationKey),
+        redis.hGet(subscriberStatsByUserIdKey, parsed.id),
+        redis.hGet(subscriberStatsLegacyMembersByUserIdKey, parsed.id),
+      ]);
+      if (generation) {
+        await tx.unwatch();
+        skippedExisting += 1;
+        continue;
+      }
+      const legacyMembers = [
+        ...new Set([...parseStringList(existingLegacyRaw), record.member]),
+      ];
+      await tx.multi();
+      if (!existingStats) {
+        await tx.hSet(subscriberStatsByUserIdKey, {
+          [parsed.id]: serialized,
+        });
+      }
+      await tx.hSet(subscriberStatsUsernameToUserIdKey, {
+        [normalizeUsername(parsed.username)]: parsed.id,
+      });
+      await tx.hSet(subscriberStatsLegacyMembersByUserIdKey, {
+        [parsed.id]: stringifyStringList(legacyMembers),
+      });
+      const transactionResult = await tx.exec();
+      if (transactionResult.length === 0) {
+        throw new Error("subscriber_stats_migration_conflict");
+      }
+      if (existingStats) skippedExisting += 1;
+      else migratedThisRun += 1;
     } else {
-      skippedExisting += 1;
+      const stored = await redis.hSetNX(
+        subscriberStatsByUserIdKey,
+        parsed.id,
+        serialized,
+      );
+      if (stored === 1) migratedThisRun += 1;
+      else skippedExisting += 1;
+      await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+        [normalizeUsername(parsed.username)]: parsed.id,
+      });
+      await addLegacySubscriberMemberIndex(redis, parsed.id, record.member);
     }
   }
 
@@ -545,8 +584,49 @@ export async function untrackSubscriberByUsername(
     subscriberStatsUsernameToUserIdKey,
     normalized,
   );
-  if (!userId) {
+  if (userId) {
+    return await untrackSubscriberById(redis, userId, username);
+  }
+
+  const matchingUserIds = new Set<string>();
+  let hashCursor = 0;
+  do {
+    const page = await redis.hScan(
+      subscriberStatsByUserIdKey,
+      hashCursor,
+      undefined,
+      100,
+    );
+    hashCursor = page.cursor;
+    for (const { field, value } of page.fieldValues) {
+      if (parseSubscriberMember(value)?.username.toLowerCase() === normalized) {
+        matchingUserIds.add(field);
+      }
+    }
+  } while (hashCursor !== 0);
+
+  let legacyCursor = 0;
+  do {
+    const page = await redis.zScan(
+      subscriberStatsKey,
+      legacyCursor,
+      undefined,
+      100,
+    );
+    legacyCursor = page.cursor;
+    for (const { member } of page.members) {
+      const parsed = parseSubscriberMember(member);
+      if (parsed?.username.toLowerCase() === normalized) {
+        matchingUserIds.add(parsed.id);
+      }
+    }
+  } while (legacyCursor !== 0);
+
+  if (matchingUserIds.size === 0) {
     return { status: "partial", userIds: [] };
   }
-  return await untrackSubscriberById(redis, userId, username);
+  for (const matchingUserId of matchingUserIds) {
+    await untrackSubscriberById(redis, matchingUserId, username);
+  }
+  return { status: "complete", userIds: [...matchingUserIds] };
 }

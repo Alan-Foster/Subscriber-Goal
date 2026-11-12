@@ -37,6 +37,12 @@ const hoisted = vi.hoisted(() => ({
   setNewSubscriber: vi.fn(),
   hasSubscriptionAttemptReceipt: vi.fn(),
   storeSubscriptionAttemptReceipt: vi.fn(),
+  getSubscriptionAcceptanceEvidence: vi.fn(),
+  getSubscriberTrackingGeneration: vi.fn(),
+  getPendingSubscriberTracking: vi.fn(),
+  persistAcceptedSubscriberTracking: vi.fn(),
+  applySubscriberTracking: vi.fn(),
+  cleanupSubscriberTracking: vi.fn(),
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
   getCtaActivityMetric: vi.fn(),
@@ -79,6 +85,14 @@ vi.mock("../data/subscriberStats", () => ({
   setNewSubscriber: hoisted.setNewSubscriber,
 }));
 
+vi.mock("../data/subscriberTracking", () => ({
+  getSubscriberTrackingGeneration: hoisted.getSubscriberTrackingGeneration,
+  getPendingSubscriberTracking: hoisted.getPendingSubscriberTracking,
+  persistAcceptedSubscriberTracking: hoisted.persistAcceptedSubscriberTracking,
+  applySubscriberTracking: hoisted.applySubscriberTracking,
+  cleanupSubscriberTracking: hoisted.cleanupSubscriberTracking,
+}));
+
 vi.mock("../data/subscriptionAttempt", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../data/subscriptionAttempt")>();
@@ -86,6 +100,8 @@ vi.mock("../data/subscriptionAttempt", async (importOriginal) => {
     ...original,
     hasSubscriptionAttemptReceipt: hoisted.hasSubscriptionAttemptReceipt,
     storeSubscriptionAttemptReceipt: hoisted.storeSubscriptionAttemptReceipt,
+    getSubscriptionAcceptanceEvidence:
+      hoisted.getSubscriptionAcceptanceEvidence,
   };
 });
 
@@ -176,6 +192,37 @@ describe("publicApi routes", () => {
     hoisted.setNewSubscriber.mockResolvedValue(true);
     hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
     hoisted.storeSubscriptionAttemptReceipt.mockResolvedValue(undefined);
+    hoisted.getSubscriptionAcceptanceEvidence.mockResolvedValue(undefined);
+    hoisted.getSubscriberTrackingGeneration.mockResolvedValue("");
+    hoisted.getPendingSubscriberTracking.mockResolvedValue(undefined);
+    hoisted.persistAcceptedSubscriberTracking.mockImplementation(
+      async (redis: unknown, input: Record<string, unknown>) => ({
+        operation: { ...input, phase: "pending", attempts: 0 },
+        created: true,
+      }),
+    );
+    hoisted.applySubscriberTracking.mockImplementation(
+      async (
+        redis: unknown,
+        operation: {
+          postId: string;
+          subscribers: number;
+          userId: string;
+          username: string;
+          shareUsername: boolean;
+        },
+      ) =>
+        (await hoisted.setNewSubscriber(
+          redis,
+          operation.postId,
+          operation.subscribers,
+          { id: operation.userId, username: operation.username },
+          operation.shareUsername,
+        ))
+          ? "applied"
+          : "obsolete",
+    );
+    hoisted.cleanupSubscriberTracking.mockResolvedValue(true);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
     hoisted.reddit.getCurrentUser.mockResolvedValue({
       username: "TinyUser",
@@ -1060,6 +1107,83 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledWith(503);
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+  });
+
+  it("surfaces ambiguity when Reddit accepts but durable tracking cannot be saved", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.persistAcceptedSubscriberTracking.mockRejectedValue(
+      new Error("redis unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { attemptId } } as Request,
+      { status } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(status).toHaveBeenCalledWith(503);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringMatching(/^Reddit may have accepted the join/),
+      }),
+    );
+    expect(hoisted.storeSubscriptionAttemptReceipt).not.toHaveBeenCalled();
+    expect(hoisted.recordStatisticsConfirmedJoin).not.toHaveBeenCalled();
+    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+  });
+
+  it("replays durable acceptance after a receipt write fails without rejoining", async () => {
+    hoisted.context.userId = "t2_user";
+    const pending = {
+      operationId: "op-winner",
+      userId: "t2_user",
+      postId: "t3_post",
+      username: "TinyUser",
+      subscribers: 101,
+      timestamp: Date.now(),
+      shareUsername: true,
+      erasureGeneration: "",
+      phase: "pending" as const,
+      attempts: 0,
+    };
+    hoisted.persistAcceptedSubscriberTracking.mockResolvedValue({
+      operation: pending,
+      created: true,
+    });
+    hoisted.storeSubscriptionAttemptReceipt.mockRejectedValueOnce(
+      new Error("receipt unavailable"),
+    );
+    const routes = createRouteHarness();
+    const firstJson = vi.fn();
+    const firstStatus = vi.fn(() => ({ json: firstJson }));
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { attemptId } } as Request,
+      { status: firstStatus } as unknown as Response,
+    );
+
+    hoisted.storeSubscriptionAttemptReceipt.mockResolvedValue(undefined);
+    hoisted.getSubscriptionAcceptanceEvidence.mockResolvedValue({
+      postId: "t3_post",
+      userId: "t2_user",
+      acceptedAt: pending.timestamp,
+      expiresAt: pending.timestamp + 120_000,
+    });
+    hoisted.getPendingSubscriberTracking.mockResolvedValue(pending);
+    const secondJson = vi.fn();
+    await routes.get(apiRoutes.subscribe)?.(
+      { body: { attemptId } } as Request,
+      { json: secondJson } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
+    expect(hoisted.recordStatisticsConfirmedJoin).toHaveBeenCalledOnce();
+    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
+    expect(secondJson).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "subscribe", postId: "t3_post" }),
+    );
   });
 
   it("does not report Tiny success when subscriber history persistence fails", async () => {
