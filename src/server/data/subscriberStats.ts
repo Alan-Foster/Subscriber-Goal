@@ -4,10 +4,19 @@ import type { BasicUserData } from "./basicData";
 import {
   addRecentSubscriberPostIndex,
   eraseFromRecentSubscribers,
+  postRecentSubscriberOrderSuffix,
   postRecentSubscriberSuffix,
+  recentSubscriberPostsByUsernameKey,
   subscriberGoalsKey,
 } from "./subGoalData";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
+import {
+  compareRecentSubscriberOrder,
+  parseRecentSubscriberOrder,
+  serializeRecentSubscriberOrder,
+  type RecentSubscriberOrder,
+} from "./recentSubscriberOrder";
+import { retiredSubscriberGoalKeyPrefix } from "../core/postRetirement";
 
 export const subscriberStatsKey = "subscriber_stats";
 export const subscriberStatsByUserIdKey = "subscriber_stats_by_user_id";
@@ -232,13 +241,93 @@ export async function setNewSubscriber(
   });
   await addLegacySubscriberMemberIndex(redis, user.id, legacyMember);
 
-  await redis.hSet(subscriberGoalsKey, {
-    [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
-      ? user.username
-      : "",
-  });
-  if (shareUsername) {
-    await addRecentSubscriberPostIndex(redis, user.username, postId);
+  if (typeof (redis as Partial<RedisClient>).watch !== "function") {
+    await redis.hSet(subscriberGoalsKey, {
+      [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
+        ? user.username
+        : "",
+    });
+    if (shareUsername) {
+      await addRecentSubscriberPostIndex(redis, user.username, postId);
+    }
+    await redis.zAdd(subscriberStatsKey, { member: legacyMember, score: now });
+    return true;
+  }
+
+  const generationKey = subscriberTrackingGenerationKey(user.id);
+  const retiredKey = `${retiredSubscriberGoalKeyPrefix}:${postId}`;
+  const normalized = normalizeUsername(user.username);
+  const order: RecentSubscriberOrder = {
+    timestamp: now,
+    operationId: `legacy:${user.id}`,
+    userId: user.id,
+    erasureGeneration: (await redis.get(generationKey)) ?? "",
+  };
+  for (let retry = 0; retry < 3; retry += 1) {
+    const tx = await redis.watch(
+      generationKey,
+      retiredKey,
+      subscriberGoalsKey,
+      recentSubscriberPostsByUsernameKey,
+    );
+    const [generation, retired, storedOrderRaw, storedUsername] =
+      await Promise.all([
+        redis.get(generationKey),
+        redis.get(retiredKey),
+        redis.hGet(
+          subscriberGoalsKey,
+          `${postId}${postRecentSubscriberOrderSuffix}`,
+        ),
+        redis.hGet(
+          subscriberGoalsKey,
+          `${postId}${postRecentSubscriberSuffix}`,
+        ),
+      ]);
+    if ((generation ?? "") !== order.erasureGeneration || retired) {
+      await tx.unwatch();
+      break;
+    }
+    const storedOrder = parseRecentSubscriberOrder(storedOrderRaw);
+    if (storedOrder && compareRecentSubscriberOrder(order, storedOrder) < 0) {
+      await tx.unwatch();
+      break;
+    }
+    const previousNormalized = normalizeUsername(storedUsername ?? "");
+    const affected = new Set(
+      [previousNormalized, shareUsername ? normalized : ""].filter(Boolean),
+    );
+    const indexUpdates = new Map<string, string[]>();
+    for (const affectedUsername of affected) {
+      const posts = parseStringList(
+        await redis.hGet(recentSubscriberPostsByUsernameKey, affectedUsername),
+      ).filter((existingPostId) => existingPostId !== postId);
+      indexUpdates.set(
+        affectedUsername,
+        shareUsername && affectedUsername === normalized
+          ? [...new Set([...posts, postId])]
+          : posts,
+      );
+    }
+    await tx.multi();
+    await tx.hSet(subscriberGoalsKey, {
+      [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
+        ? user.username
+        : "",
+      [`${postId}${postRecentSubscriberOrderSuffix}`]:
+        serializeRecentSubscriberOrder(order),
+    });
+    for (const [affectedUsername, postIds] of indexUpdates) {
+      if (postIds.length > 0) {
+        await tx.hSet(recentSubscriberPostsByUsernameKey, {
+          [affectedUsername]: JSON.stringify(postIds),
+        });
+      } else {
+        await tx.hDel(recentSubscriberPostsByUsernameKey, [affectedUsername]);
+      }
+    }
+    const result = await tx.exec();
+    if (result.length > 0) break;
+    if (retry === 2) throw new Error("recent_subscriber_update_conflict");
   }
   await redis.zAdd(subscriberStatsKey, {
     member: legacyMember,

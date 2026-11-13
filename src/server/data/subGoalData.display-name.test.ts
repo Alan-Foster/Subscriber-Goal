@@ -351,6 +351,32 @@ describe("subGoalData subreddit display name", () => {
     ).toBe("discord");
   });
 
+  it("does not let a stale goal snapshot replace the live recent subscriber", async () => {
+    const redis = new InMemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      [`t3_post${postRecentSubscriberSuffix}`]: "NewUser",
+    });
+
+    await setSubGoalData(redis as never, "t3_post", {
+      goal: 10,
+      recentSubscriber: "OldUser",
+      completedTime: 100,
+      subredditDisplayName: "ExampleSub",
+      headerText: null,
+      colorTheme: "red",
+      postHeight: "regular",
+      autoCreateNextGoal: false,
+      language: "en",
+    });
+
+    expect(
+      await redis.hGet(
+        subscriberGoalsKey,
+        `t3_post${postRecentSubscriberSuffix}`,
+      ),
+    ).toBe("NewUser");
+  });
+
   it("updates display name independently for a post", async () => {
     const redis = new InMemoryRedis();
     await setSubGoalData(

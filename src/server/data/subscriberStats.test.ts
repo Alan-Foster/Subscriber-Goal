@@ -62,6 +62,19 @@ class InMemoryRedis {
     return Object.fromEntries(map.entries());
   }
 
+  async hScan(key: string): Promise<{
+    cursor: number;
+    fieldValues: { field: string; value: string }[];
+  }> {
+    return {
+      cursor: 0,
+      fieldValues: [...(this.hashes.get(key) ?? [])].map(([field, value]) => ({
+        field,
+        value,
+      })),
+    };
+  }
+
   async hDel(key: string, fields: string[]): Promise<void> {
     const map = this.hashes.get(key);
     if (!map) {

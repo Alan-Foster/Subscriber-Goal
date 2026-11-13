@@ -37,6 +37,9 @@ const hoisted = vi.hoisted(() => ({
     hGet: vi.fn(),
     hMGet: vi.fn(),
     hSet: vi.fn(),
+    hDel: vi.fn(),
+    hScan: vi.fn(),
+    zRem: vi.fn(),
     expire: vi.fn(),
     watch: vi.fn(),
   },
@@ -387,18 +390,33 @@ describe("internalUi color theme create goal routes", () => {
       );
       hoisted.redisHashes.set(key, hash);
     });
+    hoisted.redis.hDel.mockImplementation(async (key, fields) => {
+      const hash = hoisted.redisHashes.get(key);
+      for (const field of fields as string[]) hash?.delete(field);
+    });
+    hoisted.redis.hScan.mockResolvedValue({ cursor: 0, fieldValues: [] });
+    hoisted.redis.zRem.mockResolvedValue(undefined);
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.redis.watch.mockImplementation(async () => {
       let queuedDelete: string | undefined;
+      let queuedCommand = false;
       const transaction = {
         multi: vi.fn(async () => undefined),
         del: vi.fn(async (key: string) => {
           queuedDelete = key;
           return transaction;
         }),
+        hDel: vi.fn(async () => {
+          queuedCommand = true;
+          return transaction;
+        }),
+        zRem: vi.fn(async () => {
+          queuedCommand = true;
+          return transaction;
+        }),
         exec: vi.fn(async () => {
           if (queuedDelete) hoisted.redisValues.delete(queuedDelete);
-          return queuedDelete ? [1] : [];
+          return queuedDelete || queuedCommand ? [1] : [];
         }),
         discard: vi.fn(async () => undefined),
         unwatch: vi.fn(async () => transaction),

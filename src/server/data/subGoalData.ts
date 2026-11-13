@@ -42,10 +42,13 @@ import {
   withCommunityGoalMutationLease,
   type CommunityGoalMutationLease,
 } from "../core/communityGoalMutation";
+import { parseRecentSubscriberOrder } from "./recentSubscriberOrder";
+import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
 export const postRecentSubscriberSuffix = "_recent_subscriber";
+export const postRecentSubscriberOrderSuffix = "_recent_subscriber_order_v1";
 export const postCompletedTimeSuffix = "_completed_time";
 export const postSubredditDisplayNameSuffix = "_subreddit_display_name";
 export const postHeaderTextSuffix = "_header_text";
@@ -93,6 +96,7 @@ export const autoCreateNextGoalDelayMs = 24 * 60 * 60 * 1000;
 export const subscriberGoalPostFieldSuffixes = [
   postGoalSuffix,
   postRecentSubscriberSuffix,
+  postRecentSubscriberOrderSuffix,
   postCompletedTimeSuffix,
   postSubredditDisplayNameSuffix,
   postHeaderTextSuffix,
@@ -252,6 +256,39 @@ export async function addRecentSubscriberPostIndex(
 ): Promise<void> {
   const normalized = normalizeUsername(username);
   if (!normalized) {
+    return;
+  }
+  if (typeof (redis as Partial<RedisClient>).watch === "function") {
+    for (let retry = 0; retry < 3; retry += 1) {
+      const tx = await redis.watch(
+        subscriberGoalsKey,
+        recentSubscriberPostsByUsernameKey,
+      );
+      const [displayedUsername, existingRaw] = await Promise.all([
+        redis.hGet(
+          subscriberGoalsKey,
+          `${postId}${postRecentSubscriberSuffix}`,
+        ),
+        redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
+      ]);
+      if (normalizeUsername(displayedUsername ?? "") !== normalized) {
+        await tx.unwatch();
+        return;
+      }
+      const existing = parsePostIdList(existingRaw);
+      if (existing.includes(postId)) {
+        await tx.unwatch();
+        return;
+      }
+      await tx.multi();
+      await tx.hSet(recentSubscriberPostsByUsernameKey, {
+        [normalized]: stringifyPostIdList([...existing, postId]),
+      });
+      const result = await tx.exec();
+      if (result.length > 0) return;
+      if (retry === 2)
+        throw new Error("recent_subscriber_index_update_conflict");
+    }
     return;
   }
   const existing = parsePostIdList(
@@ -478,7 +515,6 @@ export async function setSubGoalData(
   await redis.hSet(subscriberGoalsKey, {
     [`${postId}${postKindSuffix}`]: subscriberGoalPostKind,
     [`${postId}${postGoalSuffix}`]: data.goal.toString(),
-    [`${postId}${postRecentSubscriberSuffix}`]: data.recentSubscriber ?? "",
     [`${postId}${postCompletedTimeSuffix}`]: data.completedTime.toString(),
     [`${postId}${postSubredditDisplayNameSuffix}`]:
       data.subredditDisplayName ?? "",
@@ -509,6 +545,13 @@ export async function setSubGoalData(
       resolveAfterSubscribePreset(undefined, afterSubscribeAction) ??
       "",
   });
+  if (data.recentSubscriber) {
+    await redis.hSetNX(
+      subscriberGoalsKey,
+      `${postId}${postRecentSubscriberSuffix}`,
+      data.recentSubscriber,
+    );
+  }
 }
 
 export async function setAfterSubscribeActionForPost(
@@ -1027,6 +1070,7 @@ export async function registerNewSubGoalPost(
     [`${post.id}${postKindSuffix}`]: subscriberGoalPostKind,
     [`${post.id}${postGoalSuffix}`]: goal.toString(),
     [`${post.id}${postRecentSubscriberSuffix}`]: "",
+    [`${post.id}${postRecentSubscriberOrderSuffix}`]: "",
     [`${post.id}${postCompletedTimeSuffix}`]: "0",
     [`${post.id}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
     [`${post.id}${postHeaderTextSuffix}`]: headerText ?? "",
@@ -1352,18 +1396,62 @@ export async function eraseFromRecentSubscribers(
   const indexedPostIds = parsePostIdList(
     await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
-  const keysToUpdate: Record<string, string> = {};
-
+  if (typeof (redis as Partial<RedisClient>).watch !== "function") {
+    const keysToUpdate: Record<string, string> = {};
+    for (const postId of indexedPostIds) {
+      const key = `${postId}${postRecentSubscriberSuffix}`;
+      const value = await redis.hGet(subscriberGoalsKey, key);
+      if (value?.toLowerCase() === normalized) keysToUpdate[key] = "";
+    }
+    if (Object.keys(keysToUpdate).length > 0) {
+      await redis.hSet(subscriberGoalsKey, keysToUpdate);
+    }
+    await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
+    return;
+  }
   for (const postId of indexedPostIds) {
-    const key = `${postId}${postRecentSubscriberSuffix}`;
-    const value = await redis.hGet(subscriberGoalsKey, key);
-    if (value?.toLowerCase() === normalized) {
-      keysToUpdate[key] = "";
+    for (let retry = 0; retry < 3; retry += 1) {
+      const tx = await redis.watch(
+        subscriberGoalsKey,
+        recentSubscriberPostsByUsernameKey,
+      );
+      const subscriberField = `${postId}${postRecentSubscriberSuffix}`;
+      const orderField = `${postId}${postRecentSubscriberOrderSuffix}`;
+      const [value, orderRaw, currentIndexRaw] = await Promise.all([
+        redis.hGet(subscriberGoalsKey, subscriberField),
+        redis.hGet(subscriberGoalsKey, orderField),
+        redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
+      ]);
+      const order = parseRecentSubscriberOrder(orderRaw);
+      const currentGeneration = order
+        ? ((await redis.get(subscriberTrackingGenerationKey(order.userId))) ??
+          "")
+        : undefined;
+      if (
+        value?.toLowerCase() === normalized &&
+        order &&
+        currentGeneration === order.erasureGeneration
+      ) {
+        await tx.unwatch();
+        break;
+      }
+      const nextIndex = parsePostIdList(currentIndexRaw).filter(
+        (indexedPostId) => indexedPostId !== postId,
+      );
+      await tx.multi();
+      if (value?.toLowerCase() === normalized) {
+        await tx.hSet(subscriberGoalsKey, { [subscriberField]: "" });
+      }
+      if (nextIndex.length > 0) {
+        await tx.hSet(recentSubscriberPostsByUsernameKey, {
+          [normalized]: stringifyPostIdList(nextIndex),
+        });
+      } else {
+        await tx.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
+      }
+      const result = await tx.exec();
+      if (result.length > 0) break;
+      if (retry === 2) throw new Error("recent_subscriber_erasure_conflict");
     }
   }
-
-  if (Object.keys(keysToUpdate).length > 0) {
-    await redis.hSet(subscriberGoalsKey, keysToUpdate);
-  }
-  await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
 }

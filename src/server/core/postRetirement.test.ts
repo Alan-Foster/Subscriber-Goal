@@ -5,6 +5,7 @@ import {
   autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalSuccessorsKey,
   postAutomaticSuccessorSuppressionSuffix,
+  postRecentSubscriberOrderSuffix,
   subscriberGoalsKey,
 } from "../data/subGoalData";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
@@ -97,6 +98,12 @@ describe("subscriber goal post retirement", () => {
       [`${postId}_post_kind`]: "subscriber-goal-v1",
       [`${postId}${postAutomaticSuccessorSuppressionSuffix}`]:
         "auto_goal_reconciliation",
+      [`${postId}${postRecentSubscriberOrderSuffix}`]: JSON.stringify({
+        timestamp: 100,
+        operationId: "op",
+        userId: "t2_user",
+        erasureGeneration: "",
+      }),
     });
     await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { [postId]: "2" });
     await redis.hSet(autoCreateNextGoalExhaustedKey, { [postId]: "5" });
@@ -131,6 +138,11 @@ describe("subscriber goal post retirement", () => {
       redis.hashes
         .get(subscriberGoalsKey)
         ?.has(`${postId}${postAutomaticSuccessorSuppressionSuffix}`),
+    ).toBe(false);
+    expect(
+      redis.hashes
+        .get(subscriberGoalsKey)
+        ?.has(`${postId}${postRecentSubscriberOrderSuffix}`),
     ).toBe(false);
     expect(redis.hashes.get(autoCreateNextGoalSuccessorsKey)?.size).toBe(0);
     expect(redis.hashes.has(highlightManagementStateKey)).toBe(false);
