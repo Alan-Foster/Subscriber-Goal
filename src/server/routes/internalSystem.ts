@@ -10,6 +10,7 @@ import { getSubGoalData } from "../data/subGoalData";
 import {
   MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
   isMilestoneNotificationJob,
+  milestoneNotificationDeadline,
   processMilestoneNotificationBatch,
 } from "../core/milestoneNotifications";
 import { processAppAccountRecovery } from "../core/appAccountRecovery";
@@ -209,6 +210,16 @@ export function registerInternalSystemRoutes(router: Router): void {
             { deliveryEnabled: false },
           );
           res.json(result);
+          return;
+        }
+
+        if (
+          Date.now() >= milestoneNotificationDeadline(payload.completedTime)
+        ) {
+          res.status(410).json({
+            status: "error",
+            message: "Milestone notification campaign has expired.",
+          });
           return;
         }
 

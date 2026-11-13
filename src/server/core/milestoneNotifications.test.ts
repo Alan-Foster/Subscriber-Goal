@@ -7,9 +7,13 @@ import {
   milestoneNotificationBatchDelayMs,
   milestoneNotificationBatchSize,
   milestoneNotificationBody,
+  milestoneNotificationClaimMs,
+  milestoneNotificationDeadline,
   milestoneNotificationJobName,
+  milestoneNotificationPageKey,
   milestoneNotificationTitle,
   processMilestoneNotificationBatch,
+  recoverMilestoneNotificationContinuations,
   renderMilestoneNotificationCopy,
 } from "./milestoneNotifications";
 
@@ -27,6 +31,75 @@ const campaign = {
   subredditName: "ExampleSub",
   goal: 10_000,
 };
+
+class StateRedisHarness {
+  private readonly values = new Map<string, string>();
+  private readonly versions = new Map<string, number>();
+  private readonly sorted = new Map<string, Map<string, number>>();
+
+  get = vi.fn(async (key: string) => this.values.get(key));
+  set = vi.fn(async (key: string, value: string) => {
+    this.values.set(key, value);
+    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
+    return "OK";
+  });
+  zAdd = vi.fn(
+    async (key: string, member: { member: string; score: number }) => {
+      const set = this.sorted.get(key) ?? new Map<string, number>();
+      set.set(member.member, member.score);
+      this.sorted.set(key, set);
+      return 1;
+    },
+  );
+  zRem = vi.fn(async (key: string, members: string[]) => {
+    const set = this.sorted.get(key);
+    return members.reduce(
+      (count, member) => count + (set?.delete(member) ? 1 : 0),
+      0,
+    );
+  });
+  zRange = vi.fn(async (key: string, start: number, stop: number) =>
+    [...(this.sorted.get(key) ?? [])]
+      .filter(([, score]) => score >= start && score <= stop)
+      .sort((a, b) => a[1] - b[1])
+      .map(([member, score]) => ({ member, score })),
+  );
+  watch = vi.fn(async (...keys: string[]) => {
+    const watched = new Map(
+      keys.map((key) => [key, this.versions.get(key) ?? 0]),
+    );
+    const commands: (() => Promise<unknown>)[] = [];
+    return {
+      discard: vi.fn(async () => undefined),
+      multi: vi.fn(async () => undefined),
+      set: vi.fn(async (key: string, value: string) => {
+        commands.push(() => this.set(key, value));
+        return undefined;
+      }),
+      zAdd: vi.fn(
+        async (key: string, member: { member: string; score: number }) => {
+          commands.push(() => this.zAdd(key, member));
+          return undefined;
+        },
+      ),
+      zRem: vi.fn(async (key: string, members: string[]) => {
+        commands.push(() => this.zRem(key, members));
+        return undefined;
+      }),
+      exec: vi.fn(async () => {
+        if (
+          [...watched].some(
+            ([key, version]) => (this.versions.get(key) ?? 0) !== version,
+          )
+        )
+          return [];
+        const results = [];
+        for (const command of commands) results.push(await command());
+        return results;
+      }),
+    };
+  });
+}
 
 describe("milestone notifications", () => {
   it("keeps production delivery disabled", () => {
@@ -101,13 +174,14 @@ describe("milestone notifications", () => {
     const runJob = vi.fn().mockResolvedValue("job-id");
     const incrBy = vi.fn().mockResolvedValue(2);
     const expire = vi.fn().mockResolvedValue(undefined);
-    const now = 1_800_000_000_000;
+    const now = job.completedTime + 1_000;
 
     const result = await processMilestoneNotificationBatch(job, campaign, {
       deliveryEnabled: true,
       notificationClient: { listOptedInUsers, enqueue } as never,
       schedulerClient: { runJob } as never,
       dailyBudgetClient: { incrBy, expire } as never,
+      stateClient: new StateRedisHarness() as never,
       now: () => now,
     });
 
@@ -177,6 +251,8 @@ describe("milestone notifications", () => {
         notificationClient: firstClient as never,
         schedulerClient: { runJob: vi.fn() } as never,
         dailyBudgetClient: dailyBudgetClient as never,
+        stateClient: new StateRedisHarness() as never,
+        now: () => job.completedTime + 1_000,
       }),
       processMilestoneNotificationBatch(
         { ...job, postId: "t3_other" },
@@ -186,6 +262,8 @@ describe("milestone notifications", () => {
           notificationClient: secondClient as never,
           schedulerClient: { runJob: vi.fn() } as never,
           dailyBudgetClient: dailyBudgetClient as never,
+          stateClient: new StateRedisHarness() as never,
+          now: () => job.completedTime + 1_000,
         },
       ),
     ]);
@@ -216,10 +294,222 @@ describe("milestone notifications", () => {
           enqueue,
         } as never,
         schedulerClient: { runJob } as never,
+        stateClient: new StateRedisHarness() as never,
+        now: () => job.completedTime + 1_000,
       },
     );
     expect(enqueue).not.toHaveBeenCalled();
     expect(runJob).not.toHaveBeenCalled();
     expect(result).toMatchObject({ done: true, recipients: 0 });
+  });
+
+  it("converges sequential and concurrent replays on one debit and send", async () => {
+    const stateClient = new StateRedisHarness();
+    const dailyBudgetClient = {
+      incrBy: vi.fn().mockResolvedValue(1),
+      expire: vi.fn().mockResolvedValue(undefined),
+    };
+    const notificationClient = {
+      listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_alice"] }),
+      enqueue: vi.fn().mockResolvedValue({ successCount: 1, failureCount: 0 }),
+    };
+    const options = {
+      deliveryEnabled: true,
+      stateClient: stateClient as never,
+      dailyBudgetClient: dailyBudgetClient as never,
+      notificationClient: notificationClient as never,
+      schedulerClient: { runJob: vi.fn() } as never,
+      now: () => job.completedTime + 1_000,
+    };
+
+    const [first, replay] = await Promise.all([
+      processMilestoneNotificationBatch(job, campaign, options),
+      processMilestoneNotificationBatch(job, campaign, options),
+    ]);
+    const sequential = await processMilestoneNotificationBatch(
+      job,
+      campaign,
+      options,
+    );
+
+    expect([first.status, replay.status]).toContain("processed");
+    expect(sequential.status).toBe("duplicate");
+    expect(dailyBudgetClient.incrBy).toHaveBeenCalledOnce();
+    expect(notificationClient.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("fences a stale owner before debit and after the send boundary", async () => {
+    const stateClient = new StateRedisHarness();
+    let now = job.completedTime + 1_000;
+    let releaseList!: (value: { userIds: string[] }) => void;
+    const pausedList = new Promise<{ userIds: string[] }>((resolve) => {
+      releaseList = resolve;
+    });
+    const dailyBudgetClient = {
+      incrBy: vi.fn().mockResolvedValue(1),
+      expire: vi.fn(),
+    };
+    const enqueue = vi
+      .fn()
+      .mockResolvedValue({ successCount: 1, failureCount: 0 });
+    const first = processMilestoneNotificationBatch(job, campaign, {
+      deliveryEnabled: true,
+      stateClient: stateClient as never,
+      dailyBudgetClient: dailyBudgetClient as never,
+      notificationClient: {
+        listOptedInUsers: vi.fn(() => pausedList),
+        enqueue,
+      } as never,
+      now: () => now,
+    });
+    await vi.waitFor(() => expect(stateClient.get).toHaveBeenCalled());
+    now += milestoneNotificationClaimMs + 1;
+    await processMilestoneNotificationBatch(job, campaign, {
+      deliveryEnabled: true,
+      stateClient: stateClient as never,
+      dailyBudgetClient: dailyBudgetClient as never,
+      notificationClient: {
+        listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_alice"] }),
+        enqueue,
+      } as never,
+      now: () => now,
+    });
+    releaseList({ userIds: ["t2_alice"] });
+    await first;
+    expect(dailyBudgetClient.incrBy).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledOnce();
+
+    const sendState = new StateRedisHarness();
+    let releaseSend!: (value: {
+      successCount: number;
+      failureCount: number;
+    }) => void;
+    const pausedSend = new Promise<{
+      successCount: number;
+      failureCount: number;
+    }>((resolve) => {
+      releaseSend = resolve;
+    });
+    now = job.completedTime + 1_000;
+    const sending = processMilestoneNotificationBatch(
+      { ...job, cursor: "send" },
+      campaign,
+      {
+        deliveryEnabled: true,
+        stateClient: sendState as never,
+        dailyBudgetClient: {
+          incrBy: vi.fn().mockResolvedValue(1),
+          expire: vi.fn(),
+        } as never,
+        notificationClient: {
+          listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_bob"] }),
+          enqueue: vi.fn(() => pausedSend),
+        } as never,
+        now: () => now,
+      },
+    );
+    await vi.waitFor(async () => {
+      const saved = await sendState.get(
+        milestoneNotificationPageKey({ ...job, cursor: "send" }),
+      );
+      expect(saved).toContain('"phase":"enqueue_started"');
+    });
+    now += milestoneNotificationClaimMs + 1;
+    const takeover = await processMilestoneNotificationBatch(
+      { ...job, cursor: "send" },
+      campaign,
+      {
+        deliveryEnabled: true,
+        stateClient: sendState as never,
+        notificationClient: {
+          listOptedInUsers: vi.fn(),
+          enqueue: vi.fn(),
+        } as never,
+        now: () => now,
+      },
+    );
+    expect(takeover.status).toBe("unresolved");
+    releaseSend({ successCount: 1, failureCount: 0 });
+    await expect(sending).resolves.toMatchObject({ status: "unresolved" });
+  });
+
+  it("blocks replay after an ambiguous enqueue result and exposes the boundary", async () => {
+    const stateClient = new StateRedisHarness();
+    const enqueue = vi.fn().mockRejectedValue(new Error("response lost"));
+    const options = {
+      deliveryEnabled: true,
+      stateClient: stateClient as never,
+      dailyBudgetClient: {
+        incrBy: vi.fn().mockResolvedValue(1),
+        expire: vi.fn(),
+      } as never,
+      notificationClient: {
+        listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_alice"] }),
+        enqueue,
+      } as never,
+      now: () => job.completedTime + 1_000,
+    };
+    await expect(
+      processMilestoneNotificationBatch(job, campaign, options),
+    ).rejects.toThrow("response lost");
+    await expect(
+      processMilestoneNotificationBatch(job, campaign, options),
+    ).resolves.toMatchObject({ status: "unresolved" });
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(await stateClient.get(milestoneNotificationPageKey(job))).toContain(
+      '"phase":"enqueue_started"',
+    );
+  });
+
+  it("recovers the exact saved child and rejects work at the deadline", async () => {
+    const stateClient = new StateRedisHarness();
+    const failedScheduler = {
+      runJob: vi.fn().mockRejectedValue(new Error("down")),
+    };
+    await processMilestoneNotificationBatch(job, campaign, {
+      deliveryEnabled: true,
+      stateClient: stateClient as never,
+      dailyBudgetClient: {
+        incrBy: vi.fn().mockResolvedValue(1),
+        expire: vi.fn(),
+      } as never,
+      notificationClient: {
+        listOptedInUsers: vi
+          .fn()
+          .mockResolvedValue({ userIds: ["t2_alice"], next: "saved-cursor" }),
+        enqueue: vi
+          .fn()
+          .mockResolvedValue({ successCount: 1, failureCount: 0 }),
+      } as never,
+      schedulerClient: failedScheduler as never,
+      now: () => job.completedTime + 1_000,
+    });
+    const runJob = vi.fn().mockResolvedValue("accepted");
+    const summary = await recoverMilestoneNotificationContinuations({
+      deliveryEnabled: true,
+      redisClient: stateClient as never,
+      schedulerClient: { runJob } as never,
+      getCampaign: vi.fn().mockResolvedValue(campaign),
+      now: () => job.completedTime + 2_000,
+    });
+    expect(summary.scheduled).toBe(1);
+    expect(runJob.mock.calls[0]?.[0].data).toEqual({
+      ...job,
+      cursor: "saved-cursor",
+      attemptedRecipients: 1,
+    });
+
+    const reads = vi.fn();
+    const expired = await processMilestoneNotificationBatch(job, campaign, {
+      deliveryEnabled: true,
+      stateClient: { get: reads } as never,
+      notificationClient: {
+        listOptedInUsers: vi.fn(),
+        enqueue: vi.fn(),
+      } as never,
+      now: () => milestoneNotificationDeadline(job.completedTime),
+    });
+    expect(expired.status).toBe("expired");
+    expect(reads).not.toHaveBeenCalled();
   });
 });
