@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   countPendingCrossposts,
+  crosspostDeletionDueKey,
+  crosspostDeletionMarkersKey,
   crosspostListKey,
   getCrosspostPendingByRevisionKey,
   getCrosspostPendingByTimeKey,
@@ -13,6 +15,7 @@ import {
   removeCorrespondingPost,
   removeProcessedRevisions,
   storeCorrespondingPost,
+  storeCrosspostDeletionMarker,
   storeProcessedRevision,
   upsertPendingCrosspost,
 } from './crosspostData';
@@ -75,6 +78,10 @@ class InMemoryRedis {
     return sorted.slice(start, normalizedEnd + 1);
   }
 
+  async zScore(key: string, member: string): Promise<number | undefined> {
+    return this.sortedSets.get(key)?.get(member);
+  }
+
   async zRem(key: string, members: string[]): Promise<void> {
     const current = this.sortedSets.get(key);
     if (!current) {
@@ -87,6 +94,33 @@ class InMemoryRedis {
 }
 
 describe('crosspostData bookkeeping primitives', () => {
+  it('confirms both marker and due handoff before returning', async () => {
+    const redis = new InMemoryRedis();
+    await storeCrosspostDeletionMarker(
+      redis as unknown as Parameters<typeof storeCrosspostDeletionMarker>[0],
+      't3_source',
+      'rev_delete',
+      123
+    );
+
+    expect(await redis.hGet(crosspostDeletionMarkersKey, 't3_source')).toBeDefined();
+    expect(await redis.zScore(crosspostDeletionDueKey, 't3_source')).toBe(123);
+  });
+
+  it('rejects when the deletion due handoff cannot be confirmed', async () => {
+    const redis = new InMemoryRedis();
+    redis.zScore = async () => undefined;
+
+    await expect(
+      storeCrosspostDeletionMarker(
+        redis as unknown as Parameters<typeof storeCrosspostDeletionMarker>[0],
+        't3_source',
+        'rev_delete',
+        123
+      )
+    ).rejects.toThrow('handoff was not confirmed');
+  });
+
   it('storeProcessedRevision writes hash and time index', async () => {
     const redis = new InMemoryRedis();
     await storeProcessedRevision(

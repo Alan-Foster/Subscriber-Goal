@@ -176,8 +176,10 @@ async function processOneDueIntent(
   nowMs: number,
 ): Promise<void> {
   await withCommunityGoalMutationLease(redis, async () => {
-    const intent =
-      (await getSourcePostDeletionIntent(redis, dueIntent.id)) ?? dueIntent;
+    const intent = await getSourcePostDeletionIntent(redis, dueIntent.id);
+    if (!intent || intent.nextAttemptMs > nowMs) {
+      return;
+    }
     if (intent.status === "dispatched" || intent.status === "terminal_failed") {
       return;
     }
@@ -191,6 +193,12 @@ async function processOneDueIntent(
           nowMs,
         );
       } catch (error) {
+        logDiagnostic(
+          "warn",
+          "source_post_deletion_dispatch_retry_scheduled",
+          { workflow: "source_post_deletion", postId: intent.postId },
+          error,
+        );
         await reschedule(redis, intent, error, nowMs);
       }
       return;
@@ -208,6 +216,7 @@ async function processOneDueIntent(
         return;
       }
     } catch (error) {
+      // diagnostic-allow-silent: lookup failures are classified into expected missing evidence or durable retry state.
       const outcome = classifyPostLookupError(error, intent.postId);
       if (outcome.status !== "missing") {
         await reschedule(
@@ -232,6 +241,12 @@ async function processOneDueIntent(
         nowMs,
       );
     } catch (error) {
+      logDiagnostic(
+        "warn",
+        "source_post_deletion_dispatch_retry_scheduled",
+        { workflow: "source_post_deletion", postId: confirmed.postId },
+        error,
+      );
       await reschedule(redis, confirmed, error, nowMs);
     }
   });

@@ -446,7 +446,17 @@ export async function getCrosspostDeletionMarker(
       return undefined;
     }
     return value as CrosspostDeletionMarker;
-  } catch {
+  } catch (error) {
+    logDiagnostic(
+      'warn',
+      'persisted_json_invalid',
+      {
+        workflow: 'crosspost',
+        phase: 'deletion_marker_decode',
+        postId: sourcePostId,
+      },
+      error
+    );
     return undefined;
   }
 }
@@ -474,10 +484,7 @@ export async function storeCrosspostDeletionMarker(
   await redis.hSet(crosspostDeletionMarkersKey, {
     [sourcePostId]: JSON.stringify(marker),
   });
-  await redis.zAdd(crosspostDeletionDueKey, {
-    member: sourcePostId,
-    score: nowMs,
-  });
+  await scheduleCrosspostDeletionMarker(redis, sourcePostId, nowMs);
   const confirmed = await getCrosspostDeletionMarker(redis, sourcePostId);
   if (!confirmed) {
     throw new Error('Crosspost deletion marker persistence was not confirmed.');
@@ -494,6 +501,13 @@ export async function scheduleCrosspostDeletionMarker(
     member: sourcePostId,
     score: nextAttemptMs,
   });
+  const confirmedScore = await redis.zScore(
+    crosspostDeletionDueKey,
+    sourcePostId
+  );
+  if (confirmedScore !== nextAttemptMs) {
+    throw new Error('Crosspost deletion cleanup handoff was not confirmed.');
+  }
 }
 
 export async function completeCrosspostDeletionMarkerReplay(

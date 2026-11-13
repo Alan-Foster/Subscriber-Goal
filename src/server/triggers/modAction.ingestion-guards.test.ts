@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  crosspostDeletionDueKey,
+  crosspostDeletionMarkersKey,
+  crosspostListKey,
   crosspostWikiPages,
   getCrosspostPendingByRevisionKey,
 } from '../data/crosspostData';
+import { postsKey } from '../data/updaterData';
 import type { ServerAppSettings } from '../settings';
 
 const hoisted = vi.hoisted(() => ({
@@ -107,6 +111,10 @@ class InMemoryRedis {
     return sorted.slice(start, normalizedEnd + 1);
   }
 
+  async zScore(key: string, member: string): Promise<number | undefined> {
+    return this.sortedSets.get(key)?.get(member);
+  }
+
   async zRem(key: string, members: string[]): Promise<void> {
     const current = this.sortedSets.get(key);
     if (!current) {
@@ -150,6 +158,17 @@ class InMemoryRedis {
 
 let redisMock: InMemoryRedis;
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 vi.mock('@devvit/web/server', () => ({
   reddit: hoisted.mockReddit,
   redis: {
@@ -173,6 +192,8 @@ vi.mock('@devvit/web/server', () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).zAdd(...args),
     zRange: (...args: [string, number, number]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zRange(...args),
+    zScore: (...args: [string, string]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).zScore(...args),
     zRem: (...args: [string, string[]]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zRem(...args),
     watch: (...args: string[]) =>
@@ -1156,5 +1177,357 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           event.reason === 'source_not_crosspostable'
       )
     ).toBe(true);
+  });
+
+  it('durably acknowledges delete-before-create and blocks the delayed mirror', async () => {
+    mockContext.subredditName = 'SubGoal';
+    let exposeCreate = false;
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.action.delete) {
+          return {
+            ok: true,
+            revisions: [
+              { id: 'rev_delete_first', reason: 'Dispatch delete for t3_late' },
+            ],
+            durationMs: 1,
+          };
+        }
+        if (exposeCreate && page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_create_late',
+                reason: 'Post t3_late with goal 10',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    expect(await redisMock.hGet('processedRevisions', 'rev_delete_first')).toBe(
+      't3_late'
+    );
+    expect(
+      await redisMock.hGet(crosspostDeletionMarkersKey, 't3_late')
+    ).toBeDefined();
+
+    exposeCreate = true;
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(mockReddit.crosspost).not.toHaveBeenCalled();
+    expect(
+      await redisMock.hGet(crosspostDeletionMarkersKey, 't3_late')
+    ).toBeDefined();
+    expect(await redisMock.zScore(crosspostDeletionDueKey, 't3_late')).toBeUndefined();
+  });
+
+  it('re-arms cleanup after an in-flight create loses its first handoff write', async () => {
+    mockContext.subredditName = 'SubGoal';
+    let mode: 'create' | 'delete' | 'empty' = 'create';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (mode === 'create' && page === crosspostWikiPages.newPost) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_racing_create',
+                reason: 'Post t3_racing with goal 10',
+                dateMs: Date.now(),
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        if (mode === 'delete' && page === crosspostWikiPages.action.delete) {
+          return {
+            ok: true,
+            revisions: [
+              {
+                id: 'rev_racing_delete',
+                reason: 'Dispatch delete for t3_racing',
+              },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    mockReddit.getPostById.mockImplementation(async (postId: string) =>
+      postId === 't3_racing_mirror'
+        ? {
+            id: postId,
+            subredditName: 'SubGoal',
+            delete: deleteMirror,
+          }
+        : {
+            id: 't3_racing',
+            subredditId: 't5_source',
+            subredditName: 'CorporateGifts',
+            createdAt: new Date(Date.now() - 60_000),
+            nsfw: false,
+          }
+    );
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+    const createGate = deferred<{ id: string }>();
+    const deleteMirror = vi.fn(async () => undefined);
+    mockReddit.crosspost.mockReturnValue(createGate.promise);
+
+    const createRun = processCrosspostDispatchQueue(
+      baseSettings,
+      'scheduler_posts_updater'
+    );
+    await vi.waitFor(() => expect(mockReddit.crosspost).toHaveBeenCalledOnce());
+
+    // Model both lock TTLs expiring while Reddit is still creating the mirror.
+    await redisMock.del(
+      'crosspostIngestionLock:subgoal',
+      'crosspostCreateInFlight:t3_racing'
+    );
+    await redisMock.zAdd('crosspostPendingByTime:subgoal', {
+      member: 'rev_racing_create',
+      score: Date.now() + 60_000,
+    });
+    mode = 'delete';
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    mode = 'empty';
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    expect(await redisMock.zScore(crosspostDeletionDueKey, 't3_racing')).toBeUndefined();
+
+    const originalZAdd = redisMock.zAdd.bind(redisMock);
+    let failHandoff = true;
+    vi.spyOn(redisMock, 'zAdd').mockImplementation(async (key, ...entries) => {
+      if (key === crosspostDeletionDueKey && failHandoff) {
+        failHandoff = false;
+        throw new Error('cleanup handoff unavailable');
+      }
+      await originalZAdd(key, ...entries);
+    });
+    createGate.resolve({ id: 't3_racing_mirror' });
+    await createRun;
+
+    expect(deleteMirror).not.toHaveBeenCalled();
+    expect(await redisMock.hGet(crosspostListKey, 't3_racing')).toBe(
+      't3_racing_mirror'
+    );
+    await redisMock.zAdd('crosspostPendingByTime:subgoal', {
+      member: 'rev_racing_create',
+      score: 1,
+    });
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(deleteMirror).toHaveBeenCalledOnce();
+    expect(await redisMock.hGet(crosspostListKey, 't3_racing')).toBeUndefined();
+  });
+
+  it('uses one replay deletion for duplicate revisions and preserves the marker for a later mirror', async () => {
+    mockContext.subredditName = 'SubGoal';
+    let exposeDeletes = true;
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) =>
+        exposeDeletes && page === crosspostWikiPages.action.delete
+          ? {
+              ok: true,
+              revisions: [
+                { id: 'rev_delete_a', reason: 'Dispatch delete for t3_dup' },
+                { id: 'rev_delete_b', reason: 'Dispatch delete for t3_dup' },
+              ],
+              durationMs: 1,
+            }
+          : { ok: true, revisions: [], durationMs: 1 }
+    );
+    await redisMock.hSet(crosspostListKey, {
+      t3_dup: 't3_dup_mirror',
+      t3_other: 't3_other_mirror',
+    });
+    await redisMock.zAdd(
+      postsKey,
+      { member: 't3_dup', score: 1 },
+      { member: 't3_other', score: 2 }
+    );
+    const deleteMirror = vi.fn(async () => undefined);
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_dup_mirror',
+      subredditName: 'SubGoal',
+      delete: deleteMirror,
+    });
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    exposeDeletes = false;
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(deleteMirror).toHaveBeenCalledOnce();
+    expect(await redisMock.hGet(crosspostListKey, 't3_other')).toBe(
+      't3_other_mirror'
+    );
+    expect(await redisMock.hGet('processedRevisions', 'rev_delete_a')).toBe('t3_dup');
+    expect(await redisMock.hGet('processedRevisions', 'rev_delete_b')).toBe('t3_dup');
+
+    await redisMock.hSet(crosspostListKey, { t3_dup: 't3_later_mirror' });
+    await redisMock.zAdd(crosspostDeletionDueKey, {
+      member: 't3_dup',
+      score: 1,
+    });
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_later_mirror',
+      subredditName: 'SubGoal',
+      delete: deleteMirror,
+    });
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(deleteMirror).toHaveBeenCalledTimes(2);
+    expect(
+      await redisMock.hGet(crosspostDeletionMarkersKey, 't3_dup')
+    ).toBeDefined();
+  });
+
+  it('leaves a delete revision retryable after marker persistence fails', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) =>
+        page === crosspostWikiPages.action.delete
+          ? {
+              ok: true,
+              revisions: [
+                { id: 'rev_marker_retry', reason: 'Dispatch delete for t3_retry' },
+              ],
+              durationMs: 1,
+            }
+          : { ok: true, revisions: [], durationMs: 1 }
+    );
+    const originalHSet = redisMock.hSet.bind(redisMock);
+    let failMarker = true;
+    vi.spyOn(redisMock, 'hSet').mockImplementation(async (key, fields) => {
+      if (key === crosspostDeletionMarkersKey && failMarker) {
+        failMarker = false;
+        throw new Error('marker unavailable');
+      }
+      await originalHSet(key, fields);
+    });
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    expect(await redisMock.hGet('processedRevisions', 'rev_marker_retry')).toBeUndefined();
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(await redisMock.hGet('processedRevisions', 'rev_marker_retry')).toBe(
+      't3_retry'
+    );
+  });
+
+  it('retries a failed mirror deletion through the marker replay worker', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockResolvedValue({
+      ok: true,
+      revisions: [],
+      durationMs: 1,
+    });
+    await redisMock.hSet(crosspostDeletionMarkersKey, {
+      t3_delete_retry: JSON.stringify({
+        sourcePostId: 't3_delete_retry',
+        firstRevisionId: 'rev_delete_retry',
+        recordedAtMs: 1,
+      }),
+    });
+    await redisMock.hSet(crosspostListKey, {
+      t3_delete_retry: 't3_delete_retry_mirror',
+    });
+    await redisMock.zAdd(postsKey, {
+      member: 't3_delete_retry',
+      score: 1,
+    });
+    await redisMock.zAdd(crosspostDeletionDueKey, {
+      member: 't3_delete_retry',
+      score: 1,
+    });
+    const deleteMirror = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('temporary delete failure'))
+      .mockResolvedValueOnce(undefined);
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_delete_retry_mirror',
+      subredditName: 'SubGoal',
+      delete: deleteMirror,
+    });
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+    expect(deleteMirror).toHaveBeenCalledOnce();
+    expect(await redisMock.hGet(crosspostListKey, 't3_delete_retry')).toBe(
+      't3_delete_retry_mirror'
+    );
+
+    await redisMock.zAdd(crosspostDeletionDueKey, {
+      member: 't3_delete_retry',
+      score: 1,
+    });
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(deleteMirror).toHaveBeenCalledTimes(2);
+    expect(
+      await redisMock.hGet(crosspostListKey, 't3_delete_retry')
+    ).toBeUndefined();
+  });
+
+  it('preserves ordinary remove and approve mirroring', async () => {
+    mockContext.subredditName = 'SubGoal';
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subredditName: string, page: string) => {
+        if (page === crosspostWikiPages.action.remove) {
+          return {
+            ok: true,
+            revisions: [
+              { id: 'rev_remove', reason: 'Dispatch remove for t3_remove' },
+            ],
+            durationMs: 1,
+          };
+        }
+        if (page === crosspostWikiPages.action.approve) {
+          return {
+            ok: true,
+            revisions: [
+              { id: 'rev_approve', reason: 'Dispatch approve for t3_approve' },
+            ],
+            durationMs: 1,
+          };
+        }
+        return { ok: true, revisions: [], durationMs: 1 };
+      }
+    );
+    await redisMock.hSet(crosspostListKey, {
+      t3_remove: 't3_remove_mirror',
+      t3_approve: 't3_approve_mirror',
+    });
+    await redisMock.zAdd(
+      postsKey,
+      { member: 't3_remove', score: 1 },
+      { member: 't3_approve', score: 2 }
+    );
+    const remove = vi.fn(async () => undefined);
+    const approve = vi.fn(async () => undefined);
+    mockReddit.getPostById.mockImplementation(async (postId: string) => ({
+      id: postId,
+      subredditName: 'SubGoal',
+      remove,
+      approve,
+    }));
+
+    await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(remove).toHaveBeenCalledWith(false);
+    expect(approve).toHaveBeenCalledOnce();
+    expect(await redisMock.hGet('processedRevisions', 'rev_remove')).toBe(
+      't3_remove'
+    );
+    expect(await redisMock.hGet('processedRevisions', 'rev_approve')).toBe(
+      't3_approve'
+    );
   });
 });

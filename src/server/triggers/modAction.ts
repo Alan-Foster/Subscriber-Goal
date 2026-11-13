@@ -28,6 +28,7 @@ import {
   removeProcessedRevisions,
   scheduleCrosspostDeletionMarker,
   storeProcessedRevision,
+  storeCorrespondingPost,
   storeCrosspostDeletionMarker,
   upsertPendingCrosspost,
 } from '../data/crosspostData';
@@ -430,6 +431,13 @@ async function isTerminalRevisionMarked(
 
 const getCrosspostCreateInFlightKey = (sourcePostId: LinkId): string =>
   `${crosspostCreateInFlightKeyPrefix}:${sourcePostId}`;
+
+async function isSourceCreateInFlight(
+  redisClient: Pick<RedisClient, 'get'>,
+  sourcePostId: LinkId
+): Promise<boolean> {
+  return Boolean(await redisClient.get(getCrosspostCreateInFlightKey(sourcePostId)));
+}
 
 async function acquireSourceCreateInFlightLock(
   redisClient: RedisLockClient,
@@ -838,6 +846,14 @@ async function updateFromWikis(
       const mappedMirrorId = await getCorrespondingPost(redis, sourcePostId);
       if (!mappedMirrorId || !isLinkId(mappedMirrorId)) {
         if (mappedMirrorId) await removeCorrespondingPost(redis, sourcePostId);
+        if (await isSourceCreateInFlight(redis, sourcePostId)) {
+          await scheduleCrosspostDeletionMarker(
+            redis,
+            sourcePostId,
+            nowMs + retryBaseDelayMs
+          );
+          continue;
+        }
         await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
         continue;
       }
@@ -860,6 +876,16 @@ async function updateFromWikis(
       await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
       summary.actionsMirrored += 1;
     } catch (error) {
+      logDiagnostic(
+        'warn',
+        'crosspost_delete_marker_replay_failed',
+        {
+          workflow: 'crosspost',
+          phase: 'delete_marker_replay',
+          postId: sourcePostId,
+        },
+        error
+      );
       const message = toErrorMessage(error);
       if (/not[\s-]?found|does not exist|deleted|no longer exists/i.test(message)) {
         await removeCorrespondingPost(redis, sourcePostId);
@@ -1077,7 +1103,36 @@ async function updateFromWikis(
 
   for (const pending of [...reconciliationFirstPending, ...normalPending]) {
     let sourceSubredditIsNsfw = false;
+    let sourceCreateLock:
+      | Awaited<ReturnType<typeof acquireSourceCreateInFlightLock>>
+      | undefined;
     try {
+      if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
+        const knownMirrorId =
+          pending.createdCrosspostId ??
+          (await getCorrespondingPost(redis, pending.postId));
+        if (knownMirrorId && isLinkId(knownMirrorId)) {
+          await storeCorrespondingPost(redis, pending.postId, knownMirrorId);
+          await scheduleCrosspostDeletionMarker(redis, pending.postId, nowMs);
+          await removePendingCrosspost(
+            redis,
+            appSettings.promoSubreddit,
+            pending.revisionId
+          );
+        } else if (await isSourceCreateInFlight(redis, pending.postId)) {
+          await scheduleRetry(pending, 'source_delete_create_inflight');
+          continue;
+        } else {
+          await removePendingCrosspost(
+            redis,
+            appSettings.promoSubreddit,
+            pending.revisionId
+          );
+          await completeCrosspostDeletionMarkerReplay(redis, pending.postId);
+        }
+        summary.crosspostsSkipped += 1;
+        continue;
+      }
       const revisionDateMs = pending.revisionDateMs;
       if (typeof revisionDateMs !== 'number' || !Number.isFinite(revisionDateMs)) {
         console.info(
@@ -1172,6 +1227,21 @@ async function updateFromWikis(
             : {}),
         });
         try {
+          if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
+            await storeCorrespondingPost(
+              redis,
+              pending.postId,
+              reconciliationCrosspostId
+            );
+            await scheduleCrosspostDeletionMarker(redis, pending.postId, nowMs);
+            await removePendingCrosspost(
+              redis,
+              appSettings.promoSubreddit,
+              pending.revisionId
+            );
+            summary.crosspostsSkipped += 1;
+            continue;
+          }
           await finalizeCrosspostPersistenceAtomic({
             redisClient: redis,
             targetSubreddit: appSettings.promoSubreddit,
@@ -1179,6 +1249,20 @@ async function updateFromWikis(
             crosspostId: reconciliationCrosspostId,
             revisionId: pending.revisionId,
           });
+          if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
+            try {
+              await scheduleCrosspostDeletionMarker(redis, pending.postId, nowMs);
+            } catch (handoffError) {
+              await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
+                ...pending,
+                createdCrosspostId: reconciliationCrosspostId,
+                nextAttemptMs: nowMs,
+                status: 'crosspost_reconciliation_pending',
+                lastError: toErrorMessage(handoffError),
+              });
+              throw handoffError;
+            }
+          }
           summary.crosspostsSkipped += 1;
           summary.crosspostsSkippedByExistingDetection += 1;
           logCrosspostEvent({
@@ -1224,7 +1308,7 @@ async function updateFromWikis(
         }
       }
 
-      const sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
+      sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
       if (!sourceCreateLock.acquired) {
         summary.crosspostsSkippedByInFlight += 1;
         await scheduleRetry(pending, 'source_create_inflight');
@@ -1250,6 +1334,17 @@ async function updateFromWikis(
           nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });
         crosspostId = crosspost.id;
+        if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
+          await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
+            ...pending,
+            createdCrosspostId: crosspostId as LinkId,
+            nextAttemptMs: nowMs,
+            status: 'crosspost_reconciliation_pending',
+            lastError: null,
+          });
+          await storeCorrespondingPost(redis, pending.postId, crosspostId);
+          await scheduleCrosspostDeletionMarker(redis, pending.postId, nowMs);
+        }
       } catch (error) {
         logCrosspostEvent(
           {
@@ -1263,21 +1358,6 @@ async function updateFromWikis(
           'error'
         );
         throw error;
-      } finally {
-        try {
-          await releaseSourceCreateInFlightLock(
-            redis,
-            sourceCreateLock.lockKey,
-            sourceCreateLock.lockToken
-          );
-        } catch (lockError) {
-          logDiagnostic(
-            'warn',
-            'crosspost_cleanup_failed',
-            { workflow: 'crosspost', phase: 'source_create_lock_release', postId: pending.postId },
-            lockError
-          );
-        }
       }
       logCrosspostEvent({
         event: 'crosspost_attempt_succeeded',
@@ -1307,6 +1387,20 @@ async function updateFromWikis(
           crosspostId: crosspostId as LinkId,
           revisionId: pending.revisionId,
         });
+        if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
+          try {
+            await scheduleCrosspostDeletionMarker(redis, pending.postId, nowMs);
+          } catch (handoffError) {
+            await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
+              ...pending,
+              createdCrosspostId: crosspostId as LinkId,
+              nextAttemptMs: nowMs,
+              status: 'crosspost_reconciliation_pending',
+              lastError: toErrorMessage(handoffError),
+            });
+            throw handoffError;
+          }
+        }
         summary.crosspostsCreated += 1;
         summary.crosspostsCreatedThisRun += 1;
         hourlyCreatedCount += 1;
@@ -1384,6 +1478,27 @@ async function updateFromWikis(
 
       summary.crosspostsFailed += 1;
       await scheduleRetry(pending, 'crosspost_attempt_failed', errorMessage);
+    } finally {
+      if (sourceCreateLock?.acquired) {
+        try {
+          await releaseSourceCreateInFlightLock(
+            redis,
+            sourceCreateLock.lockKey,
+            sourceCreateLock.lockToken
+          );
+        } catch (lockError) {
+          logDiagnostic(
+            'warn',
+            'crosspost_cleanup_failed',
+            {
+              workflow: 'crosspost',
+              phase: 'source_create_lock_release',
+              postId: pending.postId,
+            },
+            lockError
+          );
+        }
+      }
     }
   }
 
@@ -1409,6 +1524,28 @@ async function updateFromWikis(
     let terminal = false;
     let mirrored = false;
     try {
+      if (postAction.action === 'delete') {
+        await storeCrosspostDeletionMarker(
+          redis,
+          postAction.postId,
+          postAction.revisionId,
+          nowMs
+        );
+        await storeProcessedRevision(
+          redis,
+          postAction.revisionId,
+          postAction.postId
+        );
+        summary.crosspostsSkipped += 1;
+        logCrosspostEvent({
+          event: 'crosspost_attempt_started',
+          sourcePostId: postAction.postId,
+          targetSubreddit: appSettings.promoSubreddit,
+          reason: 'action_delete_cleanup_queued',
+          revisionId: postAction.revisionId,
+        });
+        continue;
+      }
       const crosspostId = await getCorrespondingPost(redis, postAction.postId);
       if (!crosspostId) {
         summary.crosspostsSkipped += 1;
@@ -1519,32 +1656,6 @@ async function updateFromWikis(
             break;
           }
           await crosspost.approve();
-          mirrored = true;
-          break;
-        }
-        case 'delete': {
-          if (!isLinkId(crosspostId)) {
-            summary.crosspostsSkipped += 1;
-            logCrosspostEvent(
-              {
-                event: 'crosspost_attempt_skipped',
-                sourcePostId: postAction.postId,
-                targetSubreddit: appSettings.promoSubreddit,
-                crosspostId,
-                reason: `action_${postAction.action}_invalid_target`,
-                revisionId: postAction.revisionId,
-              },
-              'warn'
-            );
-            await removeCorrespondingPost(redis, postAction.postId);
-            terminal = true;
-            break;
-          }
-          const crosspost = await getCrosspostOrSkip(crosspostId);
-          if (!crosspost) {
-            break;
-          }
-          await crosspost.delete();
           mirrored = true;
           break;
         }

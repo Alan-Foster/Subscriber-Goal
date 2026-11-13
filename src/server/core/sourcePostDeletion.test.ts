@@ -8,6 +8,7 @@ import {
 } from "./sourcePostDeletion";
 import {
   getSourcePostDeletionIntent,
+  sourcePostDeletionIntentsKey,
   sourcePostDeletionDueKey,
 } from "../data/sourcePostDeletion";
 
@@ -105,7 +106,7 @@ describe("durable source post deletion", () => {
       reddit as never,
       redis as never,
       settings,
-      { nowMs: 2_000 },
+      { nowMs: 62_000 },
     );
 
     expect(reddit.getPostById).toHaveBeenCalledOnce();
@@ -177,5 +178,102 @@ describe("durable source post deletion", () => {
     await expect(
       getSourcePostDeletionIntent(redis as never, confirmed.id),
     ).resolves.toMatchObject({ status: "dispatch_pending" });
+  });
+
+  it("rechecks a stale due snapshot under the lease and preserves newer backoff", async () => {
+    const redis = new TestRedis();
+    const prepared = await prepareSourcePostDeletionIntent(redis as never, {
+      ...input,
+      nowMs: 1_000,
+    });
+    const attempted = await recordSourceDeleteAttempt(
+      redis as never,
+      prepared,
+      1_000,
+    );
+    await redis.zAdd(sourcePostDeletionDueKey, {
+      member: attempted.id,
+      score: 1_000,
+    });
+    const backedOff = {
+      ...attempted,
+      nextAttemptMs: 5_000,
+      attemptCount: 7,
+      lastError: "newer failure",
+    };
+    const originalSet = redis.set.bind(redis);
+    let moveIntoBackoff = true;
+    redis.set = vi.fn(async (key, value, options) => {
+      if (
+        key === "subscriber_goal_community_mutation_v1_lock" &&
+        moveIntoBackoff
+      ) {
+        moveIntoBackoff = false;
+        await redis.hSet(sourcePostDeletionIntentsKey, {
+          [attempted.id]: JSON.stringify(backedOff),
+        });
+        await redis.zAdd(sourcePostDeletionDueKey, {
+          member: attempted.id,
+          score: backedOff.nextAttemptMs,
+        });
+      }
+      return originalSet(key, value, options);
+    });
+    const getPostById = vi.fn(async () => {
+      throw Object.assign(new Error("gone"), { status: 404 });
+    });
+    const updateWikiPage = vi.fn(async () => undefined);
+
+    await processDueSourcePostDeletions(
+      { getPostById, updateWikiPage } as never,
+      redis as never,
+      settings,
+      { nowMs: 2_000 },
+    );
+
+    expect(getPostById).not.toHaveBeenCalled();
+    expect(updateWikiPage).not.toHaveBeenCalled();
+    await expect(
+      getSourcePostDeletionIntent(redis as never, attempted.id),
+    ).resolves.toEqual(backedOff);
+    expect(redis.sorted.get(sourcePostDeletionDueKey)?.get(attempted.id)).toBe(
+      5_000,
+    );
+
+    await processDueSourcePostDeletions(
+      { getPostById, updateWikiPage } as never,
+      redis as never,
+      settings,
+      { nowMs: 5_000 },
+    );
+    expect(getPostById).toHaveBeenCalledOnce();
+    expect(updateWikiPage).toHaveBeenCalledOnce();
+  });
+
+  it("does no work when the intent disappears before lease acquisition", async () => {
+    const redis = new TestRedis();
+    const prepared = await prepareSourcePostDeletionIntent(redis as never, {
+      ...input,
+      nowMs: 1_000,
+    });
+    const originalSet = redis.set.bind(redis);
+    redis.set = vi.fn(async (key, value, options) => {
+      if (key === "subscriber_goal_community_mutation_v1_lock") {
+        redis.hashes.get(sourcePostDeletionIntentsKey)?.delete(prepared.id);
+      }
+      return originalSet(key, value, options);
+    });
+    const getPostById = vi.fn();
+    const updateWikiPage = vi.fn();
+
+    await processDueSourcePostDeletions(
+      { getPostById, updateWikiPage } as never,
+      redis as never,
+      settings,
+      { nowMs: 2_000 },
+    );
+
+    expect(getPostById).not.toHaveBeenCalled();
+    expect(updateWikiPage).not.toHaveBeenCalled();
   });
 });
