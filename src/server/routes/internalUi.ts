@@ -47,7 +47,6 @@ import {
   type CreateGoalDraft,
   type CreateGoalDraftDetails,
 } from "../data/createGoalDraft";
-import { dispatchPostAction } from "../data/crosspostData";
 import { eraseFromRecentSubscribers } from "../data/subGoalData";
 import { getSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
 import {
@@ -75,6 +74,14 @@ import {
 } from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
+import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
+import {
+  dispatchConfirmedSourceDeletion,
+  prepareSourcePostDeletionIntent,
+  recordSourceDeleteAttempt,
+  recordSourceDeletionConfirmed,
+} from "../core/sourcePostDeletion";
+import type { LinkId, SubredditId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import {
   getCurrentActorAuthority,
@@ -527,26 +534,96 @@ export function registerInternalUiRoutes(router: Router): void {
           res.json({ showToast: actorAuthority.message });
           return;
         }
-        phase = "crosspost_delete_dispatch";
-        if (
-          subredditName.toLowerCase() !==
-          appSettings.promoSubreddit.toLowerCase()
-        ) {
-          await dispatchPostAction(reddit, appSettings, postId, "delete");
-        }
-        logDiagnostic("info", "delete_goal_phase_complete", {
-          operationId,
-          workflow: "delete_goal",
-          phase,
-          postId,
-        });
-        phase = "reddit_post_delete";
-        await post.delete();
-        logDiagnostic("info", "delete_goal_phase_complete", {
-          operationId,
-          workflow: "delete_goal",
-          phase,
-          postId,
+        let cleanupDispatched = false;
+        let sourceDeletionConfirmed = false;
+        await withCommunityGoalMutationLease(redis, async () => {
+          phase = "deletion_intent_persistence";
+          let intent = await prepareSourcePostDeletionIntent(redis, {
+            postId: postId as LinkId,
+            subredditId: subreddit.id as SubredditId,
+            subredditName,
+          });
+          logDiagnostic("info", "delete_goal_phase_complete", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+            intentId: intent.id,
+          });
+
+          if (intent.status === "dispatched") {
+            cleanupDispatched = true;
+            sourceDeletionConfirmed = true;
+            return;
+          }
+          if (intent.status === "dispatch_pending") {
+            sourceDeletionConfirmed = true;
+            phase = "crosspost_delete_dispatch";
+            try {
+              intent = await dispatchConfirmedSourceDeletion(
+                reddit,
+                redis,
+                appSettings,
+                intent,
+              );
+              cleanupDispatched = intent.status === "dispatched";
+            } catch (error) {
+              logDiagnostic(
+                "warn",
+                "delete_goal_cleanup_dispatch_pending",
+                { operationId, workflow: "delete_goal", phase, postId },
+                error,
+              );
+            }
+            return;
+          }
+
+          // This durable transition is deliberately before Reddit. If the
+          // delete response is lost, the updater knows to verify, never repeat.
+          phase = "deletion_attempt_persistence";
+          intent = await recordSourceDeleteAttempt(redis, intent);
+          phase = "reddit_post_delete";
+          await post.delete();
+          sourceDeletionConfirmed = true;
+          logDiagnostic("info", "delete_goal_phase_complete", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+          });
+
+          phase = "deletion_confirmation_persistence";
+          try {
+            intent = await recordSourceDeletionConfirmed(redis, intent);
+          } catch (error) {
+            // The preceding verify_source record remains indexed. Recovery can
+            // establish the missing source and resume dispatch on the next tick.
+            logDiagnostic(
+              "warn",
+              "delete_goal_confirmation_pending",
+              { operationId, workflow: "delete_goal", phase, postId },
+              error,
+            );
+            return;
+          }
+
+          phase = "crosspost_delete_dispatch";
+          try {
+            intent = await dispatchConfirmedSourceDeletion(
+              reddit,
+              redis,
+              appSettings,
+              intent,
+            );
+            cleanupDispatched = intent.status === "dispatched";
+          } catch (error) {
+            logDiagnostic(
+              "warn",
+              "delete_goal_cleanup_dispatch_pending",
+              { operationId, workflow: "delete_goal", phase, postId },
+              error,
+            );
+          }
         });
         const cleanupFailures: string[] = [];
         const runCleanupPhase = async (
@@ -572,9 +649,11 @@ export function registerInternalUiRoutes(router: Router): void {
             );
           }
         };
-        await runCleanupPhase("post_retirement", () =>
-          retireSubscriberGoalPost(redis, postId, "app_menu_deletion"),
-        );
+        if (sourceDeletionConfirmed) {
+          await runCleanupPhase("post_retirement", () =>
+            retireSubscriberGoalPost(redis, postId, "app_menu_deletion"),
+          );
+        }
         phase = "response_completion";
         if (cleanupFailures.length > 0) {
           logDiagnostic("warn", "delete_goal_partially_completed", {
@@ -592,7 +671,12 @@ export function registerInternalUiRoutes(router: Router): void {
           return;
         }
         res.json({
-          showToast: translate(language, "moderator.delete.success"),
+          showToast: translate(
+            language,
+            cleanupDispatched
+              ? "moderator.delete.cleanupDispatched"
+              : "moderator.delete.cleanupQueued",
+          ),
         });
         logDiagnostic("info", "delete_goal_completed", {
           operationId,

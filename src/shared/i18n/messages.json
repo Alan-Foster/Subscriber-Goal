@@ -1159,6 +1159,18 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "moderator.delete.cleanupQueued": {
+      "description": "Source deletion succeeded and durable mirror cleanup remains queued",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.delete.cleanupDispatched": {
+      "description": "Source deletion succeeded and mirror cleanup was dispatched",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "moderator.delete.failed": {
       "description": "Moderator workflow: Delete failed",
       "policy": "fallback",
@@ -2296,6 +2308,8 @@
         "moderator.delete.metadataLost": "Deletion metadata was somehow lost. Please try again. Reference: {operationId}",
         "moderator.delete.cleanupPending": "The post was deleted, but some cleanup is still pending. Reference: {operationId}",
         "moderator.delete.success": "Post deleted successfully!",
+        "moderator.delete.cleanupQueued": "Source deleted, mirror cleanup queued",
+        "moderator.delete.cleanupDispatched": "Source deleted, cleanup dispatched",
         "moderator.delete.failed": "Error deleting post. Please refresh the page and try again. Reference: {operationId}",
         "moderator.delete.ineligible": "This post is not an eligible Subscriber Goal post in the current community.",
         "moderator.authorization.loginRequired": "Please log in before performing this action.",

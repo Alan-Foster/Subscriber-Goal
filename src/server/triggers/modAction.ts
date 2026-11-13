@@ -5,6 +5,7 @@ import { getAppSettings } from '../settings';
 import {
   type PendingCrosspost,
   countPendingCrossposts,
+  completeCrosspostDeletionMarkerReplay,
   crosspostListKey,
   crosspostWikiPages,
   dispatchPostAction,
@@ -12,9 +13,11 @@ import {
   getCrosspostPendingByRevisionKey,
   getCrosspostPendingByTimeKey,
   getCorrespondingPost,
+  hasCrosspostDeletionMarker,
   hasCrosspost,
   isProcessedRevision,
   listDuePendingCrossposts,
+  listDueCrosspostDeletionMarkers,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
   modToPostActionMap,
@@ -23,7 +26,9 @@ import {
   removePendingCrosspost,
   removeCorrespondingPost,
   removeProcessedRevisions,
+  scheduleCrosspostDeletionMarker,
   storeProcessedRevision,
+  storeCrosspostDeletionMarker,
   upsertPendingCrosspost,
 } from '../data/crosspostData';
 import { getTrackedPosts } from '../data/updaterData';
@@ -824,6 +829,52 @@ async function updateFromWikis(
   const retryMaxDelayMs = getCrosspostRetryMaxDelayMs(appSettings);
   const pendingBatchSize = getCrosspostPendingBatchSize(appSettings);
 
+  const dueDeletionMarkers = await listDueCrosspostDeletionMarkers(redis, {
+    nowMs,
+    limit: pendingBatchSize,
+  });
+  for (const sourcePostId of dueDeletionMarkers) {
+    try {
+      const mappedMirrorId = await getCorrespondingPost(redis, sourcePostId);
+      if (!mappedMirrorId || !isLinkId(mappedMirrorId)) {
+        if (mappedMirrorId) await removeCorrespondingPost(redis, sourcePostId);
+        await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
+        continue;
+      }
+      const mirror = await reddit.getPostById(mappedMirrorId);
+      if (!mirror) {
+        await removeCorrespondingPost(redis, sourcePostId);
+        await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
+        continue;
+      }
+      if (
+        mirror.subredditName.toLowerCase() !==
+        appSettings.promoSubreddit.toLowerCase()
+      ) {
+        await removeCorrespondingPost(redis, sourcePostId);
+        await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
+        continue;
+      }
+      await mirror.delete();
+      await removeCorrespondingPost(redis, sourcePostId);
+      await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
+      summary.actionsMirrored += 1;
+    } catch (error) {
+      const message = toErrorMessage(error);
+      if (/not[\s-]?found|does not exist|deleted|no longer exists/i.test(message)) {
+        await removeCorrespondingPost(redis, sourcePostId);
+        await completeCrosspostDeletionMarkerReplay(redis, sourcePostId);
+      } else {
+        await scheduleCrosspostDeletionMarker(
+          redis,
+          sourcePostId,
+          nowMs + retryBaseDelayMs
+        );
+        summary.actionsFailed += 1;
+      }
+    }
+  }
+
   const newPostBatch = await getNewPosts(appSettings);
   summary.revisionsFetched += newPostBatch.revisionsFetched;
   if (newPostBatch.ok) {
@@ -903,7 +954,10 @@ async function updateFromWikis(
       (options?.incrementReconciliation ? 1 : 0);
     const nextCreatedCrosspostId =
       options?.createdCrosspostId ?? pending.createdCrosspostId;
-    if (isRetryWindowExpired(pending, retryWindowMs, nowMs)) {
+    if (
+      isRetryWindowExpired(pending, retryWindowMs, nowMs) &&
+      !reason.startsWith('delete_marker_')
+    ) {
       await removePendingCrosspost(redis, appSettings.promoSubreddit, pending.revisionId);
       summary.crosspostsSkipped += 1;
       logCrosspostEvent(

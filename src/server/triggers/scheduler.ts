@@ -57,6 +57,10 @@ import {
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
 import { processSubscriberTrackingRepairs } from "../data/subscriberTracking";
+import {
+  processDueSourcePostDeletions,
+  queueConfirmedSourceDeletionCleanup,
+} from "../core/sourcePostDeletion";
 
 type CompletedUpdateCleanupPreparation =
   | "auto_disabled"
@@ -184,6 +188,16 @@ export async function onPostsUpdaterJob(): Promise<void> {
       "error",
       "scheduler_task_failed",
       { workflow: "app_account_recovery" },
+      error,
+    );
+  }
+  try {
+    await processDueSourcePostDeletions(reddit, redis, appSettings);
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "source_post_deletion" },
       error,
     );
   }
@@ -456,6 +470,18 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const post = await reddit.getPostById(postId);
       const removedByCategory = getTerminalRemovedByCategory(post);
       if (removedByCategory) {
+        if (removedByCategory === "deleted") {
+          await queueConfirmedSourceDeletionCleanup(
+            reddit,
+            redis,
+            appSettings,
+            {
+              postId,
+              subredditId: subreddit.id,
+              subredditName: subreddit.name,
+            },
+          );
+        }
         await retireSubscriberGoalPost(
           redis,
           postId,
@@ -532,6 +558,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
       await queueUpdate(redis, postId, new Date());
     } catch (e) {
       if (isLinkId(postId) && isMissingPostError(e, postId)) {
+        await queueConfirmedSourceDeletionCleanup(reddit, redis, appSettings, {
+          postId,
+          subredditId: subreddit.id,
+          subredditName: subreddit.name,
+        });
         await retireSubscriberGoalPost(redis, postId, "confirmed_missing_post");
         console.info(
           `[updater] cleaned up inactive post: postId=${postId} reason=confirmed_missing_post`,

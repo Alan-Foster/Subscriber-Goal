@@ -1,5 +1,5 @@
 import type { ServerAppSettings } from '../settings';
-import type { LinkId, RedditClient, RedisClient } from '../types';
+import { isLinkId, type LinkId, type RedditClient, type RedisClient } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
 
 export type PostActionType = 'remove' | 'approve' | 'delete';
@@ -98,6 +98,8 @@ export async function dispatchPostAction(
 export const processedRevisionsKey = 'processedRevisions';
 export const processedRevisionsByTimeKey = 'processedRevisionsByTime';
 export const crosspostListKey = 'crosspostList';
+export const crosspostDeletionMarkersKey = 'crosspostDeletionMarkersV1';
+export const crosspostDeletionDueKey = 'crosspostDeletionDueV1';
 export const crosspostPendingByTimeKeyPrefix = 'crosspostPendingByTime';
 export const crosspostPendingByRevisionKeyPrefix = 'crosspostPendingByRevision';
 
@@ -420,4 +422,97 @@ export async function hasCrosspost(
 ): Promise<boolean> {
   const crosspostId = await redis.hGet(crosspostListKey, postId);
   return !!crosspostId;
+}
+
+export type CrosspostDeletionMarker = {
+  sourcePostId: LinkId;
+  firstRevisionId: string;
+  recordedAtMs: number;
+};
+
+export async function getCrosspostDeletionMarker(
+  redis: RedisClient,
+  sourcePostId: string
+): Promise<CrosspostDeletionMarker | undefined> {
+  const raw = await redis.hGet(crosspostDeletionMarkersKey, sourcePostId);
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as Partial<CrosspostDeletionMarker>;
+    if (
+      value.sourcePostId !== sourcePostId ||
+      typeof value.firstRevisionId !== 'string' ||
+      typeof value.recordedAtMs !== 'number'
+    ) {
+      return undefined;
+    }
+    return value as CrosspostDeletionMarker;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function hasCrosspostDeletionMarker(
+  redis: RedisClient,
+  sourcePostId: string
+): Promise<boolean> {
+  return Boolean(await getCrosspostDeletionMarker(redis, sourcePostId));
+}
+
+/** Persist and confirm the source-scoped tombstone before acknowledging delete. */
+export async function storeCrosspostDeletionMarker(
+  redis: RedisClient,
+  sourcePostId: LinkId,
+  revisionId: string,
+  nowMs = Date.now()
+): Promise<CrosspostDeletionMarker> {
+  const existing = await getCrosspostDeletionMarker(redis, sourcePostId);
+  const marker: CrosspostDeletionMarker = existing ?? {
+    sourcePostId,
+    firstRevisionId: revisionId,
+    recordedAtMs: nowMs,
+  };
+  await redis.hSet(crosspostDeletionMarkersKey, {
+    [sourcePostId]: JSON.stringify(marker),
+  });
+  await redis.zAdd(crosspostDeletionDueKey, {
+    member: sourcePostId,
+    score: nowMs,
+  });
+  const confirmed = await getCrosspostDeletionMarker(redis, sourcePostId);
+  if (!confirmed) {
+    throw new Error('Crosspost deletion marker persistence was not confirmed.');
+  }
+  return confirmed;
+}
+
+export async function scheduleCrosspostDeletionMarker(
+  redis: RedisClient,
+  sourcePostId: LinkId,
+  nextAttemptMs: number
+): Promise<void> {
+  await redis.zAdd(crosspostDeletionDueKey, {
+    member: sourcePostId,
+    score: nextAttemptMs,
+  });
+}
+
+export async function completeCrosspostDeletionMarkerReplay(
+  redis: RedisClient,
+  sourcePostId: LinkId
+): Promise<void> {
+  // The durable marker intentionally remains; only its active replay entry is
+  // removed. A delayed create still observes the source-scoped tombstone.
+  await redis.zRem(crosspostDeletionDueKey, [sourcePostId]);
+}
+
+export async function listDueCrosspostDeletionMarkers(
+  redis: RedisClient,
+  options: { nowMs?: number; limit?: number } = {}
+): Promise<LinkId[]> {
+  const nowMs = options.nowMs ?? Date.now();
+  const limit = Math.max(1, Math.min(25, Math.floor(options.limit ?? 10)));
+  const entries = await redis.zRange(crosspostDeletionDueKey, 0, limit - 1);
+  return entries
+    .filter((entry) => Number(entry.score) <= nowMs && isLinkId(entry.member))
+    .map((entry) => entry.member as LinkId);
 }

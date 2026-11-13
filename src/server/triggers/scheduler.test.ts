@@ -78,6 +78,8 @@ const hoisted = vi.hoisted(() => ({
   savePostOperationalState: vi.fn(),
   clearPostOperationalState: vi.fn(),
   scheduleHighlightRepair: vi.fn(),
+  processDueSourcePostDeletions: vi.fn(),
+  queueConfirmedSourceDeletionCleanup: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
@@ -200,6 +202,11 @@ vi.mock("../core/appAccountRecovery", () => ({
 vi.mock("../core/appRepair", () => ({
   processDueAppRepair: hoisted.processDueAppRepair,
 }));
+vi.mock("../core/sourcePostDeletion", () => ({
+  processDueSourcePostDeletions: hoisted.processDueSourcePostDeletions,
+  queueConfirmedSourceDeletionCleanup:
+    hoisted.queueConfirmedSourceDeletionCleanup,
+}));
 
 vi.mock("../core/post", () => ({
   applyGoalPostFrameStyle: hoisted.applyGoalPostFrameStyle,
@@ -247,6 +254,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.savePostOperationalState.mockReset();
     hoisted.clearPostOperationalState.mockReset();
     hoisted.scheduleHighlightRepair.mockReset();
+    hoisted.processDueSourcePostDeletions.mockReset();
+    hoisted.queueConfirmedSourceDeletionCleanup.mockReset();
+    hoisted.processDueSourcePostDeletions.mockResolvedValue(undefined);
+    hoisted.queueConfirmedSourceDeletionCleanup.mockResolvedValue("dispatched");
     hoisted.getPostOperationalState.mockResolvedValue(undefined);
     hoisted.retireSubscriberGoalPost.mockImplementation(
       async (_redis: unknown, postId: string) => {
@@ -311,6 +322,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     );
     hoisted.redis.hGet.mockResolvedValue(undefined);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_test",
       name: "CorporateGifts",
       type: "public",
       numberOfSubscribers: 10,
@@ -453,6 +465,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       expect.anything(),
       "t3_removed",
     );
+    expect(hoisted.queueConfirmedSourceDeletionCleanup).not.toHaveBeenCalled();
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
       "t3_removed",
@@ -485,6 +498,16 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
       "t3_deleted",
+    );
+    expect(hoisted.queueConfirmedSourceDeletionCleanup).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      baseSettings,
+      {
+        postId: "t3_deleted",
+        subredditId: "t5_test",
+        subredditName: "CorporateGifts",
+      },
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),
@@ -629,6 +652,16 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
       expect.anything(),
       "t3_missing",
+    );
+    expect(hoisted.queueConfirmedSourceDeletionCleanup).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      baseSettings,
+      {
+        postId: "t3_missing",
+        subredditId: "t5_test",
+        subredditName: "CorporateGifts",
+      },
     );
     expect(hoisted.untrackPost).toHaveBeenCalledWith(
       expect.anything(),

@@ -7,6 +7,7 @@ import { subGoalLanguages } from "../../shared/subGoalPostI18n";
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
+  redisSortedSets: new Map<string, Map<string, number>>(),
   highlightedPostIds: [] as string[],
   context: {
     postId: "t3_post",
@@ -42,6 +43,7 @@ const hoisted = vi.hoisted(() => ({
     hDel: vi.fn(),
     hScan: vi.fn(),
     zRem: vi.fn(),
+    zAdd: vi.fn(),
     expire: vi.fn(),
     watch: vi.fn(),
   },
@@ -89,7 +91,11 @@ vi.mock("../core/post", () => ({
 
 vi.mock("../data/subGoalData", () => ({
   autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
+  autoCreateNextGoalQueueKey: "auto_create_next_goal_v1_queue",
+  autoCreateNextGoalRetryAttemptsKey: "auto_create_next_goal_v1_retries",
+  autoCreateNextGoalExhaustedKey: "auto_create_next_goal_v1_exhausted",
   subscriberGoalsKey: "subscriber_goals",
+  subscriberGoalPostFieldSuffixes: ["_goal"],
   postKindSuffix: "_post_kind",
   postHeightSuffix: "_post_height",
   postCompletedTimeSuffix: "_completed_time",
@@ -362,6 +368,7 @@ describe("internalUi color theme create goal routes", () => {
     vi.resetAllMocks();
     hoisted.redisValues.clear();
     hoisted.redisHashes.clear();
+    hoisted.redisSortedSets.clear();
     hoisted.highlightedPostIds.splice(0);
     hoisted.redis.set.mockImplementation(async (key, value, options) => {
       if (options?.nx && hoisted.redisValues.has(key)) return undefined;
@@ -398,6 +405,12 @@ describe("internalUi color theme create goal routes", () => {
     });
     hoisted.redis.hScan.mockResolvedValue({ cursor: 0, fieldValues: [] });
     hoisted.redis.zRem.mockResolvedValue(undefined);
+    hoisted.redis.zAdd.mockImplementation(async (key, entry) => {
+      const sortedSet =
+        hoisted.redisSortedSets.get(key) ?? new Map<string, number>();
+      sortedSet.set(entry.member, entry.score);
+      hoisted.redisSortedSets.set(key, sortedSet);
+    });
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.redis.watch.mockImplementation(async () => {
       let queuedDelete: string | undefined;
@@ -613,7 +626,6 @@ describe("internalUi color theme create goal routes", () => {
 
   it.each([
     ["post_lookup", "getPostById"],
-    ["crosspost_delete_dispatch", "dispatchPostAction"],
     ["reddit_post_delete", "deletePost"],
   ] as const)(
     "logs the failed Delete a Goal %s phase",
@@ -645,6 +657,68 @@ describe("internalUi color theme create goal routes", () => {
       errorSpy.mockRestore();
     },
   );
+
+  it("keeps durable cleanup queued when source deletion succeeds but dispatch fails", async () => {
+    hoisted.dispatchPostAction.mockRejectedValueOnce(
+      new Error("wiki unavailable"),
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.deletePost).toHaveBeenCalledOnce();
+    expect(hoisted.dispatchPostAction).toHaveBeenCalledOnce();
+    expect(json).toHaveBeenCalledWith({
+      showToast: "Source deleted, mirror cleanup queued",
+    });
+  });
+
+  it("makes no Reddit delete or wiki call when intent persistence is uncertain", async () => {
+    hoisted.redis.hSet.mockRejectedValueOnce(new Error("redis uncertain"));
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(hoisted.deletePost).not.toHaveBeenCalled();
+    expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("Error deleting post"),
+    });
+  });
+
+  it("reuses one intent when a fresh authorized submit retries a live source", async () => {
+    hoisted.deletePost
+      .mockRejectedValueOnce(new Error("delete response unknown"))
+      .mockResolvedValueOnce(undefined);
+    const routes = createRouteHarness();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+
+    expect(hoisted.deletePost).toHaveBeenCalledTimes(2);
+    expect(hoisted.dispatchPostAction).toHaveBeenCalledOnce();
+    const intents = hoisted.redisHashes.get("source_post_deletion_intents_v1");
+    expect(intents?.size).toBe(1);
+    expect(JSON.parse(intents?.values().next().value ?? "{}")).toMatchObject({
+      id: "t5_example:t3_post",
+      status: "dispatched",
+      deleteAttemptCount: 2,
+    });
+  });
 
   it("blocks deletion after Manage Posts is revoked", async () => {
     hoisted.reddit.getModerators.mockReturnValue({
