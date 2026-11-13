@@ -34,6 +34,7 @@ import {
   recoverSubscriberGoalCreation,
   SubscriberGoalCreationInProgressError,
   SubscriberGoalCreationOutcomeUnknownError,
+  SubscriberGoalActorAuthorizationError,
   SubscriberGoalModeratorPermissionError,
 } from "../core/createSubscriberGoal";
 import {
@@ -74,6 +75,11 @@ import {
 } from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
+import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
+import {
+  getCurrentActorAuthority,
+  type ActorAuthorityRequirement,
+} from "../utils/actorAuthorization";
 import {
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
@@ -129,6 +135,64 @@ async function resolveCurrentSubredditLanguage(): Promise<SubGoalLanguage> {
   } catch {
     // diagnostic-allow-silent: the default language is safe when subreddit metadata is unavailable.
     return defaultSubGoalLanguage;
+  }
+}
+
+async function requireCurrentActorAuthority({
+  requirement,
+  language,
+}: {
+  requirement: ActorAuthorityRequirement;
+  language: unknown;
+}): Promise<
+  | {
+      authorized: true;
+      userId: string;
+      subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>;
+    }
+  | { authorized: false; message: string }
+> {
+  const userId = context.userId;
+  if (!userId) {
+    return {
+      authorized: false,
+      message: translate(language, "moderator.authorization.loginRequired"),
+    };
+  }
+  let subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>;
+  try {
+    subreddit = await reddit.getCurrentSubreddit();
+    const authority = await getCurrentActorAuthority({
+      reddit,
+      actorUserId: userId,
+      subredditName: subreddit.name,
+      requirement,
+    });
+    if (authority.status === "authorized") {
+      return { authorized: true, userId, subreddit };
+    }
+    return {
+      authorized: false,
+      message: translate(
+        language,
+        authority.status === "denied"
+          ? requirement === "manage-posts"
+            ? "moderator.authorization.managePostsRequired"
+            : "moderator.authorization.moderatorRequired"
+          : "moderator.authorization.retry",
+      ),
+    };
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "actor_authority_context_failed",
+      { workflow: "actor_authorization", phase: "trusted_context" },
+      error,
+    );
+    return {
+      authorized: false,
+      message: translate(language, "moderator.authorization.retry"),
+    };
   }
 }
 
@@ -418,11 +482,8 @@ export function registerInternalUiRoutes(router: Router): void {
         }
 
         phase = "metadata_resolution";
-        const subredditName =
-          context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
-        if (!subredditName) {
-          throw new Error("Subreddit name was unavailable during deletion.");
-        }
+        const subreddit = await reddit.getCurrentSubreddit();
+        const subredditName = subreddit.name;
         logDiagnostic("info", "delete_goal_phase_complete", {
           operationId,
           workflow: "delete_goal",
@@ -432,6 +493,24 @@ export function registerInternalUiRoutes(router: Router): void {
 
         phase = "post_lookup";
         const post = await reddit.getPostById(postId);
+        const managedPostIds = await getSubscriberGoalCandidatePostIds(redis);
+        if (
+          post.subredditId !== subreddit.id ||
+          post.subredditName.toLowerCase() !== subreddit.name.toLowerCase() ||
+          !managedPostIds.includes(postId)
+        ) {
+          logDiagnostic("warn", "delete_goal_target_ineligible", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+            subredditName,
+          });
+          res.json({
+            showToast: translate(language, "moderator.delete.ineligible"),
+          });
+          return;
+        }
         logDiagnostic("info", "delete_goal_phase_complete", {
           operationId,
           workflow: "delete_goal",
@@ -439,6 +518,15 @@ export function registerInternalUiRoutes(router: Router): void {
           postId,
         });
         const appSettings = getAppSettings();
+        phase = "actor_authorization";
+        const actorAuthority = await requireCurrentActorAuthority({
+          requirement: "manage-posts",
+          language,
+        });
+        if (!actorAuthority.authorized) {
+          res.json({ showToast: actorAuthority.message });
+          return;
+        }
         phase = "crosspost_delete_dispatch";
         if (
           subredditName.toLowerCase() !==
@@ -613,6 +701,15 @@ export function registerInternalUiRoutes(router: Router): void {
         res.json({
           showToast: translate(language, "moderator.data.detailsRequired"),
         });
+        return;
+      }
+
+      const actorAuthority = await requireCurrentActorAuthority({
+        requirement: "moderator",
+        language,
+      });
+      if (!actorAuthority.authorized) {
+        res.json({ showToast: actorAuthority.message });
         return;
       }
 
@@ -1474,6 +1571,9 @@ async function submitCreateGoalFollowUp(
                 userId,
                 callback.creationAttemptId,
               ),
+              actorUserId: userId,
+              subredditId: subreddit.id,
+              subredditName: subreddit.name,
             });
             if (recovery.status === "complete") {
               res.json({
@@ -1552,6 +1652,14 @@ async function submitCreateGoalFollowUp(
           return;
         }
         if (developerCommands.selfPost) {
+          const actorAuthority = await requireCurrentActorAuthority({
+            requirement: "manage-posts",
+            language: draft.language,
+          });
+          if (!actorAuthority.authorized) {
+            res.json({ showToast: actorAuthority.message });
+            return;
+          }
           const submitted = await submitExperimentalSelfPost(subreddit, res);
           if (submitted) {
             await safelyDeleteCreateGoalDraft(userId, draft.creationAttemptId);
@@ -1647,6 +1755,7 @@ async function submitCreateGoalFollowUp(
               userId,
               draft.creationAttemptId,
             ),
+            manualActorUserId: userId,
             submitAsUser: developerCommands.submitAsUser,
             ...(developerCommands.headerText
               ? { headerText: developerCommands.headerText }
@@ -1752,6 +1861,7 @@ async function submitCreateGoalFollowUp(
     res.json({
       showToast:
         error instanceof ProhibitedSubredditError ||
+        error instanceof SubscriberGoalActorAuthorizationError ||
         error instanceof SubscriberGoalModeratorPermissionError ||
         error instanceof SubscriberGoalCreationInProgressError ||
         error instanceof SubscriberGoalCreationOutcomeUnknownError

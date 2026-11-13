@@ -7,6 +7,8 @@ const hoisted = vi.hoisted(() => ({
     getPostById: vi.fn(),
     getNewPosts: vi.fn(),
     getPostData: vi.fn(),
+    getCurrentUser: vi.fn(),
+    getModerators: vi.fn(),
   },
   getModPermissionsForSubreddit: vi.fn(),
   redisValues: new Map<string, string>(),
@@ -149,7 +151,10 @@ vi.mock("../utils/subredditBlacklist", async (importOriginal) => ({
   isSubredditBlacklisted: hoisted.isSubredditBlacklisted,
 }));
 
-import { createSubscriberGoal } from "./createSubscriberGoal";
+import {
+  createSubscriberGoal,
+  recoverSubscriberGoalCreation,
+} from "./createSubscriberGoal";
 
 const createPost = ({
   highlight,
@@ -227,6 +232,19 @@ describe("createSubscriberGoal highlight handling", () => {
         hoisted.highlightedIds.clear();
         postIds.forEach((postId) => hoisted.highlightedIds.add(postId));
       }),
+    });
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      id: "t2_mod",
+      username: "ExampleMod",
+    });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => [
+        {
+          id: "t2_mod",
+          username: "ExampleMod",
+          moderatorInfo: { modPermissions: ["all"] },
+        },
+      ]),
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getAppUser.mockResolvedValue({
@@ -347,6 +365,139 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.getSubscriberGoalCandidatePostIds).not.toHaveBeenCalled();
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("revalidates a manual actor after acquiring the operation lock", async () => {
+    const order: string[] = [];
+    hoisted.redis.set.mockImplementation(async (key: string, value: string) => {
+      order.push(key.endsWith(":lock") ? "operation-lock" : "community-lock");
+      hoisted.redisValues.set(key, value);
+    });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => {
+        order.push("actor-lookup");
+        return [];
+      }),
+    });
+
+    await expect(
+      createGoal({
+        operationId: "manual-v2:t5_example:t2_mod:revoked",
+        manualActorUserId: "t2_mod",
+      }),
+    ).rejects.toMatchObject({ name: "SubscriberGoalActorAuthorizationError" });
+
+    expect(order.indexOf("actor-lookup")).toBeGreaterThan(
+      order.indexOf("operation-lock"),
+    );
+    expect(hoisted.redisHashes.size).toBe(0);
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("preserves an incomplete manual operation on transient lookup failure and resumes once", async () => {
+    const operationId = "manual-v2:t5_example:t2_mod:resume";
+    const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+    const post = createPost();
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "post_submitted"],
+        ["postId", post.id],
+        ["actorUserId", "t2_mod"],
+        ["subredditId", "t5_example"],
+        ["subredditName", "ExampleSub"],
+        ["submissionMarker", "marker"],
+      ]),
+    );
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.reddit.getModerators
+      .mockReturnValueOnce({
+        all: vi.fn().mockRejectedValue(new Error("temporary")),
+      })
+      .mockReturnValueOnce({
+        all: vi.fn(async () => [
+          {
+            id: "t2_mod",
+            username: "ExampleMod",
+            moderatorInfo: { modPermissions: ["posts"] },
+          },
+        ]),
+      });
+
+    await expect(
+      createGoal({ operationId, manualActorUserId: "t2_mod" }),
+    ).rejects.toThrow("try again shortly");
+    expect(hoisted.redisHashes.get(operationKey)?.get("status")).toBe(
+      "post_submitted",
+    );
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+
+    await expect(
+      createGoal({ operationId, manualActorUserId: "t2_mod" }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("returns completed recovery only to its original actor and subreddit without writes", async () => {
+    const operationId = "manual-v2:t5_example:t2_mod:completed";
+    const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+    const post = createPost();
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "complete"],
+        ["postId", post.id],
+        ["actorUserId", "t2_mod"],
+        ["subredditId", "t5_example"],
+        ["subredditName", "ExampleSub"],
+        ["crosspostDispatchResult", JSON.stringify({ status: "skipped" })],
+        [
+          "highlightResult",
+          JSON.stringify({
+            status: "highlighted",
+            verifiedHighlighted: true,
+            issues: [],
+          }),
+        ],
+        ["flairResult", JSON.stringify({ status: "applied", flairId: "f" })],
+      ]),
+    );
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    const writesBefore = hoisted.redis.hSet.mock.calls.length;
+
+    await expect(
+      recoverSubscriberGoalCreation({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        operationId,
+        actorUserId: "t2_mod",
+        subredditId: "t5_example",
+        subredditName: "ExampleSub",
+      }),
+    ).resolves.toMatchObject({ status: "complete", result: { post } });
+    await expect(
+      recoverSubscriberGoalCreation({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        operationId,
+        actorUserId: "t2_other",
+        subredditId: "t5_example",
+        subredditName: "ExampleSub",
+      }),
+    ).resolves.toEqual({ status: "missing" });
+    await expect(
+      recoverSubscriberGoalCreation({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        operationId,
+        actorUserId: "t2_mod",
+        subredditId: "t5_other",
+        subredditName: "OtherSub",
+      }),
+    ).resolves.toEqual({ status: "missing" });
+    expect(hoisted.redis.hSet).toHaveBeenCalledTimes(writesBefore);
   });
 
   it("creates and highlights without flair when the app has Posts but not Flair permission", async () => {

@@ -1167,6 +1167,36 @@
       },
       "protectedTokens": []
     },
+    "moderator.delete.ineligible": {
+      "description": "Moderator workflow: deletion target is outside the current community or is not managed by the app",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.authorization.loginRequired": {
+      "description": "Moderator mutation requires an authenticated user",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.authorization.managePostsRequired": {
+      "description": "Moderator mutation requires current Manage Posts permission",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.authorization.moderatorRequired": {
+      "description": "Moderator mutation requires current moderator membership",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.authorization.retry": {
+      "description": "Current moderator authority could not be conclusively verified",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "moderator.data.eraseTitle": {
       "description": "Moderator workflow: Data erase Title",
       "policy": "fallback",
@@ -2267,6 +2297,11 @@
         "moderator.delete.cleanupPending": "The post was deleted, but some cleanup is still pending. Reference: {operationId}",
         "moderator.delete.success": "Post deleted successfully!",
         "moderator.delete.failed": "Error deleting post. Please refresh the page and try again. Reference: {operationId}",
+        "moderator.delete.ineligible": "This post is not an eligible Subscriber Goal post in the current community.",
+        "moderator.authorization.loginRequired": "Please log in before performing this action.",
+        "moderator.authorization.managePostsRequired": "You must currently be a moderator with Manage Posts permission to perform this action.",
+        "moderator.authorization.moderatorRequired": "You must currently be a moderator of this community to perform this action.",
+        "moderator.authorization.retry": "Reddit could not verify your current moderator permissions. Please try again shortly.",
         "moderator.data.eraseTitle": "Sub Goal - Erase Another User's Data",
         "moderator.data.eraseDescription": "This moderator action will erase all data stored by Sub Goal for the specified user.",
         "moderator.data.username": "Username",

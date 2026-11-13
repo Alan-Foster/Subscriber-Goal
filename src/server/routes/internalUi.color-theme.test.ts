@@ -20,6 +20,8 @@ const hoisted = vi.hoisted(() => ({
     getNewPosts: vi.fn(),
     getPostData: vi.fn(),
     getCurrentUsername: vi.fn(),
+    getCurrentUser: vi.fn(),
+    getModerators: vi.fn(),
     getUserById: vi.fn(),
     getUserByUsername: vi.fn(),
     submitPost: vi.fn(),
@@ -470,8 +472,24 @@ describe("internalUi color theme create goal routes", () => {
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("ExampleMod");
+    hoisted.reddit.getCurrentUser.mockResolvedValue({
+      id: "t2_mod",
+      username: "ExampleMod",
+    });
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => [
+        {
+          id: "t2_mod",
+          username: "ExampleMod",
+          moderatorInfo: { modPermissions: ["all"] },
+        },
+      ]),
+    });
     hoisted.deletePost.mockResolvedValue(undefined);
     hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
       delete: hoisted.deletePost,
     });
     hoisted.reddit.getNewPosts.mockReturnValue({
@@ -531,7 +549,7 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.eraseFromRecentSubscribers.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
     hoisted.getQueuedUpdates.mockResolvedValue([]);
-    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_post"]);
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({
       id: "flair_subgoal",
     });
@@ -627,6 +645,55 @@ describe("internalUi color theme create goal routes", () => {
       errorSpy.mockRestore();
     },
   );
+
+  it("blocks deletion after Manage Posts is revoked", async () => {
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => [
+        {
+          id: "t2_mod",
+          username: "ExampleMod",
+          moderatorInfo: { modPermissions: ["flair"] },
+        },
+      ]),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("Manage Posts"),
+    });
+    expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
+    expect(hoisted.deletePost).not.toHaveBeenCalled();
+    expect(hoisted.removeSubscriberGoalPost).not.toHaveBeenCalled();
+  });
+
+  it("rejects deletion for a post outside the trusted current subreddit", async () => {
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_other",
+      subredditName: "OtherSub",
+      delete: hoisted.deletePost,
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("not an eligible"),
+    });
+    expect(hoisted.reddit.getModerators).not.toHaveBeenCalled();
+    expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
+    expect(hoisted.deletePost).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["update_cancellation", "cancelUpdates"],
@@ -778,6 +845,26 @@ describe("internalUi color theme create goal routes", () => {
     expect(json).toHaveBeenCalledWith({
       showToast: expect.stringContaining("Available user data was erased"),
     });
+  });
+
+  it("blocks moderator erasure after membership is revoked", async () => {
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => []),
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.eraseData)?.(
+      { body: { userId: "t2_user", confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("moderator of this community"),
+    });
+    expect(hoisted.reddit.getUserById).not.toHaveBeenCalled();
+    expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
+    expect(hoisted.eraseFromRecentSubscribers).not.toHaveBeenCalled();
   });
 
   it("responds once with a failure when moderator erasure throws", async () => {
@@ -2090,6 +2177,9 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.redisValues.has(testDraftKey(creationAttemptId))).toBe(
       false,
     );
+    hoisted.reddit.getModerators.mockReturnValue({
+      all: vi.fn(async () => []),
+    });
 
     await routes.get(internalRoutes.forms.createSubscribeOnlyFollowUp)?.(
       {
@@ -2107,7 +2197,39 @@ describe("internalUi color theme create goal routes", () => {
         navigateTo: "https://reddit.com/r/ExampleSub/comments/t3_newpost",
       }),
     );
+    expect(hoisted.registerNewSubscribeOnlyPost).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["regular", internalRoutes.forms.createSubscriberGoalFollowUp],
+    ["short", internalRoutes.forms.createSubscriberGoalFollowUp],
+    ["tiny", internalRoutes.forms.createSubscribeOnlyFollowUp],
+    ["cta", internalRoutes.forms.createCtaOnlyFollowUp],
+  ] as const)(
+    "blocks revoked manual creation for the %s variant while preserving its draft",
+    async (postHeight, route) => {
+      seedCreateGoalDraft(postHeight, "en");
+      hoisted.reddit.getModerators.mockReturnValue({
+        all: vi.fn(async () => []),
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(route)?.(
+        { body: {} } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Manage Posts"),
+      });
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewSubscribeOnlyPost).not.toHaveBeenCalled();
+      expect(hoisted.registerNewCtaOnlyPost).not.toHaveBeenCalled();
+      expect(hoisted.redisValues.has(testDraftKey())).toBe(true);
+    },
+  );
 
   it("warns without resuming registration after an ambiguous form expires", async () => {
     const creationAttemptId = "create-goal-expired-unknown12";
@@ -2119,6 +2241,9 @@ describe("internalUi color theme create goal routes", () => {
       new Map([
         ["status", "submission_unknown"],
         ["submissionMarker", "marker-expired"],
+        ["actorUserId", "t2_mod"],
+        ["subredditId", "t5_example"],
+        ["subredditName", "ExampleSub"],
       ]),
     );
     const json = vi.fn();

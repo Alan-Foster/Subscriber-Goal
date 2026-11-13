@@ -70,6 +70,7 @@ import {
   retireSubscriberGoalPost,
 } from "./postRetirement";
 import { getTerminalRemovedByCategory } from "../utils/postStatus";
+import { getCurrentActorAuthority } from "../utils/actorAuthorization";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -91,6 +92,8 @@ type CreateSubscriberGoalOptions = {
   reconciliationContext?: HighlightReconciliationContext;
   mutationLease?: CommunityGoalMutationLease;
   reconciliationNowMs?: number;
+  /** Trusted server-only identity for an interactive/manual invocation. */
+  manualActorUserId?: string;
 };
 
 export type CreateSubscriberGoalResult = {
@@ -196,6 +199,10 @@ async function writeCreationOperation(
 async function recoverCompletedCreation(
   reddit: RedditClient,
   raw: StoredCreationOperation,
+  expectedSubreddit?: {
+    id?: string | undefined;
+    name?: string | undefined;
+  },
 ): Promise<CreateSubscriberGoalResult | undefined> {
   const postId = raw.postId ?? "";
   if (
@@ -212,6 +219,14 @@ async function recoverCompletedCreation(
     const post = (await reddit.getPostById(postId)) as unknown as Awaited<
       ReturnType<typeof createGoalPost>
     >;
+    if (
+      expectedSubreddit &&
+      (post.subredditId !== expectedSubreddit.id ||
+        normalizeSubredditName(post.subredditName) !==
+          normalizeSubredditName(expectedSubreddit.name))
+    ) {
+      return undefined;
+    }
     return {
       outcome: "created",
       post,
@@ -266,17 +281,50 @@ export type SubscriberGoalCreationRecovery =
   | { status: "unknown" }
   | { status: "missing" };
 
+type ManualOperationScope = {
+  actorUserId?: string | undefined;
+  subredditId?: string | undefined;
+  subredditName?: string | undefined;
+};
+
+function operationScopeMatches(
+  raw: StoredCreationOperation,
+  expected: ManualOperationScope,
+): boolean {
+  if (!expected.actorUserId) return true;
+  return (
+    raw.actorUserId === expected.actorUserId &&
+    raw.subredditId === expected.subredditId &&
+    normalizeSubredditName(raw.subredditName) ===
+      normalizeSubredditName(expected.subredditName)
+  );
+}
+
+const normalizeSubredditName = (value: string | undefined): string =>
+  value?.trim().toLowerCase() ?? "";
+
 export async function recoverSubscriberGoalCreation({
   reddit,
   redis,
   operationId,
+  actorUserId,
+  subredditId,
+  subredditName,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   operationId: string;
+  actorUserId?: string;
+  subredditId?: string;
+  subredditName?: string;
 }): Promise<SubscriberGoalCreationRecovery> {
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
   const raw = await redis.hGetAll(operationKey);
+  if (
+    !operationScopeMatches(raw, { actorUserId, subredditId, subredditName })
+  ) {
+    return { status: "missing" };
+  }
   const terminal = recoverTerminalCreation(raw);
   if (terminal) {
     return {
@@ -287,7 +335,11 @@ export async function recoverSubscriberGoalCreation({
         : {}),
     };
   }
-  const completed = await recoverCompletedCreation(reddit, raw);
+  const completed = await recoverCompletedCreation(
+    reddit,
+    raw,
+    actorUserId ? { id: subredditId, name: subredditName } : undefined,
+  );
   if (completed) return { status: "complete", result: completed };
   if (
     raw.status === "submitting" ||
@@ -307,6 +359,20 @@ export class SubscriberGoalPermissionVerificationError extends Error {
       }),
     );
     this.name = "SubscriberGoalPermissionVerificationError";
+  }
+}
+
+export class SubscriberGoalActorAuthorizationError extends Error {
+  constructor(status: "denied" | "inconclusive", language?: SubGoalLanguage) {
+    super(
+      translate(
+        language,
+        status === "denied"
+          ? "moderator.authorization.managePostsRequired"
+          : "moderator.authorization.retry",
+      ),
+    );
+    this.name = "SubscriberGoalActorAuthorizationError";
   }
 }
 
@@ -367,9 +433,31 @@ async function createSubscriberGoalUnderCommunityLease({
   const operationKey = `subscriber_goal_creation_v1:${operationId}`;
   const lockKey = `${operationKey}:lock`;
   const existing = await redis.hGetAll(operationKey);
+  const currentSubreddit = options.manualActorUserId
+    ? await reddit.getCurrentSubreddit()
+    : undefined;
+  const expectedScope = {
+    actorUserId: options.manualActorUserId,
+    subredditId: currentSubreddit?.id,
+    subredditName: currentSubreddit?.name,
+  };
   const existingTerminal = recoverTerminalCreation(existing);
-  if (existingTerminal) return existingTerminal;
-  const completed = await recoverCompletedCreation(reddit, existing);
+  if (existingTerminal) {
+    if (operationScopeMatches(existing, expectedScope)) return existingTerminal;
+    throw new SubscriberGoalActorAuthorizationError(
+      "inconclusive",
+      options.language,
+    );
+  }
+  const completed = operationScopeMatches(existing, expectedScope)
+    ? await recoverCompletedCreation(
+        reddit,
+        existing,
+        currentSubreddit
+          ? { id: currentSubreddit.id, name: currentSubreddit.name }
+          : undefined,
+      )
+    : undefined;
   if (completed) return completed;
   const nowMs = Date.now();
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
@@ -384,9 +472,45 @@ async function createSubscriberGoalUnderCommunityLease({
   try {
     const reloaded = await redis.hGetAll(operationKey);
     const reloadedTerminal = recoverTerminalCreation(reloaded);
-    if (reloadedTerminal) return reloadedTerminal;
-    const recoveredComplete = await recoverCompletedCreation(reddit, reloaded);
+    if (reloadedTerminal) {
+      if (operationScopeMatches(reloaded, expectedScope)) {
+        return reloadedTerminal;
+      }
+      throw new SubscriberGoalActorAuthorizationError(
+        "inconclusive",
+        options.language,
+      );
+    }
+    const recoveredComplete = operationScopeMatches(reloaded, expectedScope)
+      ? await recoverCompletedCreation(
+          reddit,
+          reloaded,
+          currentSubreddit
+            ? { id: currentSubreddit.id, name: currentSubreddit.name }
+            : undefined,
+        )
+      : undefined;
     if (recoveredComplete) return recoveredComplete;
+    if (options.manualActorUserId) {
+      if (!currentSubreddit) {
+        throw new SubscriberGoalActorAuthorizationError(
+          "inconclusive",
+          options.language,
+        );
+      }
+      const authority = await getCurrentActorAuthority({
+        reddit,
+        actorUserId: options.manualActorUserId,
+        subredditName: currentSubreddit.name,
+        requirement: "manage-posts",
+      });
+      if (authority.status !== "authorized") {
+        throw new SubscriberGoalActorAuthorizationError(
+          authority.status,
+          options.language,
+        );
+      }
+    }
     let recoveredPost: Awaited<ReturnType<typeof createGoalPost>> | undefined;
     if (
       reloaded.status === "submitting" ||
@@ -435,6 +559,13 @@ async function createSubscriberGoalUnderCommunityLease({
       startedAt: reloaded.startedAt || String(nowMs),
       updatedAt: String(nowMs),
       submissionMarker,
+      ...(options.manualActorUserId && currentSubreddit
+        ? {
+            actorUserId: options.manualActorUserId,
+            subredditId: currentSubreddit.id,
+            subredditName: currentSubreddit.name,
+          }
+        : {}),
     });
     const submittedPostId = recoveredPost?.id ?? reloaded.postId ?? "";
     if (isLinkId(submittedPostId) && !recoveredPost) {
