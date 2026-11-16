@@ -183,7 +183,7 @@ export const SubGoalPage = ({
                 end={state.goal}
                 start={0}
                 showText
-                width="min(100%, 700px)"
+                width="70%"
                 onActivate={onSubscribe}
                 activationLabel={messages.progressSubscribeAriaLabel({
                   subredditName: state.subreddit.name,
@@ -195,7 +195,7 @@ export const SubGoalPage = ({
                 current={state.subreddit.subscribers}
                 start={0}
                 showText
-                width="min(100%, 700px)"
+                width="70%"
                 onActivate={onSubscribe}
                 activationLabel={messages.progressSubscribeAriaLabel({
                   subredditName: state.subreddit.name,
