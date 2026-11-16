@@ -721,6 +721,17 @@ describe("internalUi color theme create goal routes", () => {
   });
 
   it("blocks deletion after Manage Posts is revoked", async () => {
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      authorName: "subscriber-goal",
+      delete: hoisted.deletePost,
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+    });
     hoisted.reddit.getModerators.mockReturnValue({
       all: vi.fn(async () => [
         {
@@ -753,6 +764,9 @@ describe("internalUi color theme create goal routes", () => {
       subredditName: "OtherSub",
       delete: hoisted.deletePost,
     });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+    });
     const routes = createRouteHarness();
     const json = vi.fn();
 
@@ -764,8 +778,83 @@ describe("internalUi color theme create goal routes", () => {
     expect(json).toHaveBeenCalledWith({
       showToast: expect.stringContaining("not an eligible"),
     });
+    expect(hoisted.reddit.getPostData).not.toHaveBeenCalled();
     expect(hoisted.reddit.getModerators).not.toHaveBeenCalled();
     expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
+    expect(hoisted.deletePost).not.toHaveBeenCalled();
+  });
+
+  it("deletes a verified app post when its Redis registration is missing", async () => {
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      authorName: "subscriber-goal",
+      delete: hoisted.deletePost,
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+    });
+    const routes = createRouteHarness();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
+    expect(hoisted.deletePost).toHaveBeenCalledOnce();
+  });
+
+  it("rejects another app's post even when it uses a recognized post kind", async () => {
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      authorName: "another-app",
+      delete: hoisted.deletePost,
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+    });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("not an eligible"),
+    });
+    expect(hoisted.deletePost).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed custom post metadata without consulting the app user", async () => {
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_post",
+      subredditId: "t5_example",
+      subredditName: "ExampleSub",
+      authorName: "subscriber-goal",
+      delete: hoisted.deletePost,
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({ postKind: 42 });
+    const routes = createRouteHarness();
+    const json = vi.fn();
+
+    await routes.get(internalRoutes.forms.deleteGoal)?.(
+      { body: { confirm: true } } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(json).toHaveBeenCalledWith({
+      showToast: expect.stringContaining("not an eligible"),
+    });
+    expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
     expect(hoisted.deletePost).not.toHaveBeenCalled();
   });
 

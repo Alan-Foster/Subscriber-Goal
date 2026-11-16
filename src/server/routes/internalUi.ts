@@ -83,6 +83,7 @@ import {
 } from "../core/sourcePostDeletion";
 import type { LinkId, SubredditId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
+import { resolvePostKindFromPostData } from "../../shared/postKind";
 import {
   getCurrentActorAuthority,
   type ActorAuthorityRequirement,
@@ -500,12 +501,34 @@ export function registerInternalUiRoutes(router: Router): void {
 
         phase = "post_lookup";
         const post = await reddit.getPostById(postId);
+        const isCurrentSubredditPost =
+          post.subredditId === subreddit.id &&
+          post.subredditName.toLowerCase() === subreddit.name.toLowerCase();
+        if (!isCurrentSubredditPost) {
+          logDiagnostic("warn", "delete_goal_target_ineligible", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+            subredditName,
+          });
+          res.json({
+            showToast: translate(language, "moderator.delete.ineligible"),
+          });
+          return;
+        }
         const managedPostIds = await getSubscriberGoalCandidatePostIds(redis);
-        if (
-          post.subredditId !== subreddit.id ||
-          post.subredditName.toLowerCase() !== subreddit.name.toLowerCase() ||
-          !managedPostIds.includes(postId)
-        ) {
+        const isRegisteredSubscriberGoal = managedPostIds.includes(postId);
+        const postKind = isRegisteredSubscriberGoal
+          ? undefined
+          : resolvePostKindFromPostData(await reddit.getPostData(postId));
+        const appUser =
+          postKind === undefined ? undefined : await reddit.getAppUser();
+        const isVerifiedSubscriberGoalPost =
+          postKind !== undefined &&
+          typeof post.authorName === "string" &&
+          post.authorName.toLowerCase() === appUser?.username.toLowerCase();
+        if (!isRegisteredSubscriberGoal && !isVerifiedSubscriberGoalPost) {
           logDiagnostic("warn", "delete_goal_target_ineligible", {
             operationId,
             workflow: "delete_goal",
