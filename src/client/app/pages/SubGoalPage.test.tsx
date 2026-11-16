@@ -250,6 +250,14 @@ describe("SubGoalPage", () => {
     expect(html).toContain("Join r/ExampleSub");
   });
 
+  it("uses the same header top offset for regular goals", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage state={baseState} {...commonProps} />,
+    );
+
+    expect(html).toContain('class="w-full pt-12"');
+  });
+
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage
