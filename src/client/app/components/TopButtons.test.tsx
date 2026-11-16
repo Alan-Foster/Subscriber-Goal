@@ -15,6 +15,7 @@ describe("TopButtons", () => {
     expect(html).toContain("r/SubGoal");
     expect(html).toContain("View other subscriber goals in r/SubGoal");
     expect(html).toContain("absolute right-4 top-4");
+    expect(html).toContain('class="hidden sm:inline"');
     expect(html).toContain("text-xs");
     expect(html).not.toContain("text-[8px]");
     expect(html).not.toContain("group-hover:opacity-100");

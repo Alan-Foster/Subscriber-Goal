@@ -126,7 +126,7 @@ export const ResponsiveHeaderText = ({ text }: ResponsiveHeaderTextProps) => {
   return (
     <span
       ref={textRef}
-      className="w-full truncate text-center whitespace-nowrap"
+      className="min-w-0 truncate text-center whitespace-nowrap"
       data-subgoal-header-label="true"
     >
       {text}

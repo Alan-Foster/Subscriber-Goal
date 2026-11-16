@@ -268,7 +268,7 @@ describe("App", () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll("button"))
-        .find((button) => button.textContent === "Welcome to r/ExampleSub")
+        .find((button) => button.textContent === "r/ExampleSub")
         ?.click();
     });
     await act(async () => {
@@ -794,7 +794,7 @@ describe("App", () => {
 
     expect(html).toContain("h-[234px]");
     expect(html).toContain("sg-goal-frame");
-    expect(html).not.toContain('alt="Subreddit icon"');
+    expect(html).toContain('alt="Subreddit icon"');
   });
 
   it("uses the tiny shell height for tiny posts", () => {

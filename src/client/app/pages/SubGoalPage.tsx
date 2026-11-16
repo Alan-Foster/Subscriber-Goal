@@ -102,9 +102,7 @@ export const SubGoalPage = ({
     );
   }
 
-  const welcomeText =
-    state.headerText ??
-    messages.welcome({ subredditName: state.subreddit.name });
+  const headerText = state.headerText ?? `r/${state.subreddit.name}`;
 
   return (
     <div
@@ -119,39 +117,38 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      {isShort ? null : (
-        <div className="pt-6">
-          <SubredditIcon
-            iconUrl={state.subreddit.icon}
-            {...(iconAction ? { onClick: iconAction } : {})}
-          />
-        </div>
-      )}
-      {isShort ? (
-        <>
-          <div className="h-4" />
-          <div className="h-4" />
-          <div className="h-4" />
-        </>
-      ) : null}
-      <div className="relative h-7 w-full">
-        <button
-          type="button"
-          aria-hidden={showNotice}
-          disabled={showNotice || isDisabled}
-          onClick={showNotice || isDisabled ? undefined : onSubscribe}
-          className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${
-            showNotice ? "opacity-0" : "opacity-100"
-          } sg-hover-grow border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
-        >
-          <ResponsiveHeaderText text={welcomeText} />
-        </button>
-        <div
-          className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap ${
-            showNotice ? "opacity-100" : "opacity-0"
-          }`}
-        >
-          <span className="w-full truncate text-center">{notice ?? ""}</span>
+      <div className={isShort ? "w-full pt-12" : "w-full"}>
+        <div className="relative h-10 w-full" data-subgoal-header="true">
+          <button
+            type="button"
+            aria-hidden={showNotice}
+            disabled={showNotice || isDisabled}
+            onClick={showNotice || isDisabled ? undefined : onSubscribe}
+            className={`absolute inset-0 flex items-center justify-center text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+              showNotice ? "pointer-events-none opacity-0" : "opacity-100"
+            } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
+          >
+            <span
+              className="sg-header-group flex max-w-full items-center justify-center gap-2.5"
+              data-subgoal-header-group="true"
+            >
+              <SubredditIcon
+                iconUrl={state.subreddit.icon}
+                size={40}
+                hoverable={false}
+                {...(iconAction ? { onClick: iconAction } : {})}
+              />
+              <ResponsiveHeaderText text={headerText} />
+            </span>
+          </button>
+          <div
+            aria-live="polite"
+            className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+              showNotice ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          >
+            <span className="w-full truncate text-center">{notice ?? ""}</span>
+          </div>
         </div>
       </div>
       {state.goal !== null ? (

@@ -154,12 +154,21 @@ body {
   transform-origin: center;
 }
 
+.sg-header-group {
+  transition: transform 150ms ease-in-out;
+  transform-origin: center;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .sg-attention-host:hover > .sg-subscribe-attention-shell {
     transform: scale(1.05);
   }
 
   .sg-hover-grow:hover {
+    transform: scale(1.05);
+  }
+
+  .sg-header-group:hover {
     transform: scale(1.05);
   }
 }
@@ -295,6 +304,10 @@ body {
   }
 
   .sg-hover-grow {
+    transition: none;
+  }
+
+  .sg-header-group {
     transition: none;
   }
 
