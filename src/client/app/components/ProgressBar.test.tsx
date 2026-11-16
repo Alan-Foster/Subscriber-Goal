@@ -31,4 +31,15 @@ describe("ProgressBar", () => {
     expect(html).toContain('aria-valuenow="50"');
     expect(html).toContain("sg-hover-grow");
   });
+
+  it("keeps the fixed-height track and its label from shrinking or wrapping", () => {
+    const html = renderToStaticMarkup(
+      <ProgressBar current={4} end={10} start={0} showText />,
+    );
+
+    expect(html).toContain('style="width:min(100%, 700px)"');
+    expect(html).toContain("h-9 w-full shrink-0");
+    expect(html).toContain("whitespace-nowrap");
+    expect(html).toContain("4 / 10");
+  });
 });

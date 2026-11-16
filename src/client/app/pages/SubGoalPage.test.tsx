@@ -247,7 +247,7 @@ describe("SubGoalPage", () => {
     expect(html).toContain("py-3");
     expect(html).toContain('data-subgoal-mobile-control-row="true"');
     expect(html).toContain("width:40px;height:40px");
-    expect(html).toContain("gap-2.5");
+    expect(html).toContain("gap-3");
     expect(html).toContain("r/ExampleSub");
     expect(html).toContain("Join r/ExampleSub");
   });

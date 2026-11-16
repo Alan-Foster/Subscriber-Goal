@@ -128,9 +128,7 @@ export const SubGoalPage = ({
           data-subgoal-mobile-control-row="true"
         />
         <div
-          className={`flex w-full flex-col items-center ${
-            isShort ? "mt-2" : "mt-2 sm:mt-0"
-          }`}
+          className="mt-3 flex w-full flex-col items-center sm:mt-0"
           data-subgoal-content-stack="true"
         >
           <div className="relative h-10 w-full" data-subgoal-header="true">
@@ -145,7 +143,7 @@ export const SubGoalPage = ({
               } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
             >
               <span
-                className="sg-header-group flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-2.5 sm:max-w-[calc(100%-6rem)]"
+                className="sg-header-group flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-3 sm:max-w-[calc(100%-6rem)]"
                 data-subgoal-header-group="true"
               >
                 <SubredditIcon
@@ -164,7 +162,7 @@ export const SubGoalPage = ({
               }`}
             >
               <span
-                className="flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-2.5 sm:max-w-[calc(100%-6rem)]"
+                className="flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-3 sm:max-w-[calc(100%-6rem)]"
                 data-subgoal-notice-icon="true"
               >
                 <SubredditIcon
@@ -178,14 +176,14 @@ export const SubGoalPage = ({
               </span>
             </div>
           </div>
-          <div className={isShort ? "mt-3" : "mt-4"}>
+          <div className="mt-4 flex w-full justify-center">
             {state.goal !== null ? (
               <ProgressBar
                 current={state.subreddit.subscribers}
                 end={state.goal}
                 start={0}
                 showText
-                width="70%"
+                width="min(100%, 700px)"
                 onActivate={onSubscribe}
                 activationLabel={messages.progressSubscribeAriaLabel({
                   subredditName: state.subreddit.name,
@@ -197,7 +195,7 @@ export const SubGoalPage = ({
                 current={state.subreddit.subscribers}
                 start={0}
                 showText
-                width="70%"
+                width="min(100%, 700px)"
                 onActivate={onSubscribe}
                 activationLabel={messages.progressSubscribeAriaLabel({
                   subredditName: state.subreddit.name,
@@ -206,7 +204,7 @@ export const SubGoalPage = ({
               />
             )}
           </div>
-          <div className={isShort ? "mt-3" : "mt-[14px]"}>
+          <div className="mt-3">
             {showAuthenticationButtons ? (
               <LoggedOutAuthButtons
                 signUpLabel={messages.signUpButton}
@@ -229,7 +227,7 @@ export const SubGoalPage = ({
               />
             )}
           </div>
-          <div className={isShort ? "mt-3" : "mt-[14px]"}>
+          <div className="mt-3">
             {state.subscribed || state.subreddit.isNsfw ? (
               <div />
             ) : (

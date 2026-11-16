@@ -17,7 +17,7 @@ export const ProgressBar = ({
   end,
   current,
   showText = false,
-  width = "70%",
+  width = "min(100%, 700px)",
   onActivate,
   activationLabel,
   disabled = false,
@@ -46,7 +46,7 @@ export const ProgressBar = ({
   const progressContent = (
     <>
       <div
-        className="h-6 w-full rounded-md border border-[color:var(--sg-border-strong)] bg-[color:var(--sg-progress-track-bg)]"
+        className="h-9 w-full shrink-0 rounded-md border border-[color:var(--sg-border-strong)] bg-[color:var(--sg-progress-track-bg)]"
         {...(!isInvalid
           ? {
               role: "progressbar",
@@ -58,13 +58,13 @@ export const ProgressBar = ({
       >
         {!isInvalid ? (
           <div
-            className="h-full rounded-md bg-[color:var(--sg-accent)] transition-[width] duration-700 ease-out"
+            className="h-full min-w-0 shrink-0 rounded-md bg-[color:var(--sg-accent)] transition-[width] duration-700 ease-out"
             style={{ width: `${animatedProgress}%` }}
           />
         ) : null}
       </div>
       {showText && !isInvalid ? (
-        <div className="absolute inset-0 flex items-center justify-center text-sm leading-5 font-bold text-[color:var(--sg-progress-text)]">
+        <div className="absolute inset-0 flex shrink-0 items-center justify-center text-sm leading-5 font-bold whitespace-nowrap text-[color:var(--sg-progress-text)]">
           {formatSubscriberCount(current)} / {formatSubscriberCount(end)}
         </div>
       ) : null}
@@ -75,7 +75,7 @@ export const ProgressBar = ({
     return (
       <button
         type="button"
-        className="sg-hover-grow relative cursor-pointer border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed"
+        className="sg-hover-grow relative h-9 shrink-0 cursor-pointer border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-not-allowed"
         style={{ width }}
         aria-label={activationLabel}
         disabled={disabled}
@@ -87,7 +87,7 @@ export const ProgressBar = ({
   }
 
   return (
-    <div className="sg-hover-grow relative" style={{ width }}>
+    <div className="sg-hover-grow relative h-9 shrink-0" style={{ width }}>
       {progressContent}
     </div>
   );
