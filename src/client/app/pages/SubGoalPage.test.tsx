@@ -108,7 +108,7 @@ describe("SubGoalPage", () => {
     expect(regularHtml).toContain("Join r/ExampleSub using the progress bar");
     expect(regularHtml).toContain('role="progressbar"');
     expect(regularHtml).toContain('aria-valuenow="123"');
-    expect(regularHtml).toContain("r/ExampleSub</span>");
+    expect(regularHtml).toContain("Welcome to r/ExampleSub</span>");
     expect(regularHtml).toContain('data-subgoal-header-group="true"');
     expect(tinyHtml).not.toContain('role="progressbar"');
   });
@@ -135,7 +135,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "es" }} {...commonProps} />,
     );
 
-    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("Bienvenido a r/ExampleSub");
     expect(html).toContain("Unirse a r/ExampleSub");
     expect(html).toContain("Mostrar mi nombre de usuario cuando me una");
   });
@@ -145,7 +145,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "hi" }} {...commonProps} />,
     );
 
-    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("r/ExampleSub में आपका स्वागत है");
     expect(html).toContain("r/ExampleSub में शामिल हों");
     expect(html).toContain("शामिल होते समय मेरा यूज़रनेम दिखाएँ");
   });
@@ -155,7 +155,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "pa" }} {...commonProps} />,
     );
 
-    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("r/ExampleSub ਵਿੱਚ ਤੁਹਾਡਾ ਸਵਾਗਤ ਹੈ");
     expect(html).toContain("r/ExampleSub ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ");
     expect(html).toContain("ਸ਼ਾਮਲ ਹੋਣ ਵੇਲੇ ਮੇਰਾ ਯੂਜ਼ਰਨੇਮ ਦਿਖਾਓ");
   });
@@ -168,7 +168,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("r/ExampleSub मध्ये तुमचे स्वागत आहे");
     expect(html).toContain("r/ExampleSub मध्ये सामील व्हा");
     expect(html).toContain('alt="Subreddit icon"');
   });
@@ -194,9 +194,8 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain('data-subgoal-notice-icon="true"');
     expect(html).toContain("u/alice just joined!");
-    expect(html).toContain("duration-[180ms]");
+    expect(html).toContain("duration-500");
     expect(html).not.toContain("translate-x-");
     expect(html).toContain("motion-reduce:transition-none");
   });
@@ -243,36 +242,12 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain('alt="Subreddit icon"');
-    expect(html).toContain("px-4");
-    expect(html).toContain("py-3");
-    expect(html).toContain('data-subgoal-mobile-control-row="true"');
+    expect(html).toContain("gap-6 px-4 py-6");
     expect(html).toContain("width:40px;height:40px");
-    expect(html).toContain("gap-3");
-    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("gap-2.5");
+    expect(html).toContain("Welcome to r/ExampleSub");
     expect(html).toContain("Join r/ExampleSub");
   });
-
-  it.each(["regular", "short"] as const)(
-    "keeps a long %s header within the control-safe width",
-    (postHeight) => {
-      const longName = "A_subreddit_name_that_needs_to_be_truncated_on_mobile";
-      const html = renderToStaticMarkup(
-        <SubGoalPage
-          state={{
-            ...baseState,
-            postHeight,
-            subreddit: { ...baseState.subreddit, name: longName },
-          }}
-          {...commonProps}
-        />,
-      );
-
-      expect(html).toContain(`r/${longName}`);
-      expect(html).toContain("max-w-[calc(100%-4rem)]");
-      expect(html).toContain("sm:max-w-[calc(100%-6rem)]");
-      expect(html).toContain('data-subgoal-content-stack="true"');
-    },
-  );
 
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
     const html = renderToStaticMarkup(

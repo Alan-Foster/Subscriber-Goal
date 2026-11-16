@@ -102,16 +102,13 @@ export const SubGoalPage = ({
     );
   }
 
-  // A moderator-provided header remains visible when configured. The default
-  // is deliberately just the subreddit name: the logo now supplies the rest
-  // of the visual identity without adding another row or "Welcome to".
-  const headerText = state.headerText ?? `r/${state.subreddit.name}`;
+  const welcomeText =
+    state.headerText ??
+    messages.welcome({ subredditName: state.subreddit.name });
 
   return (
     <div
-      className={`relative h-full w-full px-4 text-center text-[color:var(--sg-text-primary)] ${
-        isShort ? "py-3" : "py-4"
-      }`}
+      className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"
       data-sg-theme={state.colorTheme}
     >
       <TopButtons
@@ -122,137 +119,104 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      <div className="flex h-full w-full flex-col items-center justify-center">
-        <div
-          className="h-6 w-full sm:hidden"
-          data-subgoal-mobile-control-row="true"
-        />
-        <div
-          className="mt-3 flex w-full flex-col items-center sm:mt-0"
-          data-subgoal-content-stack="true"
+      <div className="relative h-10 w-full" data-subgoal-header="true">
+        <button
+          type="button"
+          aria-hidden={showNotice}
+          disabled={showNotice || isDisabled}
+          onClick={showNotice || isDisabled ? undefined : onSubscribe}
+          className={`absolute inset-0 flex items-center justify-center text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+            showNotice ? "pointer-events-none opacity-0" : "opacity-100"
+          } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
         >
-          <div className="relative h-10 w-full" data-subgoal-header="true">
-            <button
-              type="button"
-              data-subgoal-header-activate="true"
-              aria-hidden={showNotice}
-              disabled={showNotice || isDisabled}
-              onClick={showNotice || isDisabled ? undefined : onSubscribe}
-              className={`absolute inset-0 flex items-center justify-center transition-opacity duration-[180ms] motion-reduce:transition-none ${
-                showNotice ? "pointer-events-none opacity-0" : "opacity-100"
-              } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
-            >
-              <span
-                className="sg-header-group flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-3 sm:max-w-[calc(100%-6rem)]"
-                data-subgoal-header-group="true"
-              >
-                <SubredditIcon
-                  iconUrl={state.subreddit.icon}
-                  size={40}
-                  hoverable={false}
-                  {...(iconAction ? { onClick: iconAction } : {})}
-                />
-                <ResponsiveHeaderText text={headerText} />
-              </span>
-            </button>
-            <div
-              aria-live="polite"
-              className={`absolute inset-0 flex items-center justify-center text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-[180ms] motion-reduce:transition-none ${
-                showNotice ? "opacity-100" : "pointer-events-none opacity-0"
-              }`}
-            >
-              <span
-                className="flex min-w-0 max-w-[calc(100%-4rem)] items-center justify-center gap-3 sm:max-w-[calc(100%-6rem)]"
-                data-subgoal-notice-icon="true"
-              >
-                <SubredditIcon
-                  iconUrl={state.subreddit.icon}
-                  size={40}
-                  hoverable={false}
-                />
-                <span className="min-w-0 truncate text-center">
-                  {notice ?? ""}
-                </span>
-              </span>
-            </div>
-          </div>
-          <div className="mt-4 flex w-full justify-center">
-            {state.goal !== null ? (
-              <ProgressBar
-                current={state.subreddit.subscribers}
-                end={state.goal}
-                start={0}
-                showText
-                width="70%"
-                onActivate={onSubscribe}
-                activationLabel={messages.progressSubscribeAriaLabel({
-                  subredditName: state.subreddit.name,
-                })}
-                disabled={isDisabled}
-              />
-            ) : (
-              <ProgressBar
-                current={state.subreddit.subscribers}
-                start={0}
-                showText
-                width="70%"
-                onActivate={onSubscribe}
-                activationLabel={messages.progressSubscribeAriaLabel({
-                  subredditName: state.subreddit.name,
-                })}
-                disabled={isDisabled}
-              />
-            )}
-          </div>
-          <div className="mt-3">
-            {showAuthenticationButtons ? (
-              <LoggedOutAuthButtons
-                signUpLabel={messages.signUpButton}
-                logInLabel={messages.logInButton}
-                onAuthenticate={handleButtonClick}
-              />
-            ) : afterSubscribeAction ? (
-              <AfterSubscribeButton
-                action={afterSubscribeAction}
-                analyticsContext={getGoalJourneyContext(state)}
-                language={state.language}
-                onNavigate={onAfterSubscribeNavigate}
-                trackClicks={state.trackCtaClicks === true}
-              />
-            ) : (
-              <SubscriptionButton
-                label={buttonLabel}
-                mode={buttonMode}
-                onClick={handleButtonClick}
-              />
-            )}
-          </div>
-          <div className="mt-3">
-            {state.subscribed || state.subreddit.isNsfw ? (
-              <div />
-            ) : (
-              <label
-                className={`flex items-center gap-2 text-xs text-[color:var(--sg-text-muted)] ${
-                  isDisabled ? "cursor-not-allowed" : "cursor-pointer"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="sg-hover-grow h-3 w-3 cursor-pointer accent-[color:var(--sg-accent)] disabled:cursor-not-allowed"
-                  checked={shareUsername}
-                  disabled={isDisabled}
-                  onChange={(event) =>
-                    onShareUsernameChange(event.target.checked)
-                  }
-                />
-                <span className="sg-hover-grow">
-                  {messages.shareUsernameLabel}
-                </span>
-              </label>
-            )}
-          </div>
+          <span
+            className="sg-header-group flex max-w-full items-center justify-center gap-2.5"
+            data-subgoal-header-group="true"
+          >
+            <SubredditIcon
+              iconUrl={state.subreddit.icon}
+              size={40}
+              hoverable={false}
+              {...(iconAction ? { onClick: iconAction } : {})}
+            />
+            <ResponsiveHeaderText text={welcomeText} />
+          </span>
+        </button>
+        <div
+          aria-live="polite"
+          className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+            showNotice ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <span className="w-full truncate text-center">{notice ?? ""}</span>
         </div>
       </div>
+      {state.goal !== null ? (
+        <ProgressBar
+          current={state.subreddit.subscribers}
+          end={state.goal}
+          start={0}
+          showText
+          width="70%"
+          onActivate={onSubscribe}
+          activationLabel={messages.progressSubscribeAriaLabel({
+            subredditName: state.subreddit.name,
+          })}
+          disabled={isDisabled}
+        />
+      ) : (
+        <ProgressBar
+          current={state.subreddit.subscribers}
+          start={0}
+          showText
+          width="70%"
+          onActivate={onSubscribe}
+          activationLabel={messages.progressSubscribeAriaLabel({
+            subredditName: state.subreddit.name,
+          })}
+          disabled={isDisabled}
+        />
+      )}
+      {showAuthenticationButtons ? (
+        <LoggedOutAuthButtons
+          signUpLabel={messages.signUpButton}
+          logInLabel={messages.logInButton}
+          onAuthenticate={handleButtonClick}
+        />
+      ) : afterSubscribeAction ? (
+        <AfterSubscribeButton
+          action={afterSubscribeAction}
+          analyticsContext={getGoalJourneyContext(state)}
+          language={state.language}
+          onNavigate={onAfterSubscribeNavigate}
+          trackClicks={state.trackCtaClicks === true}
+        />
+      ) : (
+        <SubscriptionButton
+          label={buttonLabel}
+          mode={buttonMode}
+          onClick={handleButtonClick}
+        />
+      )}
+      {state.subscribed || state.subreddit.isNsfw ? (
+        <div className="h-5" />
+      ) : (
+        <label
+          className={`flex items-center gap-2 text-xs text-[color:var(--sg-text-muted)] ${
+            isDisabled ? "cursor-not-allowed" : "cursor-pointer"
+          }`}
+        >
+          <input
+            type="checkbox"
+            className="sg-hover-grow h-3 w-3 cursor-pointer accent-[color:var(--sg-accent)] disabled:cursor-not-allowed"
+            checked={shareUsername}
+            disabled={isDisabled}
+            onChange={(event) => onShareUsernameChange(event.target.checked)}
+          />
+          <span className="sg-hover-grow">{messages.shareUsernameLabel}</span>
+        </label>
+      )}
+      <div className="h-5" />
     </div>
   );
 };

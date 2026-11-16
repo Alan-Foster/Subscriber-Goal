@@ -267,10 +267,8 @@ describe("App", () => {
     await act(async () => root.render(<App />));
 
     await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>(
-          'button[data-subgoal-header-activate="true"]',
-        )
+      Array.from(container.querySelectorAll("button"))
+        .find((button) => button.textContent === "Welcome to r/ExampleSub")
         ?.click();
     });
     await act(async () => {
