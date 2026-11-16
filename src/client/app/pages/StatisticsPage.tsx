@@ -6,6 +6,7 @@ import type {
   StatisticsResponse,
 } from "../../../shared/types/api";
 import { logDiagnostic } from "../../../shared/diagnostics";
+import { translate } from "../../../shared/i18n/catalog";
 
 type Props = { onReturn: () => void };
 type Row = {
@@ -24,7 +25,7 @@ const ui = {
   current: "Current",
   previous: "Previous",
   change: "Change",
-  copyJson: "Copy JSON",
+  copyJson: translate("en", "statistics.copy"),
   jsonLabel: "Statistics JSON",
 };
 const formatted = (value: number | null, percent = false) =>
@@ -81,11 +82,7 @@ export const StatisticsPage = ({ onReturn }: Props) => {
           { workflow: "statistics", phase: "dashboard", hours },
           cause,
         );
-        setError(
-          cause instanceof Error
-            ? `Statistics could not be loaded (${cause.message}).`
-            : "Statistics could not be loaded.",
-        );
+        setError(translate("en", "statistics.loadError"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -96,6 +93,10 @@ export const StatisticsPage = ({ onReturn }: Props) => {
   const copyJson = async () => {
     try {
       await navigator.clipboard.writeText(json);
+      showToast({
+        text: translate("en", "statistics.copied"),
+        appearance: "success",
+      });
     } catch (cause) {
       logDiagnostic(
         "warn",
@@ -105,9 +106,18 @@ export const StatisticsPage = ({ onReturn }: Props) => {
       );
       jsonInputRef.current?.focus();
       jsonInputRef.current?.select();
-      document.execCommand("copy");
+      if (document.execCommand("copy")) {
+        showToast({
+          text: translate("en", "statistics.copied"),
+          appearance: "success",
+        });
+        return;
+      }
+      showToast({
+        text: translate("en", "statistics.copyFailed"),
+        appearance: "neutral",
+      });
     }
-    showToast({ text: "Statistics JSON copied.", appearance: "success" });
   };
 
   const groups: Group[] = report
@@ -123,7 +133,7 @@ export const StatisticsPage = ({ onReturn }: Props) => {
             {
               label: "Viewing sessions",
               value: report.metrics.traffic.viewingSessions,
-              detail: "Visitor + post + UTC hour",
+              detail: "One viewing session per visitor, post, and UTC hour",
             },
           ],
         },

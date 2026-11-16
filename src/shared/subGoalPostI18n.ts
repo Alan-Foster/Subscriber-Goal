@@ -63,6 +63,7 @@ export type SubGoalPostMessages = {
   subscriberNotice: (params: UsernameParams) => string;
   subscribeSuccessToast: string;
   subscribeErrorToast: string;
+  subscribeUncertainToast: string;
   loginRequired: string;
   loadError: string;
   fallbackActive: (params: TextFallbackActiveParams) => string;
@@ -136,6 +137,7 @@ const buildRawPostMessages = (
         : translate(language, "post.memberJoinedAnonymous"),
     subscribeSuccessToast: translate(language, "post.joinSuccess"),
     subscribeErrorToast: translate(language, "post.joinError"),
+    subscribeUncertainToast: translate(language, "errors.subscribe.uncertain"),
     loginRequired: translate(language, "post.loginRequired"),
     loadError: translate(language, "post.loadError"),
     fallbackActive: ({

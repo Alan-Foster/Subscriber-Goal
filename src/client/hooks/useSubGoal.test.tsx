@@ -204,8 +204,7 @@ describe("useSubGoal tiny behavior", () => {
       await Promise.resolve();
     });
     const onMessage = hoisted.connectRealtime.mock.calls[0]?.[0]?.onMessage as
-      | ((data: unknown) => void)
-      | undefined;
+      ((data: unknown) => void) | undefined;
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -382,8 +381,7 @@ describe("useSubGoal tiny behavior", () => {
 
   it("disconnects a realtime connection that resolves after unmount", async () => {
     let resolveConnection:
-      | ((connection: { disconnect: () => Promise<void> }) => void)
-      | undefined;
+      ((connection: { disconnect: () => Promise<void> }) => void) | undefined;
     const disconnect = vi.fn().mockResolvedValue(undefined);
     hoisted.connectRealtime.mockReturnValue(
       new Promise((resolve) => {
@@ -651,7 +649,7 @@ describe("useSubGoal tiny behavior", () => {
     });
 
     expect(container.textContent).toBe(
-      "unsubscribed:Couldn't join the community.",
+      "unsubscribed:We couldn’t confirm whether you joined. Check the community before trying again.",
     );
     expect(container.querySelector("button")?.disabled).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(11);

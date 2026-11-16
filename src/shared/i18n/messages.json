@@ -452,6 +452,30 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "statistics.copy": {
+      "description": "Statistics dashboard: Copy statistics action",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.copied": {
+      "description": "Statistics dashboard: Clipboard copy succeeded",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.copyFailed": {
+      "description": "Statistics dashboard: Clipboard copy failed",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.loadError": {
+      "description": "Statistics dashboard: Report load failed",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "notifications.loadError": {
       "description": "Goal notification interface: Load Error",
       "policy": "required",
@@ -593,7 +617,7 @@
       "description": "Subscriber Goal post interface: Load Error",
       "policy": "required",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "post.loginRequired": {
       "description": "Subscriber Goal post interface: Login Required",
@@ -727,6 +751,12 @@
       "placeholders": {
         "operationId": "Support reference identifier"
       },
+      "protectedTokens": []
+    },
+    "errors.subscribe.uncertain": {
+      "description": "User-facing error: Subscription outcome could not be confirmed",
+      "policy": "fallback",
+      "placeholders": {},
       "protectedTokens": []
     },
     "errors.api.postIdRequired": {
@@ -2199,6 +2229,10 @@
         "notifications.goalPrompt": "Get Notified at {goalText}",
         "notifications.label": "Notifications",
         "statistics.label": "Statistics",
+        "statistics.copy": "Copy statistics",
+        "statistics.copied": "Statistics copied.",
+        "statistics.copyFailed": "Couldn’t copy automatically. Select and copy the text.",
+        "statistics.loadError": "Couldn’t load statistics. Try again.",
         "notifications.loadError": "Notification settings could not be loaded.",
         "notifications.loginRequired": "Please log in to manage notifications.",
         "notifications.return": "Return",
@@ -2215,10 +2249,10 @@
         "post.fallbackActive": "Welcome to r/{subredditName}\n\n{subscriberCountLabel} / {goalCountLabel}.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.",
         "post.fallbackCompleted": "r/{subredditName} reached {goalCountLabel}!\n\nGoal reached at `{completedIso}`.",
         "post.joinButton": "Join r/{subredditName}",
-        "post.joinError": "Couldn't join the community.",
+        "post.joinError": "Couldn’t join this community. Try again.",
         "post.joinSuccess": "Thanks for joining!",
         "post.joinedButton": "Joined r/{subredditName}",
-        "post.loadError": "Unable to load Subscriber Goal data.",
+        "post.loadError": "Couldn’t load this goal. Refresh to try again.",
         "post.loginRequired": "Please log in to join.",
         "post.logInButton": "Log In",
         "post.progressSubscribeAriaLabel": "Join r/{subredditName} using the progress bar",
@@ -2239,6 +2273,7 @@
         "errors.notifications.loginRequired": "Please log in to manage notifications.",
         "errors.notifications.invalidEnabled": "enabled must be a boolean.",
         "errors.notifications.update": "Notification settings could not be updated. Reference: {operationId}",
+        "errors.subscribe.uncertain": "We couldn’t confirm whether you joined. Check the community before trying again.",
         "errors.api.postIdRequired": "postId is required",
         "errors.api.postIdMissing": "postId is required but missing from context",
         "errors.api.ctaActivityUnsupported": "This CTA does not use click activity.",
@@ -2300,18 +2335,18 @@
         "moderator.color.blue": "Blue",
         "moderator.color.pink": "Pink",
         "moderator.delete.title": "Sub Goal - Delete This Post",
-        "moderator.delete.description": "This will permanently delete the Sub Goal post. If you wish to temporarily hide the post, you can remove it as a moderator and re-approve it later.",
-        "moderator.delete.confirm": "Are you sure?",
+        "moderator.delete.description": "Permanently delete this Subscriber Goal post? Moderators can remove the post instead if they only want to hide it.",
+        "moderator.delete.confirm": "Permanently delete this Subscriber Goal post?",
         "moderator.delete.irreversible": "This action is irreversible.",
         "moderator.delete.accept": "Delete",
-        "moderator.delete.notConfirmed": "You did not confirm the deletion. If that was a mistake, please try again and enable the confirmation toggle before hitting delete.",
-        "moderator.delete.metadataLost": "Deletion metadata was somehow lost. Please try again. Reference: {operationId}",
+        "moderator.delete.notConfirmed": "Check the confirmation box to delete this post.",
+        "moderator.delete.metadataLost": "We couldn’t identify this post. Reopen its menu and try again. Reference: {operationId}",
         "moderator.delete.cleanupPending": "The post was deleted, but some cleanup is still pending. Reference: {operationId}",
-        "moderator.delete.success": "Post deleted successfully!",
-        "moderator.delete.cleanupQueued": "Source deleted, mirror cleanup queued",
-        "moderator.delete.cleanupDispatched": "Source deleted, cleanup dispatched",
-        "moderator.delete.failed": "Error deleting post. Please refresh the page and try again. Reference: {operationId}",
-        "moderator.delete.ineligible": "This post is not an eligible Subscriber Goal post in the current community.",
+        "moderator.delete.success": "Post deleted.",
+        "moderator.delete.cleanupQueued": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
+        "moderator.delete.cleanupDispatched": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
+        "moderator.delete.failed": "Couldn’t delete this post. Try again. Reference: {operationId}",
+        "moderator.delete.ineligible": "We couldn’t verify that this is a Subscriber Goal post in this community.",
         "moderator.authorization.loginRequired": "Please log in before performing this action.",
         "moderator.authorization.managePostsRequired": "You must currently be a moderator with Manage Posts permission to perform this action.",
         "moderator.authorization.moderatorRequired": "You must currently be a moderator of this community to perform this action.",
