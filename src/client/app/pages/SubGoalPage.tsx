@@ -43,6 +43,15 @@ export const SubGoalPage = ({
     state.subscribed && state.afterSubscribeAction.type !== "disabled"
       ? state.afterSubscribeAction
       : null;
+  // A configured CTA is also useful before joining. Compact goals reserve
+  // their single-action layout for mobile, where a second control would not
+  // fit without changing the card height.
+  const secondaryAction =
+    (state.postHeight === "regular" || state.postHeight === "short") &&
+    !state.subscribed &&
+    state.afterSubscribeAction.type !== "disabled"
+      ? state.afterSubscribeAction
+      : null;
   const buttonMode = isSubmitting
     ? "submitting"
     : afterSubscribeAction
@@ -103,6 +112,40 @@ export const SubGoalPage = ({
   }
 
   const headerText = state.headerText ?? `r/${state.subreddit.name}`;
+  const joinButton = (
+    <SubscriptionButton
+      label={buttonLabel}
+      mode={buttonMode}
+      onClick={handleButtonClick}
+    />
+  );
+  const twoActionArea = secondaryAction ? (
+    <div
+      className="flex w-full max-w-[640px] flex-col items-center justify-center gap-5 md:flex-row md:gap-6 [&>.sg-attention-host]:max-w-full [&>.sg-attention-host]:min-w-0 [&>.sg-attention-host]:flex-[0_1_auto] [&>.sg-attention-host>button]:w-full [&>.sg-attention-host>button]:min-w-0"
+      data-subgoal-action-area="two-actions"
+    >
+      <AfterSubscribeButton
+        action={secondaryAction}
+        analyticsContext={getGoalJourneyContext(state)}
+        language={state.language}
+        onNavigate={onAfterSubscribeNavigate}
+        trackClicks={state.trackCtaClicks === true}
+      />
+      {joinButton}
+    </div>
+  ) : null;
+  const preSubscribeActionArea = secondaryAction ? (
+    state.postHeight === "short" ? (
+      <>
+        <div className="sm:hidden">{joinButton}</div>
+        <div className="hidden sm:flex">{twoActionArea}</div>
+      </>
+    ) : (
+      twoActionArea
+    )
+  ) : (
+    joinButton
+  );
 
   return (
     <div
@@ -192,11 +235,7 @@ export const SubGoalPage = ({
           trackClicks={state.trackCtaClicks === true}
         />
       ) : (
-        <SubscriptionButton
-          label={buttonLabel}
-          mode={buttonMode}
-          onClick={handleButtonClick}
-        />
+        preSubscribeActionArea
       )}
       {state.subscribed || state.subreddit.isNsfw ? (
         <div className="h-5" />
