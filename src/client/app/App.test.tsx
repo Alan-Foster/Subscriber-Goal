@@ -327,7 +327,7 @@ describe("App", () => {
       '[data-statistics-export-controls="true"]',
     );
     expect(exportControls?.querySelector("button")?.textContent).toBe(
-      "Copy JSON",
+      "Copy statistics",
     );
     expect(container.textContent).not.toContain("Export CSV");
 

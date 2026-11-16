@@ -55,8 +55,8 @@ describe("localization catalog", () => {
         cta: "Handlungsaufforderungs-Button (Ohne Abonnieren)",
       },
       en: {
-        tiny: "Subscribe Button and Call to Action Button (No Goal)",
-        cta: "Call To Action Button (No Subscribing)",
+        tiny: "Join button only",
+        cta: "Action button only",
       },
       hi: {
         tiny: "सब्सक्राइब बटन और कार्रवाई के लिए प्रेरित करने वाला बटन (बिना लक्ष्य)",

@@ -617,7 +617,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     expect(summary.crosspostsSkipped).toBe(0);
     expect(mockReddit.crosspost).toHaveBeenCalledWith({
       subredditName: baseSettings.promoSubreddit,
-      title: 'Visit r/CorporateGifts, they are trying to reach 15k subscribers!',
+      title: "Help r/CorporateGifts reach 15k subscribers",
       postId: 't3_secs',
       nsfw: false,
     });

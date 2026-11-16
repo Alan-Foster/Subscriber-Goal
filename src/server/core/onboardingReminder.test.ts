@@ -227,9 +227,9 @@ describe("onboarding reminder", () => {
     const message = buildOnboardingReminderMessage("ExampleSub", "upgrade");
 
     expect(message.bodyMarkdown).toContain(
-      "24-hour countdown begins when this message is sent",
+      "wait 24-hour, then try for up to 1,000 minutes",
     );
-    expect(message.bodyMarkdown).toContain("following 1,000 minutes");
+    expect(message.bodyMarkdown).toContain("The community must remain eligible");
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
     expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
     expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
@@ -244,10 +244,10 @@ describe("onboarding reminder", () => {
     );
 
     expect(message.bodyMarkdown).toContain(
-      "highlighted Subscriber Goal milestone is complete",
+      "The previous milestone is complete.",
     );
     expect(message.bodyMarkdown).toContain(
-      "active regular or short milestone goal, Tiny goal, or Action Button post",
+      "no active Subscriber Goal or action post is found",
     );
     expect(message.bodyMarkdown).not.toContain(
       "If a highlighted Subscriber Goal does not already exist",
@@ -443,7 +443,7 @@ describe("onboarding reminder", () => {
     );
     expect(message.bodyMarkdown).toContain("u/Alan-Foster");
     expect(message.bodyMarkdown).toContain(
-      "countdown begins when this message is sent",
+      "wait 24-hour, then try for up to 1,000 minutes",
     );
     expect(message.bodyMarkdown).not.toContain("or update");
   });

@@ -92,9 +92,9 @@ describe("highlight failure notifications", () => {
 
     expect(createModNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        subject: expect.stringContaining("Needs Attention"),
+        subject: expect.stringContaining("Action Required"),
         bodyMarkdown: expect.stringContaining(
-          "obsolete classic Subscriber Goal highlight could not be removed",
+          "Your post is highlighted, but the old goal is still highlighted too.",
         ),
       }),
     );

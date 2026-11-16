@@ -628,13 +628,10 @@ describe("app account recovery", () => {
       to: "RemovingMod",
       subject: "Subscriber Goal Moderator Account Removed",
       text:
-        "Hi u/RemovingMod,\n\n" +
-        "You removed u/subscriber-goal from the moderator team of r/ExampleSub.\n\n" +
-        "Subscriber Goal requires its app account to have moderator permissions to work correctly.\n\n" +
-        "If you want to remove Subscriber Goal, please uninstall it from your community's App Installation Page:\n\n" +
+        "Subscriber Goal lost moderator access in r/ExampleSub.\n\n" +
+        "To restore it, invite u/subscriber-goal with Manage Posts permission. To remove the app, uninstall it from your community’s App Installation Page:\n\n" +
         "[https://developers.reddit.com/r/ExampleSub/apps/subscriber-goal](https://developers.reddit.com/r/ExampleSub/apps/subscriber-goal)\n\n" +
-        "If you removed the account by accident, please invite u/subscriber-goal back to the moderator team with the required permissions. Subscriber Goal will automatically accept the invitation.\n\n" +
-        "This is an automated message.",
+        "This notice was sent to u/RemovingMod. This is an automated message.",
     });
   });
 

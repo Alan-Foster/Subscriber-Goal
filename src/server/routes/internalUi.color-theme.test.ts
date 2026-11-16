@@ -891,7 +891,7 @@ describe("internalUi color theme create goal routes", () => {
       );
       expect(json).toHaveBeenCalledWith({
         showToast: expect.stringMatching(
-          /^The post was deleted, but some cleanup is still pending\. Reference: delete-goal-/,
+          /^Post deleted\. Subscriber Goal couldn’t finish updating its records\. Reference: delete-goal-/,
         ),
       });
       errorSpy.mockRestore();
@@ -1007,7 +1007,7 @@ describe("internalUi color theme create goal routes", () => {
     );
     expect(json).toHaveBeenCalledTimes(1);
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("Available user data was erased"),
+      showToast: expect.stringContaining("Some Subscriber Goal data was removed"),
     });
   });
 
@@ -1087,14 +1087,14 @@ describe("internalUi color theme create goal routes", () => {
       type: "select",
       defaultValue: ["regular"],
       options: [
-        { label: "Full Height Subscriber Goal", value: "regular" },
-        { label: "Short Subscriber Goal (No Logo)", value: "short" },
+        { label: "Full subscriber goal", value: "regular" },
+        { label: "Short subscriber goal", value: "short" },
         {
-          label: "Subscribe Button and Call to Action Button (No Goal)",
+          label: "Join button only",
           value: "tiny",
         },
         {
-          label: "Call To Action Button (No Subscribing)",
+          label: "Action button only",
           value: "cta",
         },
       ],
@@ -1320,7 +1320,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(response.json).toHaveBeenLastCalledWith({
-      showToast: expect.stringContaining("no longer matches"),
+      showToast: expect.stringContaining("This form has expired"),
     });
     expect(hoisted.redisValues.get(currentKey)).toBe(currentDraft);
   });
@@ -2424,7 +2424,7 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(json).toHaveBeenCalledWith({
       showToast:
-        "Reddit may have accepted this post, but this form has expired and can no longer finish registration. Check the subreddit's recent posts before starting a new form.",
+        "Your post may already be live. This form has expired. Check the community’s recent posts before creating another.",
     });
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
@@ -2528,7 +2528,7 @@ describe("internalUi color theme create goal routes", () => {
 
     expect(json).toHaveBeenCalledWith({
       showToast:
-        "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Retry this same form while it remains open so the app can check again.",
+        "Your post may already be live. Submit this same form again to check.",
     });
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
   });
@@ -2665,7 +2665,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       showToast:
-        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
+        "Give u/subscriber-goal Manage Posts permission in r/ExampleSub, then try again.",
     });
   });
 
@@ -2688,7 +2688,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         showToast: expect.stringContaining(
-          "The post was created without Subscriber Goal flair; check the app account's Manage Flair permission.",
+          "Post created without flair. Give u/subscriber-goal Manage Flair permission to add it automatically.",
         ),
       }),
     );

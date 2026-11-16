@@ -488,7 +488,7 @@ describe("subGoalPostI18n", () => {
         goalText: "1,000",
         completedIso: "2026-10-29T12:00:00Z",
       }),
-    ).toContain("ध्येय पूर्ण झाल्याची वेळ: 2026-10-29T12:00:00Z");
+    ).toContain("Goal reached");
     expect(getModeratorInstallPromotionMessages("mr")).toMatchObject({
       greeting: "नमस्कार",
       body: "आत्ताच तुमच्या सबरेडिट्समध्ये Subscriber Goal जोडा!",
@@ -521,7 +521,7 @@ describe("subGoalPostI18n", () => {
         goalText: "15k",
         completedIso: "2026-10-28T12:00:00Z",
       }),
-    ).toContain("लक्ष्य पूरा होने का समय: `2026-10-28T12:00:00Z`");
+    ).toContain("Goal reached");
     expect(messages.subscriberNotice({ username: "आशा" })).toBe(
       "u/आशा अभी-अभी शामिल हुए!",
     );

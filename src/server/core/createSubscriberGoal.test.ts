@@ -358,7 +358,7 @@ describe("createSubscriberGoal highlight handling", () => {
     await expect(createGoal()).rejects.toMatchObject({
       name: "SubscriberGoalModeratorPermissionError",
       message:
-        "u/subscriber-goal must be a moderator of r/ExampleSub with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
+        "Give u/subscriber-goal Manage Posts permission in r/ExampleSub, then try again.",
     });
 
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
