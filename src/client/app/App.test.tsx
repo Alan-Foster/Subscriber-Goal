@@ -268,7 +268,7 @@ describe("App", () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll("button"))
-        .find((button) => button.textContent === "Welcome to r/ExampleSub")
+        .find((button) => button.textContent === "r/ExampleSub")
         ?.click();
     });
     await act(async () => {

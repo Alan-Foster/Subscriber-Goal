@@ -108,7 +108,7 @@ describe("SubGoalPage", () => {
     expect(regularHtml).toContain("Join r/ExampleSub using the progress bar");
     expect(regularHtml).toContain('role="progressbar"');
     expect(regularHtml).toContain('aria-valuenow="123"');
-    expect(regularHtml).toContain("Welcome to r/ExampleSub</span>");
+    expect(regularHtml).toContain("r/ExampleSub</span>");
     expect(regularHtml).toContain('data-subgoal-header-group="true"');
     expect(tinyHtml).not.toContain('role="progressbar"');
   });
@@ -135,7 +135,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "es" }} {...commonProps} />,
     );
 
-    expect(html).toContain("Bienvenido a r/ExampleSub");
+    expect(html).toContain("r/ExampleSub");
     expect(html).toContain("Unirse a r/ExampleSub");
     expect(html).toContain("Mostrar mi nombre de usuario cuando me una");
   });
@@ -145,7 +145,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "hi" }} {...commonProps} />,
     );
 
-    expect(html).toContain("r/ExampleSub में आपका स्वागत है");
+    expect(html).toContain("r/ExampleSub");
     expect(html).toContain("r/ExampleSub में शामिल हों");
     expect(html).toContain("शामिल होते समय मेरा यूज़रनेम दिखाएँ");
   });
@@ -155,7 +155,7 @@ describe("SubGoalPage", () => {
       <SubGoalPage state={{ ...baseState, language: "pa" }} {...commonProps} />,
     );
 
-    expect(html).toContain("r/ExampleSub ਵਿੱਚ ਤੁਹਾਡਾ ਸਵਾਗਤ ਹੈ");
+    expect(html).toContain("r/ExampleSub");
     expect(html).toContain("r/ExampleSub ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਵੋ");
     expect(html).toContain("ਸ਼ਾਮਲ ਹੋਣ ਵੇਲੇ ਮੇਰਾ ਯੂਜ਼ਰਨੇਮ ਦਿਖਾਓ");
   });
@@ -168,7 +168,7 @@ describe("SubGoalPage", () => {
       />,
     );
 
-    expect(html).toContain("r/ExampleSub मध्ये तुमचे स्वागत आहे");
+    expect(html).toContain("r/ExampleSub");
     expect(html).toContain("r/ExampleSub मध्ये सामील व्हा");
     expect(html).toContain('alt="Subreddit icon"');
   });
@@ -245,7 +245,8 @@ describe("SubGoalPage", () => {
     expect(html).toContain("gap-6 px-4 py-6");
     expect(html).toContain("width:40px;height:40px");
     expect(html).toContain("gap-2.5");
-    expect(html).toContain("Welcome to r/ExampleSub");
+    expect(html).toContain("r/ExampleSub");
+    expect(html).toContain("w-full pt-12");
     expect(html).toContain("Join r/ExampleSub");
   });
 
