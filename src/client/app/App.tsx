@@ -245,9 +245,7 @@ export const App = () => {
     } = await subscribe(payload);
     if (subscribeError) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "api_error");
-      showToast(
-        state.language === "en" ? subscribeError : messages.subscribeErrorToast,
-      );
+      showToast(subscribeError);
       subscribeAttemptRef.current = false;
       return;
     }
@@ -355,7 +353,12 @@ export const App = () => {
   let content = null;
   if (state) {
     if (page === "statistics") {
-      content = <StatisticsPage onReturn={handleReturnFromStatistics} />;
+      content = (
+        <StatisticsPage
+          onReturn={handleReturnFromStatistics}
+          language={state.language}
+        />
+      );
     } else if (page === "notifications") {
       content = (
         <NotificationSettingsPage

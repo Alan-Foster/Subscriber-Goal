@@ -32,10 +32,7 @@ import { usePrimaryCtaPaintTiming } from "../utils/startupPerformance";
 import { recordStatisticsEvent } from "../analytics/statisticsAnalytics";
 
 type TinySubscribeViewPhase =
-  | "subscribe"
-  | "confirmation"
-  | "subscribed"
-  | "notifications";
+  "subscribe" | "confirmation" | "subscribed" | "notifications";
 
 export const SubscribeOnlyApp = () => {
   const { state, loading, submitting, subscribe, prohibited } = useSubGoal();
@@ -225,9 +222,7 @@ export const SubscribeOnlyApp = () => {
     if (result.error) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "api_error");
       interactionStartedRef.current = false;
-      showToast(
-        state.language === "en" ? result.error : messages.subscribeErrorToast,
-      );
+      showToast(result.error);
       subscribeAttemptRef.current = false;
       return;
     }

@@ -147,7 +147,7 @@ const buildRawPostMessages = (
       goalCount,
       goalText,
     }) =>
-      translate(language, "post.fallbackActive", {
+      translate(language, "post.fallbackActiveV2", {
         subredditName,
         subscriberCountLabel: formatCountMessage(
           language,
@@ -163,7 +163,7 @@ const buildRawPostMessages = (
         ),
       }),
     fallbackCompleted: ({ subredditName, goalCount, goalText, completedIso }) =>
-      translate(language, "post.fallbackCompleted", {
+      translate(language, "post.fallbackCompletedV2", {
         subredditName,
         goalCountLabel: formatCountMessage(
           language,
@@ -171,7 +171,10 @@ const buildRawPostMessages = (
           goalCount,
           goalText,
         ),
-        completedIso,
+        completedText: new Intl.DateTimeFormat(metadata.locale, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date(completedIso)),
       }),
   };
 };

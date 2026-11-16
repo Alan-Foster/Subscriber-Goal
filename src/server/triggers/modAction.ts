@@ -1326,7 +1326,7 @@ async function updateFromWikis(
       try {
         const crosspost = await reddit.crosspost({
           subredditName: appSettings.promoSubreddit,
-          title: translate((sourceSubredditInfo as { language?: unknown }).language, 'outbound.crosspost.title', {
+          title: translate((sourceSubredditInfo as { language?: unknown }).language, 'outbound.crosspost.titleV2', {
             subredditName: post.subredditName,
             goal: formatSubscriberCount(pending.goal),
           }),
