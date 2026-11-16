@@ -9,9 +9,13 @@ const roundFontSizeDown = (fontSizePx: number): number =>
 
 type ResponsiveHeaderTextProps = {
   text: string;
+  className?: string;
 };
 
-export const ResponsiveHeaderText = ({ text }: ResponsiveHeaderTextProps) => {
+export const ResponsiveHeaderText = ({
+  text,
+  className = "",
+}: ResponsiveHeaderTextProps) => {
   const textRef = useRef<HTMLSpanElement>(null);
   const lastAvailableWidthRef = useRef<number | null>(null);
 
@@ -126,7 +130,7 @@ export const ResponsiveHeaderText = ({ text }: ResponsiveHeaderTextProps) => {
   return (
     <span
       ref={textRef}
-      className="w-full truncate text-center whitespace-nowrap"
+      className={`min-w-0 truncate text-center text-xl font-bold leading-7 whitespace-nowrap ${className}`}
       data-subgoal-header-label="true"
     >
       {text}
