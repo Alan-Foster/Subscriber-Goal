@@ -121,7 +121,7 @@ export const SubGoalPage = ({
   );
   const twoActionArea = secondaryAction ? (
     <div
-      className="flex w-full max-w-[640px] flex-col items-center justify-center gap-5 md:flex-row md:gap-6 [&>.sg-attention-host]:max-w-full [&>.sg-attention-host]:min-w-0 [&>.sg-attention-host]:flex-[0_1_auto] [&>.sg-attention-host>button]:w-full [&>.sg-attention-host>button]:min-w-0"
+      className="flex w-full max-w-[640px] flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6 [&>.sg-attention-host]:max-w-full [&>.sg-attention-host]:min-w-0 [&>.sg-attention-host]:flex-[0_1_auto] [&>.sg-attention-host>button]:w-full [&>.sg-attention-host>button]:min-w-0"
       data-subgoal-action-area="two-actions"
     >
       <AfterSubscribeButton
