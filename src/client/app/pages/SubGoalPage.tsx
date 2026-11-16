@@ -52,6 +52,8 @@ export const SubGoalPage = ({
     state.afterSubscribeAction.type !== "disabled"
       ? state.afterSubscribeAction
       : null;
+  const usesCompactMobileActionSpacing =
+    state.postHeight === "regular" && secondaryAction !== null;
   const buttonMode = isSubmitting
     ? "submitting"
     : afterSubscribeAction
@@ -149,7 +151,9 @@ export const SubGoalPage = ({
 
   return (
     <div
-      className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"
+      className={`relative flex h-full w-full flex-col items-center justify-center ${
+        usesCompactMobileActionSpacing ? "gap-3 sm:gap-6" : "gap-6"
+      } px-4 py-6 text-center text-[color:var(--sg-text-primary)]`}
       data-sg-theme={state.colorTheme}
     >
       <TopButtons
