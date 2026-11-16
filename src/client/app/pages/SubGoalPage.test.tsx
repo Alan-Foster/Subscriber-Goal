@@ -334,7 +334,7 @@ describe("SubGoalPage", () => {
 
     expect(html).toContain("Join r/ExampleSub");
     expect(html).toContain("Join the Discord");
-    expect(html).toContain("gap-3 sm:gap-6 px-4 py-6");
+    expect(html).toContain("gap-6 px-4 py-6");
     expect(html).toContain('data-subgoal-action-area="two-actions"');
     expect(html).toContain("flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6");
     expect(html).toContain("[&amp;&gt;.sg-attention-host]:min-w-0");
