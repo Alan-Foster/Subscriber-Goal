@@ -185,7 +185,7 @@ describe("SubGoalPage", () => {
     expect(html).not.toContain("Welcome to r/ExampleSub");
   });
 
-  it("moves the logo to the content edge while showing a join notice", () => {
+  it("crossfades the centered header while showing a join notice", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage
         state={baseState}
@@ -196,7 +196,8 @@ describe("SubGoalPage", () => {
 
     expect(html).toContain('data-subgoal-notice-icon="true"');
     expect(html).toContain("u/alice just joined!");
-    expect(html).toContain("translate-x-0");
+    expect(html).toContain("duration-[180ms]");
+    expect(html).not.toContain("translate-x-");
     expect(html).toContain("motion-reduce:transition-none");
   });
 
@@ -242,11 +243,36 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain('alt="Subreddit icon"');
-    expect(html).toContain("gap-2 px-4");
-    expect(html).toContain("py-1");
+    expect(html).toContain("px-4");
+    expect(html).toContain("py-3");
+    expect(html).toContain('data-subgoal-mobile-control-row="true"');
+    expect(html).toContain("width:40px;height:40px");
+    expect(html).toContain("gap-2.5");
     expect(html).toContain("r/ExampleSub");
     expect(html).toContain("Join r/ExampleSub");
   });
+
+  it.each(["regular", "short"] as const)(
+    "keeps a long %s header within the control-safe width",
+    (postHeight) => {
+      const longName = "A_subreddit_name_that_needs_to_be_truncated_on_mobile";
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          state={{
+            ...baseState,
+            postHeight,
+            subreddit: { ...baseState.subreddit, name: longName },
+          }}
+          {...commonProps}
+        />,
+      );
+
+      expect(html).toContain(`r/${longName}`);
+      expect(html).toContain("max-w-[calc(100%-4rem)]");
+      expect(html).toContain("sm:max-w-[calc(100%-6rem)]");
+      expect(html).toContain('data-subgoal-content-stack="true"');
+    },
+  );
 
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
     const html = renderToStaticMarkup(

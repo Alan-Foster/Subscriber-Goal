@@ -4,17 +4,19 @@ type SubredditIconProps = {
   iconUrl?: string;
   size?: number;
   onClick?: () => void;
+  hoverable?: boolean;
 };
 
 export const SubredditIcon = ({
   iconUrl,
   size = 80,
   onClick,
+  hoverable = true,
 }: SubredditIconProps) => {
   const dimensionStyle = { width: size, height: size };
   return (
     <div
-      className="sg-hover-grow flex items-center justify-center rounded-full bg-[color:var(--sg-surface)]"
+      className={`${hoverable ? "sg-hover-grow" : ""} flex items-center justify-center rounded-full bg-[color:var(--sg-surface)]`}
       style={dimensionStyle}
     >
       <LoadingElement isLoading={!iconUrl} className="h-full w-full">
