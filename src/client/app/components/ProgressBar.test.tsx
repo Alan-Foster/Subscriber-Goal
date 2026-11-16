@@ -31,5 +31,4 @@ describe("ProgressBar", () => {
     expect(html).toContain('aria-valuenow="50"');
     expect(html).toContain("sg-hover-grow");
   });
-
 });
