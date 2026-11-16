@@ -109,8 +109,8 @@ export const SubGoalPage = ({
 
   return (
     <div
-      className={`relative flex h-full w-full flex-col items-center justify-center px-4 text-center text-[color:var(--sg-text-primary)] ${
-        isShort ? "gap-3 py-4" : "gap-6 py-6"
+      className={`relative flex h-full w-full flex-col items-center justify-center gap-2 px-4 text-center text-[color:var(--sg-text-primary)] ${
+        isShort ? "py-1" : "py-6"
       }`}
       data-sg-theme={state.colorTheme}
     >
@@ -123,7 +123,7 @@ export const SubGoalPage = ({
         language={state.language}
       />
       <div
-        className={`relative w-full ${isShort ? "h-10" : "h-20"}`}
+        className="relative flex h-[88px] w-full items-end"
         data-subgoal-header="true"
       >
         <button
@@ -137,14 +137,12 @@ export const SubGoalPage = ({
           } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
         >
           <span
-            className={`flex min-w-0 max-w-full items-center justify-center ${
-              isShort ? "gap-2" : "gap-3"
-            }`}
+            className="flex min-w-0 max-w-full items-center justify-center gap-3"
             data-subgoal-header-group="true"
           >
             <SubredditIcon
               iconUrl={state.subreddit.icon}
-              size={isShort ? 36 : 64}
+              size={48}
               {...(iconAction ? { onClick: iconAction } : {})}
             />
             <ResponsiveHeaderText text={headerText} />
@@ -162,10 +160,7 @@ export const SubGoalPage = ({
             }`}
             data-subgoal-notice-icon="true"
           >
-            <SubredditIcon
-              iconUrl={state.subreddit.icon}
-              size={isShort ? 36 : 64}
-            />
+            <SubredditIcon iconUrl={state.subreddit.icon} size={48} />
           </span>
           <span className="w-full truncate px-12 text-center">
             {notice ?? ""}
@@ -220,7 +215,7 @@ export const SubGoalPage = ({
         />
       )}
       {state.subscribed || state.subreddit.isNsfw ? (
-        <div className="h-5" />
+        <div className={isShort ? "h-0" : "h-5"} />
       ) : (
         <label
           className={`flex items-center gap-2 text-xs text-[color:var(--sg-text-muted)] ${
@@ -237,7 +232,7 @@ export const SubGoalPage = ({
           <span className="sg-hover-grow">{messages.shareUsernameLabel}</span>
         </label>
       )}
-      <div className="h-5" />
+      <div className={isShort ? "h-0" : "h-5"} />
     </div>
   );
 };

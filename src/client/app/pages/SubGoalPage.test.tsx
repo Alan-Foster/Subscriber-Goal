@@ -242,7 +242,8 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain('alt="Subreddit icon"');
-    expect(html).toContain("gap-3 py-4");
+    expect(html).toContain("gap-2 px-4");
+    expect(html).toContain("py-1");
     expect(html).toContain("r/ExampleSub");
     expect(html).toContain("Join r/ExampleSub");
   });
