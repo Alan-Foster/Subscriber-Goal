@@ -35,13 +35,7 @@ type RequestResult<T> = {
   errorMessageKey?: MessageKey;
   errorMessageParams?: MessageValues;
   errorKind:
-    | "api"
-    | "gateway"
-    | "network"
-    | "protocol"
-    | "timeout"
-    | "aborted"
-    | null;
+    "api" | "gateway" | "network" | "protocol" | "timeout" | "aborted" | null;
   status: number | null;
 };
 
@@ -1022,7 +1016,7 @@ export const useSubGoal = () => {
             };
           }
 
-          const userSafeError = messages.subscribeErrorToast;
+          const userSafeError = messages.subscribeUncertainToast;
           if (mountedRef.current) setError(userSafeError);
           return {
             state: null,
@@ -1049,7 +1043,7 @@ export const useSubGoal = () => {
         if (mountedRef.current) setSubmitting(false);
       }
     },
-    [messages.subscribeErrorToast, state?.language, submitting],
+    [messages.subscribeUncertainToast, state?.language, submitting],
   );
 
   return {

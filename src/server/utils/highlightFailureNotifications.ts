@@ -10,10 +10,7 @@ const highlightIncidentLockMs = 5 * 60 * 1000;
 const highlightIncidentRetentionSeconds = 30 * 24 * 60 * 60;
 
 export type HighlightNotificationOutcome =
-  | "sent"
-  | "failed"
-  | "skipped_duplicate"
-  | "not_requested";
+  "sent" | "failed" | "skipped_duplicate" | "not_requested";
 
 type HighlightFailureNotificationParams = {
   reddit: RedditClient;
@@ -38,7 +35,6 @@ export function buildHighlightFailureMessage({
   moderatorUsername,
   postTitle,
   postUrl,
-  errorMessage,
   postOrigin = "created",
   highlightResult,
   language,
@@ -60,9 +56,6 @@ export function buildHighlightFailureMessage({
       })
     : translate(language, "outbound.highlight.moderatorUnknown");
   const postUrlLine = postUrl ? `\n${postUrl}` : "";
-  const technicalNote = errorMessage
-    ? `\n\n${translate(language, "outbound.highlight.technicalNote", { errorMessage })}`
-    : "";
 
   const isExisting = postOrigin === "existing";
   return {
@@ -79,8 +72,7 @@ export function buildHighlightFailureMessage({
       `${translate(language, "outbound.highlight.preservation")}\n\n` +
       `${translate(language, "outbound.highlight.subreddit", { subredditName })}\n` +
       `${moderatorLine}\n\n` +
-      `${translate(language, "outbound.highlight.goalHeading", { origin: isExisting ? "Existing" : "New" })}\n${postTitle}${postUrlLine}` +
-      technicalNote,
+      `${translate(language, "outbound.highlight.goalHeading", { origin: isExisting ? "Existing" : "New" })}\n${postTitle}${postUrlLine}`,
   };
 }
 

@@ -83,6 +83,7 @@ import {
 } from "../core/sourcePostDeletion";
 import type { LinkId, SubredditId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
+import { hasCrosspost } from "../data/crosspostData";
 import { resolvePostKindFromPostData } from "../../shared/postKind";
 import {
   getCurrentActorAuthority,
@@ -559,6 +560,18 @@ export function registerInternalUiRoutes(router: Router): void {
         }
         let cleanupDispatched = false;
         let sourceDeletionConfirmed = false;
+        let internalRecordsPending = false;
+        let crosspostCleanupExpected = true;
+        try {
+          crosspostCleanupExpected = await hasCrosspost(redis, postId);
+        } catch (error) {
+          logDiagnostic(
+            "warn",
+            "delete_goal_crosspost_lookup_failed",
+            { operationId, workflow: "delete_goal", phase, postId },
+            error,
+          );
+        }
         await withCommunityGoalMutationLease(redis, async () => {
           phase = "deletion_intent_persistence";
           let intent = await prepareSourcePostDeletionIntent(redis, {
@@ -619,6 +632,7 @@ export function registerInternalUiRoutes(router: Router): void {
           try {
             intent = await recordSourceDeletionConfirmed(redis, intent);
           } catch (error) {
+            internalRecordsPending = true;
             // The preceding verify_source record remains indexed. Recovery can
             // establish the missing source and resume dispatch on the next tick.
             logDiagnostic(
@@ -678,7 +692,7 @@ export function registerInternalUiRoutes(router: Router): void {
           );
         }
         phase = "response_completion";
-        if (cleanupFailures.length > 0) {
+        if (cleanupFailures.length > 0 || internalRecordsPending) {
           logDiagnostic("warn", "delete_goal_partially_completed", {
             operationId,
             workflow: "delete_goal",
@@ -696,9 +710,11 @@ export function registerInternalUiRoutes(router: Router): void {
         res.json({
           showToast: translate(
             language,
-            cleanupDispatched
-              ? "moderator.delete.cleanupDispatched"
-              : "moderator.delete.cleanupQueued",
+            crosspostCleanupExpected
+              ? cleanupDispatched
+                ? "moderator.delete.cleanupDispatched"
+                : "moderator.delete.cleanupQueued"
+              : "moderator.delete.success",
           ),
         });
         logDiagnostic("info", "delete_goal_completed", {
@@ -714,10 +730,15 @@ export function registerInternalUiRoutes(router: Router): void {
           { operationId, workflow: "delete_goal", phase, postId },
           error,
         );
+        const outcomeUncertain = phase === "reddit_post_delete";
         res.json({
-          showToast: translate(language, "moderator.delete.failed", {
-            operationId,
-          }),
+          showToast: translate(
+            language,
+            outcomeUncertain
+              ? "moderator.delete.outcomeUncertain"
+              : "moderator.delete.failed",
+            { operationId },
+          ),
         });
       }
     },
@@ -1559,13 +1580,23 @@ async function submitCreateGoalStepTwo(
           const subscriberGoal =
             "subscriberGoal" in values ? values.subscriberGoal : undefined;
           if (
-            !subscriberGoal ||
-            subreddit.numberOfSubscribers >= subscriberGoal
+            typeof subscriberGoal !== "number" ||
+            !Number.isFinite(subscriberGoal) ||
+            subscriberGoal <= 0
           ) {
             res.json({
               showToast: translate(
                 draft.language,
                 "moderator.form.goalInvalid",
+              ),
+            });
+            return;
+          }
+          if (subreddit.numberOfSubscribers >= subscriberGoal) {
+            res.json({
+              showToast: translate(
+                draft.language,
+                "moderator.form.goalNotAboveCurrent",
               ),
             });
             return;
@@ -1754,7 +1785,10 @@ async function submitCreateGoalFollowUp(
           subreddit.numberOfSubscribers >= draft.details.subscriberGoal
         ) {
           res.json({
-            showToast: translate(draft.language, "moderator.form.goalInvalid"),
+            showToast: translate(
+              draft.language,
+              "moderator.form.goalNotAboveCurrent",
+            ),
           });
           return;
         }

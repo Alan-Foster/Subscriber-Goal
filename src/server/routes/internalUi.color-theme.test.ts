@@ -614,7 +614,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("Error deleting post"),
+      showToast: expect.stringContaining("Couldn’t delete this post"),
     });
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringMatching(
@@ -673,7 +673,8 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.deletePost).toHaveBeenCalledOnce();
     expect(hoisted.dispatchPostAction).toHaveBeenCalledOnce();
     expect(json).toHaveBeenCalledWith({
-      showToast: "Source deleted, mirror cleanup queued",
+      showToast:
+        "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
     });
   });
 
@@ -690,7 +691,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.deletePost).not.toHaveBeenCalled();
     expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("Error deleting post"),
+      showToast: expect.stringContaining("Couldn’t delete this post"),
     });
   });
 
@@ -776,7 +777,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("not an eligible"),
+      showToast: expect.stringContaining("couldn’t verify"),
     });
     expect(hoisted.reddit.getPostData).not.toHaveBeenCalled();
     expect(hoisted.reddit.getModerators).not.toHaveBeenCalled();
@@ -828,7 +829,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("not an eligible"),
+      showToast: expect.stringContaining("couldn’t verify"),
     });
     expect(hoisted.deletePost).not.toHaveBeenCalled();
   });
@@ -852,7 +853,7 @@ describe("internalUi color theme create goal routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("not an eligible"),
+      showToast: expect.stringContaining("couldn’t verify"),
     });
     expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
     expect(hoisted.deletePost).not.toHaveBeenCalled();

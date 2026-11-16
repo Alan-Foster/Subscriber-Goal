@@ -364,13 +364,13 @@
       "description": "Moderator workflow: Setup regular",
       "policy": "fallback",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "moderator.setup.short": {
       "description": "Moderator workflow: Setup short",
       "policy": "fallback",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "moderator.setup.tiny": {
       "description": "Moderator workflow: Setup tiny",
@@ -448,6 +448,30 @@
     },
     "statistics.label": {
       "description": "Statistics dashboard: Label",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.copy": {
+      "description": "Statistics dashboard: Copy statistics action",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.copied": {
+      "description": "Statistics dashboard: Clipboard copy succeeded",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.copyFailed": {
+      "description": "Statistics dashboard: Clipboard copy failed",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "statistics.loadError": {
+      "description": "Statistics dashboard: Report load failed",
       "policy": "fallback",
       "placeholders": {},
       "protectedTokens": []
@@ -561,6 +585,26 @@
       },
       "protectedTokens": []
     },
+    "post.fallbackActiveV2": {
+      "description": "Text-only fallback for an active Subscriber Goal post with current Reddit opening instructions",
+      "policy": "fallback",
+      "placeholders": {
+        "subredditName": "Subreddit name without the r/ prefix",
+        "subscriberCountLabel": "Localized current subscriber-count phrase",
+        "goalCountLabel": "Localized subscriber-goal count phrase"
+      },
+      "protectedTokens": []
+    },
+    "post.fallbackCompletedV2": {
+      "description": "Text-only fallback for a completed Subscriber Goal post with a reader-formatted completion time",
+      "policy": "fallback",
+      "placeholders": {
+        "subredditName": "Subreddit name without the r/ prefix",
+        "goalCountLabel": "Localized count phrase for a reached milestone",
+        "completedText": "Localized completion date and time"
+      },
+      "protectedTokens": []
+    },
     "post.joinButton": {
       "description": "Subscriber Goal post interface: Join Button",
       "policy": "required",
@@ -593,7 +637,7 @@
       "description": "Subscriber Goal post interface: Load Error",
       "policy": "required",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "post.loginRequired": {
       "description": "Subscriber Goal post interface: Login Required",
@@ -727,6 +771,12 @@
       "placeholders": {
         "operationId": "Support reference identifier"
       },
+      "protectedTokens": []
+    },
+    "errors.subscribe.uncertain": {
+      "description": "User-facing error: Subscription outcome could not be confirmed",
+      "policy": "fallback",
+      "placeholders": {},
       "protectedTokens": []
     },
     "errors.api.postIdRequired": {
@@ -889,6 +939,12 @@
     },
     "moderator.form.goalInvalid": {
       "description": "Moderator workflow: Form goal Invalid",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "moderator.form.goalNotAboveCurrent": {
+      "description": "Moderator workflow: Goal must exceed the current subscriber count",
       "policy": "fallback",
       "placeholders": {},
       "protectedTokens": []
@@ -1179,6 +1235,14 @@
       },
       "protectedTokens": []
     },
+    "moderator.delete.outcomeUncertain": {
+      "description": "Moderator workflow: Reddit did not confirm whether deletion succeeded",
+      "policy": "fallback",
+      "placeholders": {
+        "operationId": "Support reference identifier"
+      },
+      "protectedTokens": []
+    },
     "moderator.delete.ineligible": {
       "description": "Moderator workflow: deletion target is outside the current community or is not managed by the app",
       "policy": "fallback",
@@ -1460,7 +1524,7 @@
         "delay": "Human-readable delay",
         "maxMinutes": "Display-formatted maximum delay in minutes"
       },
-      "protectedTokens": ["Subscriber Goal", "Tiny", "Action Button"]
+      "protectedTokens": ["Subscriber Goal"]
     },
     "outbound.health.body": {
       "description": "Outbound moderator or member message: Health body",
@@ -1582,7 +1646,7 @@
       "description": "Outbound moderator or member message: Highlight result cleanup",
       "policy": "fallback",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "outbound.highlight.result.reorder": {
       "description": "Outbound moderator or member message: Highlight result reorder",
@@ -1627,7 +1691,6 @@
       "description": "Moderator workflow: Create crosspost Failed",
       "policy": "fallback",
       "placeholders": {
-        "postType": "Localized post-type name",
         "subredditName": "Subreddit display name without r/"
       },
       "protectedTokens": []
@@ -1644,7 +1707,7 @@
       "description": "Moderator workflow: Create flair Warning",
       "policy": "fallback",
       "placeholders": {},
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "moderator.create.configurationWarning": {
       "description": "Moderator workflow: Create configuration Warning",
@@ -1726,6 +1789,15 @@
       },
       "protectedTokens": []
     },
+    "outbound.crosspost.titleV2": {
+      "description": "Public crosspost title inviting readers to help a community reach its goal",
+      "policy": "fallback",
+      "placeholders": {
+        "subredditName": "Subreddit display name without r/",
+        "goal": "Subscriber goal"
+      },
+      "protectedTokens": []
+    },
     "moderator.details.postTitleHelp": {
       "description": "Moderator workflow: Details post Title Help",
       "policy": "fallback",
@@ -1801,7 +1873,7 @@
         "appAccount": "App account display name with optional u/ prefix",
         "subredditName": "Subreddit display name without r/"
       },
-      "protectedTokens": ["Subscriber Goal"]
+      "protectedTokens": []
     },
     "errors.create.inProgress": {
       "description": "Moderator workflow: duplicate goal creation is in progress",
@@ -2178,15 +2250,15 @@
         "moderator.followUp.buttonText": "Button Text After a User Joins",
         "moderator.followUp.description": "Choose what members will see and do after joining.",
         "moderator.followUp.title": "Sub Goal - Step 3/3 - Settings for After Joining",
-        "moderator.setup.cta": "Call To Action Button (No Subscribing)",
+        "moderator.setup.cta": "Action button only",
         "moderator.setup.description": "Choose the shared post settings. You will customize the post on the next two pages.",
         "moderator.setup.displayName": "Customize Subreddit Name Capitalization",
-        "moderator.setup.help": "Choose a subscriber goal, a Join button with a follow-up CTA, or a CTA with no joining.",
+        "moderator.setup.help": "Choose a Subscriber Goal format. Full and short goals can include an optional second action button.",
         "moderator.setup.language": "Language",
         "moderator.setup.postHeight": "Post Height",
-        "moderator.setup.regular": "Full Height Subscriber Goal",
-        "moderator.setup.short": "Short Subscriber Goal (No Logo)",
-        "moderator.setup.tiny": "Subscribe Button and Call to Action Button (No Goal)",
+        "moderator.setup.regular": "Full subscriber goal",
+        "moderator.setup.short": "Short subscriber goal",
+        "moderator.setup.tiny": "Join button only",
         "moderator.setup.title": "Sub Goal - Step 1/3 - Choose Post Type",
         "notifications.alertsLabel": "Goal completion alerts",
         "notifications.backAriaLabel": "Return to previous page",
@@ -2199,6 +2271,10 @@
         "notifications.goalPrompt": "Get Notified at {goalText}",
         "notifications.label": "Notifications",
         "statistics.label": "Statistics",
+        "statistics.copy": "Copy statistics",
+        "statistics.copied": "Statistics copied.",
+        "statistics.copyFailed": "Couldn’t copy automatically. Select and copy the text.",
+        "statistics.loadError": "Couldn’t load statistics. Try again.",
         "notifications.loadError": "Notification settings could not be loaded.",
         "notifications.loginRequired": "Please log in to manage notifications.",
         "notifications.return": "Return",
@@ -2214,11 +2290,13 @@
         "post.defaultTitle": "Welcome to r/{subredditName}!",
         "post.fallbackActive": "Welcome to r/{subredditName}\n\n{subscriberCountLabel} / {goalCountLabel}.\n  Help us reach our goal!\n\nVisit this post on Shreddit to enjoy interactive features.",
         "post.fallbackCompleted": "r/{subredditName} reached {goalCountLabel}!\n\nGoal reached at `{completedIso}`.",
+        "post.fallbackActiveV2": "Welcome to r/{subredditName}\n\n{subscriberCountLabel} / {goalCountLabel}.\nHelp us reach our goal!\n\nOpen this post in the Reddit app or on reddit.com to join.",
+        "post.fallbackCompletedV2": "r/{subredditName} reached {goalCountLabel}!\n\nGoal reached {completedText}.",
         "post.joinButton": "Join r/{subredditName}",
-        "post.joinError": "Couldn't join the community.",
+        "post.joinError": "Couldn’t join this community. Try again.",
         "post.joinSuccess": "Thanks for joining!",
         "post.joinedButton": "Joined r/{subredditName}",
-        "post.loadError": "Unable to load Subscriber Goal data.",
+        "post.loadError": "Couldn’t load this goal. Refresh to try again.",
         "post.loginRequired": "Please log in to join.",
         "post.logInButton": "Log In",
         "post.progressSubscribeAriaLabel": "Join r/{subredditName} using the progress bar",
@@ -2239,6 +2317,7 @@
         "errors.notifications.loginRequired": "Please log in to manage notifications.",
         "errors.notifications.invalidEnabled": "enabled must be a boolean.",
         "errors.notifications.update": "Notification settings could not be updated. Reference: {operationId}",
+        "errors.subscribe.uncertain": "We couldn’t confirm whether you joined. Check the community before trying again.",
         "errors.api.postIdRequired": "postId is required",
         "errors.api.postIdMissing": "postId is required but missing from context",
         "errors.api.ctaActivityUnsupported": "This CTA does not use click activity.",
@@ -2256,17 +2335,18 @@
         "errors.request.failed": "The request could not be completed. Reference: {operationId}",
         "moderator.setup.languageHelp": "This controls the language used in the post.",
         "moderator.setup.displayNameHelp": "Only capitalization may be changed. The customized name is used in the default post title.",
-        "moderator.form.prepareSetupFailed": "Error preparing the create-post form.",
+        "moderator.form.prepareSetupFailed": "Couldn’t open the next step. Try again.",
         "moderator.form.invalidLanguageHeight": "Please select a valid language and post height.",
         "moderator.form.loginRequired": "Please log in to create a Sub Goal post.",
-        "moderator.form.prepareDetailsFailed": "Error preparing the post details form.",
-        "moderator.form.prepareFollowUpFailed": "Error preparing the follow-up options form.",
+        "moderator.form.prepareDetailsFailed": "Couldn’t open the next step. Try again.",
+        "moderator.form.prepareFollowUpFailed": "Couldn’t open the next step. Try again.",
         "moderator.form.restartLogin": "Please log in and restart the create-post flow.",
-        "moderator.form.expired": "Your post setup expired or no longer matches this form. Please begin again.",
+        "moderator.form.expired": "Your post may already be live. This form has expired. Check the community’s recent posts before creating another.",
         "moderator.form.postTitleRequired": "Please provide a post title!",
-        "moderator.form.goalInvalid": "Please select a valid subscriber goal!",
+        "moderator.form.goalInvalid": "Enter a valid subscriber goal.",
+        "moderator.form.goalNotAboveCurrent": "Enter a goal higher than the community’s current subscriber count.",
         "moderator.form.actionConfigurationInvalid": "Please enter button text between 5 and 50 characters and, when a URL is requested, a complete secure https:// URL.",
-        "moderator.form.creationFailed": "An error occurred while creating the post.",
+        "moderator.form.creationFailed": "Couldn’t create this post. Try again.",
         "moderator.details.ctaTitle": "Sub Goal - Step 2/3 - CTA Details",
         "moderator.details.ctaDescription": "Customize the CTA-only post.",
         "moderator.details.goalTitle": "Sub Goal - Step 2/3 - Subscriber Goal Details",
@@ -2300,38 +2380,39 @@
         "moderator.color.blue": "Blue",
         "moderator.color.pink": "Pink",
         "moderator.delete.title": "Sub Goal - Delete This Post",
-        "moderator.delete.description": "This will permanently delete the Sub Goal post. If you wish to temporarily hide the post, you can remove it as a moderator and re-approve it later.",
-        "moderator.delete.confirm": "Are you sure?",
+        "moderator.delete.description": "Permanently delete this Subscriber Goal post? Moderators can remove the post instead if they only want to hide it.",
+        "moderator.delete.confirm": "Permanently delete this Subscriber Goal post?",
         "moderator.delete.irreversible": "This action is irreversible.",
         "moderator.delete.accept": "Delete",
-        "moderator.delete.notConfirmed": "You did not confirm the deletion. If that was a mistake, please try again and enable the confirmation toggle before hitting delete.",
-        "moderator.delete.metadataLost": "Deletion metadata was somehow lost. Please try again. Reference: {operationId}",
-        "moderator.delete.cleanupPending": "The post was deleted, but some cleanup is still pending. Reference: {operationId}",
-        "moderator.delete.success": "Post deleted successfully!",
-        "moderator.delete.cleanupQueued": "Source deleted, mirror cleanup queued",
-        "moderator.delete.cleanupDispatched": "Source deleted, cleanup dispatched",
-        "moderator.delete.failed": "Error deleting post. Please refresh the page and try again. Reference: {operationId}",
-        "moderator.delete.ineligible": "This post is not an eligible Subscriber Goal post in the current community.",
+        "moderator.delete.notConfirmed": "Check the confirmation box to delete this post.",
+        "moderator.delete.metadataLost": "We couldn’t identify this post. Reopen its menu and try again. Reference: {operationId}",
+        "moderator.delete.cleanupPending": "Post deleted. Subscriber Goal couldn’t finish updating its records. Reference: {operationId}",
+        "moderator.delete.success": "Post deleted.",
+        "moderator.delete.cleanupQueued": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
+        "moderator.delete.cleanupDispatched": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
+        "moderator.delete.failed": "Couldn’t delete this post. Try again. Reference: {operationId}",
+        "moderator.delete.outcomeUncertain": "We couldn’t confirm whether the post was deleted. Refresh the community before trying again. Reference: {operationId}",
+        "moderator.delete.ineligible": "We couldn’t verify that this is a Subscriber Goal post in this community.",
         "moderator.authorization.loginRequired": "Please log in before performing this action.",
-        "moderator.authorization.managePostsRequired": "You must currently be a moderator with Manage Posts permission to perform this action.",
+        "moderator.authorization.managePostsRequired": "You need Manage Posts permission to do this.",
         "moderator.authorization.moderatorRequired": "You must currently be a moderator of this community to perform this action.",
         "moderator.authorization.retry": "Reddit could not verify your current moderator permissions. Please try again shortly.",
         "moderator.data.eraseTitle": "Sub Goal - Erase Another User's Data",
-        "moderator.data.eraseDescription": "This moderator action will erase all data stored by Sub Goal for the specified user.",
+        "moderator.data.eraseDescription": "Remove Subscriber Goal app data for this user in this community. This does not change their Reddit membership.",
         "moderator.data.username": "Username",
         "moderator.data.usernameHelp": "Erase all data associated with this username. Please note that in some cases this may be case sensitive, so it should be entered exactly as it appears in their Reddit profile link.",
         "moderator.data.userId": "User ID",
         "moderator.data.userIdHelp": "Erase all data associated with this user ID. If left blank, this field will be fetched based on the specified username.",
         "moderator.data.eraseAccept": "Erase",
         "moderator.data.selfTitle": "Sub Goal - Remove My Own Data",
-        "moderator.data.selfDescription": "This will remove all data stored by Sub Goal for your Reddit account.",
+        "moderator.data.selfDescription": "Remove your Subscriber Goal app data in this community. This does not change your Reddit membership.",
         "moderator.data.selfConfirm": "Remove all of my Sub Goal user data",
         "moderator.data.selfAccept": "Remove My Data",
         "moderator.data.eraseNotConfirmed": "You did not confirm the erasure. Please enable the confirmation toggle before proceeding.",
         "moderator.data.detailsRequired": "User details were not provided. Please enter a username, user ID, or both.",
-        "moderator.data.identityWarning": "Reddit identity lookup failed, so some associated data may remain. Please retry with the user ID if possible.",
-        "moderator.data.partial": "Recent subscriber references were erased where indexed. Subscriber stats could not be fully erased by username; please try again with the user ID if possible.",
-        "moderator.data.availableErased": "Available user data was erased. {warning}",
+        "moderator.data.identityWarning": "Some Subscriber Goal data was removed. To finish, try again with the user’s Reddit account ID.",
+        "moderator.data.partial": "Some Subscriber Goal data was removed. To finish, try again with the user’s Reddit account ID.",
+        "moderator.data.availableErased": "Some Subscriber Goal data was removed. {warning}",
         "moderator.data.eraseSuccess": "User data has been erased successfully.",
         "moderator.data.eraseFailed": "User data could not be fully erased. Please try again with the user ID.",
         "moderator.data.selfNotConfirmed": "You did not confirm removal. Please enable the confirmation toggle before proceeding.",
@@ -2342,7 +2423,7 @@
         "outbound.onboarding.upgradeSubject": "Subscriber Goal automatic goal update for r/{subredditName}",
         "outbound.health.subject": "Subscriber Goal needs moderator access in r/{subredditName}",
         "outbound.health.removalSubject": "Subscriber Goal Moderator Account Removed",
-        "outbound.health.removalBody": "Hi u/{moderatorName},\n\nYou removed u/subscriber-goal from the moderator team of r/{subredditName}.\n\nSubscriber Goal requires its app account to have moderator permissions to work correctly.\n\nIf you want to remove Subscriber Goal, please uninstall it from your community's App Installation Page:\n\n[{installationUrl}]({installationUrl})\n\nIf you removed the account by accident, please invite u/subscriber-goal back to the moderator team with the required permissions. Subscriber Goal will automatically accept the invitation.\n\nThis is an automated message.",
+        "outbound.health.removalBody": "Subscriber Goal lost moderator access in r/{subredditName}.\n\nTo restore it, invite u/subscriber-goal with Manage Posts permission. To remove the app, uninstall it from your community’s App Installation Page:\n\n[{installationUrl}]({installationUrl})\n\nThis notice was sent to u/{moderatorName}. This is an automated message.",
         "outbound.highlight.subjectAttention": "Action Required - SubGoal Highlight Needs Attention in r/{subredditName}",
         "outbound.highlight.subjectMissing": "Action Required - SubGoal Not Highlighted in r/{subredditName}",
         "accessibility.document.appTitle": "Subscriber Goal",
@@ -2351,12 +2432,12 @@
         "outbound.onboarding.upgradeIntro": "Subscriber Goal has been updated in r/{subredditName}.",
         "outbound.onboarding.info": "You can find more information about creating a Subscriber Goal at https://developers.reddit.com/apps/subscriber-goal.",
         "outbound.onboarding.support": "If you have questions, please send a DM to u/Alan-Foster.",
-        "outbound.onboarding.automation": "If a highlighted Subscriber Goal does not already exist, the {delay} countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add a goal to Community Highlights during the following {maxMinutes} minutes. A subreddit can have at most six Community Highlights.",
-        "outbound.onboarding.orphanedAutomation": "The highlighted Subscriber Goal milestone is complete. Unless an active regular or short milestone goal, Tiny goal, or Action Button post is found, the {delay} countdown begins when this message is sent. If this community remains eligible and Subscriber Goal retains Manage Posts permission, the app will attempt to create and add the next milestone goal to Community Highlights during the following {maxMinutes} minutes. A subreddit can have at most six Community Highlights.",
+        "outbound.onboarding.automation": "If no highlighted Subscriber Goal exists, Subscriber Goal will wait {delay}, then try for up to {maxMinutes} minutes to create and highlight one. The community must remain eligible and the app must retain Manage Posts permission.",
+        "outbound.onboarding.orphanedAutomation": "The previous milestone is complete. If no active Subscriber Goal or action post is found, Subscriber Goal will wait {delay}, then try for up to {maxMinutes} minutes to create and highlight the next goal. The community must remain eligible and the app must retain Manage Posts permission.",
         "outbound.health.body": "Subscriber Goal cannot create or maintain goal posts in r/{subredditName} because u/{appUsername} is no longer a moderator with Manage Posts permission.\n\nPlease restore u/{appUsername} with Manage Posts permission, or reinstall Subscriber Goal from {installationUrl}. Flair permission is optional but is needed to apply the Subscriber Goal post flair.\n\nThe app can accept a valid moderator invitation, but it cannot create an invitation or change its own moderator permissions.",
         "outbound.highlight.moderatorKnown": "Initiating moderator: u/{moderatorUsername}",
         "outbound.highlight.moderatorUnknown": "Initiating moderator: unknown",
-        "outbound.highlight.degradedIntro": "The Subscriber Goal is highlighted in r/{subredditName}, but reconciliation did not complete cleanly.",
+        "outbound.highlight.degradedIntro": "The Subscriber Goal is highlighted in r/{subredditName}, but the previous Community Highlights could not be fully updated.",
         "outbound.highlight.existingIntro": "Subscriber Goal found an existing valid goal, but it could not be highlighted in r/{subredditName}.",
         "outbound.highlight.newIntro": "The new Subscriber Goal post was created successfully, but it could not be highlighted in r/{subredditName}.",
         "outbound.highlight.manualReview": "Manual moderator review is required.",
@@ -2365,20 +2446,20 @@
         "outbound.highlight.subreddit": "Subreddit: r/{subredditName}",
         "outbound.highlight.goalHeading": "{origin} Subscriber Goal:",
         "outbound.highlight.technicalNote": "Technical note: {errorMessage}",
-        "outbound.highlight.result.notHighlightedRollback": "The goal is not confirmed as highlighted, and rollback could not fully restore the prior Community Highlights.",
+        "outbound.highlight.result.notHighlightedRollback": "We couldn’t restore the previous highlights. Check the Community Highlights list.",
         "outbound.highlight.result.noCapacity": "The goal was not highlighted because no safe Community Highlight slot was available.",
         "outbound.highlight.result.notConfirmed": "The goal was created, but Reddit did not confirm it as a Community Highlight.",
-        "outbound.highlight.result.rollback": "The goal is highlighted, but rollback was incomplete and the Community Highlights need moderator review.",
-        "outbound.highlight.result.cleanup": "The goal is highlighted, but an obsolete classic Subscriber Goal highlight could not be removed.",
+        "outbound.highlight.result.rollback": "Your post is highlighted, but the previous Community Highlights could not be restored. Check the Community Highlights list.",
+        "outbound.highlight.result.cleanup": "Your post is highlighted, but the old goal is still highlighted too.",
         "outbound.highlight.result.reorder": "The goal is highlighted, but it could not be verified in the first position.",
-        "outbound.highlight.result.concurrent": "A concurrent moderator change occurred while Community Highlights were being reconciled.",
+        "outbound.highlight.result.concurrent": "The Community Highlights changed while Subscriber Goal was updating them. Check the current list.",
         "outbound.highlight.result.review": "The Community Highlight needs moderator review.",
         "moderator.create.ctaLabel": "CTA post",
         "moderator.create.goalLabel": "Subscriber Goal post",
         "moderator.create.degraded": "{postType} created. {details}",
-        "moderator.create.crosspostFailed": "{postType} created, but crosspost to r/{subredditName} failed. Moderators can retry.",
+        "moderator.create.crosspostFailed": "Post created. We couldn’t send the crosspost to r/{subredditName}.",
         "moderator.create.success": "{postType} created!",
-        "moderator.create.flairWarning": "The post was created without Subscriber Goal flair; check the app account's Manage Flair permission.",
+        "moderator.create.flairWarning": "Post created without flair. Give u/subscriber-goal Manage Flair permission to add it automatically.",
         "moderator.create.configurationWarning": "The button configuration was invalid, so the default action was used.",
         "moderator.create.crosspostIneligible": "Crossposting was skipped because this community is no longer eligible.",
         "moderator.developer.loginRequired": "The selfPost developer command requires an authenticated Reddit user.",
@@ -2390,6 +2471,7 @@
         "moderator.validation.displayNameMismatch": "Subreddit display name can only change capitalization; all other characters must match exactly.",
         "post.fallback.title": "Subscriber Goal post: {title}",
         "outbound.crosspost.title": "Visit r/{subredditName}, they are trying to reach {goal} subscribers!",
+        "outbound.crosspost.titleV2": "Help r/{subredditName} reach {goal} subscribers",
         "moderator.details.postTitleHelp": "This will be used as the title of the post. You can customize it as you see fit.",
         "moderator.details.goalHelp": "The default is a suggestion based on your current subscriber count.",
         "moderator.details.goalColorHelp": "This controls the Join button, progress bar, and button glow color.",
@@ -2401,10 +2483,10 @@
         "errors.network.invalidResponse": "Invalid JSON response",
         "errors.network.timeout": "Request timed out",
         "errors.network.failed": "Request failed",
-        "errors.create.moderatorPermission": "{appAccount} must be a moderator of r/{subredditName} with Manage Posts permission. Restore the app account's moderator permissions or reinstall Subscriber Goal, then try again.",
+        "errors.create.moderatorPermission": "Give {appAccount} Manage Posts permission in r/{subredditName}, then try again.",
         "errors.create.inProgress": "This Subscriber Goal creation is already in progress. Please wait a moment and try again.",
-        "errors.create.outcomeUnknown": "Reddit may have accepted this post, but the app could not confirm its post ID. This creation attempt has been blocked to prevent a duplicate. Retry this same form while it remains open so the app can check again.",
-        "errors.create.outcomeUnknownExpired": "Reddit may have accepted this post, but this form has expired and can no longer finish registration. Check the subreddit's recent posts before starting a new form.",
+        "errors.create.outcomeUnknown": "Your post may already be live. Submit this same form again to check.",
+        "errors.create.outcomeUnknownExpired": "Your post may already be live. This form has expired. Check the community’s recent posts before creating another.",
         "errors.create.permissionVerification": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}.",
         "errors.create.permissionVerificationRetry": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}. Please try again shortly.",
         "metric.subscribersCommunity": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",

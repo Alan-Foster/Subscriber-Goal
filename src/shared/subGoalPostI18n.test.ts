@@ -166,7 +166,7 @@ describe("subGoalPostI18n", () => {
       "u/alice just joined!",
       "New member just joined!",
       "Thanks for joining!",
-      "Couldn't join the community.",
+      "Couldn’t join this community. Try again.",
       "Please log in to join.",
     ]);
 

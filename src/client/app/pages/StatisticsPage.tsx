@@ -6,8 +6,10 @@ import type {
   StatisticsResponse,
 } from "../../../shared/types/api";
 import { logDiagnostic } from "../../../shared/diagnostics";
+import { translate } from "../../../shared/i18n/catalog";
+import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 
-type Props = { onReturn: () => void };
+type Props = { onReturn: () => void; language: SubGoalLanguage };
 type Row = {
   label: string;
   value: StatisticsComparableValue;
@@ -24,7 +26,6 @@ const ui = {
   current: "Current",
   previous: "Previous",
   change: "Change",
-  copyJson: "Copy JSON",
   jsonLabel: "Statistics JSON",
 };
 const formatted = (value: number | null, percent = false) =>
@@ -54,7 +55,7 @@ const Change = ({ value }: { value: StatisticsComparableValue }) => {
   );
 };
 
-export const StatisticsPage = ({ onReturn }: Props) => {
+export const StatisticsPage = ({ onReturn, language }: Props) => {
   const [hours, setHours] = useState<24 | 168>(24);
   const [report, setReport] = useState<StatisticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,21 +82,21 @@ export const StatisticsPage = ({ onReturn }: Props) => {
           { workflow: "statistics", phase: "dashboard", hours },
           cause,
         );
-        setError(
-          cause instanceof Error
-            ? `Statistics could not be loaded (${cause.message}).`
-            : "Statistics could not be loaded.",
-        );
+        setError(translate(language, "statistics.loadError"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [hours, reloadKey]);
+  }, [hours, language, reloadKey]);
   const json = report ? JSON.stringify(report) : "";
   const copyJson = async () => {
     try {
       await navigator.clipboard.writeText(json);
+      showToast({
+        text: translate(language, "statistics.copied"),
+        appearance: "success",
+      });
     } catch (cause) {
       logDiagnostic(
         "warn",
@@ -105,9 +106,18 @@ export const StatisticsPage = ({ onReturn }: Props) => {
       );
       jsonInputRef.current?.focus();
       jsonInputRef.current?.select();
-      document.execCommand("copy");
+      if (document.execCommand("copy")) {
+        showToast({
+          text: translate(language, "statistics.copied"),
+          appearance: "success",
+        });
+        return;
+      }
+      showToast({
+        text: translate(language, "statistics.copyFailed"),
+        appearance: "neutral",
+      });
     }
-    showToast({ text: "Statistics JSON copied.", appearance: "success" });
   };
 
   const groups: Group[] = report
@@ -123,7 +133,7 @@ export const StatisticsPage = ({ onReturn }: Props) => {
             {
               label: "Viewing sessions",
               value: report.metrics.traffic.viewingSessions,
-              detail: "Visitor + post + UTC hour",
+              detail: "One viewing session per visitor, post, and UTC hour",
             },
           ],
         },
@@ -357,7 +367,7 @@ export const StatisticsPage = ({ onReturn }: Props) => {
                 className="cursor-pointer rounded-full border border-[color:var(--sg-border)] px-3 py-1.5 text-xs font-semibold"
                 onClick={() => void copyJson()}
               >
-                {ui.copyJson}
+                {translate(language, "statistics.copy")}
               </button>
               <input
                 ref={jsonInputRef}
