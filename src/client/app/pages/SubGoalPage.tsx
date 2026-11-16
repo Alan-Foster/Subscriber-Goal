@@ -72,6 +72,9 @@ export const SubGoalPage = ({
   const handleButtonClick = onSubscribe;
   const iconAction = state.subscribed ? undefined : onSubscribe;
   const showNotice = Boolean(notice);
+  const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
+  const balanceShareUsernameControlOnDesktop =
+    state.postHeight === "regular" && showShareUsernameControl;
   if (state.postHeight === "tiny") {
     const actionButton = showAuthenticationButtons ? (
       <LoggedOutAuthButtons
@@ -159,7 +162,11 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      <div className="w-full pt-12">
+      <div
+        className={`w-full pt-12 ${
+          balanceShareUsernameControlOnDesktop ? "sm:pt-4" : ""
+        }`}
+      >
         <div className="relative h-10 w-full" data-subgoal-header="true">
           <button
             type="button"
@@ -236,7 +243,7 @@ export const SubGoalPage = ({
       ) : (
         preSubscribeActionArea
       )}
-      {state.subscribed || state.subreddit.isNsfw ? (
+      {!showShareUsernameControl ? (
         <div className="h-5" />
       ) : (
         <label

@@ -250,12 +250,12 @@ describe("SubGoalPage", () => {
     expect(html).toContain("Join r/ExampleSub");
   });
 
-  it("uses the same header top offset for regular goals", () => {
+  it("reduces the desktop header top offset when the username share control is shown", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage state={baseState} {...commonProps} />,
     );
 
-    expect(html).toContain('class="w-full pt-12"');
+    expect(html).toContain('class="w-full pt-12 sm:pt-4"');
   });
 
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
