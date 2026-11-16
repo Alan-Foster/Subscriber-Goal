@@ -111,8 +111,8 @@ export const TopButtons = ({
           <span
             className={
               revealTextOnInteraction
-                ? "pointer-events-none absolute right-full mr-1.5 opacity-0 transition-opacity duration-[250ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 motion-reduce:transition-none"
-                : undefined
+                ? "pointer-events-none absolute right-full mr-1.5 hidden opacity-0 transition-opacity duration-[250ms] group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100 motion-reduce:transition-none sm:block"
+                : "hidden sm:inline"
             }
           >
             r/{promoSubreddit}
