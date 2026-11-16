@@ -128,6 +128,7 @@ export const SubGoalPage = ({
       >
         <button
           type="button"
+          data-subgoal-header-activate="true"
           aria-hidden={showNotice}
           disabled={showNotice || isDisabled}
           onClick={showNotice || isDisabled ? undefined : onSubscribe}
