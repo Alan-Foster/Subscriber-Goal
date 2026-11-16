@@ -250,6 +250,14 @@ describe("SubGoalPage", () => {
     expect(html).toContain("Join r/ExampleSub");
   });
 
+  it("uses the same header top offset for regular goals", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage state={baseState} {...commonProps} />,
+    );
+
+    expect(html).toContain('class="w-full pt-12"');
+  });
+
   it("renders only the centered subscribe experience for unsubscribed tiny posts", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage
@@ -333,7 +341,58 @@ describe("SubGoalPage", () => {
     );
 
     expect(html).toContain("Join r/ExampleSub");
-    expect(html).not.toContain("Join the Discord");
+    expect(html).toContain("Join the Discord");
+    expect(html).toContain("gap-6 px-4 py-6");
+    expect(html).toContain('data-subgoal-action-area="two-actions"');
+    expect(html).toContain("flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6");
+    expect(html).toContain("[&amp;&gt;.sg-attention-host]:min-w-0");
+    expect(html).toContain("[&amp;&gt;.sg-attention-host&gt;button]:min-w-0");
+  });
+
+  it("shows compact short goals' second action only at desktop widths", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{
+          ...baseState,
+          postHeight: "short",
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Join the Discord",
+            url: "https://discord.com/invite/example",
+            colorTheme: "pink",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Join r/ExampleSub");
+    expect(html).toContain("Join the Discord");
+    expect(html).toContain('class="sm:hidden"');
+    expect(html).toContain('class="hidden sm:flex"');
+    expect(html).toContain('data-subgoal-action-area="two-actions"');
+  });
+
+  it("does not duplicate actions after a viewer has joined", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        state={{
+          ...baseState,
+          subscribed: true,
+          afterSubscribeAction: {
+            type: "link",
+            buttonText: "Join the Discord",
+            url: "https://discord.com/invite/example",
+            colorTheme: "pink",
+          },
+        }}
+        {...commonProps}
+      />,
+    );
+
+    expect(html).toContain("Join the Discord");
+    expect(html).not.toContain('data-subscription-button-mode="subscribe"');
+    expect(html).not.toContain('data-subgoal-action-area="two-actions"');
   });
 
   it("does not add attention glow while submitting", () => {
