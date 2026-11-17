@@ -1,3 +1,4 @@
+import { rearmAutomaticGoalReconciliation } from "./automaticGoalRetry";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
@@ -144,6 +145,34 @@ async function reconcileOnboardingForLifecycleUnderLease(
           previousReminder,
         );
         return { status: "unchanged", reason };
+      }
+
+      if (
+        previousGoal?.resultStatus === "submission_reconciliation_exhausted"
+      ) {
+        const rearmed = await rearmAutomaticGoalReconciliation(
+          redis,
+          previousGoal.operationId,
+          nowMs,
+        );
+        if (!rearmed)
+          return {
+            status: "unchanged",
+            reason: "legacy_ambiguous_submission_preserved",
+          };
+        await saveOnboardingState(redis, {
+          ...previousGoal,
+          status: "pending",
+          nextRunAt: nowMs,
+          resultStatus: "submission_reconciliation_pending",
+        });
+        return { status: "rearmed", operationId: previousGoal.operationId };
+      }
+      if (previousGoal?.resultStatus === "submission_reconciliation_pending") {
+        return {
+          status: "unchanged",
+          reason: "submission_reconciliation_pending",
+        };
       }
 
       const highlighted = await ensureExistingSubscriberGoalHighlighted({

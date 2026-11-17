@@ -1,3 +1,9 @@
+import {
+  nextAutomaticGoalPrerequisiteRetry,
+  resetAutomaticGoalPrerequisiteRetry,
+  isAutomaticGoalPrerequisiteError,
+  notifyAutomaticGoalExhausted,
+} from "./automaticGoalRetry";
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import {
@@ -81,6 +87,9 @@ export async function processDueAutoCreateNextGoals({
   for (const sourcePostId of duePostIds) {
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
     const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
+    const operationId = `auto-next:${sourcePostId}`;
+    let creationAttempted = false;
+    let creationFinished = false;
     let acquired = false;
     let mutationLease: CommunityGoalMutationLease | undefined;
     let acquiredMutationLease = false;
@@ -164,6 +173,60 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
 
+      const subreddit = await reddit.getCurrentSubreddit();
+      const automaticEligibility = getAutomaticGoalEligibility(subreddit);
+      if (!automaticEligibility.eligible) {
+        if (
+          automaticEligibility.safetyStatus !== "nsfw" &&
+          ((automaticEligibility.safetyStatus === "unknown" &&
+            automaticEligibility.subredditType === "public") ||
+            automaticEligibility.subredditType === "unknown")
+        ) {
+          await scheduleAutoCreateNextGoalReconciliation(
+            redis,
+            sourcePostId,
+            await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
+          );
+          summary.rescheduled += 1;
+        } else {
+          await cancelAutoCreateNextGoal(redis, sourcePostId);
+        }
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "eligibility",
+          postId: sourcePostId,
+          reason: automaticEligibility.reason,
+        });
+        continue;
+      }
+      const accountHealth = await checkAppAccountHealth({
+        reddit,
+        redis,
+        subredditName: subreddit.name,
+        subredditId: subreddit.id,
+        language: subreddit.language,
+        notify: false,
+        scheduleUnknownRetry: true,
+        nowMs,
+      });
+      if (!accountHealth.healthy || accountHealth.status !== "healthy") {
+        await scheduleAutoCreateNextGoalReconciliation(
+          redis,
+          sourcePostId,
+          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
+        );
+        summary.rescheduled += 1;
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_suppressed", {
+          workflow: "auto_create_next_goal",
+          phase: "permission_preflight",
+          postId: sourcePostId,
+          reason: "account_recovery_required",
+        });
+        continue;
+      }
+
       try {
         const sourcePost = await reddit.getPostById(sourcePostId);
         const removedByCategory = getTerminalRemovedByCategory(sourcePost);
@@ -224,7 +287,7 @@ export async function processDueAutoCreateNextGoals({
         await scheduleAutoCreateNextGoalReconciliation(
           redis,
           sourcePostId,
-          nowMs + protectedSurfaceRecheckDelayMs,
+          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
         );
         summary.failed += 1;
         summary.rescheduled += 1;
@@ -288,40 +351,6 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
 
-      const subreddit = await reddit.getCurrentSubreddit();
-      const automaticEligibility = getAutomaticGoalEligibility(subreddit);
-      if (!automaticEligibility.eligible) {
-        await cancelAutoCreateNextGoal(redis, sourcePostId);
-        summary.skipped += 1;
-        logDiagnostic("info", "auto_create_goal_suppressed", {
-          workflow: "auto_create_next_goal",
-          phase: "eligibility",
-          postId: sourcePostId,
-          reason: automaticEligibility.reason,
-        });
-        continue;
-      }
-      const accountHealth = await checkAppAccountHealth({
-        reddit,
-        redis,
-        subredditName: subreddit.name,
-        subredditId: subreddit.id,
-        language: subreddit.language,
-        notify: false,
-        scheduleUnknownRetry: true,
-        nowMs,
-      });
-      if (!accountHealth.healthy || accountHealth.status !== "healthy") {
-        summary.skipped += 1;
-        logDiagnostic("info", "auto_create_goal_suppressed", {
-          workflow: "auto_create_next_goal",
-          phase: "permission_preflight",
-          postId: sourcePostId,
-          reason: "account_recovery_required",
-        });
-        continue;
-      }
-
       const subredditDisplayName =
         sourceGoalData.subredditDisplayName ?? subreddit.name;
       const messages = getSubGoalPostMessages(sourceGoalData.language);
@@ -330,6 +359,7 @@ export async function processDueAutoCreateNextGoals({
         appSettings.promoSubreddit,
       );
 
+      creationAttempted = true;
       const creation = await createSubscriberGoal({
         reddit,
         redis,
@@ -350,12 +380,15 @@ export async function processDueAutoCreateNextGoals({
             ? { afterSubscribePreset: sourceGoalData.afterSubscribePreset }
             : {}),
           cancelPendingAutoCreateGoals: false,
+          automaticPermissionCheck: true,
           operationId: `auto-next:${sourcePostId}`,
           reconciliationContext: "automatic_successor",
           mutationLease,
           reconciliationNowMs: nowMs,
         },
       });
+      creationFinished = true;
+      await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
       if (creation.outcome === "superseded" || creation.outcome === "retired") {
         summary.skipped += 1;
         logDiagnostic("info", "auto_create_goal_recovery_stopped", {
@@ -433,6 +466,12 @@ export async function processDueAutoCreateNextGoals({
             sourcePostId,
             operationId,
           );
+          await notifyAutomaticGoalExhausted({
+            reddit,
+            redis,
+            operationId,
+            unresolved: true,
+          });
           summary.reconciliationExhausted =
             (summary.reconciliationExhausted ?? 0) + 1;
         }
@@ -458,6 +497,19 @@ export async function processDueAutoCreateNextGoals({
         error,
       );
       summary.failed += 1;
+      if (
+        !creationAttempted ||
+        creationFinished ||
+        isAutomaticGoalPrerequisiteError(error)
+      ) {
+        await scheduleAutoCreateNextGoalReconciliation(
+          redis,
+          sourcePostId,
+          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
+        );
+        summary.rescheduled += 1;
+        continue;
+      }
       const retry = await recordAutoCreateNextGoalFailure(
         redis,
         sourcePostId,
@@ -483,6 +535,12 @@ export async function processDueAutoCreateNextGoals({
           sourcePostId,
           retry.failureCount,
         );
+        await notifyAutomaticGoalExhausted({
+          reddit,
+          redis,
+          operationId,
+          unresolved: false,
+        });
         logDiagnostic(
           "error",
           "auto_create_goal_retries_exhausted",

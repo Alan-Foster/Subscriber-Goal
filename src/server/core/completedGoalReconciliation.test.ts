@@ -178,6 +178,7 @@ describe("reconcileCompletedGoal community mutation lease", () => {
       "t3_source",
       completedTime,
       completedTime + 1_000,
+      true,
     );
   });
 

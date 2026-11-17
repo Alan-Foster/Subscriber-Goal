@@ -1926,6 +1926,28 @@
         "countText": "Display-formatted count"
       },
       "protectedTokens": []
+    },
+    "outbound.automaticGoal.exhaustedSubject": {
+      "description": "Moderator notice for exhausted automatic goal creation: exhaustedSubject",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
+    "outbound.automaticGoal.exhaustedBody": {
+      "description": "Moderator notice for exhausted automatic goal creation: exhaustedBody",
+      "policy": "fallback",
+      "placeholders": {
+        "operationId": "Original automatic creation operation identifier"
+      },
+      "protectedTokens": []
+    },
+    "outbound.automaticGoal.unresolvedBody": {
+      "description": "Moderator notice for exhausted automatic goal creation: unresolvedBody",
+      "policy": "fallback",
+      "placeholders": {
+        "operationId": "Original automatic creation operation identifier"
+      },
+      "protectedTokens": []
     }
   },
   "locales": {
@@ -2490,7 +2512,10 @@
         "errors.create.permissionVerification": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}.",
         "errors.create.permissionVerificationRetry": "Reddit could not verify Subscriber Goal's moderator permissions in r/{subredditName}. Please try again shortly.",
         "metric.subscribersCommunity": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",
-        "metric.subscribersReached": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}"
+        "metric.subscribersReached": "{count, plural, one {{countText} subscriber} other {{countText} subscribers}}",
+        "outbound.automaticGoal.exhaustedSubject": "Subscriber Goal automatic creation needs attention",
+        "outbound.automaticGoal.exhaustedBody": "Subscriber Goal stopped automatic creation after repeated creation failures. Please check the app permissions and existing goal posts. An app upgrade can retry eligible work. Operation: {operationId}",
+        "outbound.automaticGoal.unresolvedBody": "Reddit may have accepted an automatic goal post, but Subscriber Goal could not confirm the result. Please review the existing posts before creating another goal. An app upgrade can resume lookup using the original operation without submitting another post. Operation: {operationId}"
       }
     },
     "es": {

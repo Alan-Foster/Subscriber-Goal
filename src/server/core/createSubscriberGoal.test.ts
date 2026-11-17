@@ -972,6 +972,74 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
+  it("resumes exhausted automatic lookup after upgrade under the original operation and marker", async () => {
+    const { rearmAutomaticGoalReconciliation } =
+      await import("./automaticGoalRetry");
+    const operationId = "auto-next:t3_upgrade-recovery";
+    const key = "subscriber_goal_creation_v1:" + operationId;
+    hoisted.redisHashes.set(
+      key,
+      new Map(
+        Object.entries({
+          status: "submission_unknown",
+          subredditName: "ExampleSub",
+          subredditId: "t5_example",
+          submissionMarker: "original-upgrade-marker",
+          reconciliationStatus: "exhausted",
+          reconciliationAttempts: "6",
+        }),
+      ),
+    );
+    const post = createPost();
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn(async () => [post]),
+    });
+    hoisted.reddit.getPostData.mockResolvedValue({
+      submissionMarker: "original-upgrade-marker",
+    });
+    expect(
+      await rearmAutomaticGoalReconciliation(
+        hoisted.redis as never,
+        operationId,
+        2_000,
+      ),
+    ).toBe(true);
+    await expect(
+      createGoal({
+        operationId,
+        automaticPermissionCheck: true,
+        reconciliationNowMs: 2_000,
+      }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    await expect(
+      createGoal({
+        operationId,
+        automaticPermissionCheck: true,
+        reconciliationNowMs: 3_000,
+      }),
+    ).resolves.toMatchObject({ post: { id: post.id } });
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.redisHashes.get(key)?.get("submissionMarker")).toBe(
+      "original-upgrade-marker",
+    );
+  });
+
+  it("keeps automatic pre-submit Redis failures outside the creation attempt budget", async () => {
+    hoisted.state.failSubmittingWrite = true;
+    await expect(
+      createGoal({
+        operationId: "auto-next:t3_redis-deferral",
+        automaticPermissionCheck: true,
+      }),
+    ).rejects.toMatchObject({
+      name: "AutomaticGoalPrerequisiteError",
+      cause: expect.objectContaining({ message: "submitting write failed" }),
+    });
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
   it("stops scanning after the sixth inconclusive reconciliation", async () => {
     const operationKey =
       "subscriber_goal_creation_v1:auto-next:t3_reconciliation-cutoff";

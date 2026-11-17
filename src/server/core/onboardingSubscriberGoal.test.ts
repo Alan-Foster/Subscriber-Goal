@@ -1274,7 +1274,9 @@ describe("onboarding subscriber goal", () => {
       status: "not_due",
     });
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"onboarding_goal_retry_scheduled"'),
+      expect.stringContaining(
+        '"event":"onboarding_prerequisite_retry_scheduled"',
+      ),
     );
   });
 
@@ -1378,7 +1380,9 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "install",
       nowMs,
     });
-    hoisted.getTrackedPosts.mockRejectedValue(new Error("redis unavailable"));
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new Error("confirmed creation failure"),
+    );
 
     let runAt = nowMs + onboardingGoalBaseDelayMs;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1400,10 +1404,11 @@ describe("onboarding subscriber goal", () => {
       resultStatus: "retry_exhausted",
       attempts: "3",
     });
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledTimes(3);
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
-  it("cancels automatic creation when Manage Posts cannot be verified", async () => {
+  it("defers unknown permission and resumes on a healthy due check", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
@@ -1423,7 +1428,7 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
-    ).resolves.toMatchObject({ status: "cancelled" });
+    ).resolves.toMatchObject({ status: "failed" });
     expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith(
       expect.objectContaining({
         notify: false,
@@ -1433,16 +1438,33 @@ describe("onboarding subscriber goal", () => {
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "complete",
-      resultStatus: "cancelled_permission",
+      status: "pending",
+      attempts: "0",
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"onboarding_goal_cancelled"'),
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
+    const pending = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "healthy",
+      healthy: true,
+      permissions: ["all"],
+    });
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: Number(pending.nextRunAt),
+      }),
+    ).resolves.toMatchObject({ status: "created" });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+    expect(
+      hoisted.createSubscriberGoal.mock.calls[0]?.[0]?.options.operationId,
+    ).toBe(pending.operationId);
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("does not retry an unknown permission result from the creation boundary", async () => {
+  it("retries an unknown permission result from the creation boundary", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -1462,11 +1484,141 @@ describe("onboarding subscriber goal", () => {
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "complete",
-      resultStatus: "retry_exhausted",
-      attempts: "1",
+      status: "pending",
+      attempts: "0",
     });
   });
+
+  it("preserves pending onboarding through repeated inventory uncertainty", async () => {
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    let runAt = Number(initial.nextRunAt);
+    hoisted.getTrackedPosts.mockRejectedValue(
+      new Error("temporary inventory error"),
+    );
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: runAt,
+      });
+      const state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      expect(state).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        operationId: initial.operationId,
+      });
+      expect(Number(state.nextRunAt) - runAt).toBeLessThanOrEqual(3_600_000);
+      runAt = Number(state.nextRunAt);
+    }
+    hoisted.getTrackedPosts.mockResolvedValue([]);
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: runAt,
+      }),
+    ).resolves.toMatchObject({ status: "created" });
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "sends one exhaustion notice across replay of the same onboarding operation (unresolved=%s)",
+    async (unresolved) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      hoisted.createSubscriberGoal.mockRejectedValue(
+        unresolved
+          ? new SubscriberGoalCreationOutcomeUnknownError(undefined, {
+              status: "exhausted",
+              attempts: 6,
+            } as never)
+          : new Error("confirmed creation failure"),
+      );
+      for (let replay = 0; replay < 2; replay++) {
+        await redis.hSet(onboardingSubscriberGoalStateKey, {
+          ...initial,
+          attempts: "2",
+          status: "pending",
+        });
+        await processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: Number(initial.nextRunAt),
+        });
+      }
+      expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+      expect(
+        reddit.modMail.createModNotification.mock.calls[0]?.[0],
+      ).toMatchObject({
+        bodyMarkdown: expect.stringContaining(initial.operationId!),
+      });
+    },
+  );
+
+  it.each(["lookup failure", "incident change"])(
+    "recovers onboarding after a real health check returns unknown from %s",
+    async (reason) => {
+      const actual =
+        await vi.importActual<typeof import("./appAccountHealth")>(
+          "./appAccountHealth",
+        );
+      hoisted.checkAppAccountHealth.mockImplementation(
+        actual.checkAppAccountHealth,
+      );
+      let first = true;
+      const permissions = vi.fn(async () => {
+        if (first) {
+          first = false;
+          if (reason === "lookup failure")
+            throw new Error("temporary permission lookup failure");
+          await redis.hSet("app_account_recovery_v1_state", {
+            status: "pending",
+            incidentToken: "changed",
+          });
+        }
+        return ["all"];
+      });
+      reddit.getAppUser.mockResolvedValue({
+        username: "subscriber-goal",
+        getModPermissionsForSubreddit: permissions,
+      } as never);
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      let state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: Number(state.nextRunAt),
+        }),
+      ).resolves.toMatchObject({ status: "failed" });
+      state = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      expect(state).toMatchObject({ status: "pending", attempts: "0" });
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: Number(state.nextRunAt),
+        }),
+      ).resolves.toMatchObject({ status: "created" });
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    },
+  );
 
   it("pauses armed creation and re-randomizes it when re-enabled", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);

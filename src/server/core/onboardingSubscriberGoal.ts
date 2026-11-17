@@ -1,4 +1,10 @@
 import {
+  nextAutomaticGoalPrerequisiteRetry,
+  resetAutomaticGoalPrerequisiteRetry,
+  isAutomaticGoalPrerequisiteError,
+  notifyAutomaticGoalExhausted,
+} from "./automaticGoalRetry";
+import {
   createDefaultAfterSubscribeAction,
   getDefaultAfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
@@ -792,6 +798,8 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     return { status: "not_due", ...base };
   }
 
+  let creationAttempted = false;
+  let creationFinished = false;
   let activeState = state;
   try {
     const reloaded = parseOnboardingState(
@@ -859,6 +867,54 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         lifecycleSource: reloaded.lifecycleSource,
         creationStaggerMinutes: reloaded.creationStaggerMinutes,
         eligibilitySubscriberCount: eligibility.subscriberCount,
+        ...inspected,
+      };
+    }
+
+    const health = await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      language: subreddit.language,
+      notify: false,
+      scheduleUnknownRetry: false,
+      nowMs,
+    });
+    if (health.status === "unknown") {
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "pending",
+        nextRunAt: await nextAutomaticGoalPrerequisiteRetry(
+          redis,
+          reloaded.operationId,
+          nowMs,
+        ),
+      });
+      return { status: "failed", ...inspected };
+    }
+    if (!health.healthy || health.status !== "healthy") {
+      const errorMessage =
+        "Subscriber Goal lacks verified Manage Posts permission.";
+      await saveOnboardingState(redis, {
+        ...reloaded,
+        status: "complete",
+        completedAt: nowMs,
+        resultStatus: "cancelled_permission",
+        errorMessage,
+      });
+      logDiagnostic("warn", "onboarding_goal_cancelled", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "permission_check",
+        lifecycleSource: reloaded.lifecycleSource,
+        operationId: reloaded.operationId,
+        reason: "manage_posts_permission",
+      });
+      return {
+        status: "cancelled",
+        lifecycleSource: reloaded.lifecycleSource,
+        creationStaggerMinutes: reloaded.creationStaggerMinutes,
+        errorMessage,
         ...inspected,
       };
     }
@@ -970,42 +1026,6 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         postId: existing.postId,
         existingSource: existing.source!,
         lifecycleSource: reloaded.lifecycleSource,
-        ...inspected,
-      };
-    }
-
-    const health = await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: subreddit.language,
-      notify: false,
-      scheduleUnknownRetry: false,
-      nowMs,
-    });
-    if (!health.healthy || health.status !== "healthy") {
-      const errorMessage =
-        "Subscriber Goal lacks verified Manage Posts permission.";
-      await saveOnboardingState(redis, {
-        ...reloaded,
-        status: "complete",
-        completedAt: nowMs,
-        resultStatus: "cancelled_permission",
-        errorMessage,
-      });
-      logDiagnostic("warn", "onboarding_goal_cancelled", {
-        workflow: "onboarding_subscriber_goal",
-        phase: "permission_check",
-        lifecycleSource: reloaded.lifecycleSource,
-        operationId: reloaded.operationId,
-        reason: "manage_posts_permission",
-      });
-      return {
-        status: "cancelled",
-        lifecycleSource: reloaded.lifecycleSource,
-        creationStaggerMinutes: reloaded.creationStaggerMinutes,
-        errorMessage,
         ...inspected,
       };
     }
@@ -1187,6 +1207,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       startedAt: nowMs,
       startedAtIso: new Date(nowMs).toISOString(),
     });
+    creationAttempted = true;
     const creation = await createSubscriberGoal({
       reddit,
       redis,
@@ -1215,6 +1236,8 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         reconciliationNowMs: nowMs,
       },
     });
+    creationFinished = true;
+    await resetAutomaticGoalPrerequisiteRetry(redis, reloaded.operationId);
     if (creation.outcome === "superseded" || creation.outcome === "retired") {
       const resolvedPostId = creation.supersedingPostId ?? creation.post.id;
       await saveOnboardingState(redis, {
@@ -1323,6 +1346,13 @@ async function processDueOnboardingSubscriberGoalUnderLease({
           : "submission_reconciliation_exhausted",
         errorMessage,
       });
+      if (!pending)
+        await notifyAutomaticGoalExhausted({
+          reddit,
+          redis,
+          operationId: activeState.operationId,
+          unresolved: true,
+        });
       logDiagnostic(
         pending ? "warn" : "error",
         "onboarding_goal_submission_unresolved",
@@ -1345,6 +1375,33 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       };
     }
     try {
+      if (
+        !creationAttempted ||
+        creationFinished ||
+        isAutomaticGoalPrerequisiteError(error)
+      ) {
+        await saveOnboardingState(redis, {
+          ...activeState,
+          status: "pending",
+          nextRunAt: await nextAutomaticGoalPrerequisiteRetry(
+            redis,
+            activeState.operationId,
+            nowMs,
+          ),
+          errorMessage,
+        });
+        logDiagnostic(
+          "warn",
+          "onboarding_prerequisite_retry_scheduled",
+          {
+            workflow: "onboarding_subscriber_goal",
+            phase: "prerequisite",
+            operationId: activeState.operationId,
+          },
+          error,
+        );
+        return { status: "failed", errorMessage, ...inspected };
+      }
       const attempts = (activeState.attempts ?? 0) + 1;
       const terminal =
         attempts >= onboardingMaxAttempts || isPermanentOnboardingError(error);
@@ -1359,6 +1416,13 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         resultStatus: terminal ? "retry_exhausted" : "failed",
         errorMessage,
       });
+      if (terminal)
+        await notifyAutomaticGoalExhausted({
+          reddit,
+          redis,
+          operationId: activeState.operationId,
+          unresolved: false,
+        });
       if (!terminal)
         logDiagnostic(
           "warn",
@@ -3111,8 +3175,7 @@ function isPermanentOnboardingError(error: unknown): boolean {
   const name = error instanceof Error ? error.name : "";
   return (
     name === "ProhibitedSubredditError" ||
-    name === "SubscriberGoalModeratorPermissionError" ||
-    name === "SubscriberGoalPermissionVerificationError"
+    name === "SubscriberGoalModeratorPermissionError"
   );
 }
 
