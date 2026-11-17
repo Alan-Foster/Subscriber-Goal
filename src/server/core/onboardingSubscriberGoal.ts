@@ -120,8 +120,6 @@ export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v4";
 export const AUTOMATIC_ONBOARDING_ENABLED = true;
 export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
 export const onboardingTinySubscriberThreshold = 1_000_000;
-export const onboardingRecentPostScanLimit = 1_000;
-export const onboardingRecentPostPageSize = 100;
 export const onboardingAuthorSearchLimit = 100;
 export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
 export const onboardingSubscriberGoalInitializationLockTtlMs = 60 * 1000;
@@ -1572,16 +1570,6 @@ export async function findValidSubscriberGoals(
       .all()) as CandidatePost[];
     diagnostics.searchInspected = searchedPosts.length;
     for (const post of searchedPosts) await inspect(post, "search", false);
-
-    const recentPosts = (await reddit
-      .getNewPosts({
-        subredditName: subreddit.name,
-        limit: onboardingRecentPostScanLimit,
-        pageSize: onboardingRecentPostPageSize,
-      })
-      .all()) as CandidatePost[];
-    diagnostics.recentInspected = recentPosts.length;
-    for (const post of recentPosts) await inspect(post, "recent", false);
   }
 
   return { ...diagnostics, candidates };
