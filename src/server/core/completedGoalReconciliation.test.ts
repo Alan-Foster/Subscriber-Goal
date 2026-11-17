@@ -152,6 +152,35 @@ describe("reconcileCompletedGoal community mutation lease", () => {
     expect(redis.values.get(communityGoalMutationLockKey)).toBe("inherited");
   });
 
+  it("repairs legacy false state using the original completion deadline", async () => {
+    const completedTime = 10_000;
+    hoisted.repairAutoCreateNextGoal.mockResolvedValue({
+      status: "scheduled",
+      runAt: completedTime + 24 * 60 * 60 * 1000,
+      failureCount: 0,
+    });
+
+    await expect(
+      reconcileCompletedGoal({
+        reddit: {} as never,
+        redis: redis as never,
+        lifecycleSource: "upgrade",
+        sourcePostId: "t3_source",
+        completedTime,
+        autoCreateNextGoal: false,
+        nowMs: completedTime + 1_000,
+        appSettings,
+      }),
+    ).resolves.toMatchObject({ outcome: "replacement_scheduled" });
+
+    expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledWith(
+      redis,
+      "t3_source",
+      completedTime,
+      completedTime + 1_000,
+    );
+  });
+
   it("leaves suppression and queue state intact when lease acquisition contends", async () => {
     redis.values.set(communityGoalMutationLockKey, "other-owner");
 

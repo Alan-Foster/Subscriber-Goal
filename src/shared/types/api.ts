@@ -276,7 +276,6 @@ type CreateGoalDetailsFormValues = {
 export type CreateSubscriberGoalFormValues = CreateGoalDetailsFormValues & {
   subscriberGoal?: number;
   crosspost?: boolean;
-  autoCreateNextGoal?: boolean;
 };
 
 export type CreateSubscribeOnlyFormValues = CreateGoalDetailsFormValues;

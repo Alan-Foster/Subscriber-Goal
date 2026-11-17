@@ -201,7 +201,11 @@ async function reconcileOnboardingForLifecycleUnderLease(
             authoritativePostId: highlighted.postId,
           });
         }
-        if (lifecycleSource === "upgrade") {
+        if (
+          lifecycleSource === "upgrade" &&
+          highlighted.autoCreateNextGoalConfigured &&
+          !highlighted.autoCreateNextGoalWasDisabled
+        ) {
           const preserveCompletedDecision = async (
             outcome: CompletedGoalReconciliationOutcome,
             terminalPostId: string,
@@ -254,21 +258,6 @@ async function reconcileOnboardingForLifecycleUnderLease(
               operationId,
               sourcePostId: highlighted.postId,
               postId: successor,
-            };
-          }
-          if (
-            highlighted.autoCreateNextGoalConfigured &&
-            !highlighted.autoCreateNextGoal
-          ) {
-            await cancelAutoCreateNextGoal(redis, highlighted.postId);
-            await preserveCompletedDecision(
-              "completed_auto_disabled",
-              highlighted.postId,
-            );
-            return {
-              status: "completed_auto_disabled",
-              operationId,
-              sourcePostId: highlighted.postId,
             };
           }
           if (!allowOnboardingRearm) {

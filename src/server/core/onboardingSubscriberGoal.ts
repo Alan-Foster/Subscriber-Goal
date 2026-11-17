@@ -290,6 +290,7 @@ export type OnboardingGoalCandidate = {
   completedTime?: number;
   autoCreateNextGoal?: boolean;
   autoCreateNextGoalConfigured?: boolean;
+  autoCreateNextGoalWasDisabled?: boolean;
   discoveryOrder: number;
 };
 
@@ -322,6 +323,7 @@ export type OnboardingHighlightEnsuranceResult =
     completedTime?: number;
     autoCreateNextGoal?: boolean;
     autoCreateNextGoalConfigured?: boolean;
+    autoCreateNextGoalWasDisabled?: boolean;
     supersededCompletedPostIds?: string[];
     errorMessage?: string;
   };
@@ -1650,6 +1652,8 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
       candidate.autoCreateNextGoalConfigured =
         goalData.autoCreateNextGoalConfigured;
+      candidate.autoCreateNextGoalWasDisabled =
+        goalData.autoCreateNextGoalWasDisabled;
       if (!candidate.completedTime && subscriberCount === undefined) {
         subscriberCount = (await reddit.getCurrentSubreddit())
           .numberOfSubscribers;
@@ -1890,6 +1894,12 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
           : {
               autoCreateNextGoalConfigured:
                 selected.autoCreateNextGoalConfigured,
+            }),
+        ...(selected.autoCreateNextGoalWasDisabled === undefined
+          ? {}
+          : {
+              autoCreateNextGoalWasDisabled:
+                selected.autoCreateNextGoalWasDisabled,
             }),
       };
       logHighlightEnsurance(result.status, result);

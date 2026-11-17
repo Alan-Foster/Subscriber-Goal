@@ -55,9 +55,9 @@ export async function reconcileCompletedGoal({
   if (lifecycleSource !== "upgrade" && lifecycleSource !== "install") {
     return { outcome: "completed_no_recovery", sourcePostId };
   }
-  if (!autoCreateNextGoal) {
-    return { outcome: "completed_auto_disabled", sourcePostId };
-  }
+  // Retained in the call shape while old persisted records are migrated.
+  // A legacy false value no longer disables mandatory recovery.
+  void autoCreateNextGoal;
 
   return withCommunityGoalMutationLease(
     redis,

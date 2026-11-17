@@ -47,6 +47,7 @@ const hoisted = vi.hoisted(() => ({
   getSubscriberGoalCandidatePostIds: vi.fn(),
   checkAppAccountHealth: vi.fn(),
   findLiveHighlightedSubscriberGoalCandidates: vi.fn(),
+  ensureExistingSubscriberGoalHighlighted: vi.fn(),
   reddit: {
     getPostById: vi.fn(),
     getCurrentSubreddit: vi.fn(),
@@ -140,6 +141,11 @@ vi.mock("../data/liveSubscriberGoalHighlights", () => ({
     hoisted.findLiveHighlightedSubscriberGoalCandidates,
 }));
 
+vi.mock("./onboardingSubscriberGoal", () => ({
+  ensureExistingSubscriberGoalHighlighted:
+    hoisted.ensureExistingSubscriberGoalHighlighted,
+}));
+
 vi.mock("../utils/highlightFailureNotifications", () => ({
   getPostUrl: vi.fn((post: { permalink?: string; url?: string }) =>
     post.permalink ? `https://reddit.com${post.permalink}` : post.url,
@@ -156,6 +162,10 @@ describe("processDueAutoCreateNextGoals", () => {
     hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(0);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([]);
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "missing",
+      eligiblePostIds: [],
+    });
     hoisted.checkCompletionStatus.mockResolvedValue(undefined);
     hoisted.checkAppAccountHealth.mockResolvedValue({
       status: "healthy",
@@ -318,6 +328,12 @@ describe("processDueAutoCreateNextGoals", () => {
 
   it("lets a valid Tiny primary suppress a due milestone successor", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "existing",
+      postId: "t3_tiny",
+      classification: "tiny",
+      eligiblePostIds: ["t3_tiny"],
+    });
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(["t3_tiny"]);
     hoisted.redisHashes.set(
       "subscriber_goals",
@@ -340,9 +356,13 @@ describe("processDueAutoCreateNextGoals", () => {
       }),
     ).resolves.toMatchObject({ due: 1, created: 0, skipped: 1 });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", expect.any(Number));
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
-  it("adopts a newer completed classic instead of creating from an older source", async () => {
+  it("does not let a newer completed classic suppress required creation", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
       "t3_source",
@@ -373,17 +393,60 @@ describe("processDueAutoCreateNextGoals", () => {
         redis: hoisted.redis as never,
         appSettings: baseSettings,
       }),
-    ).resolves.toMatchObject({ due: 1, created: 0, skipped: 1 });
+    ).resolves.toMatchObject({ due: 1, created: 1, skipped: 0 });
     expect(
       hoisted.redisHashes
         .get("auto_create_next_goal_v1_successors")
         ?.get("t3_source"),
-    ).toBe("t3_newer_completed");
+    ).toBe("t3_next");
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+  });
+
+  it("reuses an older unpinned 75/100 goal when the 75/75 source completes", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_goal_75"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 75,
+      completedTime: 1_000,
+      autoCreateNextGoal: true,
+      language: "en",
+    });
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_goal_75",
+      createdAt: new Date("2026-09-02T00:00:00Z"),
+    });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockImplementation(
+      async () => {
+        await hoisted.redis.hSet("auto_create_next_goal_v1_successors", {
+          t3_goal_75: "t3_goal_100",
+        });
+        return {
+          status: "existing",
+          postId: "t3_goal_100",
+          classification: "classic",
+          eligiblePostIds: ["t3_goal_100"],
+          unhighlightedEligiblePostIds: [],
+        };
+      },
+    );
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+      }),
+    ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
+
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(
+      hoisted.redisHashes
+        .get("auto_create_next_goal_v1_successors")
+        ?.get("t3_goal_75"),
+    ).toBe("t3_goal_100");
     expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       hoisted.redis,
-      "t3_source",
+      "t3_goal_75",
     );
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
   it("creates the next milestone below the onboarding minimum and carries display settings forward", async () => {
@@ -438,8 +501,9 @@ describe("processDueAutoCreateNextGoals", () => {
         }),
       },
     });
-    expect(hoisted.cancelAllAutoCreateNextGoals).toHaveBeenCalledWith(
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
       hoisted.redis,
+      "t3_source",
     );
   });
 
@@ -572,6 +636,19 @@ describe("processDueAutoCreateNextGoals", () => {
 
   it("adopts an untracked incomplete highlighted classic as the live successor", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockImplementation(
+      async () => {
+        await hoisted.redis.hSet("auto_create_next_goal_v1_successors", {
+          t3_source: "t3_live",
+        });
+        return {
+          status: "existing",
+          postId: "t3_live",
+          classification: "classic",
+          eligiblePostIds: ["t3_live"],
+        };
+      },
+    );
     hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
       {
         postId: "t3_live",
@@ -622,6 +699,12 @@ describe("processDueAutoCreateNextGoals", () => {
     "preserves a highlighted %s app-owned experience without mapping a classic successor",
     async (classification, classificationConfidence) => {
       hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+        status: "existing",
+        postId: "t3_live",
+        classification,
+        eligiblePostIds: classification === "ambiguous" ? [] : ["t3_live"],
+      });
       hoisted.findLiveHighlightedSubscriberGoalCandidates.mockResolvedValue([
         {
           postId: "t3_live",
@@ -712,20 +795,14 @@ describe("processDueAutoCreateNextGoals", () => {
       }),
     ).resolves.toMatchObject({ created: 1, skipped: 0, failed: 0 });
 
-    expect(hoisted.checkCompletionStatus).toHaveBeenCalledWith(
-      hoisted.reddit,
-      hoisted.redis,
-      "t3_reached",
-      expect.objectContaining({
-        scheduleAutomaticSuccessor: false,
-        automaticSuccessorSuppression: "auto_goal_reconciliation",
-      }),
-    );
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).toHaveBeenCalledOnce();
   });
 
   it("reschedules when the live Highlights check fails", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-    hoisted.findLiveHighlightedSubscriberGoalCandidates.mockRejectedValue(
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockRejectedValue(
       new Error("highlights unavailable"),
     );
 
@@ -741,7 +818,10 @@ describe("processDueAutoCreateNextGoals", () => {
       rescheduled: 1,
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.recordAutoCreateNextGoalFailure).toHaveBeenCalled();
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", expect.any(Number));
   });
 
   it("inherits the source goal language instead of re-detecting the subreddit language", async () => {

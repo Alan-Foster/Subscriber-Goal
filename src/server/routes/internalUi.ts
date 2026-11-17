@@ -1207,13 +1207,6 @@ function buildCreateGoalDetailsForm(
           sourceSubredditIsNsfw,
           draft.language,
         ),
-        {
-          name: "autoCreateNextGoal",
-          label: translate(draft.language, "moderator.details.autoNext"),
-          type: "boolean",
-          helpText: translate(draft.language, "moderator.details.autoNextHelp"),
-          defaultValue: true,
-        },
         ...(shouldCrosspost
           ? [
               {
@@ -1616,9 +1609,6 @@ async function submitCreateGoalStepTwo(
               "crosspost" in values &&
               values.crosspost === true,
             afterSubscribePreset,
-            autoCreateNextGoal:
-              !("autoCreateNextGoal" in values) ||
-              values.autoCreateNextGoal !== false,
           };
         }
 
@@ -1851,10 +1841,6 @@ async function submitCreateGoalFollowUp(
         }
         const persistedAfterSubscribePreset = normalizedPreset;
         const appSettings = getAppSettings();
-        const autoCreateNextGoal =
-          draft.details.kind === "subscriber-goal"
-            ? draft.details.autoCreateNextGoal
-            : false;
         const crosspostEligible = isCrosspostEligible(
           subreddit,
           appSettings.promoSubreddit,
@@ -1886,7 +1872,7 @@ async function submitCreateGoalFollowUp(
                   ? defaultAfterSubscribeColorTheme
                   : draft.details.colorTheme,
             postHeight: draft.postHeight,
-            autoCreateNextGoal,
+            autoCreateNextGoal: draft.details.kind === "subscriber-goal",
             language: draft.language,
             afterSubscribeAction: afterSubscribeResult.action,
             afterSubscribePreset: persistedAfterSubscribePreset,

@@ -595,7 +595,7 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
-  it("onboards a completed legacy goal whose auto setting was never recorded", async () => {
+  it("repairs a completed legacy goal whose auto setting was never recorded", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_legacy_unconfigured" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -609,13 +609,17 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "rearmed" });
+    ).resolves.toMatchObject({ status: "replacement_scheduled" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      intent: "orphaned_completed_goal",
-      replacementSourcePostId: post.id,
+      status: "complete",
+      resultStatus: "replacement_scheduled",
+      postId: post.id,
     });
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs - 6 * 24 * 60 * 60 * 1000 },
+    ]);
   });
 
   it("preserves an existing successor deadline exactly across an upgrade", async () => {
@@ -764,7 +768,7 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
-  it("does not replace or rearm a completed goal whose automatic replacement is disabled", async () => {
+  it("recovers mandatory successor work for a legacy disabled goal", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_opted_out" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -779,23 +783,21 @@ describe("onboarding lifecycle reconciliation", () => {
         { lifecycleSource: "upgrade", nowMs },
       ),
     ).resolves.toMatchObject({
-      status: "completed_auto_disabled",
+      status: "replacement_scheduled",
       sourcePostId: post.id,
     });
     expect(post.highlight).not.toHaveBeenCalled();
-    expect(
-      lifecycleHoisted.processDueAutoCreateNextGoals,
-    ).not.toHaveBeenCalled();
+    expect(lifecycleHoisted.processDueAutoCreateNextGoals).toHaveBeenCalled();
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "complete",
-      resultStatus: "completed_auto_disabled",
+      resultStatus: "replacement_scheduled",
       postId: post.id,
     });
   });
 
-  it("lets the newest completed goal's explicit opt-out supersede older enabled work", async () => {
+  it("moves mandatory work to the newest completed source despite a legacy opt-out", async () => {
     const enabled = makeLifecycleGoalPost({
       id: "t3_enabled",
       createdAt: nowMs - 120_000,
@@ -827,17 +829,22 @@ describe("onboarding lifecycle reconciliation", () => {
         { lifecycleSource: "upgrade", nowMs },
       ),
     ).resolves.toMatchObject({
-      status: "completed_auto_disabled",
+      status: "replacement_scheduled",
       sourcePostId: newerDisabled.id,
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "complete",
-      resultStatus: "completed_auto_disabled",
+      resultStatus: "replacement_scheduled",
       postId: newerDisabled.id,
     });
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      {
+        member: newerDisabled.id,
+        score: nowMs - 12 * 60 * 60 * 1000,
+      },
+    ]);
     await expect(
       redis.hGet(autoCreateNextGoalRetryAttemptsKey, enabled.id),
     ).resolves.toBeUndefined();
@@ -934,7 +941,7 @@ describe("onboarding lifecycle reconciliation", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("preserves successor opt-out during reinstall", async () => {
+  it("ignores a legacy successor opt-out during reinstall", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_install_opted_out" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -948,12 +955,12 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "install", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "completed_auto_disabled" });
+    ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
-    expect(
-      lifecycleHoisted.processDueAutoCreateNextGoals,
-    ).not.toHaveBeenCalled();
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    expect(lifecycleHoisted.processDueAutoCreateNextGoals).toHaveBeenCalled();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs - 24 * 60 * 60 * 1000 },
+    ]);
   });
 
   it("preserves an existing replacement retry and its backoff", async () => {

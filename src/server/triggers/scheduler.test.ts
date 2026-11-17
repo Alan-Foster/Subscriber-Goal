@@ -60,6 +60,7 @@ const hoisted = vi.hoisted(() => ({
   cancelUpdates: vi.fn(),
   untrackPost: vi.fn(),
   cancelAutoCreateNextGoal: vi.fn(),
+  clearAutomaticSuccessorSuppression: vi.fn(),
   getSubGoalData: vi.fn(),
   checkCompletionStatus: vi.fn(),
   repairAutoCreateNextGoal: vi.fn(),
@@ -141,6 +142,8 @@ vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
 vi.mock("../data/subGoalData", () => ({
   autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
+  clearAutomaticSuccessorSuppression:
+    hoisted.clearAutomaticSuccessorSuppression,
   checkCompletionStatus: hoisted.checkCompletionStatus,
   getSubGoalData: hoisted.getSubGoalData,
   repairAutoCreateNextGoal: hoisted.repairAutoCreateNextGoal,
@@ -904,7 +907,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
       await onPostsUpdaterJob();
 
-      expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+      if (_label === "disabled") {
+        expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledWith(
+          expect.anything(),
+          "t3_terminal",
+          1_000,
+        );
+      } else {
+        expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+      }
       expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
         expect.anything(),
         "t3_terminal",
@@ -938,7 +949,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
   });
 
   it.each(["onboarding_reconciliation", "unknown"])(
-    "does not repair a completed source with %s successor suppression",
+    "clears %s successor suppression and repairs mandatory work",
     async (automaticSuccessorSuppression) => {
       hoisted.context.subredditName = "CorporateGifts";
       hoisted.getQueuedUpdates.mockResolvedValue(["t3_suppressed"]);
@@ -955,7 +966,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
       await onPostsUpdaterJob();
 
-      expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
+      expect(hoisted.clearAutomaticSuccessorSuppression).toHaveBeenCalledWith(
+        expect.anything(),
+        "t3_suppressed",
+      );
+      expect(hoisted.repairAutoCreateNextGoal).toHaveBeenCalledWith(
+        expect.anything(),
+        "t3_suppressed",
+        1_000,
+      );
       expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
         expect.anything(),
         "t3_suppressed",
