@@ -316,7 +316,7 @@ describe("Community Highlights manager", () => {
     expect(harness.getIds()).toEqual(["t3_target", "t3_b"]);
   });
 
-  it("preserves the live list after a concurrent moderator replacement", async () => {
+  it("rolls back when a concurrent sixth highlight makes the app write seventh", async () => {
     const original = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e"];
     const harness = createHarness(original);
     harness.target.highlight.mockImplementationOnce(async () => {
@@ -333,15 +333,15 @@ describe("Community Highlights manager", () => {
     );
 
     expect(result).toMatchObject({
-      status: "highlighted",
+      status: "not_highlighted",
       capacityOutcome: "concurrent_change",
-      rollbackOutcome: "not_needed",
+      rollbackOutcome: "restored",
     });
     expect(result.issues.map(({ category }) => category)).toContain(
       "concurrency",
     );
     expect(harness.getIds()).toEqual([
-      "t3_target",
+      "t3_a",
       "t3_b",
       "t3_c",
       "t3_d",

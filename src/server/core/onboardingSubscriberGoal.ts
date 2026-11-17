@@ -1753,6 +1753,11 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
         : undefined;
       if (newestActiveClassic) {
         for (const completedClassic of completedGoals) {
+          const existingSuccessor = await redis.hGet(
+            autoCreateNextGoalSuccessorsKey,
+            completedClassic.postId,
+          );
+          if (existingSuccessor) continue;
           await redis.hSet(autoCreateNextGoalSuccessorsKey, {
             [completedClassic.postId]: newestActiveClassic.postId,
           });

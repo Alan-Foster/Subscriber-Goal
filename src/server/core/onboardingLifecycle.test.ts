@@ -1314,6 +1314,9 @@ describe("existing goal highlight ensurance", () => {
       t3_completed_two_completed_time: String(nowMs - 10_000),
       t3_active_goal_goal: "3000",
     });
+    await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+      [firstCompleted.id]: "t3_existing_successor",
+    });
 
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([firstCompleted, secondCompleted, active]) as never,
@@ -1329,7 +1332,7 @@ describe("existing goal highlight ensurance", () => {
     expect(active.unhighlight).not.toHaveBeenCalled();
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, firstCompleted.id),
-    ).resolves.toBe(active.id);
+    ).resolves.toBe("t3_existing_successor");
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, secondCompleted.id),
     ).resolves.toBe(active.id);
