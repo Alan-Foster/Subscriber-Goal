@@ -26,11 +26,22 @@ import { postOperationalStateKeyPrefix } from "../data/postOperationalState";
 
 const lifecycleHoisted = vi.hoisted(() => ({
   processDueAutoCreateNextGoals: vi.fn(),
+  createSubscriberGoal: vi.fn(),
 }));
 
-vi.mock("./autoCreateNextGoal", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./autoCreateNextGoal")>()),
-  processDueAutoCreateNextGoals: lifecycleHoisted.processDueAutoCreateNextGoals,
+vi.mock("./autoCreateNextGoal", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./autoCreateNextGoal")>();
+  return {
+    ...actual,
+    actualProcessDueAutoCreateNextGoals: actual.processDueAutoCreateNextGoals,
+    processDueAutoCreateNextGoals:
+      lifecycleHoisted.processDueAutoCreateNextGoals,
+  };
+});
+
+vi.mock("./createSubscriberGoal", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./createSubscriberGoal")>()),
+  createSubscriberGoal: lifecycleHoisted.createSubscriberGoal,
 }));
 
 class InMemoryRedis {
@@ -81,6 +92,14 @@ class InMemoryRedis {
     this.hashes.set(key, hash);
   }
 
+  async hIncrBy(key: string, field: string, increment: number): Promise<number> {
+    const hash = this.hashes.get(key) ?? new Map<string, string>();
+    const value = Number(hash.get(field) ?? 0) + increment;
+    hash.set(field, String(value));
+    this.hashes.set(key, hash);
+    return value;
+  }
+
   async zRange(key: string): Promise<{ member: string; score: number }[]> {
     return [...(this.sortedSets.get(key) ?? [])]
       .map(([member, score]) => ({ member, score }))
@@ -94,6 +113,10 @@ class InMemoryRedis {
     const set = this.sortedSets.get(key) ?? new Map<string, number>();
     set.set(entry.member, entry.score);
     this.sortedSets.set(key, set);
+  }
+
+  async zScore(key: string, member: string): Promise<number | undefined> {
+    return this.sortedSets.get(key)?.get(member);
   }
 
   async zRem(key: string, members: string[]): Promise<void> {
@@ -284,6 +307,16 @@ describe("onboarding lifecycle reconciliation", () => {
       failed: 0,
       rescheduled: 0,
       exhausted: 0,
+    });
+    lifecycleHoisted.createSubscriberGoal.mockReset();
+    lifecycleHoisted.createSubscriberGoal.mockResolvedValue({
+      outcome: "created",
+      post: {
+        id: "t3_recovered_successor",
+        title: "Recovered successor",
+        url: "https://www.reddit.com/r/ExampleSub/comments/recovered",
+      },
+      highlightResult: { issues: [] },
     });
   });
 
@@ -715,6 +748,54 @@ describe("onboarding lifecycle reconciliation", () => {
     await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
       { member: completed.id, score: deferredRecheckAt },
     ]);
+  });
+
+  it("seeds and resumes legacy successor recovery around a protected Tiny post", async () => {
+    const completed = makeLifecycleGoalPost({ id: "t3_legacy_completed" });
+    const tiny = {
+      ...makeLifecycleGoalPost({ id: "t3_legacy_tiny", highlighted: true }),
+      postData: { postKind: "subscribe-only-v1", postHeight: "tiny" },
+      removedByCategory: undefined as string | undefined,
+    };
+    await seedGoalData(redis, completed.id, {
+      goal: 1_500,
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+      autoCreateNextGoal: false,
+    });
+    const autoCreateNextGoalModule = (await import("./autoCreateNextGoal")) as
+      typeof import("./autoCreateNextGoal") & {
+        actualProcessDueAutoCreateNextGoals: typeof import("./autoCreateNextGoal").processDueAutoCreateNextGoals;
+      };
+    lifecycleHoisted.processDueAutoCreateNextGoals.mockImplementation(
+      autoCreateNextGoalModule.actualProcessDueAutoCreateNextGoals,
+    );
+    const reddit = createReddit({ posts: [completed, tiny] });
+
+    await expect(
+      reconcileOnboardingForLifecycle(reddit as never, redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      }),
+    ).resolves.toMatchObject({ status: "existing", postId: tiny.id });
+
+    expect(lifecycleHoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    const [deferred] = await redis.zRange(autoCreateNextGoalQueueKey);
+    expect(deferred).toMatchObject({ member: completed.id });
+    expect(deferred!.score).toBeGreaterThan(nowMs);
+
+    tiny.removedByCategory = "deleted";
+    await expect(
+      autoCreateNextGoalModule.actualProcessDueAutoCreateNextGoals({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: {
+          promoSubreddit: "SubscriberGoal",
+        } as never,
+        nowMs: deferred!.score,
+      }),
+    ).resolves.toMatchObject({ created: 1 });
+    expect(lifecycleHoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
   });
 
   it("keeps failed overdue work in successor retry recovery", async () => {

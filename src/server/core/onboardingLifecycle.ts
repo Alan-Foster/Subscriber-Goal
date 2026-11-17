@@ -269,6 +269,32 @@ async function reconcileOnboardingForLifecycleUnderLease(
           (highlighted.classification === "tiny" ||
             highlighted.classification === "cta")
         ) {
+          for (const supersededPostId of
+            highlighted.supersededCompletedPostIds ?? []) {
+            await cancelAutoCreateNextGoal(redis, supersededPostId);
+          }
+          if (highlighted.deferredCompletedGoal) {
+            const deferred = highlighted.deferredCompletedGoal;
+            const recovery = await reconcileCompletedGoal({
+              reddit,
+              redis,
+              appSettings,
+              lifecycleSource,
+              sourcePostId: deferred.postId,
+              completedTime: deferred.completedTime,
+              autoCreateNextGoal: deferred.autoCreateNextGoal,
+              nowMs,
+              mutationLease,
+            });
+            logDiagnostic("info", "upgrade_protected_successor_reconciled", {
+              workflow: "onboarding_lifecycle",
+              phase: "upgrade_classification",
+              lifecycleSource,
+              protectedPostId: highlighted.postId,
+              sourcePostId: deferred.postId,
+              outcome: recovery.outcome,
+            });
+          }
           logDiagnostic("info", "upgrade_protected_experience_preserved", {
             workflow: "onboarding_lifecycle",
             phase: "upgrade_classification",

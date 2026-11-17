@@ -322,6 +322,11 @@ export type OnboardingHighlightEnsuranceResult =
     completedTime?: number;
     autoCreateNextGoal?: boolean;
     autoCreateNextGoalConfigured?: boolean;
+    deferredCompletedGoal?: {
+      postId: string;
+      completedTime: number;
+      autoCreateNextGoal: boolean;
+    };
     supersededCompletedPostIds?: string[];
     errorMessage?: string;
   };
@@ -1842,6 +1847,17 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       const selectedReconciliation =
         failed[0] ?? degraded[0] ?? reconciliations[0]!;
       const { candidate: selected, highlightResult } = selectedReconciliation;
+      const deferredCompletedGoal =
+        activeGoals.length === 0 && completedGoals.length > 0
+          ? newestGoalCandidate(completedGoals)
+          : undefined;
+      const supersededCompletedPostIds = deferredCompletedGoal
+        ? completedGoals
+            .filter(
+              (candidate) => candidate.postId !== deferredCompletedGoal.postId,
+            )
+            .map((candidate) => candidate.postId)
+        : [];
       const result: OnboardingHighlightEnsuranceResult = {
         status: failed.length > 0 ? "existing_not_highlighted" : "existing",
         ...base,
@@ -1852,6 +1868,19 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
         selectedWasAlreadyHighlighted: selected.isHighlighted,
         ...reconciliationDetails(highlightResult),
         notificationOutcome: selectedReconciliation.notificationOutcome,
+        ...(deferredCompletedGoal?.completedTime === undefined
+          ? {}
+          : {
+              deferredCompletedGoal: {
+                postId: deferredCompletedGoal.postId,
+                completedTime: deferredCompletedGoal.completedTime,
+                autoCreateNextGoal:
+                  deferredCompletedGoal.autoCreateNextGoal ?? false,
+              },
+            }),
+        ...(supersededCompletedPostIds.length > 0
+          ? { supersededCompletedPostIds }
+          : {}),
       };
       logHighlightEnsurance(result.status, result);
       return result;
