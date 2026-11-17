@@ -41,6 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- 2.7.3 - Fixed a bug where goals break if they are caught by AutoMod / removed then approved.
 - 2.7.2 - Finished 2 button implementation. Improved cron recovery and transient auto-goal failures.
 - 2.7.1 - Combined header and logo to one line. Goals now have 2 buttons when space permits. All goal completion now result in a new goal 24 hours later. Improvement to auto-pin system. Devvit 0.15.4
 - 2.6.2 - Fixed the Goal Delete tool toast message and other wording.
