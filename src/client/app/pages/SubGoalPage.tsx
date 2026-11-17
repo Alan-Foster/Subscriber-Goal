@@ -72,9 +72,6 @@ export const SubGoalPage = ({
   const handleButtonClick = onSubscribe;
   const iconAction = state.subscribed ? undefined : onSubscribe;
   const showNotice = Boolean(notice);
-  const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
-  const balanceShareUsernameControlOnDesktop =
-    state.postHeight === "regular" && showShareUsernameControl;
   if (state.postHeight === "tiny") {
     const actionButton = showAuthenticationButtons ? (
       <LoggedOutAuthButtons
@@ -113,6 +110,9 @@ export const SubGoalPage = ({
     );
   }
 
+  const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
+  const balanceShareUsernameControlOnDesktop =
+    state.postHeight === "regular" && showShareUsernameControl;
   const headerText = state.headerText ?? `r/${state.subreddit.name}`;
   const joinButton = (
     <SubscriptionButton

@@ -1,10 +1,7 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
-import {
-  autoCreateNextGoalSuccessorsKey,
-  cancelAutoCreateNextGoal,
-} from "../data/subGoalData";
+import { cancelAutoCreateNextGoal } from "../data/subGoalData";
 import {
   reconcileCompletedGoal,
   type CompletedGoalReconciliationOutcome,
@@ -269,8 +266,8 @@ async function reconcileOnboardingForLifecycleUnderLease(
           (highlighted.classification === "tiny" ||
             highlighted.classification === "cta")
         ) {
-          for (const supersededPostId of
-            highlighted.supersededCompletedPostIds ?? []) {
+          for (const supersededPostId of highlighted.supersededCompletedPostIds ??
+            []) {
             await cancelAutoCreateNextGoal(redis, supersededPostId);
           }
           if (highlighted.deferredCompletedGoal) {

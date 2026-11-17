@@ -282,7 +282,7 @@ const parseCount = (value: string | undefined) => {
 };
 const sumField = (rows: Record<string, string>[], field: string) =>
   rows.reduce((sum, row) => sum + parseCount(row[field]), 0);
-const empty = () => new Uint8Array(bitmapBytes);
+const empty = (): Uint8Array => new Uint8Array(bitmapBytes);
 function union(buffers: Array<Buffer | Uint8Array | undefined>): Uint8Array {
   const result = empty();
   for (const buffer of buffers)
