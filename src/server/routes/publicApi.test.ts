@@ -1449,6 +1449,234 @@ describe("publicApi routes", () => {
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
 
+  function seedAutomaticCard(
+    type: "top-post-day" | "newest-post" | "link" = "top-post-day",
+  ) {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    const data = {
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      completedTime: 0,
+      goal: 200,
+      colorTheme: "red",
+      language: "en",
+      afterSubscribeAction: {
+        type,
+        buttonText: "A custom configured label",
+        colorTheme: "blue",
+        ...(type === "link" ? { url: "https://example.com/" } : {}),
+      },
+    };
+    hoisted.getSubGoalData.mockResolvedValue(data);
+    return data;
+  }
+  async function requestAction(query?: Record<string, unknown>) {
+    const json = vi.fn();
+    const res = { json, status: vi.fn(() => res) };
+    await createRouteHarness().get(apiRoutes.afterSubscribeTarget)?.(
+      { query } as Request,
+      res as unknown as Response,
+    );
+    return res;
+  }
+
+  it.each(["top-post-day", "newest-post", "link"] as const)(
+    "resolves only the automatic partner of configured %s",
+    async (type) => {
+      seedAutomaticCard(type);
+      const target = {
+        id: "t3_target",
+        authorName: "CommunityMember",
+        url: "https://www.reddit.com/r/ExampleSub/comments/target",
+      };
+      hoisted.reddit.getTopPosts.mockReturnValue({
+        all: vi.fn(async () => [target]),
+      });
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi.fn(async () => [target]),
+      });
+      const selector = type === "top-post-day" ? "newest-post" : "top-post-day";
+      const res = await requestAction({
+        automaticAction: selector,
+        type: "link",
+        url: "https://forged.example/",
+      });
+      expect(res.json).toHaveBeenCalledWith({ target: { url: target.url } });
+      expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(
+        selector === "top-post-day" ? 1 : 0,
+      );
+      expect(hoisted.reddit.getNewPosts).toHaveBeenCalledTimes(
+        selector === "newest-post" ? 1 : 0,
+      );
+      expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
+      expect(hoisted.recordStatisticsCtaClick).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "link",
+    "disabled",
+    "",
+    "top-post-day",
+    ["newest-post", "newest-post"],
+    ["newest-post"],
+    { type: "newest-post" },
+    42,
+    null,
+    undefined,
+  ])(
+    "rejects unsupported, mismatched or malformed automatic selector %j",
+    async (selector) => {
+      seedAutomaticCard();
+      const res = await requestAction({ automaticAction: selector });
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+      expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "logged out",
+    "untracked",
+    "CTA-only",
+    "Tiny",
+    "completed",
+    "blacklisted",
+    "NSFW",
+    "disabled",
+  ])(
+    "rejects automatic actions for %s before any listing lookup",
+    async (reason) => {
+      const data = seedAutomaticCard();
+      if (reason === "logged out") hoisted.context.userId = null;
+      if (reason === "untracked")
+        hoisted.isTrackedSubscriber.mockResolvedValue(false);
+      if (reason === "CTA-only") {
+        data.postKind = "cta-only-v1";
+        data.postHeight = "cta";
+      }
+      if (reason === "Tiny") {
+        data.postKind = "subscribe-only-v1";
+        data.postHeight = "tiny";
+      }
+      if (reason === "completed") data.completedTime = 1_000;
+      if (reason === "disabled")
+        hoisted.getSubGoalData.mockResolvedValue({
+          ...data,
+          afterSubscribeAction: { type: "disabled" },
+        });
+      if (reason === "blacklisted")
+        hoisted.isSubredditBlacklisted.mockResolvedValue(true);
+      if (reason === "NSFW")
+        hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+          name: "ExampleSub",
+          nsfw: true,
+        });
+      const res = await requestAction({ automaticAction: "newest-post" });
+      expect(res.status).toHaveBeenCalledWith(
+        reason === "disabled" ? 400 : 403,
+      );
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+      expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+      expect(res.json).not.toHaveBeenCalledWith(
+        expect.objectContaining({ target: expect.anything() }),
+      );
+    },
+  );
+
+  it.each(["automaticAction[]", "automaticAction[type]"])(
+    "rejects malformed selector key %s before fetching listings",
+    async (key) => {
+      seedAutomaticCard();
+      const res = await requestAction({ [key]: "newest-post" });
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+      expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "unknown"])(
+    "permits automatic actions when community safety metadata is %j",
+    async (nsfw) => {
+      seedAutomaticCard();
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        name: "ExampleSub",
+        nsfw,
+      });
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi.fn(async () => [
+          {
+            id: "t3_recent",
+            url: "https://reddit.com/r/ExampleSub/comments/recent",
+          },
+        ]),
+      });
+      const res = await requestAction({ automaticAction: "newest-post" });
+      expect(res.json).toHaveBeenCalledWith({
+        target: { url: "https://reddit.com/r/ExampleSub/comments/recent" },
+      });
+    },
+  );
+
+  it.each([false, true])(
+    "filters app authors from configured and automatic Most Recent, except in promo (promo=%s)",
+    async (promo) => {
+      for (const automatic of [false, true]) {
+        seedAutomaticCard(automatic ? "top-post-day" : "newest-post");
+        hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+          name: promo ? "SubGoal" : "ExampleSub",
+          nsfw: false,
+        });
+        hoisted.reddit.getNewPosts.mockReturnValue({
+          all: vi.fn(async () => [
+            {
+              id: "t3_post",
+              authorName: "CommunityMember",
+              url: "https://reddit.com/current",
+            },
+            {
+              id: "t3_app",
+              authorName: "u/Subscriber-Goal",
+              url: "https://reddit.com/app",
+            },
+            {
+              id: "t3_user",
+              authorName: "CommunityMember",
+              url: "https://reddit.com/user",
+            },
+          ]),
+        });
+        const res = await requestAction(
+          automatic ? { automaticAction: "newest-post" } : undefined,
+        );
+        expect(res.json).toHaveBeenCalledWith({
+          target: {
+            url: promo ? "https://reddit.com/app" : "https://reddit.com/user",
+          },
+        });
+      }
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not prefetch either dynamic target while loading a subscribed active card", async () => {
+    seedAutomaticCard();
+    const json = vi.fn();
+    const res = { json, setHeader: vi.fn() };
+    await createRouteHarness().get(apiRoutes.init)?.(
+      { headers: {} } as Request,
+      res as unknown as Response,
+    );
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ subscribed: true }),
+      }),
+    );
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+  });
+
   it("returns the current top-day post as a minimal navigation target", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);

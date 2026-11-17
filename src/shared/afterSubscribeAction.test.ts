@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createDefaultAfterSubscribeAction,
+  getAutomaticAfterSubscribeAction,
   createTopPostFallbackAction,
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
@@ -185,5 +186,47 @@ describe("resolveAfterSubscribeAction", () => {
       },
       invalidConfiguration: true,
     });
+  });
+});
+
+describe("automatic post-Join pairing", () => {
+  it.each([
+    ["top-post-day", "blue", "newest-post", "green"],
+    ["top-post-day", "green", "newest-post", "blue"],
+    ["top-post-day", "pink", "newest-post", "green"],
+    ["newest-post", "green", "top-post-day", "blue"],
+    ["newest-post", "blue", "top-post-day", "green"],
+    ["link", "pink", "top-post-day", "blue"],
+  ] as const)(
+    "pairs configured %s/%s with %s/%s without changing its customization",
+    (type, colorTheme, automaticType, automaticColor) => {
+      const configured = {
+        type,
+        colorTheme,
+        buttonText: "My custom label",
+        ...(type === "link" ? { url: "https://example.com/" } : {}),
+      } as Parameters<typeof getAutomaticAfterSubscribeAction>[0];
+      const before = { ...configured };
+      expect(getAutomaticAfterSubscribeAction(configured, "en")).toEqual({
+        type: automaticType,
+        colorTheme: automaticColor,
+        buttonText:
+          automaticType === "top-post-day"
+            ? "View the Top Post Today"
+            : "View the Most Recent Post",
+      });
+      expect(configured).toEqual(before);
+    },
+  );
+  it("uses localized labels and adds nothing to a disabled CTA", () => {
+    expect(
+      getAutomaticAfterSubscribeAction({ type: "disabled" }, "en"),
+    ).toBeNull();
+    expect(
+      getAutomaticAfterSubscribeAction(
+        { type: "top-post-day", buttonText: "Custom", colorTheme: "blue" },
+        "es",
+      )?.buttonText,
+    ).toBe("Ver la publicación más reciente");
   });
 });
