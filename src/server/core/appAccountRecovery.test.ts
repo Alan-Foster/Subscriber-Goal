@@ -19,6 +19,7 @@ import {
   appAccountRecoveryStateKey,
   handleAppAccountModeratorAction,
   processAppAccountRecovery,
+  processDueAppAccountRecovery,
   recordLifecycleAndScheduleRecovery,
   scheduleAppAccountRecovery,
 } from "./appAccountRecovery";
@@ -26,6 +27,24 @@ import {
 class TestRedis {
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
+
+  async watch(key: string) {
+    const before = JSON.stringify(await this.hGetAll(key));
+    let fields: Record<string, string> = {};
+    return {
+      multi: async () => undefined,
+      unwatch: async () => undefined,
+      discard: async () => undefined,
+      hSet: async (_key: string, next: Record<string, string>) => {
+        fields = next;
+      },
+      exec: async () => {
+        if (JSON.stringify(await this.hGetAll(key)) !== before) return [];
+        await this.hSet(key, fields);
+        return [1];
+      },
+    };
+  }
 
   async set(
     key: string,
@@ -101,6 +120,189 @@ describe("app account recovery", () => {
   });
 
   const moderator = () => ({ username: "subscriber-goal" });
+
+  const seedTerminal = async (status = "insufficient_permissions") => {
+    await redis.hSet(appAccountRecoveryStateKey, {
+      status,
+      incidentToken: "old",
+      subredditName: "ExampleSub",
+      reason: "removal",
+    });
+    const actual =
+      await vi.importActual<typeof import("./appAccountHealth")>(
+        "./appAccountHealth",
+      );
+    hoisted.checkAppAccountHealth.mockImplementation(
+      actual.checkAppAccountHealth,
+    );
+  };
+  const tick = (nowMs: number) =>
+    processDueAppAccountRecovery({
+      reddit: reddit as never,
+      redis: redis as never,
+      scheduler,
+      nowMs,
+    });
+
+  it.each([
+    "missing",
+    "insufficient_permissions",
+    "acceptance_failed",
+    "verification_failed",
+    "exhausted",
+  ])(
+    "periodically restores persisted %s without a moderator event",
+    async (status) => {
+      await seedTerminal(status);
+      await expect(tick(100)).resolves.toMatchObject({
+        status: "healthy",
+        incidentToken: "old",
+      });
+      expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+        status: "healthy",
+        permissions: "posts",
+      });
+      expect(
+        await redis.hGetAll("app_repair_community_highlights_v3_state"),
+      ).toMatchObject({ status: "pending", reason: "permissions_restored" });
+      expect(scheduler.runJob).not.toHaveBeenCalled();
+      expect(reddit.sendPrivateMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["posts"], ["all"]])(
+    "restores terminal recovery through a permission edit with %j",
+    async (permission) => {
+      await seedTerminal();
+      permissions = [permission];
+      await handleAppAccountModeratorAction({
+        reddit: reddit as never,
+        redis: redis as never,
+        scheduler,
+        action: "setpermissions",
+        subredditName: "ExampleSub",
+        nowMs: 100,
+      });
+      expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+        status: "healthy",
+      });
+      const repair = await redis.hGetAll(
+        "app_repair_community_highlights_v3_state",
+      );
+      await tick(200);
+      await handleAppAccountModeratorAction({
+        reddit: reddit as never,
+        redis: redis as never,
+        scheduler,
+        action: "setpermissions",
+        subredditName: "ExampleSub",
+        nowMs: 300,
+      });
+      expect(
+        await redis.hGetAll("app_repair_community_highlights_v3_state"),
+      ).toEqual(repair);
+    },
+  );
+
+  it("backs off unhealthy ticks up to one hour, and resumes with full permissions", async () => {
+    await seedTerminal();
+    permissions = [];
+    let nowMs = 100;
+    for (let attempt = 1; attempt <= 9; attempt++) {
+      await expect(tick(nowMs)).resolves.toMatchObject({
+        status: "insufficient_permissions",
+      });
+      const next = Number(
+        (await redis.hGetAll(appAccountRecoveryStateKey)).nextVerificationAt,
+      );
+      expect(next - nowMs).toBe(
+        Math.min(3_600_000, 60_000 * 2 ** (attempt - 1)),
+      );
+      const calls = reddit.getAppUser.mock.calls.length;
+      await tick(next - 1);
+      expect(reddit.getAppUser).toHaveBeenCalledTimes(calls);
+      nowMs = next;
+    }
+    permissions = ["all"];
+    await expect(tick(nowMs)).resolves.toMatchObject({ status: "healthy" });
+    expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+      permissions: "all",
+    });
+  });
+
+  it("keeps temporary lookup failures blocked until a later verified tick", async () => {
+    await seedTerminal("verification_failed");
+    reddit.getAppUser.mockRejectedValueOnce(
+      new Error("temporary Reddit API failure"),
+    );
+    await expect(tick(100)).resolves.toMatchObject({
+      status: "verification_failed",
+    });
+    await expect(tick(60_100)).resolves.toMatchObject({ status: "healthy" });
+  });
+
+  it.each(["removal", "reinvite"] as const)(
+    "does not clear a newer %s during periodic verification",
+    async (reason) => {
+      await seedTerminal();
+      reddit.getAppUser.mockImplementationOnce(async () => {
+        await scheduleAppAccountRecovery({
+          redis: redis as never,
+          scheduler,
+          reason,
+          subredditName: "ExampleSub",
+          nowMs: 101,
+        });
+        return {
+          username: "subscriber-goal",
+          getModPermissionsForSubreddit: async () => ["posts"],
+        };
+      });
+      await expect(tick(100)).resolves.toMatchObject({ status: "pending" });
+      expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+        status: "pending",
+        reason,
+      });
+      expect(
+        await redis.hGetAll("app_repair_community_highlights_v3_state"),
+      ).toEqual({});
+    },
+  );
+
+  it("does not let an active worker verification overwrite a newer removal", async () => {
+    const incidentToken = await scheduleAppAccountRecovery({
+      redis: redis as never,
+      scheduler,
+      reason: "upgrade",
+      subredditName: "ExampleSub",
+      nowMs: 0,
+      dueAtMs: 0,
+    });
+    moderatorResponses.push([moderator()]);
+    hoisted.checkAppAccountHealth.mockImplementationOnce(async () => {
+      await scheduleAppAccountRecovery({
+        redis: redis as never,
+        scheduler,
+        reason: "removal",
+        subredditName: "ExampleSub",
+        nowMs: 101,
+      });
+      return { healthy: true };
+    });
+    await expect(
+      processAppAccountRecovery({
+        reddit: reddit as never,
+        redis: redis as never,
+        scheduler,
+        incidentToken,
+        nowMs: 100,
+      }),
+    ).resolves.toMatchObject({ status: "stale" });
+    expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+      status: "pending",
+      reason: "removal",
+    });
+  });
 
   it("records install time, preserves it on upgrade, and deduplicates scheduling", async () => {
     const installToken = await recordLifecycleAndScheduleRecovery({

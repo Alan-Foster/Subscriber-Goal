@@ -40,9 +40,13 @@ const hoisted = vi.hoisted(() => ({
   reddit: {
     getCurrentSubreddit: vi.fn(),
     getPostById: vi.fn(),
+    getAppUser: vi.fn(),
   },
   redis: {
     hGet: vi.fn(),
+    hGetAll: vi.fn(),
+    hSet: vi.fn(),
+    del: vi.fn(),
   },
   getAppSettings: vi.fn(),
   processCrosspostDispatchQueue: vi.fn(),
@@ -224,6 +228,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.reddit.getCurrentSubreddit.mockReset();
     hoisted.reddit.getPostById.mockReset();
     hoisted.redis.hGet.mockReset();
+    hoisted.redis.hGetAll.mockReset();
+    hoisted.redis.hSet.mockReset();
+    hoisted.redis.del.mockReset();
+    hoisted.reddit.getAppUser.mockReset();
     hoisted.getAppSettings.mockReset();
     hoisted.processCrosspostDispatchQueue.mockReset();
     hoisted.countPendingCrossposts.mockReset();
@@ -383,7 +391,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.getQueuedUpdates).toHaveBeenCalledOnce();
   });
 
-  it("runs recovery before subreddit work and stops while access is missing", async () => {
+  it("continues independent work while permission-dependent queues wait, then resumes", async () => {
     hoisted.processDueAppAccountRecovery.mockResolvedValue({
       status: "missing",
     });
@@ -391,11 +399,150 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     await onPostsUpdaterJob();
 
     expect(hoisted.processDueAppAccountRecovery).toHaveBeenCalledOnce();
-    expect(hoisted.reddit.getCurrentSubreddit).not.toHaveBeenCalled();
+    expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
+    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
     expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
-    expect(hoisted.getQueuedUpdates).not.toHaveBeenCalled();
+    expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalled();
+    expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+
+    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+      status: "healthy",
+    });
+    await onPostsUpdaterJob();
+    expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
+    expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+    expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    "pending",
+    "processing",
+    "locked",
+    "not_due",
+    "insufficient_permissions",
+    "verification_failed",
+  ])(
+    "defers posting during %s recovery while detecting goal completion",
+    async (status) => {
+      hoisted.processDueAppAccountRecovery.mockResolvedValue({ status });
+      hoisted.context.subredditName = "SubGoal";
+      hoisted.getQueuedUpdates.mockResolvedValue(["t3_goal"]);
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_test",
+        name: "SubGoal",
+        numberOfSubscribers: 20,
+      });
+      hoisted.reddit.getPostById.mockResolvedValue({});
+      hoisted.checkCompletionStatus.mockResolvedValue(1_000);
+      await onPostsUpdaterJob();
+      expect(hoisted.checkCompletionStatus).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "t3_goal",
+      );
+      expect(hoisted.applyTextFallback).toHaveBeenCalled();
+      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unknown", "unhealthy", "throw"])(
+    "keeps dependent work queued for a %s health result",
+    async (status) => {
+      if (status === "throw")
+        hoisted.processDueAppAccountHealthCheck.mockRejectedValue(
+          new Error("lookup failed"),
+        );
+      else
+        hoisted.processDueAppAccountHealthCheck.mockResolvedValue({
+          status,
+          healthy: false,
+        });
+      await onPostsUpdaterJob();
+      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
+      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
+    },
+  );
+
+  it.each(["posts", "all"])(
+    "resumes gated work after exhausted health retries verify %s through the real health worker",
+    async (permission) => {
+      const health = await vi.importActual<
+        typeof import("../core/appAccountHealth")
+      >("../core/appAccountHealth");
+      const hashes = new Map<string, Record<string, string>>([
+        [
+          health.appAccountHealthRetryStateKey,
+          {
+            status: "exhausted",
+            attempts: "3",
+            nextRunAt: "1000",
+            subredditName: "CorporateGifts",
+            lastError: "missing_posts_permission",
+          },
+        ],
+        [health.appAccountHealthStateKey, { status: "unhealthy" }],
+        [
+          "app_account_recovery_v1_state",
+          { status: "healthy", incidentToken: "existing" },
+        ],
+      ]);
+      hoisted.redis.hGetAll.mockImplementation(async (key: string) => ({
+        ...hashes.get(key),
+      }));
+      hoisted.redis.hSet.mockImplementation(
+        async (key: string, fields: Record<string, string>) => {
+          hashes.set(key, { ...hashes.get(key), ...fields });
+        },
+      );
+      hoisted.redis.del.mockImplementation(async (key: string) => {
+        hashes.delete(key);
+      });
+      hoisted.processDueAppAccountRecovery.mockResolvedValue({
+        status: "healthy",
+      });
+      hoisted.processDueAppAccountHealthCheck.mockImplementation(
+        health.processDueAppAccountHealthCheck,
+      );
+      hoisted.reddit.getAppUser.mockResolvedValue({
+        username: "subscriber-goal",
+        getModPermissionsForSubreddit: async () => [permission],
+      });
+      const now = vi.spyOn(Date, "now").mockReturnValue(999);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
+      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledOnce();
+
+      now.mockReturnValue(1000);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
+      expect(hashes.has(health.appAccountHealthRetryStateKey)).toBe(false);
+      expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+      expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
+
+      now.mockReturnValue(2000);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
+      expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("isolates aggregate observation failures from the remaining scheduler", async () => {
     const errorSpy = vi

@@ -1,3 +1,8 @@
+import {
+  appAccountRecoveryStateKey,
+  isTerminalRecoveryStatus,
+  updateRecoveryState,
+} from "./appAccountRecoveryState";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import type { RedditClient, RedisClient } from "../types";
@@ -11,6 +16,16 @@ export const appAccountHealthRetryStateKey =
   "app_account_health_v1_retry_state";
 export const subscriberGoalAppUsername = "subscriber-goal";
 export const appAccountHealthMaxRetryAttempts = 3;
+// Seven attempts reach the one-hour ceiling; keep that counter bounded while
+// exhausted records continue periodic verification for missed permission events.
+const maxHealthBackoffAttempts = 7;
+
+function nextHealthRetryAttempt(previousAttempts: string | undefined): number {
+  return Math.min(
+    maxHealthBackoffAttempts,
+    Math.max(0, parseInt(previousAttempts ?? "0", 10) || 0) + 1,
+  );
+}
 
 export type AppAccountHealthStatus = "healthy" | "unhealthy" | "unknown";
 
@@ -20,11 +35,7 @@ export type AppAccountHealthResult = {
   appUsername?: string;
   permissions: string[];
   notification:
-    | "not_needed"
-    | "deduplicated"
-    | "modmail"
-    | "installer_dm"
-    | "failed";
+    "not_needed" | "deduplicated" | "modmail" | "installer_dm" | "failed";
 };
 
 export async function rememberAppInstaller(
@@ -73,6 +84,7 @@ export async function checkAppAccountHealth({
   language?: unknown;
   nowMs?: number;
 }): Promise<AppAccountHealthResult> {
+  const recovery = await redis.hGetAll(appAccountRecoveryStateKey);
   let appUsername: string | undefined;
   let permissions: string[] = [];
   try {
@@ -83,7 +95,7 @@ export async function checkAppAccountHealth({
   } catch (error) {
     if (scheduleUnknownRetry) {
       const previousRetry = await redis.hGetAll(appAccountHealthRetryStateKey);
-      const attempts = (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+      const attempts = nextHealthRetryAttempt(previousRetry.attempts);
       const retryDelayMs = Math.min(
         60 * 60 * 1000,
         60_000 * 2 ** (attempts - 1),
@@ -118,15 +130,47 @@ export async function checkAppAccountHealth({
     };
   }
 
+  const currentRecovery = await redis.hGetAll(appAccountRecoveryStateKey);
+  if (
+    ["incidentToken", "status", "verificationToken"].some(
+      (key) => currentRecovery[key] !== recovery[key],
+    )
+  ) {
+    return {
+      status: "unknown",
+      healthy: false,
+      permissions: [],
+      notification: "not_needed",
+    };
+  }
   const [previousHealth, previousRetry] = await Promise.all([
     redis.hGetAll(appAccountHealthStateKey),
     redis.hGetAll(appAccountHealthRetryStateKey),
   ]);
-  await redis.del(appAccountHealthRetryStateKey);
+
   const healthy = permissions.includes("all") || permissions.includes("posts");
   const fingerprint = "missing_posts";
 
   if (healthy) {
+    const restoredRecovery = isTerminalRecoveryStatus(recovery.status);
+    if (
+      restoredRecovery &&
+      !(await updateRecoveryState(redis, recovery, {
+        status: "healthy",
+        completedAt: String(nowMs),
+        permissions: permissions.join(","),
+        lastError: "",
+      }))
+    ) {
+      return {
+        status: "unknown",
+        healthy: false,
+        permissions: [],
+        notification: "not_needed",
+      };
+    }
+
+    await redis.del(appAccountHealthRetryStateKey);
     await redis.hSet(appAccountHealthStateKey, {
       status: "healthy",
       checkedAt: String(nowMs),
@@ -137,8 +181,10 @@ export async function checkAppAccountHealth({
       notification: "not_needed",
     });
     if (
+      restoredRecovery ||
       previousHealth.status === "unhealthy" ||
-      previousRetry.status === "pending"
+      previousRetry.status === "pending" ||
+      previousRetry.status === "exhausted"
     ) {
       await scheduleHighlightRepair(redis, {
         nowMs,
@@ -156,8 +202,7 @@ export async function checkAppAccountHealth({
     };
   }
 
-  const healthRetryAttempts =
-    (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+  const healthRetryAttempts = nextHealthRetryAttempt(previousRetry.attempts);
   const healthRetryDelayMs = Math.min(
     60 * 60 * 1000,
     60_000 * 2 ** (healthRetryAttempts - 1),
@@ -316,11 +361,22 @@ export async function processDueAppAccountHealthCheck({
 }): Promise<AppAccountHealthResult | undefined> {
   const retry = await redis.hGetAll(appAccountHealthRetryStateKey);
   if (
-    retry.status !== "pending" ||
+    (retry.status !== "pending" && retry.status !== "exhausted") ||
     !retry.subredditName ||
     !Number.isFinite(Number(retry.nextRunAt)) ||
     nowMs < Number(retry.nextRunAt)
   ) {
+    if (retry.status === "pending" || retry.status === "exhausted") {
+      return {
+        status:
+          retry.lastError === "missing_posts_permission"
+            ? "unhealthy"
+            : "unknown",
+        healthy: false,
+        permissions: [],
+        notification: "not_needed",
+      };
+    }
     return undefined;
   }
   return checkAppAccountHealth({

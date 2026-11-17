@@ -197,39 +197,23 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
+  // Own-post rendering, completion detection, statistics, and data migrations
+  // remain independent. Posting and moderation workers retain their queues
+  // until the current recovery incident permits them to run.
+  let permissionWorkAllowed = false;
   try {
     const recovery = await processDueAppAccountRecovery({
       reddit,
       redis,
       scheduler,
     });
-    if (
-      recovery.status === "pending" ||
-      recovery.status === "processing" ||
-      recovery.status === "locked" ||
-      recovery.status === "missing" ||
-      recovery.status === "insufficient_permissions" ||
-      recovery.status === "acceptance_failed" ||
-      recovery.status === "verification_failed" ||
-      recovery.status === "exhausted"
-    ) {
-      return;
-    }
+    permissionWorkAllowed =
+      recovery.status === "healthy" || recovery.status === "stale";
   } catch (error) {
     logDiagnostic(
       "error",
       "scheduler_task_failed",
       { workflow: "app_account_recovery" },
-      error,
-    );
-  }
-  try {
-    await processDueSourcePostDeletions(reddit, redis, appSettings);
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "source_post_deletion" },
       error,
     );
   }
@@ -259,8 +243,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     }
   }
   try {
-    await processDueAppAccountHealthCheck({ reddit, redis });
+    if (permissionWorkAllowed) {
+      const health = await processDueAppAccountHealthCheck({ reddit, redis });
+      if (health && !health.healthy) permissionWorkAllowed = false;
+    }
   } catch (error) {
+    permissionWorkAllowed = false;
     logDiagnostic(
       "error",
       "scheduler_task_failed",
@@ -269,7 +257,18 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    await processDueAppRepair({ reddit, redis });
+    if (permissionWorkAllowed)
+      await processDueSourcePostDeletions(reddit, redis, appSettings);
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "source_post_deletion" },
+      error,
+    );
+  }
+  try {
+    if (permissionWorkAllowed) await processDueAppRepair({ reddit, redis });
   } catch (error) {
     logDiagnostic(
       "error",
@@ -280,6 +279,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
   if (
+    permissionWorkAllowed &&
     currentSubredditName &&
     isCrosspostAuthorityInstall(appSettings, currentSubredditName)
   ) {
@@ -394,11 +394,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    await processDueOnboardingSubscriberGoal({
-      reddit,
-      redis,
-      appSettings,
-    });
+    if (permissionWorkAllowed)
+      await processDueOnboardingSubscriberGoal({
+        reddit,
+        redis,
+        appSettings,
+      });
   } catch (error) {
     logDiagnostic(
       "error",
@@ -408,23 +409,25 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    const autoCreateSummary = await processDueAutoCreateNextGoals({
-      reddit,
-      redis,
-      appSettings,
-    });
-    if (
-      autoCreateSummary.due > 0 ||
-      autoCreateSummary.created > 0 ||
-      autoCreateSummary.skipped > 0 ||
-      autoCreateSummary.failed > 0 ||
-      autoCreateSummary.rescheduled > 0 ||
-      autoCreateSummary.exhausted > 0 ||
-      (autoCreateSummary.unresolved ?? 0) > 0
-    ) {
-      console.info(
-        `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed} rescheduled=${autoCreateSummary.rescheduled} exhausted=${autoCreateSummary.exhausted} unresolved=${autoCreateSummary.unresolved ?? 0} reconciliationRescheduled=${autoCreateSummary.reconciliationRescheduled ?? 0} reconciliationExhausted=${autoCreateSummary.reconciliationExhausted ?? 0}`,
-      );
+    if (permissionWorkAllowed) {
+      const autoCreateSummary = await processDueAutoCreateNextGoals({
+        reddit,
+        redis,
+        appSettings,
+      });
+      if (
+        autoCreateSummary.due > 0 ||
+        autoCreateSummary.created > 0 ||
+        autoCreateSummary.skipped > 0 ||
+        autoCreateSummary.failed > 0 ||
+        autoCreateSummary.rescheduled > 0 ||
+        autoCreateSummary.exhausted > 0 ||
+        (autoCreateSummary.unresolved ?? 0) > 0
+      ) {
+        console.info(
+          `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed} rescheduled=${autoCreateSummary.rescheduled} exhausted=${autoCreateSummary.exhausted} unresolved=${autoCreateSummary.unresolved ?? 0} reconciliationRescheduled=${autoCreateSummary.reconciliationRescheduled ?? 0} reconciliationExhausted=${autoCreateSummary.reconciliationExhausted ?? 0}`,
+        );
+      }
     }
   } catch (error) {
     logDiagnostic(
