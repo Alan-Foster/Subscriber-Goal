@@ -53,10 +53,7 @@ import {
   untrackSubscriberById,
   untrackSubscriberByUsername,
 } from "../data/subscriberStats";
-import {
-  findPendingSubscriberUserIdByUsername,
-  invalidateSubscriberTracking,
-} from "../data/subscriberTracking";
+import { findPendingSubscriberUserIdByUsername } from "../data/subscriberTracking";
 import { getAppSettings } from "../settings";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
@@ -884,7 +881,6 @@ export function registerInternalUiRoutes(router: Router): void {
           );
         }
         if (resolvedUserId) {
-          await invalidateSubscriberTracking(redis, resolvedUserId);
           await untrackSubscriberById(redis, resolvedUserId, resolvedUsername);
         } else if (resolvedUsername) {
           const result = await untrackSubscriberByUsername(
@@ -898,10 +894,6 @@ export function registerInternalUiRoutes(router: Router): void {
             });
             return;
           }
-        }
-
-        if (resolvedUsername) {
-          await eraseFromRecentSubscribers(redis, resolvedUsername);
         }
 
         if (identityLookupWarning) {
@@ -967,11 +959,14 @@ export function registerInternalUiRoutes(router: Router): void {
         }
 
         phase = "subscriber_untracking";
-        await invalidateSubscriberTracking(redis, currentUserId);
         await untrackSubscriberById(redis, currentUserId, currentUsername);
         if (currentUsername) {
           phase = "recent_subscriber_cleanup";
-          await eraseFromRecentSubscribers(redis, currentUsername);
+          await eraseFromRecentSubscribers(
+            redis,
+            currentUsername,
+            currentUserId,
+          );
         }
 
         phase = "response_completion";

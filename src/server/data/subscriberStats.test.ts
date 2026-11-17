@@ -3,6 +3,7 @@ import {
   recentSubscriberPostsByUsernameKey,
   subscriberGoalsKey,
 } from "./subGoalData";
+import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 import {
   clearLegacySubscriberErasureTombstones,
   getSubscriberStats,
@@ -25,9 +26,40 @@ import {
 type ZEntry = { member: string; score: number };
 
 class InMemoryRedis {
+  private strings = new Map<string, string>();
   private hashes = new Map<string, Map<string, string>>();
   private sortedSets = new Map<string, Map<string, number>>();
   zRangeCalls = 0;
+
+  async get(key: string): Promise<string | undefined> {
+    return this.strings.get(key);
+  }
+
+  async set(key: string, value: string): Promise<void> {
+    this.strings.set(key, value);
+  }
+
+  async watch() {
+    const queued: (() => Promise<unknown>)[] = [];
+    return {
+      multi: async () => {},
+      unwatch: async () => {},
+      hSet: async (key: string, fields: Record<string, string>) => {
+        queued.push(() => this.hSet(key, fields));
+      },
+      hDel: async (key: string, fields: string[]) => {
+        queued.push(() => this.hDel(key, fields));
+      },
+      zRem: async (key: string, members: string[]) => {
+        queued.push(() => this.zRem(key, members));
+      },
+      exec: async () => {
+        const results = [];
+        for (const action of queued) results.push(await action());
+        return results;
+      },
+    };
+  }
 
   async hSet(key: string, fields: Record<string, string>): Promise<number> {
     const current = this.hashes.get(key) ?? new Map<string, string>();
@@ -424,6 +456,40 @@ describe("subscriberStats direct lookup", () => {
     ).resolves.toEqual({ status: "partial", userIds: [] });
     expect(redis.zRangeCalls).toBe(0);
   });
+
+  it.each(["username index", "current scan", "legacy scan"])(
+    "invalidates tracking when recovering an ID from the %s",
+    async (source) => {
+      const generationKey = subscriberTrackingGenerationKey("t2_user");
+      await redis.set(generationKey, "before-erasure");
+      if (source === "username index") {
+        await redis.hSet(subscriberStatsUsernameToUserIdKey, {
+          testuser: "t2_user",
+        });
+      }
+      if (source !== "legacy scan") {
+        await redis.hSet(subscriberStatsByUserIdKey, {
+          t2_user: "t2_user:TestUser:124:1000",
+        });
+      } else {
+        await redis.zAdd(subscriberStatsKey, {
+          member: "t2_user:TestUser:124",
+          score: 1000,
+        });
+      }
+      await expect(
+        untrackSubscriberByUsername(
+          redis as unknown as Parameters<typeof untrackSubscriberByUsername>[0],
+          "tEsTuSeR",
+        ),
+      ).resolves.toEqual({ status: "complete", userIds: ["t2_user"] });
+      expect(await redis.get(generationKey)).not.toBe("before-erasure");
+      expect(
+        await redis.hGet(subscriberStatsByUserIdKey, "t2_user"),
+      ).toBeUndefined();
+      expect(await redis.zCard(subscriberStatsKey)).toBe(0);
+    },
+  );
 
   it("allows users to be re-added after legacy tombstones are cleared", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_000);
