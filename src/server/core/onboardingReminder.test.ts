@@ -955,6 +955,97 @@ describe("onboarding reminder", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("keeps upgrade account recovery paused beyond 48 hours and resumes without an exhaustion notice", async () => {
+    const {
+      automaticGoalPrerequisiteMaxAgeMs,
+      automaticGoalPrerequisiteRetriesKey,
+    } = await import("./automaticGoalRetry");
+    let goal: Record<string, unknown> = {
+      version: "onboarding_subscriber_goal_v4",
+      status: "awaiting_warning",
+      lifecycleSource: "upgrade",
+      armedAt: nowMs,
+      creationStaggerMinutes: 10,
+      operationId: "onboarding:long-account-recovery",
+      intent: "missing_goal",
+    };
+    hoisted.getOnboardingSubscriberGoalState.mockImplementation(
+      async () => goal,
+    );
+    hoisted.saveOnboardingState.mockImplementation(async (_redis, nextGoal) => {
+      goal = nextGoal;
+    });
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "unknown",
+      healthy: false,
+    });
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    const start = nowMs + onboardingReminderDelayMs;
+    const fields = {
+      [String(goal.operationId)]: "7",
+      [goal.operationId + ":firstDeferredAt"]: String(
+        start - automaticGoalPrerequisiteMaxAgeMs,
+      ),
+    };
+    await redis.hSet(automaticGoalPrerequisiteRetriesKey, fields);
+    const run = (at: number) =>
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: at,
+      });
+    for (const at of [
+      start,
+      start + automaticGoalPrerequisiteMaxAgeMs + 300_000,
+    ]) {
+      await expect(run(at)).resolves.toMatchObject({ status: "paused" });
+      expect(goal).toMatchObject({
+        status: "awaiting_warning",
+        pausedForAccountRecovery: true,
+        operationId: "onboarding:long-account-recovery",
+      });
+      expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+        status: "pending",
+        nextRunAt: String(at + 300_000),
+      });
+      expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+        fields,
+      );
+      expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+      hoisted.checkAppAccountHealth.mockResolvedValue({
+        status: "unhealthy",
+        healthy: false,
+      });
+    }
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "healthy",
+      healthy: true,
+    });
+    const pending = await redis.hGetAll(onboardingReminderStateKey);
+    await expect(run(Number(pending.nextRunAt))).resolves.toMatchObject({
+      status: "not_due",
+    });
+    expect(goal).not.toHaveProperty("pausedForAccountRecovery");
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    const resumed = await redis.hGetAll(onboardingReminderStateKey);
+    await expect(run(Number(resumed.nextRunAt))).resolves.toMatchObject({
+      status: "sent",
+    });
+    expect(
+      reddit.modMail.createModNotification,
+    ).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        subject: expect.not.stringContaining("needs attention"),
+      }),
+    );
+    expect(
+      hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+    ).toHaveBeenCalledOnce();
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+  });
+
   it("selects fresh warning and creation staggers after account recovery", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({

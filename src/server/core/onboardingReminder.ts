@@ -482,9 +482,9 @@ export async function processDueOnboardingReminder({
     const activeGoalState = await getOnboardingSubscriberGoalState(redis);
     const operationId =
       activeGoalState?.operationId ?? "onboarding-reminder:" + reloaded.armedAt;
-    const deferPrerequisite = async (
-      accountRecovery = false,
-    ): Promise<OnboardingReminderSummary> => {
+    // The reminder and goal share a prerequisite window until Modmail is sent.
+    // The upgrade account-recovery pause below has its own retry policy.
+    const deferPrerequisite = async (): Promise<OnboardingReminderSummary> => {
       const retry = await nextAutomaticGoalPrerequisiteRetry(
         redis,
         operationId,
@@ -506,9 +506,7 @@ export async function processDueOnboardingReminder({
                 completedAt: nowMs,
                 resultStatus: "retry_exhausted" as const,
               }
-            : accountRecovery
-              ? { pausedForAccountRecovery: true }
-              : {}),
+            : {}),
         });
       }
       if (retry.retryAt === null) {
@@ -522,12 +520,7 @@ export async function processDueOnboardingReminder({
         await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
       }
       return {
-        status:
-          retry.retryAt === null
-            ? "complete"
-            : accountRecovery
-              ? "paused"
-              : "not_due",
+        status: retry.retryAt === null ? "complete" : "not_due",
         ...inspected,
       };
     };
@@ -589,7 +582,25 @@ export async function processDueOnboardingReminder({
         nowMs,
       });
       if (!preflightHealth.healthy || preflightHealth.status !== "healthy") {
-        return await deferPrerequisite(true);
+        const retryAt = nowMs + 5 * 60 * 1000;
+        await saveOnboardingState(redis, {
+          ...activeGoalState,
+          status: "awaiting_warning",
+          pausedForAccountRecovery: true,
+        });
+        await saveOnboardingReminderState(redis, {
+          ...reloaded,
+          status: "pending",
+          nextRunAt: retryAt,
+        });
+        logDiagnostic("info", "onboarding_paused_for_account_recovery", {
+          workflow: "onboarding_reminder",
+          phase: "permission_preflight",
+          lifecycleSource: reloaded.lifecycleSource,
+          sourcePostId: activeGoalState.replacementSourcePostId ?? "none",
+          nextRunAt: retryAt,
+        });
+        return { status: "paused", ...base };
       }
       accountHealthVerified = true;
     }
