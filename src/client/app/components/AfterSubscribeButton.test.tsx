@@ -2,13 +2,18 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AfterSubscribeAction } from "../../../shared/afterSubscribeAction";
+import type {
+  AfterSubscribeAction,
+  DynamicAfterSubscribeActionType,
+} from "../../../shared/afterSubscribeAction";
 import { apiRoutes } from "../../../shared/routes";
 
 const hoisted = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock("@devvit/web/client", () => ({ showToast: hoisted.showToast }));
 
+import { goalJourneyAnalytics } from "../../analytics/goalJourneyAnalytics";
+import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 import { AfterSubscribeButton } from "./AfterSubscribeButton";
 
 type ActionableAction = Exclude<AfterSubscribeAction, { type: "disabled" }>;
@@ -22,6 +27,8 @@ describe("AfterSubscribeButton", () => {
     action: ActionableAction,
     language: "en" | "es" = "en",
     trackClicks = false,
+    automaticAction?: DynamicAfterSubscribeActionType,
+    analyticsContext?: GoalJourneyContext,
   ) => {
     await act(async () => {
       root.render(
@@ -30,6 +37,8 @@ describe("AfterSubscribeButton", () => {
           language={language}
           onNavigate={onNavigate}
           trackClicks={trackClicks}
+          {...(automaticAction ? { automaticAction } : {})}
+          {...(analyticsContext ? { analyticsContext } : {})}
         />,
       );
     });
@@ -49,6 +58,7 @@ describe("AfterSubscribeButton", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("navigates persisted HTTPS links without calling the dynamic endpoint", async () => {
@@ -223,6 +233,111 @@ describe("AfterSubscribeButton", () => {
     expect(onNavigate).not.toHaveBeenCalled();
     expect(container.querySelector("button")?.disabled).toBe(false);
   });
+
+  it.each(["success", "unavailable", "failure"] as const)(
+    "excludes automatic %s from configured Statistics, journey events, and link activity",
+    async (outcome) => {
+      const activated = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaActivated")
+        .mockImplementation(() => {});
+      const opened = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaOpened")
+        .mockImplementation(() => {});
+      const failed = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaFailed")
+        .mockImplementation(() => {});
+      const fetchMock = vi.fn(async () => {
+        if (outcome === "failure") throw new Error("offline");
+        return new Response(
+          JSON.stringify(
+            outcome === "success"
+              ? {
+                  target: {
+                    url: "https://www.reddit.com/r/ExampleSub/comments/recent",
+                  },
+                }
+              : { status: "error" },
+          ),
+          {
+            status: outcome === "success" ? 200 : 404,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await renderButton(
+        { type: "newest-post", buttonText: "Recent", colorTheme: "green" },
+        "en",
+        true,
+        "newest-post",
+        { goalSize: "regular", entryState: "subscribed", hasFollowupCta: true },
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      await act(async () => container.querySelector("button")?.click());
+      expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+        apiRoutes.afterSubscribeTarget + "?automaticAction=newest-post",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(activated).not.toHaveBeenCalled();
+      expect(opened).not.toHaveBeenCalled();
+      expect(failed).not.toHaveBeenCalled();
+      if (outcome === "success") expect(onNavigate).toHaveBeenCalledOnce();
+      else {
+        expect(onNavigate).not.toHaveBeenCalled();
+        expect(hoisted.showToast).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it.each(["success", "failure"] as const)(
+    "preserves configured dynamic %s tracking",
+    async (outcome) => {
+      const activated = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaActivated")
+        .mockImplementation(() => {});
+      const opened = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaOpened")
+        .mockImplementation(() => {});
+      const failed = vi
+        .spyOn(goalJourneyAnalytics, "afterSubscribeCtaFailed")
+        .mockImplementation(() => {});
+      const fetchMock = vi.fn(
+        async (url: string) =>
+          new Response(
+            JSON.stringify(
+              url === apiRoutes.statisticsEvent
+                ? { status: "ok" }
+                : outcome === "success"
+                  ? { target: { url: "https://example.com/post" } }
+                  : { status: "error" },
+            ),
+            {
+              status:
+                outcome === "failure" && url !== apiRoutes.statisticsEvent
+                  ? 404
+                  : 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      await renderButton(
+        { type: "newest-post", buttonText: "Recent", colorTheme: "green" },
+        "en",
+        false,
+        undefined,
+        { goalSize: "regular", entryState: "subscribed", hasFollowupCta: true },
+      );
+      await act(async () => container.querySelector("button")?.click());
+      expect(fetchMock).toHaveBeenCalledWith(
+        apiRoutes.statisticsEvent,
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(activated).toHaveBeenCalledOnce();
+      expect(opened).toHaveBeenCalledTimes(outcome === "success" ? 1 : 0);
+      expect(failed).toHaveBeenCalledTimes(outcome === "failure" ? 1 : 0);
+    },
+  );
 
   it("does not navigate when a successful response has a malformed target", async () => {
     vi.stubGlobal(

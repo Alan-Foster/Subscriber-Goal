@@ -344,7 +344,9 @@ describe("SubGoalPage", () => {
     expect(html).toContain("Join the Discord");
     expect(html).toContain("gap-6 px-4 py-6");
     expect(html).toContain('data-subgoal-action-area="two-actions"');
-    expect(html).toContain("flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6");
+    expect(html).toContain(
+      "flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6",
+    );
     expect(html).toContain("[&amp;&gt;.sg-attention-host]:min-w-0");
     expect(html).toContain("[&amp;&gt;.sg-attention-host&gt;button]:min-w-0");
   });
@@ -373,7 +375,7 @@ describe("SubGoalPage", () => {
     expect(html).toContain('data-subgoal-action-area="two-actions"');
   });
 
-  it("does not duplicate actions after a viewer has joined", () => {
+  it("replaces Join with an automatic action after a viewer has joined", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage
         state={{
@@ -392,7 +394,86 @@ describe("SubGoalPage", () => {
 
     expect(html).toContain("Join the Discord");
     expect(html).not.toContain('data-subscription-button-mode="subscribe"');
-    expect(html).not.toContain('data-subgoal-action-area="two-actions"');
+    expect(html).toContain('data-subgoal-action-area="two-actions"');
+    expect(html.indexOf("Join the Discord")).toBeLessThan(
+      html.indexOf("View the Top Post Today"),
+    );
+  });
+
+  it.each(["regular", "short"] as const)(
+    "shows a configured-first pair on subscribed %s reload",
+    (postHeight) => {
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          {...commonProps}
+          state={{
+            ...baseState,
+            postHeight,
+            subscribed: true,
+            afterSubscribeAction: {
+              type: "top-post-day",
+              buttonText: "Featured pick",
+              colorTheme: "blue",
+            },
+          }}
+        />,
+      );
+      expect(html).toContain('data-subgoal-action-area="two-actions"');
+      expect(html.indexOf("Featured pick")).toBeLessThan(
+        html.indexOf("View the Most Recent Post"),
+      );
+      expect(html).toContain('data-sg-theme="green"');
+      expect(html).not.toContain('data-subscription-button-mode="subscribe"');
+    },
+  );
+
+  it.each(["NSFW", "logged out", "unconfirmed", "submitting", "completed"])(
+    "does not add an automatic action for %s",
+    (reason) => {
+      const state = {
+        ...baseState,
+        subscribed: reason !== "unconfirmed",
+        user: reason === "logged out" ? null : baseState.user,
+        completedTime: reason === "completed" ? 1_000 : null,
+        subreddit: { ...baseState.subreddit, isNsfw: reason === "NSFW" },
+        afterSubscribeAction: {
+          type: "top-post-day" as const,
+          buttonText: "Featured pick",
+          colorTheme: "blue" as const,
+        },
+      };
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          {...commonProps}
+          state={state}
+          isSubmitting={reason === "submitting"}
+        />,
+      );
+      expect(html).not.toContain("View the Most Recent Post");
+    },
+  );
+
+  it("allows unknown community safety under the existing dynamic action policy", () => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        {...commonProps}
+        state={{
+          ...baseState,
+          subscribed: true,
+          subreddit: {
+            ...baseState.subreddit,
+            isNsfw: undefined as unknown as boolean,
+          },
+          afterSubscribeAction: {
+            type: "top-post-day",
+            buttonText: "Featured pick",
+            colorTheme: "green",
+          },
+        }}
+      />,
+    );
+    expect(html).toContain("View the Most Recent Post");
+    expect(html).toContain('data-sg-theme="blue"');
   });
 
   it("does not add attention glow while submitting", () => {

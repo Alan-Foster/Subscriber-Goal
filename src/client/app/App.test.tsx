@@ -571,6 +571,62 @@ describe("App", () => {
     container.remove();
   });
 
+  it.each([true, false])(
+    "shows the automatic pair only after confirmed Join and return from Thanks (confirmed=%s)",
+    async (confirmed) => {
+      const configured = {
+        type: "top-post-day" as const,
+        buttonText: "Featured pick",
+        colorTheme: "blue" as const,
+      };
+      hoisted.state = {
+        ...hoisted.createState(),
+        afterSubscribeAction: configured,
+      } as SubGoalState;
+      hoisted.subscribe.mockImplementation(async () => {
+        hoisted.state = {
+          ...hoisted.state,
+          subscribed: confirmed,
+        } as SubGoalState;
+        return { state: hoisted.state, error: null };
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(<App />));
+      expect(container.textContent).not.toContain("View the Most Recent Post");
+      const join = Array.from(container.querySelectorAll("button")).find(
+        (button) => button.textContent === "Join r/ExampleSub",
+      );
+      await act(async () => join?.click());
+      expect(container.textContent).not.toContain("View the Most Recent Post");
+      const back = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Return to Previous Page"]',
+      );
+      expect(back).not.toBeNull();
+      await act(async () => back?.click());
+      const labels = Array.from(
+        container.querySelectorAll(
+          '[data-subgoal-action-area="two-actions"] button',
+        ),
+      ).map((button) => button.textContent);
+      expect(labels).toEqual(
+        confirmed
+          ? ["Featured pick", "View the Most Recent Post"]
+          : ["Featured pick", "Join r/ExampleSub"],
+      );
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes("after-subscribe-target"),
+        ),
+      ).toBe(false);
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  );
+
   it("returns from Thanks without changing notification settings", async () => {
     hoisted.subscribe.mockResolvedValue({
       state: { ...hoisted.createState(), subscribed: true },

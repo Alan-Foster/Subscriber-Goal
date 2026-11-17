@@ -1,3 +1,7 @@
+import {
+  getAutomaticAfterSubscribeAction,
+  dynamicAfterSubscribeActionTypes,
+} from "../../shared/afterSubscribeAction";
 import type { Request, Response, Router } from "express";
 import { context, reddit, redis, realtime } from "@devvit/web/server";
 import { notifications } from "@devvit/notifications";
@@ -27,7 +31,11 @@ import { isTrackedSubscriber } from "../data/subscriberStats";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { getSubredditIcon } from "../utils/redditUtils";
 import { resolveShareUsername } from "../utils/usernameSharePolicy";
-import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
+import {
+  ctaOnlyPostKind,
+  subscribeOnlyPostKind,
+  subscriberGoalPostKind,
+} from "../../shared/postKind";
 import { isSubredditBlacklisted } from "../utils/subredditBlacklist";
 import {
   getRequestJourneyId,
@@ -705,8 +713,28 @@ export function registerPublicApiRoutes(router: Router): void {
 
   router.get(
     apiRoutes.afterSubscribeTarget,
-    async (_req, res): Promise<void> => {
+    async (req, res): Promise<void> => {
       const { postId, userId } = context;
+      const query = req.query ?? {};
+      const hasAutomaticSelector = Object.prototype.hasOwnProperty.call(
+        query,
+        "automaticAction",
+      );
+      const selector = query.automaticAction;
+      const malformedSelectorKey = Object.keys(query).some((key) =>
+        key.startsWith("automaticAction["),
+      );
+      if (
+        malformedSelectorKey ||
+        (hasAutomaticSelector &&
+          (typeof selector !== "string" ||
+            !dynamicAfterSubscribeActionTypes.includes(
+              selector as (typeof dynamicAfterSubscribeActionTypes)[number],
+            )))
+      ) {
+        res.status(400).json(localizedError("errors.api.invalidRequest"));
+        return;
+      }
       if (!postId) {
         res.status(400).json(localizedError("errors.api.postIdRequired"));
         return;
@@ -718,13 +746,35 @@ export function registerPublicApiRoutes(router: Router): void {
           context.postData,
         );
         if (
-          subGoalData.postKind !== ctaOnlyPostKind &&
+          (hasAutomaticSelector || subGoalData.postKind !== ctaOnlyPostKind) &&
           (!userId || !(await isTrackedSubscriber(redis, userId)))
         ) {
           res.status(403).json(localizedError("errors.join.required"));
           return;
         }
-        const action = subGoalData.afterSubscribeAction;
+        let action = subGoalData.afterSubscribeAction;
+        if (hasAutomaticSelector) {
+          if (
+            subGoalData.postKind !== subscriberGoalPostKind ||
+            (subGoalData.postHeight !== "regular" &&
+              subGoalData.postHeight !== "short") ||
+            subGoalData.completedTime
+          ) {
+            res.status(403).json(localizedError("errors.api.forbidden"));
+            return;
+          }
+          const automaticAction = getAutomaticAfterSubscribeAction(
+            action,
+            subGoalData.language,
+          );
+          if (!automaticAction || automaticAction.type !== selector) {
+            res
+              .status(400)
+              .json(localizedError("errors.api.dynamicTargetUnsupported"));
+            return;
+          }
+          action = automaticAction;
+        }
         if (action.type !== "top-post-day" && action.type !== "newest-post") {
           res
             .status(400)
@@ -732,6 +782,14 @@ export function registerPublicApiRoutes(router: Router): void {
           return;
         }
         const subreddit = await reddit.getCurrentSubreddit();
+        if (
+          hasAutomaticSelector &&
+          (getCurrentSubredditNsfw(subreddit) === true ||
+            (await isSubredditBlacklisted(reddit, subreddit.name)))
+        ) {
+          res.status(403).json(localizedError("errors.api.forbidden"));
+          return;
+        }
         if (getCurrentSubredditNsfw(subreddit) === true) {
           res.json({
             target: {
@@ -741,11 +799,10 @@ export function registerPublicApiRoutes(router: Router): void {
           return;
         }
         let target: NavigationTarget | undefined;
+        const promoSubreddit = getPublicAppSettings().promoSubreddit;
+        const allowAppAccountPosts =
+          subreddit.name.toLowerCase() === promoSubreddit.toLowerCase();
         if (action.type === "top-post-day") {
-          const promoSubreddit = getPublicAppSettings().promoSubreddit;
-          const allowAppAccountPosts =
-            subreddit.name.toLowerCase() === promoSubreddit.toLowerCase();
-
           for (const timeframe of ["day", "week", "month", "all"] as const) {
             const candidates = await reddit
               .getTopPosts({
@@ -785,6 +842,12 @@ export function registerPublicApiRoutes(router: Router): void {
             ) {
               continue;
             }
+            if (
+              !allowAppAccountPosts &&
+              normalizeRedditUsername(candidate.authorName) ===
+                appAccountUsername
+            )
+              continue;
             target = createPostNavigationTarget(candidate);
             if (target) break;
           }

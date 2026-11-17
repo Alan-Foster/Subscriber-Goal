@@ -1,3 +1,4 @@
+import { getAutomaticAfterSubscribeAction } from "../../../shared/afterSubscribeAction";
 import type { CtaOnlyState, SubGoalState } from "../../../shared/types/api";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { ProgressBar } from "../components/ProgressBar";
@@ -41,15 +42,6 @@ export const SubGoalPage = ({
   const notificationMessages = getNotificationMessages(state.language);
   const afterSubscribeAction =
     state.subscribed && state.afterSubscribeAction.type !== "disabled"
-      ? state.afterSubscribeAction
-      : null;
-  // A configured CTA is also useful before joining. Compact goals reserve
-  // their single-action layout for mobile, where a second control would not
-  // fit without changing the card height.
-  const secondaryAction =
-    (state.postHeight === "regular" || state.postHeight === "short") &&
-    !state.subscribed &&
-    state.afterSubscribeAction.type !== "disabled"
       ? state.afterSubscribeAction
       : null;
   const buttonMode = isSubmitting
@@ -110,6 +102,22 @@ export const SubGoalPage = ({
     );
   }
 
+  const automaticAction =
+    state.subscribed &&
+    authenticated &&
+    !isSubmitting &&
+    state.completedTime === null &&
+    state.subreddit.isNsfw !== true
+      ? getAutomaticAfterSubscribeAction(
+          state.afterSubscribeAction,
+          state.language,
+        )
+      : null;
+  const secondaryAction =
+    (!state.subscribed || automaticAction) &&
+    state.afterSubscribeAction.type !== "disabled"
+      ? state.afterSubscribeAction
+      : null;
   const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
   const balanceShareUsernameControlOnDesktop =
     state.postHeight === "regular" && showShareUsernameControl;
@@ -121,6 +129,16 @@ export const SubGoalPage = ({
       onClick={handleButtonClick}
     />
   );
+  const configuredActionButton = afterSubscribeAction ? (
+    <AfterSubscribeButton
+      action={afterSubscribeAction}
+      analyticsContext={getGoalJourneyContext(state)}
+      language={state.language}
+      onNavigate={onAfterSubscribeNavigate}
+      trackClicks={state.trackCtaClicks === true}
+    />
+  ) : null;
+  const singleAction = configuredActionButton ?? joinButton;
   const twoActionArea = secondaryAction ? (
     <div
       className="flex w-full max-w-[640px] flex-col items-center justify-center gap-5 sm:flex-row sm:gap-6 [&>.sg-attention-host]:max-w-full [&>.sg-attention-host]:min-w-0 [&>.sg-attention-host]:flex-[0_1_auto] [&>.sg-attention-host>button]:w-full [&>.sg-attention-host>button]:min-w-0"
@@ -133,20 +151,29 @@ export const SubGoalPage = ({
         onNavigate={onAfterSubscribeNavigate}
         trackClicks={state.trackCtaClicks === true}
       />
-      {joinButton}
+      {automaticAction ? (
+        <AfterSubscribeButton
+          action={automaticAction}
+          automaticAction={automaticAction.type}
+          language={state.language}
+          onNavigate={onAfterSubscribeNavigate}
+        />
+      ) : (
+        joinButton
+      )}
     </div>
   ) : null;
-  const preSubscribeActionArea = secondaryAction ? (
+  const responsiveActionArea = secondaryAction ? (
     state.postHeight === "short" ? (
       <>
-        <div className="sm:hidden">{joinButton}</div>
+        <div className="sm:hidden">{singleAction}</div>
         <div className="hidden sm:flex">{twoActionArea}</div>
       </>
     ) : (
       twoActionArea
     )
   ) : (
-    joinButton
+    singleAction
   );
 
   return (
@@ -232,16 +259,8 @@ export const SubGoalPage = ({
           logInLabel={messages.logInButton}
           onAuthenticate={handleButtonClick}
         />
-      ) : afterSubscribeAction ? (
-        <AfterSubscribeButton
-          action={afterSubscribeAction}
-          analyticsContext={getGoalJourneyContext(state)}
-          language={state.language}
-          onNavigate={onAfterSubscribeNavigate}
-          trackClicks={state.trackCtaClicks === true}
-        />
       ) : (
-        preSubscribeActionArea
+        responsiveActionArea
       )}
       {!showShareUsernameControl ? (
         <div className="h-5" />

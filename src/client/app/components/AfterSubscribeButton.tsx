@@ -1,6 +1,9 @@
 import { showToast } from "@devvit/web/client";
 import { useRef, useState } from "react";
-import type { AfterSubscribeAction } from "../../../shared/afterSubscribeAction";
+import type {
+  AfterSubscribeAction,
+  DynamicAfterSubscribeActionType,
+} from "../../../shared/afterSubscribeAction";
 import { getAfterSubscribePresetMessages } from "../../../shared/subGoalPostI18n";
 import type { SubGoalLanguage } from "../../../shared/subGoalPostI18n";
 import type {
@@ -30,6 +33,7 @@ type AfterSubscribeButtonProps = {
   onNavigate: (target: string | NavigationTarget) => void;
   analyticsContext?: GoalJourneyContext;
   trackClicks?: boolean;
+  automaticAction?: DynamicAfterSubscribeActionType;
 };
 
 export const AfterSubscribeButton = ({
@@ -38,6 +42,7 @@ export const AfterSubscribeButton = ({
   onNavigate,
   analyticsContext,
   trackClicks = false,
+  automaticAction,
 }: AfterSubscribeButtonProps) => {
   const [resolving, setResolving] = useState(false);
   const resolvingRef = useRef(false);
@@ -48,16 +53,16 @@ export const AfterSubscribeButton = ({
       return;
     }
     resolvingRef.current = true;
-    recordStatisticsEvent("cta_click");
+    if (!automaticAction) recordStatisticsEvent("cta_click");
     const actionType = getAfterSubscribeAnalyticsActionType(action);
-    if (analyticsContext) {
+    if (analyticsContext && !automaticAction) {
       goalJourneyAnalytics.afterSubscribeCtaActivated(
         analyticsContext,
         actionType,
       );
     }
     if (action.type === "link") {
-      if (trackClicks) {
+      if (trackClicks && !automaticAction) {
         void fetch(apiRoutes.ctaClick, {
           method: "POST",
           keepalive: true,
@@ -80,7 +85,7 @@ export const AfterSubscribeButton = ({
             );
           });
       }
-      if (analyticsContext) {
+      if (analyticsContext && !automaticAction) {
         goalJourneyAnalytics.afterSubscribeCtaOpened(
           analyticsContext,
           actionType,
@@ -93,7 +98,9 @@ export const AfterSubscribeButton = ({
     setResolving(true);
     try {
       const result = await requestJsonWithRetry<AfterSubscribeTargetResponse>(
-        apiRoutes.afterSubscribeTarget,
+        automaticAction
+          ? `${apiRoutes.afterSubscribeTarget}?automaticAction=${encodeURIComponent(automaticAction)}`
+          : apiRoutes.afterSubscribeTarget,
         undefined,
         {
           // Dynamic CTA resolution historically made one request. Keep that
@@ -125,7 +132,7 @@ export const AfterSubscribeButton = ({
               : messages.dynamicPostError,
           ),
         );
-        if (analyticsContext) {
+        if (analyticsContext && !automaticAction) {
           goalJourneyAnalytics.afterSubscribeCtaFailed(
             analyticsContext,
             actionType,
@@ -134,7 +141,7 @@ export const AfterSubscribeButton = ({
         }
         return;
       }
-      if (analyticsContext) {
+      if (analyticsContext && !automaticAction) {
         goalJourneyAnalytics.afterSubscribeCtaOpened(
           analyticsContext,
           actionType,
@@ -149,7 +156,7 @@ export const AfterSubscribeButton = ({
         error,
       );
       showToast(messages.dynamicPostError);
-      if (analyticsContext) {
+      if (analyticsContext && !automaticAction) {
         goalJourneyAnalytics.afterSubscribeCtaFailed(
           analyticsContext,
           actionType,

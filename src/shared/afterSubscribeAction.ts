@@ -12,6 +12,8 @@ export const dynamicAfterSubscribeActionTypes = [
   "top-post-day",
   "newest-post",
 ] as const;
+export type DynamicAfterSubscribeActionType =
+  (typeof dynamicAfterSubscribeActionTypes)[number];
 export type AfterSubscribeActionType =
   | (typeof afterSubscribeActionTypes)[number]
   | (typeof dynamicAfterSubscribeActionTypes)[number];
@@ -48,6 +50,34 @@ export type AfterSubscribeAction =
       buttonText: string;
       colorTheme: SubGoalColorTheme;
     };
+
+export type AutomaticAfterSubscribeAction = Extract<
+  AfterSubscribeAction,
+  { type: DynamicAfterSubscribeActionType }
+>;
+
+export function getAutomaticAfterSubscribeAction(
+  configuredAction: AfterSubscribeAction,
+  language: SubGoalLanguage,
+): AutomaticAfterSubscribeAction | null {
+  if (configuredAction.type === "disabled") return null;
+  const type =
+    configuredAction.type === "top-post-day" ? "newest-post" : "top-post-day";
+  const preferredColor = type === "top-post-day" ? "blue" : "green";
+  const alternateColor = preferredColor === "blue" ? "green" : "blue";
+  const messages = getAfterSubscribePresetMessages(language);
+  return {
+    type,
+    buttonText:
+      type === "top-post-day"
+        ? messages.viewTopPostToday
+        : messages.viewMostRecentPostToday,
+    colorTheme:
+      configuredAction.colorTheme === preferredColor
+        ? alternateColor
+        : preferredColor,
+  };
+}
 
 export const defaultAfterSubscribeAction: AfterSubscribeAction = {
   type: "disabled",

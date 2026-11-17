@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { SubscribeOnlyState } from "../../../shared/types/api";
+import type {
+  SubscribeOnlyState,
+  SubscriberGoalState,
+} from "../../../shared/types/api";
 
 const hoisted = vi.hoisted(() => ({ isWide: false }));
 
@@ -142,5 +145,85 @@ describe("SubGoalPage responsive tiny layout", () => {
     expect(html).toContain("15.1k subscribers");
     expect(html).toContain("4 clicks this week");
     expect(html).not.toContain("3 new today");
+  });
+});
+
+describe("subscribed classic action layouts", () => {
+  const state: SubscriberGoalState = {
+    goal: 500,
+    recentSubscriber: null,
+    completedTime: null,
+    headerText: null,
+    colorTheme: "red",
+    postHeight: "regular",
+    language: "en",
+    subscribed: true,
+    moderatorInstallPromoEligible: false,
+    canViewStatistics: false,
+    user: { id: "t2_user", username: "alice" },
+    appSettings: { promoSubreddit: "SubGoal" },
+    subreddit: {
+      id: "t5_test",
+      name: "ExampleSub",
+      icon: "/icon.png",
+      subscribers: 123,
+      isNsfw: false,
+    },
+    afterSubscribeAction: {
+      type: "top-post-day",
+      buttonText: "Featured pick",
+      colorTheme: "blue",
+    },
+  };
+  it("reuses the regular column/desktop-row layout with the automatic action second", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      <SubGoalPage {...commonProps} state={state} />,
+    );
+    const area = container.querySelector(
+      '[data-subgoal-action-area="two-actions"]',
+    )!;
+    expect(area.className).toContain("flex-col");
+    expect(area.className).toContain("sm:flex-row");
+    expect(
+      Array.from(area.querySelectorAll("button")).map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Featured pick", "View the Most Recent Post"]);
+  });
+  it("keeps short mobile configured-only while exposing the pair in its desktop branch", () => {
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      <SubGoalPage
+        {...commonProps}
+        state={{ ...state, postHeight: "short" }}
+      />,
+    );
+    const desktop = container.querySelector(
+      '[data-subgoal-action-area="two-actions"]',
+    )!;
+    expect(desktop.parentElement?.className).toBe("hidden sm:flex");
+    const mobile = container.querySelector(".sm\\:hidden")!;
+    expect(
+      Array.from(mobile.querySelectorAll("button")).map(
+        (button) => button.textContent,
+      ),
+    ).toEqual(["Featured pick"]);
+    expect(desktop.textContent).toContain("View the Most Recent Post");
+  });
+  it.each([false, true])("keeps Tiny configured-only (wide=%s)", (isWide) => {
+    hoisted.isWide = isWide;
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        {...commonProps}
+        state={createState({
+          subscribed: true,
+          afterSubscribeAction: state.afterSubscribeAction,
+        })}
+      />,
+    );
+    expect(html).toContain("Featured pick");
+    expect(html).not.toContain("View the Most Recent Post");
+    expect(html).not.toContain('data-subgoal-action-area="two-actions"');
   });
 });
