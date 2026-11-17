@@ -1,3 +1,9 @@
+import {
+  appAccountRecoveryStateKey,
+  isTerminalRecoveryStatus,
+  updateRecoveryState,
+} from "./appAccountRecoveryState";
+export { appAccountRecoveryStateKey } from "./appAccountRecoveryState";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import type { RedditClient, RedisClient } from "../types";
@@ -14,7 +20,6 @@ import {
 
 export const appAccountInstallationStateKey =
   "app_account_recovery_v1_installation";
-export const appAccountRecoveryStateKey = "app_account_recovery_v1_state";
 export const appAccountRecoveryLockKey = "app_account_recovery_v1_lock";
 export const appAccountRecoveryEventKeyPrefix = "app_account_recovery_v1_event";
 export const appAccountRecoveryJobName = "app-account-recovery-job";
@@ -26,10 +31,7 @@ const notificationRetentionMs = 90 * 24 * 60 * 60 * 1000;
 const eventClaimTtlMs = 5 * 60 * 1000;
 
 export type AppAccountRecoveryReason =
-  | "install"
-  | "upgrade"
-  | "removal"
-  | "reinvite";
+  "install" | "upgrade" | "removal" | "reinvite";
 
 export type AppAccountRecoveryJobData = {
   incidentToken: string;
@@ -229,6 +231,9 @@ export async function scheduleAppAccountRecovery({
     schedulerJobId: "",
     lastError: "",
     invitationAcceptedAt: "",
+    verificationToken: "",
+    verificationAttempts: "0",
+    nextVerificationAt: "",
     notification: normalizedRemovedBy ? "pending" : "unavailable",
   });
   const jobId = await scheduler.runJob({
@@ -499,7 +504,43 @@ export async function processDueAppAccountRecovery({
 }): Promise<AppAccountRecoveryResult> {
   const state = await redis.hGetAll(appAccountRecoveryStateKey);
   if (!state.incidentToken) return { status: "stale" };
-  return processAppAccountRecovery({
+  if (isTerminalRecoveryStatus(state.status)) {
+    // Legacy terminal records have no verification deadline: inspect them once
+    // immediately, then keep retrying with a one-hour ceiling.
+    if (!state.subredditName || nowMs < Number(state.nextVerificationAt || 0)) {
+      return {
+        status: state.status as RecoveryStatus,
+        incidentToken: state.incidentToken,
+      };
+    }
+    const attempts = Math.min(7, (Number(state.verificationAttempts) || 0) + 1);
+    const claimed = await updateRecoveryState(redis, state, {
+      verificationToken: crypto.randomUUID(),
+      verificationAttempts: String(attempts),
+      nextVerificationAt: String(
+        nowMs + Math.min(3_600_000, 60_000 * 2 ** (attempts - 1)),
+      ),
+    });
+    if (!claimed)
+      return { status: "locked", incidentToken: state.incidentToken };
+    await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: state.subredditName,
+      ...(state.subredditId ? { subredditId: state.subredditId } : {}),
+      notify: false,
+      scheduleUnknownRetry: false,
+      nowMs,
+    });
+    const current = await redis.hGetAll(appAccountRecoveryStateKey);
+    return {
+      status: toRecoveryResultStatus(current.status),
+      ...(current.incidentToken
+        ? { incidentToken: current.incidentToken }
+        : {}),
+    };
+  }
+  const result = await processAppAccountRecovery({
     reddit,
     redis,
     scheduler,
@@ -507,6 +548,12 @@ export async function processDueAppAccountRecovery({
     nowMs,
     acceptInvite,
   });
+  if (result.status === "locked") return result;
+  const current = await redis.hGetAll(appAccountRecoveryStateKey);
+  return {
+    status: toRecoveryResultStatus(current.status),
+    ...(current.incidentToken ? { incidentToken: current.incidentToken } : {}),
+  };
 }
 
 export async function processAppAccountRecovery({
@@ -554,10 +601,14 @@ export async function processAppAccountRecovery({
   }
 
   try {
-    await redis.hSet(appAccountRecoveryStateKey, {
-      status: "processing",
-      startedAt: String(nowMs),
-    });
+    if (
+      !(await updateRecoveryState(redis, activeState, {
+        status: "processing",
+        startedAt: String(nowMs),
+      }))
+    )
+      return { status: "stale", incidentToken };
+    activeState.status = "processing";
     const removalNotificationDelivered = await sendRemovalNotificationOnce(
       reddit,
       redis,
@@ -570,13 +621,25 @@ export async function processAppAccountRecovery({
       activeState.subredditName,
     );
     if (inspection.status === "healthy") {
-      await recordHealthy(
+      const recorded = await recordHealthy(
         reddit,
         redis,
         activeState,
         inspection.permissions,
         nowMs,
       );
+      if (recorded === "stale") return { status: "stale", incidentToken };
+      if (recorded === "unverified")
+        return retryOrExhaust({
+          reddit,
+          redis,
+          scheduler,
+          state: activeState,
+          nowMs,
+          error: "Permissions could not be verified.",
+          terminalStatus: "verification_failed",
+          suppressHealthNotification: removalNotificationDelivered,
+        });
       return { status: "healthy", incidentToken };
     }
     if (inspection.status === "insufficient_permissions") {
@@ -665,13 +728,25 @@ export async function processAppAccountRecovery({
       activeState.subredditName,
     );
     if (verified.status === "healthy") {
-      await recordHealthy(
+      const recorded = await recordHealthy(
         reddit,
         redis,
         activeState,
         verified.permissions,
         nowMs,
       );
+      if (recorded === "stale") return { status: "stale", incidentToken };
+      if (recorded === "unverified")
+        return retryOrExhaust({
+          reddit,
+          redis,
+          scheduler,
+          state: activeState,
+          nowMs,
+          error: "Permissions could not be verified.",
+          terminalStatus: "verification_failed",
+          suppressHealthNotification: removalNotificationDelivered,
+        });
       return { status: "healthy", incidentToken };
     }
     if (verified.status === "insufficient_permissions") {
@@ -804,8 +879,8 @@ async function recordHealthy(
   state: Record<string, string> & { subredditName: string },
   permissions: string[],
   nowMs: number,
-): Promise<void> {
-  await checkAppAccountHealth({
+): Promise<"healthy" | "stale" | "unverified"> {
+  const health = await checkAppAccountHealth({
     reddit,
     redis,
     subredditName: state.subredditName,
@@ -815,12 +890,14 @@ async function recordHealthy(
     scheduleUnknownRetry: false,
     nowMs,
   });
-  await redis.hSet(appAccountRecoveryStateKey, {
+  if (!health.healthy) return "unverified";
+  const updated = await updateRecoveryState(redis, state, {
     status: "healthy",
     completedAt: String(nowMs),
     permissions: permissions.join(","),
     lastError: "",
   });
+  return updated ? "healthy" : "stale";
 }
 
 async function recordUnhealthy(
@@ -843,12 +920,16 @@ async function recordUnhealthy(
     scheduleUnknownRetry: false,
     nowMs,
   });
-  await redis.hSet(appAccountRecoveryStateKey, {
-    status,
-    completedAt: String(nowMs),
-    permissions: permissions.join(","),
-    lastError,
-  });
+  await updateRecoveryState(
+    redis,
+    { ...state, status: "processing" },
+    {
+      status,
+      completedAt: String(nowMs),
+      permissions: permissions.join(","),
+      lastError,
+    },
+  );
 }
 
 async function retryOrExhaust({
@@ -876,13 +957,19 @@ async function retryOrExhaust({
   const attempts = (parseInt(state.attempts || "0", 10) || 0) + 1;
   if (attempts < appAccountRecoveryMaxAttempts) {
     const dueAt = nowMs + appAccountRecoveryDelayMs;
-    await redis.hSet(appAccountRecoveryStateKey, {
-      status: "pending",
-      attempts: String(attempts),
-      dueAt: String(dueAt),
-      lastError: error,
-      schedulerJobId: "",
-    });
+    const updated = await updateRecoveryState(
+      redis,
+      { ...state, status: "processing" },
+      {
+        status: "pending",
+        attempts: String(attempts),
+        dueAt: String(dueAt),
+        lastError: error,
+        schedulerJobId: "",
+      },
+    );
+    if (!updated)
+      return { status: "stale", incidentToken: state.incidentToken };
     const jobId = await scheduler.runJob({
       name: appAccountRecoveryJobName,
       runAt: new Date(dueAt),
@@ -901,12 +988,16 @@ async function retryOrExhaust({
     scheduleUnknownRetry: false,
     nowMs,
   });
-  await redis.hSet(appAccountRecoveryStateKey, {
-    status: terminalStatus,
-    outcome: terminalStatus,
-    attempts: String(attempts),
-    completedAt: String(nowMs),
-    lastError: error,
-  });
+  await updateRecoveryState(
+    redis,
+    { ...state, status: "processing" },
+    {
+      status: terminalStatus,
+      outcome: terminalStatus,
+      attempts: String(attempts),
+      completedAt: String(nowMs),
+      lastError: error,
+    },
+  );
   return { status: terminalStatus, incidentToken: state.incidentToken };
 }
