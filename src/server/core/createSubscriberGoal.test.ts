@@ -34,6 +34,9 @@ const hoisted = vi.hoisted(() => ({
       hoisted.redisValues.delete(key);
       hoisted.redisHashes.delete(key);
     }),
+    hDel: vi.fn(async (key: string, fields: string[]) => {
+      for (const field of fields) hoisted.redisHashes.get(key)?.delete(field);
+    }),
     hGetAll: vi.fn(async (key: string) =>
       Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
     ),

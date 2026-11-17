@@ -40,7 +40,10 @@ import {
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
 import { retireSubscriberGoalPost } from "./postRetirement";
-import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
+import {
+  getAutomaticGoalEligibility,
+  isAutomaticGoalEligibilityUncertain,
+} from "./automaticGoalEligibility";
 import { checkAppAccountHealth } from "./appAccountHealth";
 
 export type AutoCreateNextGoalSummary = {
@@ -88,6 +91,44 @@ export async function processDueAutoCreateNextGoals({
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
     const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     const operationId = `auto-next:${sourcePostId}`;
+    let language: unknown;
+    const deferPrerequisite = async (): Promise<void> => {
+      const retry = await nextAutomaticGoalPrerequisiteRetry(
+        redis,
+        operationId,
+        nowMs,
+      );
+      if (retry.retryAt === null) {
+        await markAutoCreateNextGoalExhausted(
+          redis,
+          sourcePostId,
+          retry.attempts,
+        );
+        summary.exhausted += 1;
+        logDiagnostic("error", "auto_create_goal_prerequisites_exhausted", {
+          workflow: "auto_create_next_goal",
+          phase: "terminal",
+          operationId,
+          postId: sourcePostId,
+          attempts: retry.attempts,
+        });
+        await notifyAutomaticGoalExhausted({
+          reddit,
+          redis,
+          operationId,
+          unresolved: false,
+          language,
+        });
+        await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
+      } else {
+        await scheduleAutoCreateNextGoalReconciliation(
+          redis,
+          sourcePostId,
+          retry.retryAt,
+        );
+        summary.rescheduled += 1;
+      }
+    };
     let creationAttempted = false;
     let creationFinished = false;
     let acquired = false;
@@ -167,6 +208,7 @@ export async function processDueAutoCreateNextGoals({
       }
 
       const sourceGoalData = await getSubGoalData(redis, sourcePostId);
+      language = sourceGoalData.language;
       if (!sourceGoalData.goal || !sourceGoalData.completedTime) {
         summary.skipped += 1;
         await cancelAutoCreateNextGoal(redis, sourcePostId);
@@ -176,18 +218,8 @@ export async function processDueAutoCreateNextGoals({
       const subreddit = await reddit.getCurrentSubreddit();
       const automaticEligibility = getAutomaticGoalEligibility(subreddit);
       if (!automaticEligibility.eligible) {
-        if (
-          automaticEligibility.safetyStatus !== "nsfw" &&
-          ((automaticEligibility.safetyStatus === "unknown" &&
-            automaticEligibility.subredditType === "public") ||
-            automaticEligibility.subredditType === "unknown")
-        ) {
-          await scheduleAutoCreateNextGoalReconciliation(
-            redis,
-            sourcePostId,
-            await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
-          );
-          summary.rescheduled += 1;
+        if (isAutomaticGoalEligibilityUncertain(automaticEligibility)) {
+          await deferPrerequisite();
         } else {
           await cancelAutoCreateNextGoal(redis, sourcePostId);
         }
@@ -211,12 +243,7 @@ export async function processDueAutoCreateNextGoals({
         nowMs,
       });
       if (!accountHealth.healthy || accountHealth.status !== "healthy") {
-        await scheduleAutoCreateNextGoalReconciliation(
-          redis,
-          sourcePostId,
-          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
-        );
-        summary.rescheduled += 1;
+        await deferPrerequisite();
         summary.skipped += 1;
         logDiagnostic("info", "auto_create_goal_suppressed", {
           workflow: "auto_create_next_goal",
@@ -284,13 +311,8 @@ export async function processDueAutoCreateNextGoals({
       } catch (error) {
         // An uncertain inventory must never authorize a post or consume the
         // finite submission retry budget. Keep the original source pending.
-        await scheduleAutoCreateNextGoalReconciliation(
-          redis,
-          sourcePostId,
-          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
-        );
+        await deferPrerequisite();
         summary.failed += 1;
-        summary.rescheduled += 1;
         logDiagnostic(
           "warn",
           "auto_create_inventory_retry_scheduled",
@@ -471,6 +493,7 @@ export async function processDueAutoCreateNextGoals({
             redis,
             operationId,
             unresolved: true,
+            language,
           });
           summary.reconciliationExhausted =
             (summary.reconciliationExhausted ?? 0) + 1;
@@ -502,12 +525,7 @@ export async function processDueAutoCreateNextGoals({
         creationFinished ||
         isAutomaticGoalPrerequisiteError(error)
       ) {
-        await scheduleAutoCreateNextGoalReconciliation(
-          redis,
-          sourcePostId,
-          await nextAutomaticGoalPrerequisiteRetry(redis, operationId, nowMs),
-        );
-        summary.rescheduled += 1;
+        await deferPrerequisite();
         continue;
       }
       const retry = await recordAutoCreateNextGoalFailure(
@@ -540,6 +558,7 @@ export async function processDueAutoCreateNextGoals({
           redis,
           operationId,
           unresolved: false,
+          language,
         });
         logDiagnostic(
           "error",

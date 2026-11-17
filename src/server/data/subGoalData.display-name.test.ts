@@ -1070,6 +1070,63 @@ describe("subGoalData subreddit display name", () => {
     },
   );
 
+  it("starts a fresh prerequisite window and permits a new notice after an exhausted successor is re-armed", async () => {
+    const {
+      automaticGoalPrerequisiteRetriesKey,
+      nextAutomaticGoalPrerequisiteRetry,
+      notifyAutomaticGoalExhausted,
+    } = await import("../core/automaticGoalRetry");
+    const redis = new InMemoryRedis();
+    const operationId = "auto-next:t3_source";
+    const typedRedis = redis as never;
+    const send = vi.fn(async () => undefined);
+    const reddit = {
+      getCurrentSubreddit: vi.fn(async () => ({
+        id: "t5_test",
+        language: "en",
+      })),
+      modMail: { createModNotification: send },
+    };
+    const notify = () =>
+      notifyAutomaticGoalExhausted({
+        redis: typedRedis,
+        reddit: reddit as never,
+        operationId,
+        unresolved: false,
+      });
+    await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_source: "53" });
+    await nextAutomaticGoalPrerequisiteRetry(typedRedis, operationId, 1_000);
+    await notify();
+    await notify();
+    expect(send).toHaveBeenCalledOnce();
+    await expect(
+      repairAutoCreateNextGoal(
+        typedRedis,
+        "t3_source",
+        1_000,
+        48 * 3_600_000,
+        true,
+      ),
+    ).resolves.toMatchObject({ status: "scheduled", runAt: 86_401_000 });
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+    await expect(
+      nextAutomaticGoalPrerequisiteRetry(
+        typedRedis,
+        operationId,
+        48 * 3_600_000,
+      ),
+    ).resolves.toEqual({ attempts: 1, retryAt: 48 * 3_600_000 + 300_000 });
+    await notify();
+    await notify();
+    expect(send).toHaveBeenCalledTimes(2);
+    await cancelAutoCreateNextGoal(typedRedis, "t3_source");
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+  });
+
   it("does not repair exhausted auto-create work", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_exhausted: "6" });

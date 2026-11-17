@@ -122,6 +122,13 @@ class InMemoryRedis {
     this.values.set(key, value);
   }
 
+  async hGet(key: string, field: string): Promise<string | undefined> {
+    return (await this.hGetAll(key))[field];
+  }
+  async hDel(key: string, fields: string[]): Promise<void> {
+    for (const field of fields) this.hashes.get(key)?.delete(field);
+  }
+
   async get(key: string): Promise<string | undefined> {
     return this.values.get(key);
   }
@@ -229,7 +236,9 @@ describe("onboarding reminder", () => {
     expect(message.bodyMarkdown).toContain(
       "wait 24-hour, then try for up to 1,000 minutes",
     );
-    expect(message.bodyMarkdown).toContain("The community must remain eligible");
+    expect(message.bodyMarkdown).toContain(
+      "The community must remain eligible",
+    );
     expect(message.bodyMarkdown).not.toContain("23 hours and 59 minutes");
     expect(onboardingGoalBaseDelayMs).toBe(1_440 * 60 * 1000);
     expect(onboardingGoalStaggerMaxMinutes).toBe(1_000);
@@ -396,10 +405,11 @@ describe("onboarding reminder", () => {
           redis: redis as never,
           nowMs: nowMs + onboardingReminderDelayMs,
         }),
-      ).resolves.toMatchObject({
-        status: "ineligible",
-        eligibilitySubscriberCount: 1_001,
-      });
+      ).resolves.toMatchObject(
+        type === undefined
+          ? { status: "not_due" }
+          : { status: "ineligible", eligibilitySubscriberCount: 1_001 },
+      );
       expect(
         hoisted.ensureExistingSubscriberGoalHighlighted,
       ).not.toHaveBeenCalled();
@@ -775,7 +785,7 @@ describe("onboarding reminder", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("cancels without modmail when Manage Posts cannot be verified", async () => {
+  it("defers without cancelling the goal when Manage Posts cannot be verified", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await scheduleOnboardingReminder(redis as never, { nowMs });
     hoisted.checkAppAccountHealth.mockResolvedValue({
@@ -791,7 +801,7 @@ describe("onboarding reminder", () => {
         redis: redis as never,
         nowMs: nowMs + onboardingReminderDelayMs,
       }),
-    ).resolves.toMatchObject({ status: "cancelled" });
+    ).resolves.toMatchObject({ status: "not_due" });
     expect(hoisted.checkAppAccountHealth).toHaveBeenCalledWith(
       expect.objectContaining({
         notify: false,
@@ -802,12 +812,12 @@ describe("onboarding reminder", () => {
     await expect(
       redis.hGetAll(onboardingReminderStateKey),
     ).resolves.toMatchObject({
-      status: "complete",
-      result: "cancelled_permission",
+      status: "pending",
     });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('"event":"onboarding_reminder_cancelled"'),
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(
+      hoisted.markOnboardingSubscriberGoalCancelled,
+    ).not.toHaveBeenCalled();
   });
 
   it.each(["orphaned_completed_goal", "missing_goal"] as const)(
@@ -850,6 +860,100 @@ describe("onboarding reminder", () => {
       ).resolves.toMatchObject({ status: "pending" });
     },
   );
+
+  it.each(["unknown", "unhealthy"])(
+    "keeps the onboarding goal recoverable when reminder health is %s",
+    async (status) => {
+      const { automaticGoalPrerequisiteMaxAgeMs } =
+        await import("./automaticGoalRetry");
+      hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+        version: "onboarding_subscriber_goal_v4",
+        status: "awaiting_warning",
+        lifecycleSource: "install",
+        armedAt: nowMs,
+        creationStaggerMinutes: 1,
+        operationId: "onboarding:reminder-retry",
+      });
+      await scheduleOnboardingReminder(redis as never, { nowMs });
+      hoisted.checkAppAccountHealth.mockResolvedValue({
+        status,
+        healthy: false,
+      });
+      const run = (at: number) =>
+        processDueOnboardingReminder({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: at,
+        });
+      const start = nowMs + onboardingReminderDelayMs;
+      await run(start);
+      const pending = await redis.hGetAll(onboardingReminderStateKey);
+      expect(pending).toMatchObject({ status: "pending" });
+      expect(
+        hoisted.markOnboardingSubscriberGoalCancelled,
+      ).not.toHaveBeenCalled();
+      expect(hoisted.saveOnboardingState).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: "complete" }),
+      );
+      hoisted.checkAppAccountHealth.mockResolvedValue({
+        status: "healthy",
+        healthy: true,
+      });
+      await expect(run(Number(pending.nextRunAt))).resolves.toMatchObject({
+        status: "sent",
+      });
+      expect(
+        hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
+      ).toHaveBeenCalledOnce();
+      expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("exhausts deferred reminder permission checks after 48 hours without writing cancelled_permission", async () => {
+    const { automaticGoalPrerequisiteMaxAgeMs } =
+      await import("./automaticGoalRetry");
+    hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
+      version: "onboarding_subscriber_goal_v4",
+      status: "awaiting_warning",
+      lifecycleSource: "install",
+      armedAt: nowMs,
+      creationStaggerMinutes: 1,
+      operationId: "onboarding:reminder-ceiling",
+    });
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "unknown",
+      healthy: false,
+    });
+    const run = (at: number) =>
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: at,
+      });
+    const start = nowMs + onboardingReminderDelayMs;
+    await run(start);
+    await expect(
+      run(start + automaticGoalPrerequisiteMaxAgeMs),
+    ).resolves.toMatchObject({ status: "complete" });
+    expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+      status: "complete",
+      result: "retry_exhausted",
+    });
+    expect(hoisted.saveOnboardingState).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: "complete",
+        resultStatus: "retry_exhausted",
+      }),
+    );
+    await run(start + automaticGoalPrerequisiteMaxAgeMs + 1);
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    expect(
+      hoisted.markOnboardingSubscriberGoalCancelled,
+    ).not.toHaveBeenCalled();
+  });
 
   it("selects fresh warning and creation staggers after account recovery", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);

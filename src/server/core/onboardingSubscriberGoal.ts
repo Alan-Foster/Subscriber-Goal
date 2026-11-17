@@ -71,6 +71,7 @@ import {
 } from "./completedGoalReconciliation";
 import {
   getAutomaticGoalEligibility,
+  isAutomaticGoalEligibilityUncertain,
   type AutomaticGoalIneligibilityReason,
 } from "./automaticGoalEligibility";
 import {
@@ -801,6 +802,31 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   let creationAttempted = false;
   let creationFinished = false;
   let activeState = state;
+  let notificationLanguage: unknown;
+  const deferPrerequisite = async (errorMessage?: string): Promise<boolean> => {
+    const retry = await nextAutomaticGoalPrerequisiteRetry(
+      redis,
+      activeState.operationId,
+      nowMs,
+    );
+    await saveOnboardingState(redis, {
+      ...activeState,
+      status: retry.retryAt === null ? "complete" : "pending",
+      ...(retry.retryAt === null
+        ? { completedAt: nowMs, resultStatus: "retry_exhausted" as const }
+        : { nextRunAt: retry.retryAt }),
+      ...(errorMessage ? { errorMessage } : {}),
+    });
+    if (retry.retryAt === null)
+      await notifyAutomaticGoalExhausted({
+        reddit,
+        redis,
+        operationId: activeState.operationId,
+        unresolved: false,
+        language: notificationLanguage,
+      });
+    return retry.retryAt === null;
+  };
   try {
     const reloaded = parseOnboardingState(
       await redis.hGetAll(onboardingSubscriberGoalStateKey),
@@ -837,6 +863,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     }
 
     let subreddit = await reddit.getCurrentSubreddit();
+    notificationLanguage = subreddit.language;
     const eligibility = getOnboardingEligibility(subreddit);
     logDiagnostic("info", "onboarding_eligibility_checked", {
       workflow: "onboarding_subscriber_goal",
@@ -852,6 +879,13 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       reason: eligibility.reason ?? "none",
     });
     if (!eligibility.eligible) {
+      if (
+        eligibility.reason !== "subscriber_count" &&
+        isAutomaticGoalEligibilityUncertain(eligibility)
+      ) {
+        const exhausted = await deferPrerequisite();
+        return { status: exhausted ? "complete" : "failed", ...inspected };
+      }
       await saveOnboardingState(redis, {
         ...reloaded,
         status: "complete",
@@ -881,42 +915,11 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       scheduleUnknownRetry: false,
       nowMs,
     });
-    if (health.status === "unknown") {
-      await saveOnboardingState(redis, {
-        ...reloaded,
-        status: "pending",
-        nextRunAt: await nextAutomaticGoalPrerequisiteRetry(
-          redis,
-          reloaded.operationId,
-          nowMs,
-        ),
-      });
-      return { status: "failed", ...inspected };
-    }
     if (!health.healthy || health.status !== "healthy") {
-      const errorMessage =
-        "Subscriber Goal lacks verified Manage Posts permission.";
-      await saveOnboardingState(redis, {
-        ...reloaded,
-        status: "complete",
-        completedAt: nowMs,
-        resultStatus: "cancelled_permission",
-        errorMessage,
-      });
-      logDiagnostic("warn", "onboarding_goal_cancelled", {
-        workflow: "onboarding_subscriber_goal",
-        phase: "permission_check",
-        lifecycleSource: reloaded.lifecycleSource,
-        operationId: reloaded.operationId,
-        reason: "manage_posts_permission",
-      });
-      return {
-        status: "cancelled",
-        lifecycleSource: reloaded.lifecycleSource,
-        creationStaggerMinutes: reloaded.creationStaggerMinutes,
-        errorMessage,
-        ...inspected,
-      };
+      const exhausted = await deferPrerequisite(
+        "Subscriber Goal lacks verified Manage Posts permission.",
+      );
+      return { status: exhausted ? "complete" : "failed", ...inspected };
     }
 
     const existing = reconcilingSubmission
@@ -1042,6 +1045,13 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     subreddit = await reddit.getCurrentSubreddit();
     const creationEligibility = getOnboardingEligibility(subreddit);
     if (!creationEligibility.eligible) {
+      if (
+        creationEligibility.reason !== "subscriber_count" &&
+        isAutomaticGoalEligibilityUncertain(creationEligibility)
+      ) {
+        const exhausted = await deferPrerequisite();
+        return { status: exhausted ? "complete" : "failed", ...inspected };
+      }
       await saveOnboardingState(redis, {
         ...reloaded,
         status: "complete",
@@ -1352,6 +1362,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
           redis,
           operationId: activeState.operationId,
           unresolved: true,
+          language: notificationLanguage,
         });
       logDiagnostic(
         pending ? "warn" : "error",
@@ -1380,19 +1391,12 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         creationFinished ||
         isAutomaticGoalPrerequisiteError(error)
       ) {
-        await saveOnboardingState(redis, {
-          ...activeState,
-          status: "pending",
-          nextRunAt: await nextAutomaticGoalPrerequisiteRetry(
-            redis,
-            activeState.operationId,
-            nowMs,
-          ),
-          errorMessage,
-        });
+        const exhausted = await deferPrerequisite(errorMessage);
         logDiagnostic(
-          "warn",
-          "onboarding_prerequisite_retry_scheduled",
+          exhausted ? "error" : "warn",
+          exhausted
+            ? "onboarding_goal_prerequisites_exhausted"
+            : "onboarding_prerequisite_retry_scheduled",
           {
             workflow: "onboarding_subscriber_goal",
             phase: "prerequisite",
@@ -1400,7 +1404,11 @@ async function processDueOnboardingSubscriberGoalUnderLease({
           },
           error,
         );
-        return { status: "failed", errorMessage, ...inspected };
+        return {
+          status: exhausted ? "complete" : "failed",
+          errorMessage,
+          ...inspected,
+        };
       }
       const attempts = (activeState.attempts ?? 0) + 1;
       const terminal =
@@ -1422,6 +1430,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
           redis,
           operationId: activeState.operationId,
           unresolved: false,
+          language: notificationLanguage,
         });
       if (!terminal)
         logDiagnostic(
@@ -3003,6 +3012,8 @@ export async function saveOnboardingState(
     onboardingSubscriberGoalStateKey,
     serializeOnboardingState(state),
   );
+  if (state.status === "complete")
+    await resetAutomaticGoalPrerequisiteRetry(redis, state.operationId);
 }
 
 function isOnboardingIneligibilityReason(
@@ -3173,10 +3184,7 @@ export function selectOnboardingRetryDelayMs(
 
 function isPermanentOnboardingError(error: unknown): boolean {
   const name = error instanceof Error ? error.name : "";
-  return (
-    name === "ProhibitedSubredditError" ||
-    name === "SubscriberGoalModeratorPermissionError"
-  );
+  return name === "ProhibitedSubredditError";
 }
 
 async function mutateGoalTerminalOrSchedule(

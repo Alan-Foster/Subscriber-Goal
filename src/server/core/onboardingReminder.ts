@@ -1,3 +1,9 @@
+import {
+  nextAutomaticGoalPrerequisiteRetry,
+  resetAutomaticGoalPrerequisiteRetry,
+  notifyAutomaticGoalExhausted,
+} from "./automaticGoalRetry";
+import { isAutomaticGoalEligibilityUncertain } from "./automaticGoalEligibility";
 import type { RedditClient, RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
@@ -36,8 +42,7 @@ import { findLiveHighlightedSubscriberGoalCandidates } from "../data/liveSubscri
 
 function isExpectedCompletedReplacement(
   state:
-    | Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>>
-    | undefined,
+    Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>> | undefined,
   postId: string | undefined,
 ): boolean {
   return Boolean(
@@ -48,8 +53,7 @@ function isExpectedCompletedReplacement(
 
 function isUpgradeOnboardingIntent(
   state:
-    | Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>>
-    | undefined,
+    Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>> | undefined,
 ): boolean {
   return Boolean(
     state?.lifecycleSource === "upgrade" &&
@@ -73,10 +77,7 @@ export const onboardingReminderDelayMs =
   onboardingReminderStaggerMinMinutes * 60 * 1000;
 
 type OnboardingReminderStatus =
-  | "pending"
-  | "processing"
-  | "dispatching"
-  | "complete";
+  "pending" | "processing" | "dispatching" | "complete";
 type OnboardingReminderResult =
   | "sent"
   | "existing"
@@ -478,6 +479,58 @@ export async function processDueOnboardingReminder({
     });
 
     const subreddit = await reddit.getCurrentSubreddit();
+    const activeGoalState = await getOnboardingSubscriberGoalState(redis);
+    const operationId =
+      activeGoalState?.operationId ?? "onboarding-reminder:" + reloaded.armedAt;
+    const deferPrerequisite = async (
+      accountRecovery = false,
+    ): Promise<OnboardingReminderSummary> => {
+      const retry = await nextAutomaticGoalPrerequisiteRetry(
+        redis,
+        operationId,
+        nowMs,
+      );
+      await saveOnboardingReminderState(redis, {
+        ...reloaded,
+        status: retry.retryAt === null ? "complete" : "pending",
+        ...(retry.retryAt === null
+          ? { completedAt: nowMs, result: "retry_exhausted" as const }
+          : { nextRunAt: retry.retryAt }),
+      });
+      if (activeGoalState && activeGoalState.status !== "complete") {
+        await saveOnboardingState(redis, {
+          ...activeGoalState,
+          ...(retry.retryAt === null
+            ? {
+                status: "complete" as const,
+                completedAt: nowMs,
+                resultStatus: "retry_exhausted" as const,
+              }
+            : accountRecovery
+              ? { pausedForAccountRecovery: true }
+              : {}),
+        });
+      }
+      if (retry.retryAt === null) {
+        await notifyAutomaticGoalExhausted({
+          reddit,
+          redis,
+          operationId,
+          unresolved: false,
+          language: subreddit.language,
+        });
+        await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
+      }
+      return {
+        status:
+          retry.retryAt === null
+            ? "complete"
+            : accountRecovery
+              ? "paused"
+              : "not_due",
+        ...inspected,
+      };
+    };
     const eligibility = getOnboardingEligibility(subreddit);
     logDiagnostic("info", "onboarding_eligibility_checked", {
       workflow: "onboarding_reminder",
@@ -492,6 +545,11 @@ export async function processDueOnboardingReminder({
       reason: eligibility.reason ?? "none",
     });
     if (!eligibility.eligible) {
+      if (
+        eligibility.reason !== "subscriber_count" &&
+        isAutomaticGoalEligibilityUncertain(eligibility)
+      )
+        return await deferPrerequisite();
       await markOnboardingReminderIneligible(
         redis,
         eligibility.subscriberCount,
@@ -514,7 +572,6 @@ export async function processDueOnboardingReminder({
       };
     }
 
-    const activeGoalState = await getOnboardingSubscriberGoalState(redis);
     const upgradeOnboardingIntent = isUpgradeOnboardingIntent(activeGoalState);
     const recoveredFromAccountPause = Boolean(
       upgradeOnboardingIntent && activeGoalState?.pausedForAccountRecovery,
@@ -532,25 +589,7 @@ export async function processDueOnboardingReminder({
         nowMs,
       });
       if (!preflightHealth.healthy || preflightHealth.status !== "healthy") {
-        const retryAt = nowMs + 5 * 60 * 1000;
-        await saveOnboardingState(redis, {
-          ...activeGoalState,
-          status: "awaiting_warning",
-          pausedForAccountRecovery: true,
-        });
-        await saveOnboardingReminderState(redis, {
-          ...reloaded,
-          status: "pending",
-          nextRunAt: retryAt,
-        });
-        logDiagnostic("info", "onboarding_paused_for_account_recovery", {
-          workflow: "onboarding_reminder",
-          phase: "permission_preflight",
-          lifecycleSource: reloaded.lifecycleSource,
-          sourcePostId: activeGoalState.replacementSourcePostId ?? "none",
-          nextRunAt: retryAt,
-        });
-        return { status: "paused", ...base };
+        return await deferPrerequisite(true);
       }
       accountHealthVerified = true;
     }
@@ -733,30 +772,7 @@ export async function processDueOnboardingReminder({
         accountHealthVerified = true;
       }
     }
-    if (!accountHealthVerified) {
-      const errorMessage =
-        "Subscriber Goal lacks verified Manage Posts permission.";
-      await saveOnboardingReminderState(redis, {
-        ...reloaded,
-        status: "complete",
-        completedAt: nowMs,
-        result: "cancelled_permission",
-        errorMessage,
-      });
-      await markOnboardingSubscriberGoalCancelled(
-        redis,
-        "cancelled_permission",
-        nowMs,
-        errorMessage,
-      );
-      logDiagnostic("warn", "onboarding_reminder_cancelled", {
-        workflow: "onboarding_reminder",
-        phase: "permission_check",
-        lifecycleSource: reloaded.lifecycleSource,
-        reason: "manage_posts_permission",
-      });
-      return { status: "cancelled", errorMessage, ...inspected };
-    }
+    if (!accountHealthVerified) return await deferPrerequisite();
 
     if (!automationEnabled) {
       await saveOnboardingReminderState(redis, {
@@ -832,6 +848,7 @@ export async function processDueOnboardingReminder({
       result: "sent",
       sentAt: nowMs,
     });
+    await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
     logDiagnostic("info", "onboarding_modmail_sent", {
       workflow: "onboarding_reminder",
       phase: "modmail_sent",

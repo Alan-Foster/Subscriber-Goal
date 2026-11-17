@@ -1087,10 +1087,11 @@ describe("onboarding subscriber goal", () => {
           appSettings: settings,
           nowMs: nowMs + onboardingGoalBaseDelayMs,
         }),
-      ).resolves.toMatchObject({
-        status: "ineligible",
-        eligibilitySubscriberCount: 1_001,
-      });
+      ).resolves.toMatchObject(
+        type === undefined
+          ? { status: "failed" }
+          : { status: "ineligible", eligibilitySubscriberCount: 1_001 },
+      );
 
       expect(reddit.getAppUser).not.toHaveBeenCalled();
       expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
@@ -1617,6 +1618,104 @@ describe("onboarding subscriber goal", () => {
         }),
       ).resolves.toMatchObject({ status: "created" });
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unknown safety", "unknown type", "unhealthy"])(
+    "defers %s and resumes on verified eligibility and permissions",
+    async (reason) => {
+      const { automaticGoalPrerequisiteRetriesKey } =
+        await import("./automaticGoalRetry");
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      const subreddit = await reddit.getCurrentSubreddit();
+      if (reason !== "unhealthy")
+        reddit.getCurrentSubreddit.mockResolvedValueOnce({
+          ...subreddit,
+          ...(reason === "unknown safety"
+            ? { nsfw: undefined }
+            : { type: undefined }),
+        });
+      else
+        hoisted.checkAppAccountHealth.mockResolvedValueOnce({
+          status: "unhealthy",
+          healthy: false,
+        });
+      const run = (at: number) =>
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: at,
+        });
+      await run(Number(initial.nextRunAt));
+      const pending = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      expect(pending).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        operationId: initial.operationId,
+      });
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      await expect(run(Number(pending.nextRunAt))).resolves.toMatchObject({
+        status: "created",
+      });
+      expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+        {},
+      );
+    },
+  );
+
+  it.each(["preflight", "creation boundary"])(
+    "exhausts missing permissions after the 48-hour window at %s",
+    async (boundary) => {
+      const {
+        automaticGoalPrerequisiteMaxAgeMs,
+        automaticGoalPrerequisiteRetriesKey,
+      } = await import("./automaticGoalRetry");
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      const start = Number(initial.nextRunAt);
+      if (boundary === "preflight")
+        hoisted.checkAppAccountHealth.mockResolvedValue({
+          status: "unhealthy",
+          healthy: false,
+        });
+      else
+        hoisted.createSubscriberGoal.mockRejectedValue(
+          Object.assign(new Error("Manage Posts missing"), {
+            name: "SubscriberGoalModeratorPermissionError",
+          }),
+        );
+      const run = (at: number) =>
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: at,
+        });
+      await run(start);
+      expect(
+        await redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).toMatchObject({ status: "pending", attempts: "0" });
+      await run(start + automaticGoalPrerequisiteMaxAgeMs);
+      expect(
+        await redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).toMatchObject({
+        status: "complete",
+        resultStatus: "retry_exhausted",
+        operationId: initial.operationId,
+      });
+      await run(start + automaticGoalPrerequisiteMaxAgeMs + 1);
+      expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+      expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+        {},
+      );
     },
   );
 

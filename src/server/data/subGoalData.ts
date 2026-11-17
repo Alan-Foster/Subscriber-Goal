@@ -1,4 +1,8 @@
-import { rearmAutomaticGoalReconciliation } from "../core/automaticGoalRetry";
+import {
+  rearmAutomaticGoalReconciliation,
+  beginAutomaticGoalRetryGeneration,
+  resetAutomaticGoalPrerequisiteRetry,
+} from "../core/automaticGoalRetry";
 import type { RedditClient, RedisClient } from "../types";
 import { isLinkId } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -718,6 +722,7 @@ export async function repairAutoCreateNextGoal(
       redis,
       reconciliationExhausted,
       nowMs,
+      true,
     ))
   ) {
     await redis.hDel(autoCreateNextGoalReconciliationExhaustedKey, [postId]);
@@ -743,6 +748,7 @@ export async function repairAutoCreateNextGoal(
     rearmExhausted &&
     (exhausted || failureCount > autoCreateNextGoalRetryDelayMs.length)
   ) {
+    await beginAutomaticGoalRetryGeneration(redis, `auto-next:${postId}`);
     await Promise.all([
       redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),
       redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
@@ -842,6 +848,7 @@ export async function cancelAutoCreateNextGoal(
   postId: string,
 ): Promise<void> {
   await Promise.all([
+    resetAutomaticGoalPrerequisiteRetry(redis, `auto-next:${postId}`),
     redis.zRem(autoCreateNextGoalQueueKey, [postId]),
     redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
     redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),

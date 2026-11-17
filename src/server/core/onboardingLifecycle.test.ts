@@ -517,6 +517,39 @@ describe("onboarding lifecycle reconciliation", () => {
     },
   );
 
+  it("re-arms prerequisite exhaustion with the same operation and a fresh window", async () => {
+    const {
+      automaticGoalPrerequisiteRetriesKey,
+      automaticGoalRetryGenerationsKey,
+    } = await import("./automaticGoalRetry");
+    await seedCompleted(redis, "retry_exhausted", "sent");
+    const previous = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    await redis.hSet(automaticGoalPrerequisiteRetriesKey, {
+      [previous.operationId!]: "53",
+      [previous.operationId + ":firstDeferredAt"]: String(
+        nowMs - 48 * 3_600_000,
+      ),
+    });
+    await expect(
+      reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "rearmed",
+      operationId: previous.operationId,
+    });
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+    expect(
+      await redis.hGet(automaticGoalRetryGenerationsKey, previous.operationId!),
+    ).toBe("1");
+    expect(await redis.hGetAll(onboardingSubscriberGoalStateKey)).toMatchObject(
+      { status: "awaiting_warning", operationId: previous.operationId },
+    );
+  });
+
   it("preserves active operation identity and timers when no highlight exists", async () => {
     await seedCompleted(redis);
     await redis.hSet(onboardingSubscriberGoalStateKey, {

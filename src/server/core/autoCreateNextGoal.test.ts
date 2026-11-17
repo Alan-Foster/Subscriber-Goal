@@ -76,6 +76,9 @@ const hoisted = vi.hoisted(() => ({
       );
       hoisted.redisHashes.set(key, hash);
     }),
+    hDel: vi.fn(async (key: string, fields: string[]) => {
+      for (const field of fields) hoisted.redisHashes.get(key)?.delete(field);
+    }),
     hMGet: vi.fn(async (key: string, fields: string[]) =>
       fields.map((field) => hoisted.redisHashes.get(key)?.get(field)),
     ),
@@ -1347,6 +1350,66 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(
       hoisted.ensureExistingSubscriberGoalHighlighted,
     ).not.toHaveBeenCalled();
+  });
+
+  it("exhausts prerequisite uncertainty after 48 hours and sends one notice", async () => {
+    const {
+      automaticGoalPrerequisiteMaxAgeMs,
+      automaticGoalPrerequisiteRetriesKey,
+    } = await import("./automaticGoalRetry");
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.checkAppAccountHealth.mockResolvedValue({
+      status: "unknown",
+      healthy: false,
+    });
+    const run = (nowMs: number) =>
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs,
+      });
+    await expect(run(1_000)).resolves.toMatchObject({
+      rescheduled: 1,
+      exhausted: 0,
+    });
+    hoisted.markAutoCreateNextGoalExhausted.mockImplementation(async () => {
+      hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(undefined);
+    });
+    await expect(
+      run(1_000 + automaticGoalPrerequisiteMaxAgeMs),
+    ).resolves.toMatchObject({ rescheduled: 0, exhausted: 1 });
+    await run(2_000 + automaticGoalPrerequisiteMaxAgeMs);
+    expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(
+      hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
+    ).toBe(0);
+  });
+
+  it("clears prerequisite fields when a successor recovers before the ceiling", async () => {
+    const { automaticGoalPrerequisiteRetriesKey } =
+      await import("./automaticGoalRetry");
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.checkAppAccountHealth.mockResolvedValueOnce({
+      status: "unhealthy",
+      healthy: false,
+    });
+    const run = (nowMs: number) =>
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs,
+      });
+    await run(1_000);
+    expect(
+      hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
+    ).toBe(2);
+    await expect(run(301_000)).resolves.toMatchObject({ created: 1 });
+    expect(
+      hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
+    ).toBe(0);
   });
 
   it("reschedules a failed automatic creation", async () => {
