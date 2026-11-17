@@ -1,4 +1,8 @@
 import {
+  PostTemporarilyUnavailableError,
+  temporarilyRemovedPostRecheckDelayMs,
+} from "../utils/postStatus";
+import {
   nextAutomaticGoalPrerequisiteRetry,
   resetAutomaticGoalPrerequisiteRetry,
   notifyAutomaticGoalExhausted,
@@ -890,6 +894,24 @@ export async function processDueOnboardingReminder({
       );
       if (latest?.status === "complete") {
         return { status: "complete", ...inspected };
+      }
+      if (
+        !dispatchStarted &&
+        error instanceof PostTemporarilyUnavailableError
+      ) {
+        await saveOnboardingReminderState(redis, {
+          ...(latest ?? state),
+          status: "pending",
+          nextRunAt: nowMs + temporarilyRemovedPostRecheckDelayMs,
+          errorMessage,
+        });
+        logDiagnostic("info", "onboarding_reminder_post_paused", {
+          workflow: "onboarding_reminder",
+          phase: "post_availability",
+          postId: error.postId,
+          category: error.category ?? "unknown",
+        });
+        return { status: "not_due", ...inspected };
       }
       if (dispatchStarted || latest?.status === "dispatching") {
         await saveOnboardingReminderState(redis, {

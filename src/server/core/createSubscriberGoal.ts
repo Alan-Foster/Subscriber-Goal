@@ -70,7 +70,11 @@ import {
   isSubscriberGoalPostRetired,
   retireSubscriberGoalPost,
 } from "./postRetirement";
-import { getTerminalRemovedByCategory } from "../utils/postStatus";
+import {
+  getPostAvailability,
+  PostTemporarilyUnavailableError,
+  isMissingPostError,
+} from "../utils/postStatus";
 import { getCurrentActorAuthority } from "../utils/actorAuthorization";
 
 type CreateSubscriberGoalOptions = {
@@ -410,6 +414,7 @@ export async function createSubscriberGoal({
     if (
       options.automaticPermissionCheck &&
       !(error instanceof SubscriberGoalCreationOutcomeUnknownError) &&
+      !(error instanceof PostTemporarilyUnavailableError) &&
       !(error instanceof SubscriberGoalModeratorPermissionError) &&
       !(error instanceof ProhibitedSubredditError)
     ) {
@@ -593,13 +598,11 @@ async function createSubscriberGoalUnderCommunityLease({
         recoveredPost = (await reddit.getPostById(
           submittedPostId,
         )) as unknown as Awaited<ReturnType<typeof createGoalPost>>;
+        if (!recoveredPost) {
+          throw new PostTemporarilyUnavailableError(submittedPostId);
+        }
       } catch (error) {
-        const message = toErrorMessage(error);
-        if (
-          /not[\s-]?found|does not exist|deleted|no longer exists|\b404\b|\b410\b/i.test(
-            message,
-          )
-        ) {
+        if (isMissingPostError(error, submittedPostId)) {
           await retireSubscriberGoalPost(
             redis,
             submittedPostId,
@@ -1326,8 +1329,12 @@ async function revalidateRecoveredCreation({
   if (await isSubscriberGoalPostRetired(redis, post.id)) {
     return createTerminalCreationResult("retired", post.id);
   }
-  const removedByCategory = getTerminalRemovedByCategory(post);
-  if (removedByCategory) {
+  const availability = getPostAvailability(post);
+  if (availability.status === "temporarily_removed") {
+    throw new PostTemporarilyUnavailableError(post.id, availability.category);
+  }
+  if (availability.status === "terminal") {
+    const removedByCategory = availability.category;
     await retireSubscriberGoalPost(
       redis,
       post.id,

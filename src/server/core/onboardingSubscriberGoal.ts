@@ -49,7 +49,9 @@ import {
   registerSubscriberGoalPost,
 } from "../data/subscriberGoalPostRegistry";
 import {
-  getTerminalRemovedByCategory,
+  getPostAvailability,
+  PostTemporarilyUnavailableError,
+  temporarilyRemovedPostRecheckDelayMs,
   isMissingPostError,
 } from "../utils/postStatus";
 import {
@@ -309,6 +311,8 @@ export type OnboardingHighlightEnsuranceResult =
     classificationConfidence?: GoalClassificationConfidence;
     moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
     selectedWasAlreadyHighlighted?: boolean;
+    pausedByRemovedGoal?: boolean;
+    removedGoalBlockerPostIds?: string[];
     candidateCount: number;
     highlightedClassicCount: number;
     highlightedProtectedCount: number;
@@ -1341,6 +1345,22 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   } catch (error) {
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
+    if (error instanceof PostTemporarilyUnavailableError) {
+      await saveOnboardingState(redis, {
+        ...activeState,
+        status: "pending",
+        nextRunAt: nowMs + temporarilyRemovedPostRecheckDelayMs,
+        errorMessage,
+      });
+      logDiagnostic("info", "onboarding_goal_post_paused", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "post_availability",
+        operationId: activeState.operationId,
+        postId: error.postId,
+        category: error.category ?? "unknown",
+      });
+      return { status: "failed", errorMessage, ...inspected };
+    }
     if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
       const pending =
         error.reconciliationStatus === "pending" &&
@@ -1492,7 +1512,10 @@ export async function findValidSubscriberGoals(
   nowMs = Date.now(),
   includeRecovery = true,
 ): Promise<
-  OnboardingDetectionDiagnostics & { candidates: OnboardingGoalCandidate[] }
+  OnboardingDetectionDiagnostics & {
+    candidates: OnboardingGoalCandidate[];
+    removedActiveGoals: OnboardingGoalCandidate[];
+  }
 > {
   const diagnostics: OnboardingDetectionDiagnostics = {
     registeredInspected: 0,
@@ -1527,6 +1550,7 @@ export async function findValidSubscriberGoals(
   diagnostics.highlightedInspected = highlightedPosts.length;
 
   const candidates: OnboardingGoalCandidate[] = [];
+  const removedActiveGoals: OnboardingGoalCandidate[] = [];
   const seen = new Set<string>();
   let discoveryOrder = 0;
   const inspect = async (
@@ -1538,14 +1562,43 @@ export async function findValidSubscriberGoals(
     if (!postId || seen.has(postId) || !isLinkId(postId)) return;
     seen.add(postId);
     if (await isSubscriberGoalPostRetired(redis, postId)) return;
-    if (
-      !(await isSubscriberGoalCandidate(
-        redis,
-        post,
-        subreddit,
-        appUser.username,
-      ))
-    ) {
+    const availability = getPostAvailability(post);
+    const isCandidate = await isSubscriberGoalCandidate(
+      redis,
+      post,
+      subreddit,
+      appUser.username,
+    );
+    if (availability.status === "temporarily_removed") {
+      // Historical removals must not block unrelated work. Only an unfinished
+      // classic goal prevents a replacement; none of these posts are pruned.
+      if (isCandidate) {
+        const metadata = await getGoalCandidateMetadata(redis, post);
+        if (metadata.classification === "classic") {
+          const goalData = await getSubGoalData(
+            redis,
+            postId,
+            post.postData ?? post.customPostData,
+          );
+          if (!goalData.completedTime) {
+            const createdAtMs = getCreatedAtMs(post.createdAt);
+            removedActiveGoals.push({
+              postId,
+              post,
+              source,
+              ...(createdAtMs === undefined ? {} : { createdAtMs }),
+              isHighlighted: false,
+              ...metadata,
+              goal: goalData.goal,
+              completedTime: goalData.completedTime,
+              discoveryOrder: discoveryOrder++,
+            });
+          }
+        }
+      }
+      return;
+    }
+    if (!isCandidate) {
       if (pruneInvalid) {
         await pruneStaleCandidate(redis, postId);
         diagnostics.stalePruned += 1;
@@ -1650,7 +1703,7 @@ export async function findValidSubscriberGoals(
     for (const post of searchedPosts) await inspect(post, "search", false);
   }
 
-  return { ...diagnostics, candidates };
+  return { ...diagnostics, candidates, removedActiveGoals };
 }
 
 export async function ensureExistingSubscriberGoalHighlighted({
@@ -1707,7 +1760,88 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   mutationLease: CommunityGoalMutationLease;
 }): Promise<OnboardingHighlightEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
-  const { candidates, ...diagnostics } = discovery;
+  const { candidates, removedActiveGoals, ...diagnostics } = discovery;
+  const newestLiveClassicAt = candidates
+    .filter((candidate) => candidate.classification === "classic")
+    .reduce(
+      (newest, candidate) =>
+        Math.max(newest, candidate.createdAtMs ?? Number.POSITIVE_INFINITY),
+      Number.NEGATIVE_INFINITY,
+    );
+  // A newer live classic supersedes an older removed goal, even if the live
+  // one is completed. Unknown removal dates remain conservative blockers.
+  const blockingRemovedGoals = removedActiveGoals.filter(
+    (candidate) =>
+      candidate.createdAtMs === undefined ||
+      candidate.createdAtMs > newestLiveClassicAt,
+  );
+  const liveResult = await reconcileLiveSubscriberGoalHighlights({
+    reddit,
+    redis,
+    nowMs,
+    notifyOnFailure,
+    reconciliationContext,
+    mutationLease,
+    ...(highlightVerification ? { highlightVerification } : {}),
+    candidates,
+    diagnostics,
+    pauseSuccessorMapping: blockingRemovedGoals.length > 0,
+  });
+  if (blockingRemovedGoals.length === 0) return liveResult;
+  const selected =
+    blockingRemovedGoals.find(({ createdAtMs }) => createdAtMs === undefined) ??
+    newestGoalCandidate(blockingRemovedGoals);
+  const blockerIds = blockingRemovedGoals.map(({ postId }) => postId);
+  const result: OnboardingHighlightEnsuranceResult = {
+    ...liveResult,
+    ...(liveResult.status === "missing"
+      ? {
+          status: "existing_not_highlighted" as const,
+          postId: selected.postId,
+          source: selected.source,
+          classification: selected.classification,
+          classificationConfidence: selected.classificationConfidence,
+          selectedWasAlreadyHighlighted: false,
+          verificationResult: "not_highlighted" as const,
+          notificationOutcome: "not_requested" as const,
+        }
+      : {}),
+    pausedByRemovedGoal: true,
+    removedGoalBlockerPostIds: blockerIds,
+    candidateCount: liveResult.candidateCount + blockingRemovedGoals.length,
+    eligiblePostIds: [...blockerIds, ...liveResult.eligiblePostIds],
+    unhighlightedEligiblePostIds: [
+      ...blockerIds,
+      ...liveResult.unhighlightedEligiblePostIds,
+    ],
+  };
+  logHighlightEnsurance(result.status, result);
+  return result;
+}
+
+async function reconcileLiveSubscriberGoalHighlights({
+  reddit,
+  redis,
+  nowMs,
+  notifyOnFailure,
+  highlightVerification,
+  reconciliationContext,
+  mutationLease,
+  candidates,
+  diagnostics,
+  pauseSuccessorMapping,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  nowMs: number;
+  notifyOnFailure: boolean;
+  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  reconciliationContext: HighlightReconciliationContext;
+  mutationLease: CommunityGoalMutationLease;
+  candidates: OnboardingGoalCandidate[];
+  diagnostics: OnboardingDetectionDiagnostics;
+  pauseSuccessorMapping: boolean;
+}): Promise<OnboardingHighlightEnsuranceResult> {
   {
     let subscriberCount: number | undefined;
     for (const candidate of candidates) {
@@ -1817,7 +1951,9 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       const newestActiveClassic = activeGoals.length
         ? newestGoalCandidate(activeGoals)
         : undefined;
-      if (newestActiveClassic) {
+      // A removed newer goal may already be the intended successor. Repair
+      // older live highlights without mapping sources to those older goals.
+      if (newestActiveClassic && !pauseSuccessorMapping) {
         for (const completedClassic of completedGoals) {
           const existingSuccessor = await redis.hGet(
             autoCreateNextGoalSuccessorsKey,
@@ -2745,7 +2881,7 @@ async function isSubscriberGoalCandidate(
   if (
     !post.id ||
     post.authorName?.toLowerCase() !== appUsername.toLowerCase() ||
-    getTerminalRemovedByCategory(post) !== undefined
+    getPostAvailability(post).status === "terminal"
   ) {
     return false;
   }

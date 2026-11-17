@@ -398,6 +398,129 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "moderator",
+    "automod_filtered",
+    "reddit",
+    "community_ops",
+    "unknown_remover",
+  ])(
+    "resumes the same %s-removed submitted post without a duplicate",
+    async (category) => {
+      const operationId = "auto-next:t3_source";
+      const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+      const post = {
+        ...createPost(),
+        removedByCategory: category as string | undefined,
+      };
+      hoisted.redisHashes.set(
+        operationKey,
+        new Map([
+          ["status", "post_submitted"],
+          ["postId", post.id],
+          ["submissionMarker", "marker"],
+        ]),
+      );
+      hoisted.reddit.getPostById.mockResolvedValue(post);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await expect(
+          createGoal({ operationId, automaticPermissionCheck: true }),
+        ).rejects.toMatchObject({
+          name: "PostTemporarilyUnavailableError",
+          postId: post.id,
+        });
+        expect(hoisted.redisHashes.get(operationKey)?.get("postId")).toBe(
+          post.id,
+        );
+        expect(
+          hoisted.redisHashes.get(operationKey)?.get("submissionMarker"),
+        ).toBe("marker");
+      }
+      expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
+      expect(post.highlight).not.toHaveBeenCalled();
+      expect(
+        hoisted.redisValues.has(`retired_subscriber_goal_v1:${post.id}`),
+      ).toBe(false);
+      post.removedByCategory = undefined;
+      await expect(
+        createGoal({ operationId, automaticPermissionCheck: true }),
+      ).resolves.toMatchObject({ post: { id: post.id } });
+      expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not replace a known post when Reddit returns no object without confirming deletion", async () => {
+    const operationId = "auto-next:t3_noobject";
+    const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "post_submitted"],
+        ["postId", "t3_known"],
+        ["submissionMarker", "marker"],
+      ]),
+    );
+    hoisted.reddit.getPostById.mockResolvedValue(undefined);
+    await expect(
+      createGoal({ operationId, automaticPermissionCheck: true }),
+    ).rejects.toMatchObject({
+      name: "PostTemporarilyUnavailableError",
+      postId: "t3_known",
+    });
+    expect(hoisted.redisHashes.get(operationKey)?.get("postId")).toBe(
+      "t3_known",
+    );
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+  });
+
+  it.each(["deleted", "author", "404", "410"])(
+    "still retires %s on recovered creation without submitting a replacement",
+    async (category) => {
+      const retirement = await import("./postRetirement");
+      const retire = vi
+        .spyOn(retirement, "retireSubscriberGoalPost")
+        .mockResolvedValue(undefined);
+      try {
+        const operationId = "auto-next:t3_terminal";
+        const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+        const post = { ...createPost(), removedByCategory: category };
+        hoisted.redisHashes.set(
+          operationKey,
+          new Map([
+            ["status", "post_submitted"],
+            ["postId", post.id],
+            ["submissionMarker", "marker"],
+          ]),
+        );
+        if (category === "404" || category === "410") {
+          hoisted.reddit.getPostById.mockRejectedValue({
+            status: Number(category),
+          });
+        } else {
+          hoisted.reddit.getPostById.mockResolvedValue(post);
+        }
+        await expect(
+          createGoal({ operationId, automaticPermissionCheck: true }),
+        ).resolves.toMatchObject({ outcome: "retired", post: { id: post.id } });
+        expect(retire).toHaveBeenCalledWith(
+          hoisted.redis,
+          post.id,
+          category === "404" || category === "410"
+            ? "creation_retry_post_missing"
+            : `creation_retry_removed:${category}`,
+        );
+        expect(hoisted.redisHashes.get(operationKey)?.get("status")).toBe(
+          "retired",
+        );
+        expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      } finally {
+        retire.mockRestore();
+      }
+    },
+  );
+
   it("preserves an incomplete manual operation on transient lookup failure and resumes once", async () => {
     const operationId = "manual-v2:t5_example:t2_mod:resume";
     const operationKey = `subscriber_goal_creation_v1:${operationId}`;

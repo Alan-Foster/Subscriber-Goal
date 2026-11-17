@@ -188,6 +188,12 @@ async function processDueAppRepairUnderLease({
           mutationLease,
         });
         recurringHighlightCheck = (result.eligiblePostIds?.length ?? 0) > 0;
+        const onlyRemovedGoalsUnhighlighted =
+          result.pausedByRemovedGoal &&
+          (result.unhighlightedEligiblePostIds?.length ?? 0) > 0 &&
+          result.unhighlightedEligiblePostIds.every((postId) =>
+            result.removedGoalBlockerPostIds?.includes(postId),
+          );
         const expectedTargetOutstanding = state.targetPostId
           ? !(await isSubscriberGoalPostRetired(redis, state.targetPostId)) &&
             !(await redis.hGet(
@@ -197,7 +203,8 @@ async function processDueAppRepairUnderLease({
           : false;
         if (
           (result.status === "missing" && expectedTargetOutstanding) ||
-          result.status === "existing_not_highlighted" ||
+          (result.status === "existing_not_highlighted" &&
+            !onlyRemovedGoalsUnhighlighted) ||
           result.reconciliationOutcome === "degraded" ||
           result.reconciliationOutcome === "failed"
         ) {

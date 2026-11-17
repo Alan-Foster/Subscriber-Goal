@@ -6,7 +6,7 @@ import {
 } from "../../shared/postKind";
 import type { RedditClient, RedisClient } from "../types";
 import { isLinkId, type LinkId } from "../types";
-import { getTerminalRemovedByCategory } from "../utils/postStatus";
+import { getPostAvailability } from "../utils/postStatus";
 import {
   postGoalSuffix,
   postHeightSuffix,
@@ -17,15 +17,10 @@ import { registerSubscriberGoalPost } from "./subscriberGoalPostRegistry";
 import { isSubscriberGoalPostRetired } from "../core/postRetirement";
 
 export type LiveSubscriberGoalClassification =
-  | "classic"
-  | "tiny"
-  | "cta"
-  | "ambiguous";
+  "classic" | "tiny" | "cta" | "ambiguous";
 
 export type LiveSubscriberGoalClassificationConfidence =
-  | "explicit"
-  | "migrated_consistent"
-  | "ambiguous";
+  "explicit" | "migrated_consistent" | "ambiguous";
 
 type LiveCandidatePost = Awaited<ReturnType<RedditClient["getPostById"]>> & {
   postData?: unknown;
@@ -70,7 +65,7 @@ export async function findLiveHighlightedSubscriberGoalCandidates({
     )) as LiveCandidatePost;
     if (
       (await isSubscriberGoalPostRetired(redis, highlighted.postId)) ||
-      getTerminalRemovedByCategory(post) !== undefined ||
+      getPostAvailability(post).status !== "active" ||
       post.authorName?.toLowerCase() !== appUser.username.toLowerCase() ||
       (post.subredditId !== subreddit.id &&
         post.subredditName?.toLowerCase() !== subreddit.name.toLowerCase())

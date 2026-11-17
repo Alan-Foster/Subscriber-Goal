@@ -232,6 +232,54 @@ describe("scheduled app repair", () => {
     });
   });
 
+  it.each(["only_removed", "live_unpinned", "live_degraded"])(
+    "handles removal pauses without hiding live repair failures (%s)",
+    async (scenario) => {
+      hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+        status: "existing_not_highlighted",
+        pausedByRemovedGoal: true,
+        removedGoalBlockerPostIds: ["t3_removed"],
+        eligiblePostIds: ["t3_removed", "t3_live"],
+        unhighlightedEligiblePostIds:
+          scenario === "live_unpinned"
+            ? ["t3_removed", "t3_live"]
+            : ["t3_removed"],
+        ...(scenario === "live_degraded"
+          ? { reconciliationOutcome: "degraded" }
+          : {}),
+      });
+      await scheduleAppRepair(redis as never, 100, 0);
+      const run = (nowMs: number) =>
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        });
+      await expect(run(100)).resolves.toBe(
+        scenario === "only_removed" ? "complete" : "retry",
+      );
+      if (scenario === "only_removed") {
+        expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+          status: "complete",
+          recurring: "true",
+          attempts: "0",
+          nextRunAt: String(100 + recurringHighlightRepairIntervalMs),
+        });
+        await expect(
+          run(100 + recurringHighlightRepairIntervalMs),
+        ).resolves.toBe("complete");
+        expect(
+          hoisted.ensureExistingSubscriberGoalHighlighted,
+        ).toHaveBeenCalledTimes(2);
+      } else {
+        expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+          status: "pending",
+          attempts: "1",
+        });
+      }
+    },
+  );
+
   it("retries when Community Highlight reconciliation cannot safely complete", async () => {
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
       status: "existing_not_highlighted",

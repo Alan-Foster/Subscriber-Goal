@@ -24,7 +24,9 @@ import {
 } from "./createSubscriberGoal";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import {
-  getTerminalRemovedByCategory,
+  getPostAvailability,
+  PostTemporarilyUnavailableError,
+  temporarilyRemovedPostRecheckDelayMs,
   isMissingPostError,
 } from "../utils/postStatus";
 import { isLinkId } from "../types";
@@ -256,8 +258,15 @@ export async function processDueAutoCreateNextGoals({
 
       try {
         const sourcePost = await reddit.getPostById(sourcePostId);
-        const removedByCategory = getTerminalRemovedByCategory(sourcePost);
-        if (removedByCategory) {
+        const availability = getPostAvailability(sourcePost);
+        if (availability.status === "temporarily_removed") {
+          throw new PostTemporarilyUnavailableError(
+            sourcePostId,
+            availability.category,
+          );
+        }
+        if (availability.status === "terminal") {
+          const removedByCategory = availability.category;
           summary.skipped += 1;
           await retireSubscriberGoalPost(
             redis,
@@ -468,6 +477,23 @@ export async function processDueAutoCreateNextGoals({
       summary.created += 1;
       break;
     } catch (error) {
+      if (error instanceof PostTemporarilyUnavailableError) {
+        await scheduleAutoCreateNextGoalReconciliation(
+          redis,
+          sourcePostId,
+          nowMs + temporarilyRemovedPostRecheckDelayMs,
+        );
+        summary.skipped += 1;
+        summary.rescheduled += 1;
+        logDiagnostic("info", "auto_create_goal_post_paused", {
+          workflow: "auto_create_next_goal",
+          phase: "post_availability",
+          postId: error.postId,
+          sourcePostId,
+          category: error.category ?? "unknown",
+        });
+        continue;
+      }
       if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
         summary.unresolved = (summary.unresolved ?? 0) + 1;
         const operationId = `auto-next:${sourcePostId}`;

@@ -1103,46 +1103,89 @@ describe("processDueAutoCreateNextGoals", () => {
     );
   });
 
-  it("skips due jobs whose source post has been removed", async () => {
-    const infoSpy = vi
-      .spyOn(console, "info")
-      .mockImplementation(() => undefined);
-    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-    hoisted.reddit.getPostById.mockResolvedValue({
-      id: "t3_source",
-      removedByCategory: "moderator",
-    });
+  it.each([
+    "moderator",
+    "automod_filtered",
+    "reddit",
+    "community_ops",
+    "unrecognized",
+  ])(
+    "keeps a %s-removed source queued past 48 hours and resumes after approval",
+    async (category) => {
+      const { temporarilyRemovedPostRecheckDelayMs } =
+        await import("../utils/postStatus");
+      const source = {
+        id: "t3_source",
+        removedByCategory: category as string | undefined,
+      };
+      let runAt = 86_401_000;
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      hoisted.getAutoCreateNextGoalRunAt.mockImplementation(async () => runAt);
+      hoisted.scheduleAutoCreateNextGoalReconciliation.mockImplementation(
+        async (_redis, _post, next: number) => {
+          runAt = next;
+        },
+      );
+      hoisted.reddit.getPostById.mockResolvedValue(source);
+      const run = (nowMs: number) =>
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+          nowMs,
+        });
+      for (const nowMs of [86_401_000, 86_401_000 + 72 * 3_600_000]) {
+        await expect(run(nowMs)).resolves.toMatchObject({
+          created: 0,
+          skipped: 1,
+          rescheduled: 1,
+          failed: 0,
+          exhausted: 0,
+        });
+        expect(runAt).toBe(nowMs + temporarilyRemovedPostRecheckDelayMs);
+      }
+      expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+      expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
+      expect(hoisted.retireSubscriberGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+      expect(
+        hoisted.ensureExistingSubscriberGoalHighlighted,
+      ).not.toHaveBeenCalled();
+      source.removedByCategory = undefined;
+      await expect(run(runAt)).resolves.toMatchObject({ created: 1 });
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+      expect(
+        hoisted.createSubscriberGoal.mock.calls[0]?.[0]?.options.operationId,
+      ).toBe("auto-next:t3_source");
+    },
+  );
 
-    await expect(
-      processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+  it.each(["deleted", "author"])(
+    "still retires a terminal %s source",
+    async (category) => {
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      hoisted.reddit.getPostById.mockResolvedValue({
+        id: "t3_source",
+        removedByCategory: category,
+      });
+      await processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
         appSettings: baseSettings,
-      }),
-    ).resolves.toEqual({
-      due: 1,
-      created: 0,
-      skipped: 1,
-      failed: 0,
-      rescheduled: 0,
-      exhausted: 0,
-    });
-
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.retireSubscriberGoalPost).toHaveBeenCalledWith(
-      hoisted.redis,
-      "t3_source",
-      "removedByCategory:moderator",
-      expect.any(Number),
-    );
-    expect(infoSpy).toHaveBeenCalledWith(
-      "[autoCreateNextGoal] skipping inactive source post: sourcePostId=t3_source reason=removedByCategory:moderator",
-    );
-  });
+        nowMs: 86_401_000,
+      });
+      expect(hoisted.retireSubscriberGoalPost).toHaveBeenCalledWith(
+        hoisted.redis,
+        "t3_source",
+        "removedByCategory:" + category,
+        86_401_000,
+      );
+      expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      expect(
+        hoisted.scheduleAutoCreateNextGoalReconciliation,
+      ).not.toHaveBeenCalled();
+    },
+  );
 
   it("skips due jobs whose source post is missing", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
@@ -1410,6 +1453,39 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(
       hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
     ).toBe(0);
+  });
+
+  it("keeps recovery of a removed successor pending without charging creation attempts", async () => {
+    const {
+      PostTemporarilyUnavailableError,
+      temporarilyRemovedPostRecheckDelayMs: hour,
+    } = await import("../utils/postStatus");
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new PostTemporarilyUnavailableError("t3_recovered", "automod_filtered"),
+    );
+    for (const nowMs of [86_401_000, 86_401_000 + 72 * hour]) {
+      await expect(
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+          nowMs,
+        }),
+      ).resolves.toMatchObject({
+        created: 0,
+        skipped: 1,
+        rescheduled: 1,
+        exhausted: 0,
+        failed: 0,
+      });
+      expect(
+        hoisted.scheduleAutoCreateNextGoalReconciliation,
+      ).toHaveBeenLastCalledWith(hoisted.redis, "t3_source", nowMs + hour);
+    }
+    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+    expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
   it("reschedules a failed automatic creation", async () => {
