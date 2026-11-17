@@ -12,6 +12,7 @@ const hoisted = vi.hoisted(() => ({ showToast: vi.fn() }));
 
 vi.mock("@devvit/web/client", () => ({ showToast: hoisted.showToast }));
 
+import * as statisticsAnalytics from "../../analytics/statisticsAnalytics";
 import { goalJourneyAnalytics } from "../../analytics/goalJourneyAnalytics";
 import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 import { AfterSubscribeButton } from "./AfterSubscribeButton";
@@ -121,6 +122,81 @@ describe("AfterSubscribeButton", () => {
     ).toHaveLength(2);
     expect(onNavigate).toHaveBeenCalledTimes(2);
   });
+
+  it("reuses the Statistics visitor identifier for public activity without waiting for recording", async () => {
+    const visitor = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    window.localStorage.setItem(
+      "subscriber-goal:statistics-visitor-v1",
+      visitor,
+    );
+    const fetchMock = vi.fn((url: string) =>
+      url === apiRoutes.ctaClick
+        ? new Promise<Response>(() => {})
+        : Promise.resolve({ ok: true }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await renderButton(
+      {
+        type: "link",
+        buttonText: "Visit",
+        url: "https://example.com",
+        colorTheme: "blue",
+      },
+      "en",
+      true,
+    );
+    await act(async () => container.querySelector("button")?.click());
+    expect(fetchMock).toHaveBeenCalledWith(
+      apiRoutes.ctaClick,
+      expect.objectContaining({
+        method: "POST",
+        keepalive: true,
+        headers: { "X-SG-Visitor-ID": visitor },
+      }),
+    );
+    expect(onNavigate).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it.each(["network", "http", "synchronous_fetch", "visitor_id", "crypto"])(
+    "navigates even when tracking fails during %s",
+    async (failure) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      if (failure === "visitor_id")
+        vi.spyOn(
+          statisticsAnalytics,
+          "statisticsRequestHeaders",
+        ).mockImplementation(() => {
+          throw new Error("visitor unavailable");
+        });
+      if (failure === "crypto") {
+        window.localStorage.clear();
+        vi.stubGlobal("crypto", {});
+      }
+      const fetchMock = vi.fn((url: string) => {
+        if (failure === "synchronous_fetch") throw new Error("fetch failed");
+        if (url === apiRoutes.ctaClick && failure === "network")
+          return Promise.reject(new Error("offline"));
+        return Promise.resolve({
+          ok: failure !== "http",
+          status: failure === "http" ? 503 : 200,
+        });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await renderButton(
+        {
+          type: "link",
+          buttonText: "Visit",
+          url: "https://example.com",
+          colorTheme: "blue",
+        },
+        "en",
+        true,
+      );
+      await act(async () => container.querySelector("button")?.click());
+      expect(onNavigate).toHaveBeenCalledExactlyOnceWith("https://example.com");
+      expect(hoisted.showToast).not.toHaveBeenCalled();
+    },
+  );
 
   it("resolves a dynamic target once, disables while loading, and navigates to it", async () => {
     let resolveFetch!: (response: Response) => void;

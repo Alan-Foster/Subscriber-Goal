@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AfterSubscribePreset } from "../../shared/afterSubscribeAction";
 import type { CompactCtaActivityMetric } from "../../shared/types/api";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -95,10 +96,24 @@ export async function ensureCommunityPostActivityBackfill(
 export async function recordCtaClick(
   redis: RedisClient,
   postId: string,
+  viewerIdentity: string,
   options: { nowMs?: number } = {},
 ): Promise<void> {
+  if (!viewerIdentity) return;
   const dayStartMs = getUtcDayStartMs(options.nowMs ?? Date.now());
+  // Scope the digest to this post and day, and expire the claim atomically.
+  // No raw viewer identifiers or durable cross-day visitor history are stored.
+  const digest = createHash("sha256")
+    .update(JSON.stringify([postId, dayStartMs, viewerIdentity]))
+    .digest("hex");
+  const claimed = await redis.set(`cta_click_claim_v1:${digest}`, "1", {
+    nx: true,
+    expiration: new Date(dayStartMs + 2 * utcDayMs),
+  });
+  if (!claimed) return;
   const key = clickDayKey(postId, dayStartMs);
+  // Retain the claim if incrementing fails: a retry must never double-count an
+  // increment whose response was lost. Public activity is best-effort.
   await redis.incrBy(key, 1);
   await redis.expire(key, retainedSeconds);
 }
