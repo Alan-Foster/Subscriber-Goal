@@ -1134,7 +1134,7 @@ describe("existing goal highlight ensurance", () => {
     };
   };
 
-  it("does not auto-highlight a protected Tiny post", async () => {
+  it("restores an unhighlighted protected Tiny post", async () => {
     const older = makePost({
       id: "t3_older",
       createdAt: "2026-09-15T00:00:00Z",
@@ -1154,16 +1154,40 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({
-      status: "existing_not_highlighted",
+      status: "existing",
       postId: "t3_newer",
       classification: "tiny",
       selectedWasAlreadyHighlighted: false,
     });
-    expect(newer.highlight).not.toHaveBeenCalled();
+    expect(newer.highlight).toHaveBeenCalledOnce();
     expect(older.highlight).not.toHaveBeenCalled();
   });
 
-  it("preserves one existing highlight even when a newer candidate is unhighlighted", async () => {
+  it("restores an unhighlighted CTA post", async () => {
+    const cta = makePost({
+      id: "t3_cta_recovery",
+      createdAt: "2026-09-16T00:00:00Z",
+      postKind: "cta-only-v1",
+      postHeight: "cta",
+    });
+
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: makeReddit([cta]) as never,
+      redis: new InMemoryRedis() as never,
+      nowMs,
+    });
+
+    expect(result).toMatchObject({
+      status: "existing",
+      postId: cta.id,
+      classification: "cta",
+      eligiblePostIds: [cta.id],
+      unhighlightedEligiblePostIds: [],
+    });
+    expect(cta.highlight).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles every active classic goal without displacing either", async () => {
     const highlighted = makePost({
       id: "t3_highlighted",
       createdAt: "2026-09-15T00:00:00Z",
@@ -1177,15 +1201,24 @@ describe("existing goal highlight ensurance", () => {
       postKind: "subscriber-goal-v1",
       postHeight: "short",
     });
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", {
+      t3_highlighted_goal: "3000",
+      t3_newer_goal: "4000",
+    });
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([highlighted, newer]) as never,
-      redis: new InMemoryRedis() as never,
+      redis: redis as never,
       nowMs,
     });
 
-    expect(result.postId).toBe("t3_highlighted");
+    expect(result).toMatchObject({
+      status: "existing",
+      eligiblePostIds: ["t3_newer", "t3_highlighted"],
+      unhighlightedEligiblePostIds: [],
+    });
     expect(highlighted.unhighlight).not.toHaveBeenCalled();
-    expect(newer.highlight).not.toHaveBeenCalled();
+    expect(newer.highlight).toHaveBeenCalledOnce();
   });
 
   it("consolidates only older classic highlights and preserves CTA, Tiny, and ambiguous highlights", async () => {
@@ -1242,9 +1275,9 @@ describe("existing goal highlight ensurance", () => {
       nowMs,
     });
 
-    expect(result.classicPostsUnhighlighted).toEqual(["t3_oldclassic"]);
+    expect(result.classicPostsUnhighlighted).toEqual([]);
     expect(result.protectedHighlightsPreserved).toEqual(["t3_cta", "t3_tiny"]);
-    expect(oldClassic.unhighlight).toHaveBeenCalledOnce();
+    expect(oldClassic.unhighlight).not.toHaveBeenCalled();
     expect(newClassic.unhighlight).not.toHaveBeenCalled();
     expect(cta.unhighlight).not.toHaveBeenCalled();
     expect(tiny.unhighlight).not.toHaveBeenCalled();
@@ -1281,6 +1314,9 @@ describe("existing goal highlight ensurance", () => {
       t3_completed_two_completed_time: String(nowMs - 10_000),
       t3_active_goal_goal: "3000",
     });
+    await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+      [firstCompleted.id]: "t3_existing_successor",
+    });
 
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: makeReddit([firstCompleted, secondCompleted, active]) as never,
@@ -1290,22 +1326,19 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({ status: "existing", postId: active.id });
-    expect(result.classicPostsUnhighlighted).toEqual([
-      firstCompleted.id,
-      secondCompleted.id,
-    ]);
-    expect(firstCompleted.unhighlight).toHaveBeenCalledOnce();
-    expect(secondCompleted.unhighlight).toHaveBeenCalledOnce();
+    expect(result.classicPostsUnhighlighted).toEqual([]);
+    expect(firstCompleted.unhighlight).not.toHaveBeenCalled();
+    expect(secondCompleted.unhighlight).not.toHaveBeenCalled();
     expect(active.unhighlight).not.toHaveBeenCalled();
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, firstCompleted.id),
-    ).resolves.toBe(active.id);
+    ).resolves.toBe("t3_existing_successor");
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, secondCompleted.id),
     ).resolves.toBe(active.id);
   });
 
-  it("preserves a moderator unhighlight after establishing the baseline", async () => {
+  it("restores a moderator-unhighlighted active goal", async () => {
     const active = makePost({
       id: "t3_moderator_override",
       createdAt: "2026-09-15T00:00:00Z",
@@ -1344,14 +1377,13 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({
-      status: "existing_not_highlighted",
-      moderatorOverride: "unhighlighted",
+      status: "existing",
     });
-    expect(active.highlight).not.toHaveBeenCalled();
+    expect(active.highlight).toHaveBeenCalledOnce();
     await expect(
       redis.hGetAll(highlightManagementStateKey),
     ).resolves.toMatchObject({
-      moderatorOverride: "unhighlighted",
+      moderatorOverride: "none",
       highlightedUntil: String(nowMs + 60 * 60 * 1000),
     });
   });
@@ -1385,13 +1417,12 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({
-      status: "existing_not_highlighted",
-      moderatorOverride: "expired",
+      status: "existing",
     });
-    expect(active.highlight).not.toHaveBeenCalled();
+    expect(active.highlight).toHaveBeenCalledOnce();
     await expect(
       redis.hGetAll(highlightManagementStateKey),
-    ).resolves.toMatchObject({ moderatorOverride: "expired" });
+    ).resolves.toMatchObject({ moderatorOverride: "none" });
   });
 
   it("adopts moderator-edited label and expiration metadata", async () => {

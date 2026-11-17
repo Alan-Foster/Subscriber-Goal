@@ -96,8 +96,6 @@ import {
   onboardingGoalStaggerMinMinutes,
   onboardingMinimumSubscriberCount,
   onboardingTinySubscriberThreshold,
-  onboardingRecentPostPageSize,
-  onboardingRecentPostScanLimit,
   onboardingSubscriberGoalStateKey,
   processDueOnboardingSubscriberGoal,
   scheduleOnboardingSubscriberGoalAfterWarning,
@@ -471,7 +469,7 @@ describe("onboarding subscriber goal", () => {
     expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
   });
 
-  it("recognizes a highlighted Tiny post and a recent legacy app post", async () => {
+  it("recognizes a highlighted Tiny post and an author-search legacy app post", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -503,7 +501,7 @@ describe("onboarding subscriber goal", () => {
     });
     const upgradeState = await redis.hGetAll(onboardingSubscriberGoalStateKey);
     reddit = createReddit();
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
         {
           id: "t3_legacy",
@@ -528,13 +526,17 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "existing",
       postId: "t3_legacy",
-      existingSource: "recent",
+      existingSource: "search",
     });
-    expect(reddit.getNewPosts).toHaveBeenCalledWith({
+    expect(reddit.searchPosts).toHaveBeenCalledWith({
+      query: "author:subscriber-goal",
       subredditName: "ExampleSub",
-      limit: onboardingRecentPostScanLimit,
-      pageSize: onboardingRecentPostPageSize,
+      sort: "new",
+      timeframe: "all",
+      limit: 100,
+      pageSize: 100,
     });
+    expect(reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
   it("creates an English Red regular goal with the small-subreddit Blue CTA and then becomes terminal", async () => {
@@ -542,7 +544,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "install",
       nowMs,
     });
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([
         {
           id: "t3_old_legacy",
@@ -623,7 +625,7 @@ describe("onboarding subscriber goal", () => {
       [`${predecessor.id}_post_kind`]: "subscriber-goal-v1",
       [`${predecessor.id}_post_height`]: "regular",
     });
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([predecessor]),
     });
     reddit.getPostById.mockResolvedValue(predecessor);
@@ -674,7 +676,7 @@ describe("onboarding subscriber goal", () => {
       member: predecessor.id,
       score: nowMs + 123_000,
     });
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([predecessor]),
     });
     reddit.getPostById.mockResolvedValue(predecessor);
@@ -734,7 +736,7 @@ describe("onboarding subscriber goal", () => {
       [`${newerCompleted.id}_post_kind`]: "subscriber-goal-v1",
       [`${newerCompleted.id}_post_height`]: "regular",
     });
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([newerCompleted]),
     });
     reddit.getPostById.mockResolvedValue(newerCompleted);
@@ -799,7 +801,7 @@ describe("onboarding subscriber goal", () => {
           postHeight: candidate.postHeight,
         },
       };
-      reddit.getNewPosts.mockReturnValue({
+      reddit.searchPosts.mockReturnValue({
         all: vi.fn().mockResolvedValue([post]),
       });
       reddit.getPostById.mockResolvedValue(post);
@@ -825,7 +827,7 @@ describe("onboarding subscriber goal", () => {
       lifecycleSource: "install",
       nowMs,
     });
-    reddit.getNewPosts
+    reddit.searchPosts
       .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
       .mockReturnValueOnce({
         all: vi.fn().mockResolvedValue([
@@ -850,7 +852,7 @@ describe("onboarding subscriber goal", () => {
     ).resolves.toMatchObject({
       status: "existing",
       postId: "t3_racing_goal",
-      existingSource: "recent",
+      existingSource: "search",
     });
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
@@ -880,7 +882,7 @@ describe("onboarding subscriber goal", () => {
       [`${completedPost.id}_post_kind`]: "subscriber-goal-v1",
     });
     reddit.getPostById.mockResolvedValue(completedPost);
-    reddit.getNewPosts.mockReturnValue({
+    reddit.searchPosts.mockReturnValue({
       all: vi.fn().mockResolvedValue([completedPost]),
     });
 
@@ -916,7 +918,7 @@ describe("onboarding subscriber goal", () => {
       highlight,
     };
     reddit.getPostById.mockResolvedValue(completedPost);
-    reddit.getNewPosts
+    reddit.searchPosts
       .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
       .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([completedPost]) });
     hoisted.checkAppAccountHealth.mockImplementationOnce(async () => {

@@ -281,7 +281,12 @@ describe("onAppChanged", () => {
     expect(
       hoisted.initializeRecentSubscriberIndexMigration,
     ).toHaveBeenCalledWith(expect.anything());
-    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      undefined,
+      { force: false, reason: "lifecycle_unknown" },
+    );
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,
@@ -324,7 +329,12 @@ describe("onAppChanged", () => {
       subredditName: "SubGoal",
       installerUsername: "InstallingMod",
     });
-    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(expect.anything());
+    expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      undefined,
+      { force: true, reason: "lifecycle_install" },
+    );
     expect(hoisted.ensureSubscriberGoalPostFlair).not.toHaveBeenCalled();
     expect(hoisted.reconcileSubscriberGoalHighlights).not.toHaveBeenCalled();
   });

@@ -51,6 +51,7 @@ vi.mock("./onboardingSubscriberGoal", () => ({
 import {
   appRepairStateKey,
   processDueAppRepair,
+  recurringHighlightRepairIntervalMs,
   scheduleAppRepair,
 } from "./appRepair";
 
@@ -75,6 +76,9 @@ class TestRedis {
   }
   async hGetAll(key: string): Promise<Record<string, string>> {
     return Object.fromEntries(this.hashes.get(key) ?? []);
+  }
+  async hGet(key: string, field: string): Promise<string | undefined> {
+    return this.hashes.get(key)?.get(field);
   }
   async hSet(key: string, fields: Record<string, string>): Promise<void> {
     const hash = this.hashes.get(key) ?? new Map<string, string>();
@@ -109,7 +113,9 @@ describe("scheduled app repair", () => {
     ]);
     hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked"]);
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
-      status: "missing",
+      status: "existing",
+      reconciliationOutcome: "complete",
+      eligiblePostIds: ["t3_registered"],
     });
   });
 
@@ -142,6 +148,62 @@ describe("scheduled app repair", () => {
     });
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "complete",
+      recurring: "true",
+      nextRunAt: String(100 + recurringHighlightRepairIntervalMs),
+      targetPostId: "",
+    });
+  });
+
+  it("runs reconciliation again when the recurring active-surface check is due", async () => {
+    await redis.hSet(appRepairStateKey, {
+      version: "app_repair_community_highlights_v3",
+      status: "complete",
+      recurring: "true",
+      nextRunAt: "200",
+    });
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 199,
+      }),
+    ).resolves.toBe("not_due");
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 200,
+      }),
+    ).resolves.toBe("complete");
+
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).toHaveBeenCalledOnce();
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "complete",
+      recurring: "true",
+      nextRunAt: String(200 + recurringHighlightRepairIntervalMs),
+    });
+  });
+
+  it("can schedule another lifecycle repair after completion", async () => {
+    await redis.hSet(appRepairStateKey, {
+      version: "app_repair_community_highlights_v3",
+      status: "complete",
+      completedAt: "90",
+      attempts: "4",
+      lastError: "old failure",
+    });
+
+    await scheduleAppRepair(redis as never, 100, 0);
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      nextRunAt: "100",
+      attempts: "0",
+      lastError: "",
+      scheduledAt: "100",
     });
   });
 
@@ -189,6 +251,49 @@ describe("scheduled app repair", () => {
       status: "pending",
       attempts: "1",
       lastError: expect.stringContaining("six Community Highlight slots"),
+    });
+  });
+
+  it("completes after a successful discovery finds no eligible post", async () => {
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "missing",
+    });
+    await scheduleAppRepair(redis as never, 100, 0);
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("complete");
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "complete",
+      recurring: "false",
+      lastError: "",
+    });
+  });
+
+  it("retries when an expected repair target is still missing", async () => {
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "missing",
+    });
+    await scheduleAppRepair(redis as never, 100, 0);
+    await redis.hSet(appRepairStateKey, { targetPostId: "t3_expected" });
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("retry");
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      lastError: expect.stringContaining("reconciliation failed"),
     });
   });
 

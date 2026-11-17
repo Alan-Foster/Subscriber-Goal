@@ -29,6 +29,7 @@ import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
+export const recurringHighlightRepairIntervalMs = 6 * 60 * 60 * 1000;
 
 export async function scheduleAppRepair(
   redis: RedisClient,
@@ -77,7 +78,7 @@ async function processDueAppRepairUnderLease({
   const state = await redis.hGetAll(appRepairStateKey);
   if (
     state.version !== appRepairVersion ||
-    state.status === "complete" ||
+    (state.status === "complete" && state.recurring !== "true") ||
     !Number.isFinite(Number(state.nextRunAt)) ||
     nowMs < Number(state.nextRunAt)
   ) {
@@ -92,6 +93,7 @@ async function processDueAppRepairUnderLease({
   if ((await redis.get(appRepairLockKey)) !== lockToken) return "not_due";
 
   const failures: string[] = [];
+  let recurringHighlightCheck = false;
   const runPhase = async (phase: string, operation: () => Promise<unknown>) => {
     try {
       await operation();
@@ -177,15 +179,6 @@ async function processDueAppRepairUnderLease({
         );
       }
       await runPhase("highlight_reconciliation", async () => {
-        const targetStopped = state.targetPostId
-          ? (await isSubscriberGoalPostRetired(redis, state.targetPostId)) ||
-            Boolean(
-              await redis.hGet(
-                autoCreateNextGoalSuccessorsKey,
-                state.targetPostId,
-              ),
-            )
-          : false;
         const result = await ensureExistingSubscriberGoalHighlighted({
           reddit,
           redis,
@@ -194,13 +187,19 @@ async function processDueAppRepairUnderLease({
           reconciliationContext: "repair",
           mutationLease,
         });
+        recurringHighlightCheck = (result.eligiblePostIds?.length ?? 0) > 0;
+        const expectedTargetOutstanding = state.targetPostId
+          ? !(await isSubscriberGoalPostRetired(redis, state.targetPostId)) &&
+            !(await redis.hGet(
+              autoCreateNextGoalSuccessorsKey,
+              state.targetPostId,
+            ))
+          : false;
         if (
-          !targetStopped &&
-          !result.moderatorOverride &&
-          !result.failureCategories?.includes("post_state") &&
-          (result.status === "existing_not_highlighted" ||
-            result.reconciliationOutcome === "degraded" ||
-            result.reconciliationOutcome === "failed")
+          (result.status === "missing" && expectedTargetOutstanding) ||
+          result.status === "existing_not_highlighted" ||
+          result.reconciliationOutcome === "degraded" ||
+          result.reconciliationOutcome === "failed"
         ) {
           throw new Error(
             result.errorMessage ??
@@ -217,6 +216,11 @@ async function processDueAppRepairUnderLease({
         ...state,
         status: "complete",
         completedAt: String(nowMs),
+        recurring: recurringHighlightCheck ? "true" : "false",
+        nextRunAt: recurringHighlightCheck
+          ? String(nowMs + recurringHighlightRepairIntervalMs)
+          : "",
+        targetPostId: "",
         lastError: "",
       });
       return "complete";

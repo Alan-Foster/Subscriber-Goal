@@ -675,7 +675,7 @@ export async function highlightAndVerifyPost(
         category: "concurrency",
         postId: post.id,
         message:
-          "A concurrent Community Highlight change displaced an existing post; the Subscriber Goal was rolled back.",
+          "A concurrent sixth highlight made the app write unsafe; the Subscriber Goal was rolled back.",
       });
       const displacedPosts: RemovedHighlight[] = [];
       try {
@@ -703,7 +703,10 @@ export async function highlightAndVerifyPost(
         rollbackOutcome = await restoreRemovedHighlights(
           subreddit,
           [...removed, ...displacedPosts],
-          rollbackOrder,
+          [
+            ...rollbackOrder,
+            ...unexpected.map(({ postId }) => postId as LinkId),
+          ],
           options,
         );
       } catch (error) {
