@@ -311,6 +311,8 @@ export type OnboardingHighlightEnsuranceResult =
     classificationConfidence?: GoalClassificationConfidence;
     moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
     selectedWasAlreadyHighlighted?: boolean;
+    pausedByRemovedGoal?: boolean;
+    removedGoalBlockerPostIds?: string[];
     candidateCount: number;
     highlightedClassicCount: number;
     highlightedProtectedCount: number;
@@ -1773,31 +1775,73 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       candidate.createdAtMs === undefined ||
       candidate.createdAtMs > newestLiveClassicAt,
   );
-  if (blockingRemovedGoals.length > 0) {
-    const selected =
-      blockingRemovedGoals.find(
-        ({ createdAtMs }) => createdAtMs === undefined,
-      ) ?? newestGoalCandidate(blockingRemovedGoals);
-    const result: OnboardingHighlightEnsuranceResult = {
-      ...emptyHighlightEnsuranceResult(),
-      ...diagnostics,
-      status: "existing_not_highlighted",
-      postId: selected.postId,
-      source: selected.source,
-      classification: selected.classification,
-      classificationConfidence: selected.classificationConfidence,
-      candidateCount: candidates.length + blockingRemovedGoals.length,
-      eligiblePostIds: blockingRemovedGoals.map(({ postId }) => postId),
-      unhighlightedEligiblePostIds: blockingRemovedGoals.map(
-        ({ postId }) => postId,
-      ),
-      selectedWasAlreadyHighlighted: false,
-      verificationResult: "not_highlighted",
-      notificationOutcome: "not_requested",
-    };
-    logHighlightEnsurance(result.status, result);
-    return result;
-  }
+  const liveResult = await reconcileLiveSubscriberGoalHighlights({
+    reddit,
+    redis,
+    nowMs,
+    notifyOnFailure,
+    reconciliationContext,
+    mutationLease,
+    ...(highlightVerification ? { highlightVerification } : {}),
+    candidates,
+    diagnostics,
+    pauseSuccessorMapping: blockingRemovedGoals.length > 0,
+  });
+  if (blockingRemovedGoals.length === 0) return liveResult;
+  const selected =
+    blockingRemovedGoals.find(({ createdAtMs }) => createdAtMs === undefined) ??
+    newestGoalCandidate(blockingRemovedGoals);
+  const blockerIds = blockingRemovedGoals.map(({ postId }) => postId);
+  const result: OnboardingHighlightEnsuranceResult = {
+    ...liveResult,
+    ...(liveResult.status === "missing"
+      ? {
+          status: "existing_not_highlighted" as const,
+          postId: selected.postId,
+          source: selected.source,
+          classification: selected.classification,
+          classificationConfidence: selected.classificationConfidence,
+          selectedWasAlreadyHighlighted: false,
+          verificationResult: "not_highlighted" as const,
+          notificationOutcome: "not_requested" as const,
+        }
+      : {}),
+    pausedByRemovedGoal: true,
+    removedGoalBlockerPostIds: blockerIds,
+    candidateCount: liveResult.candidateCount + blockingRemovedGoals.length,
+    eligiblePostIds: [...blockerIds, ...liveResult.eligiblePostIds],
+    unhighlightedEligiblePostIds: [
+      ...blockerIds,
+      ...liveResult.unhighlightedEligiblePostIds,
+    ],
+  };
+  logHighlightEnsurance(result.status, result);
+  return result;
+}
+
+async function reconcileLiveSubscriberGoalHighlights({
+  reddit,
+  redis,
+  nowMs,
+  notifyOnFailure,
+  highlightVerification,
+  reconciliationContext,
+  mutationLease,
+  candidates,
+  diagnostics,
+  pauseSuccessorMapping,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  nowMs: number;
+  notifyOnFailure: boolean;
+  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  reconciliationContext: HighlightReconciliationContext;
+  mutationLease: CommunityGoalMutationLease;
+  candidates: OnboardingGoalCandidate[];
+  diagnostics: OnboardingDetectionDiagnostics;
+  pauseSuccessorMapping: boolean;
+}): Promise<OnboardingHighlightEnsuranceResult> {
   {
     let subscriberCount: number | undefined;
     for (const candidate of candidates) {
@@ -1907,7 +1951,9 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       const newestActiveClassic = activeGoals.length
         ? newestGoalCandidate(activeGoals)
         : undefined;
-      if (newestActiveClassic) {
+      // A removed newer goal may already be the intended successor. Repair
+      // older live highlights without mapping sources to those older goals.
+      if (newestActiveClassic && !pauseSuccessorMapping) {
         for (const completedClassic of completedGoals) {
           const existingSuccessor = await redis.hGet(
             autoCreateNextGoalSuccessorsKey,
