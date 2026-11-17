@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.7.1 - Combined header and logo to one line. Goals now have 2 buttons when space permits. Devvit 0.15.4
+- 2.7.1 - Combined header and logo to one line. Goals now have 2 buttons when space permits. All goal completion now result in a new goal 24 hours later. Improvement to auto-pin system. Devvit 0.15.4
 - 2.6.2 - Fixed the Goal Delete tool toast message and other wording.
 - 2.6.1 - Fixed several edge cases including missing goal replacements, post creation retries resetting goal progress, and joins showing success before subscriber tracking finished.
 - 2.5.3 - Fixed a bug related to idempotency keys preventing new goals from being created.
