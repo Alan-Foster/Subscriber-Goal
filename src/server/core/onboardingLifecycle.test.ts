@@ -530,7 +530,7 @@ describe("onboarding lifecycle reconciliation", () => {
     ).resolves.toEqual({});
   });
 
-  it("does not arm completed-goal onboarding when lifecycle eligibility is false", async () => {
+  it("preserves mandatory successor work when onboarding rearming is disabled", async () => {
     const completedTime = nowMs - 60 * 60 * 1000;
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, { goal: 1_500, completedTime });
@@ -549,19 +549,21 @@ describe("onboarding lifecycle reconciliation", () => {
           allowOnboardingRearm: false,
         },
       ),
-    ).resolves.toEqual({
-      status: "unchanged",
-      reason: "onboarding_ineligible",
+    ).resolves.toMatchObject({
+      status: "replacement_scheduled",
+      sourcePostId: post.id,
     });
 
     expect(post.highlight).not.toHaveBeenCalled();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs + 60_000 },
+    ]);
   });
 
-  it("arms warning-based onboarding instead of creating an overdue replacement inline", async () => {
+  it("uses the original deadline for an enabled overdue goal during upgrade", async () => {
     const completedTime = nowMs - 24 * 60 * 60 * 1000;
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, { goal: 1_500, completedTime });
@@ -580,18 +582,16 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "rearmed" });
+    ).resolves.toMatchObject({ status: "replacement_created" });
 
     expect(post.highlight).not.toHaveBeenCalled();
-    expect(
-      lifecycleHoisted.processDueAutoCreateNextGoals,
-    ).not.toHaveBeenCalled();
+    expect(lifecycleHoisted.processDueAutoCreateNextGoals).toHaveBeenCalled();
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "awaiting_warning",
-      intent: "orphaned_completed_goal",
-      replacementSourcePostId: post.id,
+      status: "complete",
+      resultStatus: "replacement_created",
+      postId: post.id,
     });
   });
 
@@ -659,7 +659,7 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "rearmed" });
+    ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
     expect(post.highlight).not.toHaveBeenCalled();
     await expect(
@@ -670,8 +670,10 @@ describe("onboarding lifecycle reconciliation", () => {
         "subscriber_goals",
         `${post.id}${postAutomaticSuccessorSuppressionSuffix}`,
       ),
-    ).resolves.toBe("onboarding_reconciliation");
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    ).resolves.toBeUndefined();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs + 24 * 60 * 60 * 1000 },
+    ]);
   });
 
   it("lets a protected Tiny highlight suppress an overdue classic replacement", async () => {
@@ -683,6 +685,11 @@ describe("onboarding lifecycle reconciliation", () => {
     await seedGoalData(redis, completed.id, {
       goal: 1_500,
       completedTime: nowMs - 48 * 60 * 60 * 1000,
+    });
+    const deferredRecheckAt = nowMs + 60 * 60 * 1000;
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: completed.id,
+      score: deferredRecheckAt,
     });
     lifecycleHoisted.processDueAutoCreateNextGoals.mockResolvedValue({
       due: 1,
@@ -705,9 +712,12 @@ describe("onboarding lifecycle reconciliation", () => {
     });
     expect(tiny.unhighlight).not.toHaveBeenCalled();
     expect(completed.highlight).not.toHaveBeenCalled();
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: completed.id, score: deferredRecheckAt },
+    ]);
   });
 
-  it("moves orphaned overdue work into warning-based onboarding", async () => {
+  it("keeps failed overdue work in successor retry recovery", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_retry" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -728,12 +738,13 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "rearmed" });
+    ).resolves.toMatchObject({ status: "replacement_retrying" });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "awaiting_warning",
-      intent: "orphaned_completed_goal",
+      status: "complete",
+      resultStatus: "replacement_retrying",
+      postId: post.id,
     });
   });
 
@@ -1002,7 +1013,7 @@ describe("onboarding lifecycle reconciliation", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("quarantines exhausted replacement work behind a fresh delayed warning", async () => {
+  it("preserves exhausted replacement state during upgrade", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_exhausted" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -1016,18 +1027,18 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "rearmed" });
+    ).resolves.toMatchObject({ status: "replacement_exhausted" });
 
     await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
     await expect(
       redis.hGet(autoCreateNextGoalExhaustedKey, post.id),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("6");
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
-      status: "awaiting_warning",
-      intent: "orphaned_completed_goal",
-      replacementSourcePostId: post.id,
+      status: "complete",
+      resultStatus: "replacement_exhausted",
+      postId: post.id,
     });
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,

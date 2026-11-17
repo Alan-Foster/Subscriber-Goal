@@ -362,6 +362,45 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
+  it("resumes the deferred successor after a Tiny blocker is retired", async () => {
+    let runAt = 0;
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockImplementation(async () => runAt);
+    hoisted.scheduleAutoCreateNextGoalReconciliation.mockImplementation(
+      async (_redis, _postId, nextRunAt: number) => {
+        runAt = nextRunAt;
+      },
+    );
+    hoisted.ensureExistingSubscriberGoalHighlighted
+      .mockResolvedValueOnce({
+        status: "existing",
+        postId: "t3_tiny",
+        classification: "tiny",
+        eligiblePostIds: ["t3_tiny"],
+      })
+      .mockResolvedValueOnce({ status: "missing", eligiblePostIds: [] });
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ created: 0, skipped: 1, rescheduled: 1 });
+    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: runAt,
+      }),
+    ).resolves.toMatchObject({ created: 1, skipped: 0 });
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+  });
+
   it("does not let a newer completed classic suppress required creation", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([

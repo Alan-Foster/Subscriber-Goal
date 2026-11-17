@@ -138,8 +138,6 @@ export type SubGoalData = {
   autoCreateNextGoal: boolean;
   /** Distinguishes an explicit opt-out from posts created before this setting existed. */
   autoCreateNextGoalConfigured: boolean;
-  /** Legacy migration signal; it never disables successor creation. */
-  autoCreateNextGoalWasDisabled: boolean;
   automaticSuccessorSuppression: PersistedAutomaticSuccessorSuppression | null;
   language: SubGoalLanguage;
   postHeight: SubGoalPostHeight;
@@ -486,7 +484,6 @@ export async function getSubGoalData(
     autoCreateNextGoal: parsedGoal > 0,
     autoCreateNextGoalConfigured:
       autoCreateNextGoal === "true" || autoCreateNextGoal === "false",
-    autoCreateNextGoalWasDisabled: autoCreateNextGoal === "false",
     automaticSuccessorSuppression: resolvedAutomaticSuccessorSuppression,
     language: resolvedLanguage,
     postHeight: resolvedHeight,
@@ -507,7 +504,6 @@ export async function setSubGoalData(
     | "afterSubscribeAction"
     | "afterSubscribePreset"
     | "autoCreateNextGoalConfigured"
-    | "autoCreateNextGoalWasDisabled"
     | "automaticSuccessorSuppression"
   > & {
     postKind?: PostKind;
