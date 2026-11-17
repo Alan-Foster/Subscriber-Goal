@@ -3,6 +3,7 @@ import {
   autoCreateNextGoalSuccessorsKey,
   cancelAutoCreateNextGoal,
   checkCompletionStatus,
+  clearAutomaticSuccessorSuppression,
   getSubGoalData,
   processRecentSubscriberIndexMigrationBatch,
   repairAutoCreateNextGoal,
@@ -87,9 +88,8 @@ async function prepareCompletedUpdateCleanup(
     if (!latest.completedTime) {
       throw new Error("Completed goal lost its persisted completion time.");
     }
-    if (!latest.autoCreateNextGoal) return "auto_disabled";
     if (latest.automaticSuccessorSuppression) {
-      return "intentionally_suppressed";
+      await clearAutomaticSuccessorSuppression(redis, postId);
     }
 
     const [successor, onboardingIntent, replacementSourcePostId, status] =

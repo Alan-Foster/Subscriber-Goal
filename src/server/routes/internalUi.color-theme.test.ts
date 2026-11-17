@@ -1007,7 +1007,9 @@ describe("internalUi color theme create goal routes", () => {
     );
     expect(json).toHaveBeenCalledTimes(1);
     expect(json).toHaveBeenCalledWith({
-      showToast: expect.stringContaining("Some Subscriber Goal data was removed"),
+      showToast: expect.stringContaining(
+        "Some Subscriber Goal data was removed",
+      ),
     });
   });
 
@@ -1387,7 +1389,6 @@ describe("internalUi color theme create goal routes", () => {
       "subscriberGoal",
       "colorTheme",
       "afterSubscribePreset",
-      "autoCreateNextGoal",
       "crosspost",
     ]);
     expect(
@@ -1438,10 +1439,10 @@ describe("internalUi color theme create goal routes", () => {
       ],
     });
     expect(
-      response.showForm.form.fields.find(
+      response.showForm.form.fields.some(
         (field) => field.name === "autoCreateNextGoal",
       ),
-    ).toMatchObject({ defaultValue: true });
+    ).toBe(false);
     expect(hoisted.redis.set).toHaveBeenCalledWith(
       testDraftKey(),
       JSON.stringify({
@@ -1727,7 +1728,6 @@ describe("internalUi color theme create goal routes", () => {
         colorTheme: "pink",
         crosspost: true,
         afterSubscribePreset: "top-post-day",
-        autoCreateNextGoal: false,
       },
     });
   });
@@ -2586,7 +2586,7 @@ describe("internalUi color theme create goal routes", () => {
       false,
       "ExampleSub",
       "blue",
-      false,
+      true,
       "es",
       undefined,
       "short",

@@ -2,11 +2,7 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import {
-  autoCreateNextGoalExhaustedKey,
-  autoCreateNextGoalQueueKey,
-  autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalSuccessorsKey,
-  cancelAllAutoCreateNextGoals,
   cancelAutoCreateNextGoal,
 } from "../data/subGoalData";
 import {
@@ -201,165 +197,6 @@ async function reconcileOnboardingForLifecycleUnderLease(
             authoritativePostId: highlighted.postId,
           });
         }
-        if (lifecycleSource === "upgrade") {
-          const preserveCompletedDecision = async (
-            outcome: CompletedGoalReconciliationOutcome,
-            terminalPostId: string,
-          ): Promise<void> => {
-            const nextGoal: OnboardingSubscriberGoalState = {
-              version: onboardingSubscriberGoalVersion,
-              status: "complete",
-              armedAt: previousGoal?.armedAt ?? nowMs,
-              lifecycleSource,
-              creationStaggerMinutes:
-                previousGoal?.creationStaggerMinutes ??
-                selectOnboardingGoalStaggerMinutes(),
-              operationId,
-              completedAt: nowMs,
-              postId: terminalPostId,
-              existingSource: highlighted.source!,
-              resultStatus: outcome,
-            };
-            const nextReminder: OnboardingReminderState = {
-              version: onboardingReminderVersion,
-              status: "complete",
-              armedAt: previousReminder?.armedAt ?? nextGoal.armedAt,
-              nextRunAt: previousReminder?.nextRunAt ?? nowMs,
-              lifecycleSource,
-              reminderStaggerMinutes:
-                previousReminder?.reminderStaggerMinutes ??
-                selectOnboardingReminderStaggerMinutes(),
-              completedAt: nowMs,
-              postId: terminalPostId,
-              existingSource: highlighted.source!,
-              result: outcome,
-            };
-            await savePairedState(redis, previousGoal, nextGoal, nextReminder);
-          };
-          const [successor, queued, rawFailures, exhausted] = await Promise.all(
-            [
-              redis.hGet(autoCreateNextGoalSuccessorsKey, highlighted.postId),
-              redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
-              redis.hGet(
-                autoCreateNextGoalRetryAttemptsKey,
-                highlighted.postId,
-              ),
-              redis.hGet(autoCreateNextGoalExhaustedKey, highlighted.postId),
-            ],
-          );
-          if (successor) {
-            await preserveCompletedDecision("replacement_created", successor);
-            return {
-              status: "replacement_created",
-              operationId,
-              sourcePostId: highlighted.postId,
-              postId: successor,
-            };
-          }
-          if (
-            highlighted.autoCreateNextGoalConfigured &&
-            !highlighted.autoCreateNextGoal
-          ) {
-            await cancelAutoCreateNextGoal(redis, highlighted.postId);
-            await preserveCompletedDecision(
-              "completed_auto_disabled",
-              highlighted.postId,
-            );
-            return {
-              status: "completed_auto_disabled",
-              operationId,
-              sourcePostId: highlighted.postId,
-            };
-          }
-          if (!allowOnboardingRearm) {
-            await cancelAutoCreateNextGoal(redis, highlighted.postId);
-            return { status: "unchanged", reason: "onboarding_ineligible" };
-          }
-          const subreddit = await reddit.getCurrentSubreddit();
-          const accountHealth = await checkAppAccountHealth({
-            reddit,
-            redis,
-            subredditName: subreddit.name,
-            subredditId: subreddit.id,
-            language: subreddit.language,
-            notify: false,
-            scheduleUnknownRetry: true,
-            nowMs,
-          });
-          const accountHealthy =
-            accountHealth.healthy && accountHealth.status === "healthy";
-          const queuedEntry = queued.find(
-            (entry) => entry.member === highlighted.postId,
-          );
-          if (queuedEntry && !exhausted && accountHealthy) {
-            const outcome: CompletedGoalReconciliationOutcome =
-              Number(rawFailures) > 0
-                ? "replacement_retrying"
-                : "replacement_scheduled";
-            logDiagnostic("info", "upgrade_successor_schedule_preserved", {
-              workflow: "onboarding_lifecycle",
-              phase: "upgrade_classification",
-              lifecycleSource,
-              sourcePostId: highlighted.postId,
-              outcome,
-              runAt: queuedEntry?.score ?? "none",
-            });
-            await preserveCompletedDecision(outcome, highlighted.postId);
-            return {
-              status: outcome,
-              operationId,
-              sourcePostId: highlighted.postId,
-            };
-          }
-          if (
-            isWorkflowActive(previousGoal, previousReminder) &&
-            previousGoal?.intent === "orphaned_completed_goal" &&
-            previousGoal.replacementSourcePostId === highlighted.postId
-          ) {
-            return { status: "unchanged", reason: "active_workflow_preserved" };
-          }
-
-          const creationStaggerMinutes = selectOnboardingGoalStaggerMinutes();
-          const reminderStaggerMinutes =
-            selectOnboardingReminderStaggerMinutes();
-          const nextGoal: OnboardingSubscriberGoalState = {
-            version: onboardingSubscriberGoalVersion,
-            status: "awaiting_warning",
-            armedAt: nowMs,
-            lifecycleSource,
-            creationStaggerMinutes,
-            operationId: createOperationId(nowMs),
-            intent: "orphaned_completed_goal",
-            replacementSourcePostId: highlighted.postId,
-            ...(!accountHealthy ? { pausedForAccountRecovery: true } : {}),
-          };
-          const nextReminder: OnboardingReminderState = {
-            version: onboardingReminderVersion,
-            status: "pending",
-            armedAt: nowMs,
-            nextRunAt: accountHealthy
-              ? nowMs + reminderStaggerMinutes * 60 * 1000
-              : nowMs + 5 * 60 * 1000,
-            lifecycleSource,
-            reminderStaggerMinutes,
-          };
-          await savePairedState(redis, previousGoal, nextGoal, nextReminder);
-          await cancelAutoCreateNextGoal(redis, highlighted.postId);
-          logDiagnostic("info", "upgrade_orphaned_goal_onboarding_armed", {
-            workflow: "onboarding_lifecycle",
-            phase: "upgrade_classification",
-            lifecycleSource,
-            sourcePostId: highlighted.postId,
-            autoSetting: highlighted.autoCreateNextGoalConfigured
-              ? "enabled"
-              : "legacy_unconfigured",
-            operationId: nextGoal.operationId,
-            reminderStaggerMinutes,
-            creationStaggerMinutes,
-            staleSuccessorState: exhausted ? "exhausted" : "none",
-          });
-          return { status: "rearmed", operationId: nextGoal.operationId };
-        }
         const completed = await reconcileCompletedGoal({
           reddit,
           redis,
@@ -432,7 +269,32 @@ async function reconcileOnboardingForLifecycleUnderLease(
           (highlighted.classification === "tiny" ||
             highlighted.classification === "cta")
         ) {
-          await cancelAllAutoCreateNextGoals(redis);
+          for (const supersededPostId of
+            highlighted.supersededCompletedPostIds ?? []) {
+            await cancelAutoCreateNextGoal(redis, supersededPostId);
+          }
+          if (highlighted.deferredCompletedGoal) {
+            const deferred = highlighted.deferredCompletedGoal;
+            const recovery = await reconcileCompletedGoal({
+              reddit,
+              redis,
+              appSettings,
+              lifecycleSource,
+              sourcePostId: deferred.postId,
+              completedTime: deferred.completedTime,
+              autoCreateNextGoal: deferred.autoCreateNextGoal,
+              nowMs,
+              mutationLease,
+            });
+            logDiagnostic("info", "upgrade_protected_successor_reconciled", {
+              workflow: "onboarding_lifecycle",
+              phase: "upgrade_classification",
+              lifecycleSource,
+              protectedPostId: highlighted.postId,
+              sourcePostId: deferred.postId,
+              outcome: recovery.outcome,
+            });
+          }
           logDiagnostic("info", "upgrade_protected_experience_preserved", {
             workflow: "onboarding_lifecycle",
             phase: "upgrade_classification",

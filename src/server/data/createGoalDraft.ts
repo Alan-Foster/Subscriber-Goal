@@ -37,7 +37,8 @@ export type SubscriberGoalDraftDetails = {
   colorTheme: SubGoalColorTheme;
   crosspost: boolean;
   afterSubscribePreset: AfterSubscribePreset;
-  autoCreateNextGoal: boolean;
+  /** @deprecated Accepted only so in-flight pre-v54 drafts remain usable. */
+  autoCreateNextGoal?: boolean;
 };
 
 export type SubscribeOnlyDraftDetails = {
@@ -262,8 +263,7 @@ function isSubscriberGoalDetails(
     value.subscriberGoal > 0 &&
     isSubGoalColorTheme(value.colorTheme) &&
     typeof value.crosspost === "boolean" &&
-    isAfterSubscribePreset(value.afterSubscribePreset) &&
-    typeof value.autoCreateNextGoal === "boolean"
+    isAfterSubscribePreset(value.afterSubscribePreset)
   );
 }
 

@@ -207,7 +207,6 @@ describe("create goal drafts", () => {
         colorTheme: "pink",
         crosspost: true,
         afterSubscribePreset: "web-link",
-        autoCreateNextGoal: true,
       },
     });
     await saveCreateGoalDraft(redis, "t2_tiny", {
@@ -242,6 +241,30 @@ describe("create goal drafts", () => {
       (await getCreateGoalDraft(redis, "t2_goal", "create-goal-goal1234"))
         ?.stage,
     ).toBe("follow-up");
+    values.set(
+      getCreateGoalDraftKey("t2_legacy", "create-goal-legacy12"),
+      JSON.stringify({
+        version: 5,
+        stage: "follow-up",
+        creationAttemptId: "create-goal-legacy12",
+        language: "en",
+        postHeight: "regular",
+        subredditDisplayName: "ExampleSub",
+        customDeveloperField: "",
+        details: {
+          kind: "subscriber-goal",
+          postTitle: "Legacy",
+          subscriberGoal: 250,
+          colorTheme: "pink",
+          crosspost: false,
+          afterSubscribePreset: "web-link",
+          autoCreateNextGoal: false,
+        },
+      }),
+    );
+    await expect(
+      getCreateGoalDraft(redis, "t2_legacy", "create-goal-legacy12"),
+    ).resolves.toMatchObject({ stage: "follow-up" });
     expect(
       (await getCreateGoalDraft(redis, "t2_tiny", "create-goal-tiny1234"))
         ?.stage,

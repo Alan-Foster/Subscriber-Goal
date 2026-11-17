@@ -479,7 +479,9 @@ export async function getSubGoalData(
         : null,
     headerText: headerText && headerText.length > 0 ? headerText : null,
     colorTheme: resolvedColorTheme,
-    autoCreateNextGoal: autoCreateNextGoal === "true",
+    // Successors are mandatory for classic numeric goals. Legacy false and
+    // missing values remain detectable below but can no longer opt out.
+    autoCreateNextGoal: parsedGoal > 0,
     autoCreateNextGoalConfigured:
       autoCreateNextGoal === "true" || autoCreateNextGoal === "false",
     automaticSuccessorSuppression: resolvedAutomaticSuccessorSuppression,
@@ -522,9 +524,8 @@ export async function setSubGoalData(
     [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
       data.colorTheme,
     ),
-    [`${postId}${postAutoCreateNextGoalSuffix}`]: data.autoCreateNextGoal
-      ? "true"
-      : "false",
+    [`${postId}${postAutoCreateNextGoalSuffix}`]:
+      data.goal > 0 ? "true" : "false",
     [`${postId}${postAutomaticSuccessorSuppressionSuffix}`]:
       data.automaticSuccessorSuppression ?? "",
     [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
@@ -1008,7 +1009,7 @@ async function checkCompletionStatusUnderLease(
       }
     }
     if (
-      lockedSubGoalData.autoCreateNextGoal &&
+      lockedSubGoalData.goal > 0 &&
       options.scheduleAutomaticSuccessor !== false
     ) {
       try {
@@ -1053,7 +1054,7 @@ export async function registerNewSubGoalPost(
   crosspost: boolean,
   subredditDisplayName: string,
   colorTheme: SubGoalColorTheme = defaultSubGoalColorTheme,
-  autoCreateNextGoal = false,
+  _autoCreateNextGoal = true,
   language: SubGoalLanguage = defaultSubGoalLanguage,
   headerText?: string,
   postHeight: Exclude<SubGoalPostHeight, "tiny" | "cta"> = "regular",
@@ -1075,9 +1076,7 @@ export async function registerNewSubGoalPost(
     [`${post.id}${postSubredditDisplayNameSuffix}`]: subredditDisplayName,
     [`${post.id}${postHeaderTextSuffix}`]: headerText ?? "",
     [`${post.id}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(colorTheme),
-    [`${post.id}${postAutoCreateNextGoalSuffix}`]: autoCreateNextGoal
-      ? "true"
-      : "false",
+    [`${post.id}${postAutoCreateNextGoalSuffix}`]: "true",
     [`${post.id}${postAutomaticSuccessorSuppressionSuffix}`]: "",
     [`${post.id}${postLanguageSuffix}`]: resolveSubGoalLanguage(language),
     [`${post.id}${postHeightSuffix}`]: resolveSubGoalPostHeight(postHeight),

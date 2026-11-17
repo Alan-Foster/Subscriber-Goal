@@ -226,7 +226,7 @@ describe("subGoalData subreddit display name", () => {
       completedTime: 1234,
       automaticSuccessorSuppression: "auto_goal_reconciliation",
       subredditDisplayName: "Newer Name",
-      autoCreateNextGoal: false,
+      autoCreateNextGoal: true,
       colorTheme: "blue",
     });
     await expect(redis.zScore(postsKey, post.id)).resolves.toBe(900);
@@ -844,7 +844,7 @@ describe("subGoalData subreddit display name", () => {
     },
   );
 
-  it("defaults missing auto-create settings to disabled", async () => {
+  it("treats missing auto-create settings as mandatory", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(subscriberGoalsKey, {
       t3_missing_goal: "10",
@@ -855,7 +855,7 @@ describe("subGoalData subreddit display name", () => {
         redis as unknown as Parameters<typeof getSubGoalData>[0],
         "t3_missing",
       ),
-    ).resolves.toMatchObject({ autoCreateNextGoal: false });
+    ).resolves.toMatchObject({ autoCreateNextGoal: true });
   });
 
   it("defaults missing or invalid language settings to English", async () => {
@@ -1074,7 +1074,7 @@ describe("subGoalData subreddit display name", () => {
     expect(queued[0]?.member).toBe("t3_post");
   });
 
-  it("does not queue auto-create when a disabled goal reaches completion", async () => {
+  it("queues auto-create when a legacy-disabled goal reaches completion", async () => {
     const redis = new InMemoryRedis();
     const reddit = {
       getCurrentSubreddit: async () => ({ numberOfSubscribers: 10 }),
@@ -1100,7 +1100,9 @@ describe("subGoalData subreddit display name", () => {
       "t3_post",
     );
 
-    expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([]);
+    await expect(
+      redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+    ).resolves.toEqual([expect.objectContaining({ member: "t3_post" })]);
   });
 
   it("persists intentional successor suppression atomically with completion", async () => {
