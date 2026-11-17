@@ -1387,25 +1387,75 @@ export async function processRecentSubscriberIndexMigrationBatch(
     `[recentSubscriberIndexMigration] batch complete: scanned=${result.members.length} indexed=${indexedThisRun} scannedTotal=${nextState.scannedTotal} indexedTotal=${nextState.indexedTotal} cursor=${nextState.cursor} status=${nextState.status}`,
   );
 }
+export async function findRecentSubscriberUserIdsByUsername(
+  redis: RedisClient,
+  username: string,
+): Promise<string[]> {
+  const normalized = username.trim().toLowerCase();
+  const postIds = parsePostIdList(
+    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
+  );
+  const userIds = new Set<string>();
+  for (const postId of postIds) {
+    const [value, orderRaw] = await Promise.all([
+      redis.hGet(subscriberGoalsKey, `${postId}${postRecentSubscriberSuffix}`),
+      redis.hGet(
+        subscriberGoalsKey,
+        `${postId}${postRecentSubscriberOrderSuffix}`,
+      ),
+    ]);
+    const order = parseRecentSubscriberOrder(orderRaw);
+    if (value?.toLowerCase() === normalized && order) userIds.add(order.userId);
+  }
+  return [...userIds];
+}
+
 export async function eraseFromRecentSubscribers(
   redis: RedisClient,
   username: string,
+  userId?: string,
 ): Promise<void> {
-  const normalized = username.toLowerCase();
+  const normalized = username.trim().toLowerCase();
   const indexedPostIds = parsePostIdList(
     await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
   if (typeof (redis as Partial<RedisClient>).watch !== "function") {
     const keysToUpdate: Record<string, string> = {};
+    const preservedPostIds: string[] = [];
     for (const postId of indexedPostIds) {
       const key = `${postId}${postRecentSubscriberSuffix}`;
       const value = await redis.hGet(subscriberGoalsKey, key);
+      const order = parseRecentSubscriberOrder(
+        await redis.hGet(
+          subscriberGoalsKey,
+          `${postId}${postRecentSubscriberOrderSuffix}`,
+        ),
+      );
+      const generation = order
+        ? ((await redis.get(subscriberTrackingGenerationKey(order.userId))) ??
+          "")
+        : undefined;
+      if (
+        value?.toLowerCase() === normalized &&
+        order &&
+        ((userId && order.userId !== userId) ||
+          generation === order.erasureGeneration)
+      ) {
+        preservedPostIds.push(postId);
+        continue;
+      }
       if (value?.toLowerCase() === normalized) keysToUpdate[key] = "";
     }
     if (Object.keys(keysToUpdate).length > 0) {
       await redis.hSet(subscriberGoalsKey, keysToUpdate);
     }
-    await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
+    if (preservedPostIds.length > 0) {
+      await redis.hSet(recentSubscriberPostsByUsernameKey, {
+        [normalized]: stringifyPostIdList(preservedPostIds),
+      });
+    } else {
+      await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
+    }
     return;
   }
   for (const postId of indexedPostIds) {
@@ -1429,7 +1479,8 @@ export async function eraseFromRecentSubscribers(
       if (
         value?.toLowerCase() === normalized &&
         order &&
-        currentGeneration === order.erasureGeneration
+        ((userId && order.userId !== userId) ||
+          currentGeneration === order.erasureGeneration)
       ) {
         await tx.unwatch();
         break;

@@ -981,6 +981,7 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.eraseFromRecentSubscribers).toHaveBeenCalledWith(
       hoisted.redis,
       "ExampleMod",
+      "t2_mod",
     );
     expect(json).toHaveBeenCalledWith({
       showToast: "Your Sub Goal user data has been removed.",
@@ -1012,6 +1013,75 @@ describe("internalUi color theme create goal routes", () => {
       ),
     });
   });
+
+  it.each([
+    {
+      lookup: "missing",
+      status: "complete",
+      fails: false,
+      expected: "User data has been erased successfully.",
+    },
+    {
+      lookup: "throws",
+      status: "complete",
+      fails: false,
+      expected: "Some Subscriber Goal data was removed",
+    },
+    {
+      lookup: "missing",
+      status: "partial",
+      fails: false,
+      expected: "To finish, try again",
+    },
+    {
+      lookup: "throws",
+      status: "partial",
+      fails: false,
+      expected: "To finish, try again",
+    },
+    {
+      lookup: "missing",
+      status: "complete",
+      fails: true,
+      expected: "could not be fully erased",
+    },
+    {
+      lookup: "throws",
+      status: "complete",
+      fails: true,
+      expected: "could not be fully erased",
+    },
+  ])(
+    "reports $status erasure when username lookup $lookup (failure=$fails)",
+    async ({ lookup, status, fails, expected }) => {
+      if (lookup === "throws")
+        hoisted.reddit.getUserByUsername.mockRejectedValue(
+          new Error("Reddit unavailable"),
+        );
+      else hoisted.reddit.getUserByUsername.mockResolvedValue(undefined);
+      hoisted.untrackSubscriberByUsername.mockResolvedValue({
+        status,
+        userIds: status === "complete" ? ["t2_user"] : [],
+      });
+      if (fails)
+        hoisted.untrackSubscriberByUsername.mockRejectedValue(
+          new Error("Redis unavailable"),
+        );
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      await routes.get(internalRoutes.forms.eraseData)?.(
+        { body: { username: "AlIcE", confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+      expect(hoisted.untrackSubscriberByUsername).toHaveBeenCalledWith(
+        hoisted.redis,
+        "AlIcE",
+      );
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        showToast: expect.stringContaining(expected),
+      });
+    },
+  );
 
   it("blocks moderator erasure after membership is revoked", async () => {
     hoisted.reddit.getModerators.mockReturnValue({

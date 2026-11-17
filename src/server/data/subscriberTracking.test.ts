@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../types";
 import {
   applySubscriberTracking,
@@ -16,11 +16,14 @@ import {
 import {
   subscriberStatsByUserIdKey,
   subscriberStatsKey,
+  subscriberStatsUsernameToUserIdKey,
+  untrackSubscriberByUsername,
 } from "./subscriberStats";
 import {
   eraseFromRecentSubscribers,
   postRecentSubscriberOrderSuffix,
   subscriberGoalsKey,
+  recentSubscriberPostsByUsernameKey,
 } from "./subGoalData";
 import { parseRecentSubscriberOrder } from "./recentSubscriberOrder";
 
@@ -93,6 +96,9 @@ class MemoryRedis {
     for (const member of members) this.sorted.get(key)?.delete(member);
     this.changed(key);
   }
+  async zScan(key: string): Promise<{ cursor: number; members: Entry[] }> {
+    return { cursor: 0, members: await this.zRange(key, 0, -1) };
+  }
   async watch(...keys: string[]): Promise<MemoryTransaction> {
     return new MemoryTransaction(this, keys);
   }
@@ -161,6 +167,239 @@ const client = (redis: MemoryRedis): RedisClient =>
   redis as unknown as RedisClient;
 
 describe("durable subscriber tracking", () => {
+  it.each(["stats index", "post order only"])(
+    "erases a username recovered from %s and fences stale work",
+    async (source) => {
+      const redis = new MemoryRedis();
+      const generation = await getSubscriberTrackingGeneration(
+        client(redis),
+        "t2_u",
+      );
+      const old = (
+        await persistAcceptedSubscriberTracking(client(redis), {
+          operationId: "op-old",
+          userId: "t2_u",
+          postId: "t3_post",
+          username: "Alice",
+          subscribers: 101,
+          timestamp: 1000,
+          shareUsername: true,
+          erasureGeneration: generation,
+        })
+      ).operation;
+      await applySubscriberTracking(client(redis), old);
+      // The pending username lookup cannot help the moderator route.
+      await redis.hDel(subscriberTrackingUsernameToUserIdKey, ["alice"]);
+      if (source === "post order only") {
+        await redis.hDel(subscriberStatsByUserIdKey, ["t2_u"]);
+        await redis.hDel(subscriberStatsUsernameToUserIdKey, ["alice"]);
+        await redis.zRem(subscriberStatsKey, ["t2_u:Alice:101"]);
+      }
+      const order = await redis.hGet(
+        subscriberGoalsKey,
+        `t3_post${postRecentSubscriberOrderSuffix}`,
+      );
+      await redis.hSet(subscriberGoalsKey, {
+        t3_second_recent_subscriber: "ALICE",
+        [`t3_second${postRecentSubscriberOrderSuffix}`]: order!,
+        t3_legacy_recent_subscriber: "aLiCe",
+        t3_other_recent_subscriber: "Bob",
+      });
+      await redis.hSet(recentSubscriberPostsByUsernameKey, {
+        alice: JSON.stringify([
+          "t3_post",
+          "t3_second",
+          "t3_legacy",
+          "t3_other",
+        ]),
+      });
+      await expect(
+        untrackSubscriberByUsername(client(redis), "aLiCe"),
+      ).resolves.toEqual({
+        status: "complete",
+        userIds: ["t2_u"],
+      });
+      for (const postId of ["t3_post", "t3_second", "t3_legacy"]) {
+        expect(
+          await redis.hGet(subscriberGoalsKey, `${postId}_recent_subscriber`),
+        ).toBe("");
+      }
+      expect(
+        await redis.hGet(subscriberGoalsKey, "t3_other_recent_subscriber"),
+      ).toBe("Bob");
+      expect(
+        await getSubscriberTrackingGeneration(client(redis), "t2_u"),
+      ).not.toBe(generation);
+      expect(
+        await redis.hGet(subscriberStatsByUserIdKey, "t2_u"),
+      ).toBeUndefined();
+      expect(
+        await getPendingSubscriberTracking(client(redis), "t2_u"),
+      ).toBeUndefined();
+      expect(await redis.zRange(subscriberTrackingQueueKey, 0, -1)).toEqual([]);
+      await expect(applySubscriberTracking(client(redis), old)).resolves.toBe(
+        "invalidated",
+      );
+      expect(
+        await redis.hGet(subscriberGoalsKey, "t3_post_recent_subscriber"),
+      ).toBe("");
+    },
+  );
+
+  it("retains ID evidence when pending cleanup fails and retries safely", async () => {
+    const redis = new MemoryRedis();
+    await redis.hSet(subscriberStatsUsernameToUserIdKey, { alice: "t2_u" });
+    await redis.hSet(subscriberStatsByUserIdKey, {
+      t2_u: "t2_u:Alice:101:1000",
+    });
+    redis.execFailures = 1;
+    await expect(
+      untrackSubscriberByUsername(client(redis), "Alice"),
+    ).rejects.toThrow("transaction unavailable");
+    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_u")).toBeDefined();
+    await expect(
+      untrackSubscriberByUsername(client(redis), "Alice"),
+    ).resolves.toMatchObject({ status: "complete" });
+    expect(
+      await redis.hGet(subscriberStatsByUserIdKey, "t2_u"),
+    ).toBeUndefined();
+  });
+
+  it("retries a partial display erasure using the remaining post ordering evidence", async () => {
+    const redis = new MemoryRedis();
+    const order = JSON.stringify({
+      userId: "t2_u",
+      timestamp: 1000,
+      operationId: "old",
+      erasureGeneration: "",
+    });
+    await redis.hSet(subscriberGoalsKey, {
+      t3_first_recent_subscriber: "Alice",
+      [`t3_first${postRecentSubscriberOrderSuffix}`]: order,
+      t3_second_recent_subscriber: "Alice",
+      [`t3_second${postRecentSubscriberOrderSuffix}`]: order,
+    });
+    await redis.hSet(recentSubscriberPostsByUsernameKey, {
+      alice: JSON.stringify(["t3_first", "t3_second"]),
+    });
+    const originalHSet = redis.hSet.bind(redis);
+    let fail = true;
+    vi.spyOn(redis, "hSet").mockImplementation(async (key, fields) => {
+      if (
+        key === subscriberGoalsKey &&
+        fields.t3_second_recent_subscriber === "" &&
+        fail
+      ) {
+        fail = false;
+        throw new Error("display write failed");
+      }
+      await originalHSet(key, fields);
+    });
+    await expect(
+      untrackSubscriberByUsername(client(redis), "Alice"),
+    ).rejects.toThrow("display write failed");
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_first_recent_subscriber"),
+    ).toBe("");
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_second_recent_subscriber"),
+    ).toBe("Alice");
+    await expect(
+      untrackSubscriberByUsername(client(redis), "Alice"),
+    ).resolves.toMatchObject({ status: "complete" });
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_second_recent_subscriber"),
+    ).toBe("");
+    expect(
+      await redis.hGet(recentSubscriberPostsByUsernameKey, "alice"),
+    ).toBeUndefined();
+  });
+
+  it("preserves a fresh authorized join that conflicts with display erasure", async () => {
+    const redis = new MemoryRedis();
+    const generation = await getSubscriberTrackingGeneration(
+      client(redis),
+      "t2_u",
+    );
+    const old = (
+      await persistAcceptedSubscriberTracking(client(redis), {
+        operationId: "old",
+        userId: "t2_u",
+        postId: "t3_post",
+        username: "Alice",
+        subscribers: 101,
+        timestamp: 1000,
+        shareUsername: true,
+        erasureGeneration: generation,
+      })
+    ).operation;
+    await applySubscriberTracking(client(redis), old);
+    await invalidateSubscriberTracking(client(redis), "t2_u");
+    await redis.hDel(subscriberStatsByUserIdKey, ["t2_u"]);
+    const fresh = (
+      await persistAcceptedSubscriberTracking(client(redis), {
+        ...old,
+        operationId: "fresh",
+        timestamp: 2000,
+        erasureGeneration: await getSubscriberTrackingGeneration(
+          client(redis),
+          "t2_u",
+        ),
+      })
+    ).operation;
+    redis.beforeExec = async () => {
+      await applySubscriberTracking(client(redis), fresh);
+    };
+    await eraseFromRecentSubscribers(client(redis), "Alice", "t2_u");
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_post_recent_subscriber"),
+    ).toBe("Alice");
+    expect(
+      parseRecentSubscriberOrder(
+        await redis.hGet(
+          subscriberGoalsKey,
+          `t3_post${postRecentSubscriberOrderSuffix}`,
+        ),
+      )?.operationId,
+    ).toBe("fresh");
+    expect(await redis.hGet(recentSubscriberPostsByUsernameKey, "alice")).toBe(
+      JSON.stringify(["t3_post"]),
+    );
+    await expect(applySubscriberTracking(client(redis), old)).resolves.toBe(
+      "invalidated",
+    );
+  });
+
+  it("retries display transaction conflicts and preserves another ID with the same name", async () => {
+    const redis = new MemoryRedis();
+    await redis.hSet(subscriberGoalsKey, {
+      t3_post_recent_subscriber: "Alice",
+      [`t3_post${postRecentSubscriberOrderSuffix}`]: JSON.stringify({
+        userId: "t2_other",
+        timestamp: 1000,
+        operationId: "other",
+        erasureGeneration: "old",
+      }),
+      t3_legacy_recent_subscriber: "Alice",
+    });
+    await redis.hSet(recentSubscriberPostsByUsernameKey, {
+      alice: JSON.stringify(["t3_post", "t3_legacy"]),
+    });
+    redis.beforeExec = async () => {
+      await redis.hSet(subscriberGoalsKey, { unrelated: "conflict" });
+    };
+    await eraseFromRecentSubscribers(client(redis), "Alice", "t2_u");
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_post_recent_subscriber"),
+    ).toBe("Alice");
+    expect(
+      await redis.hGet(subscriberGoalsKey, "t3_legacy_recent_subscriber"),
+    ).toBe("");
+    expect(await redis.hGet(recentSubscriberPostsByUsernameKey, "alice")).toBe(
+      JSON.stringify(["t3_post"]),
+    );
+  });
+
   it.each([
     {
       name: "newer public join",

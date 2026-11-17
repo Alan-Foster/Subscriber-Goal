@@ -4,12 +4,14 @@ import type { BasicUserData } from "./basicData";
 import {
   addRecentSubscriberPostIndex,
   eraseFromRecentSubscribers,
+  findRecentSubscriberUserIdsByUsername,
   postRecentSubscriberOrderSuffix,
   postRecentSubscriberSuffix,
   recentSubscriberPostsByUsernameKey,
   subscriberGoalsKey,
 } from "./subGoalData";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
+import { invalidateSubscriberTracking } from "./subscriberTracking";
 import {
   compareRecentSubscriberOrder,
   parseRecentSubscriberOrder,
@@ -611,6 +613,9 @@ export async function untrackSubscriberById(
   userId: string,
   knownUsername?: string,
 ): Promise<SubscriberErasureResult> {
+  // Every caller, including local username recovery, must fence stale work
+  // before deleting any of the evidence needed to retry an erasure.
+  await invalidateSubscriberTracking(redis, userId);
   const indexedRecord = await redis.hGet(subscriberStatsByUserIdKey, userId);
   const parsed = indexedRecord
     ? parseSubscriberMember(indexedRecord)
@@ -656,11 +661,11 @@ export async function untrackSubscriberById(
       .map((member) => parseSubscriberMember(member)?.username)
       .filter((username): username is string => Boolean(username)),
   ];
+  for (const username of usernamesToDelete) {
+    await eraseFromRecentSubscribers(redis, username, userId);
+  }
   await deleteSubscriberIndexes(redis, userId, usernamesToDelete);
   await redis.hDel(subscriberStatsErasedUserIdsKey, [userId]);
-  for (const username of usernamesToDelete) {
-    await eraseFromRecentSubscribers(redis, username);
-  }
   return { status: "complete", userIds: [userId] };
 }
 
@@ -677,7 +682,9 @@ export async function untrackSubscriberByUsername(
     return await untrackSubscriberById(redis, userId, username);
   }
 
-  const matchingUserIds = new Set<string>();
+  const matchingUserIds = new Set<string>(
+    await findRecentSubscriberUserIdsByUsername(redis, username),
+  );
   let hashCursor = 0;
   do {
     const page = await redis.hScan(
