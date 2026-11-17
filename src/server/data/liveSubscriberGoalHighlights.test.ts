@@ -49,6 +49,31 @@ describe("live Subscriber Goal highlight discovery", () => {
     });
   };
 
+  it.each([
+    "moderator",
+    "automod_filtered",
+    "reddit",
+    "community_ops",
+    "unknown_remover",
+    "deleted",
+  ])(
+    "excludes %s removals from live highlights and rediscovers approved posts",
+    async (category) => {
+      const post = {
+        id: "t3_live",
+        authorName: "Subscriber-Goal",
+        subredditId: "t5_example",
+        createdAt: new Date(2000),
+        postData: { postKind: "subscriber-goal-v1", postHeight: "regular" },
+        removedByCategory: category as string | undefined,
+      };
+      await expect(discover({ post })).resolves.toEqual([]);
+      expect(hoisted.registerSubscriberGoalPost).not.toHaveBeenCalled();
+      post.removedByCategory = undefined;
+      expect(await discover({ post })).toHaveLength(1);
+    },
+  );
+
   it("discovers and registers an untracked inline classic goal", async () => {
     const candidates = await discover({
       post: {

@@ -955,6 +955,44 @@ describe("onboarding reminder", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("keeps reminders pending during known removals beyond ordinary retry limits", async () => {
+    const {
+      PostTemporarilyUnavailableError,
+      temporarilyRemovedPostRecheckDelayMs: hour,
+    } = await import("../utils/postStatus");
+    await scheduleOnboardingReminder(redis as never, { nowMs });
+    const healthyInventory =
+      await hoisted.ensureExistingSubscriberGoalHighlighted();
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockRejectedValue(
+      new PostTemporarilyUnavailableError("t3_paused", "automod_filtered"),
+    );
+    const run = (at: number) =>
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: at,
+      });
+    let at = nowMs + onboardingReminderDelayMs;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(run(at)).resolves.toMatchObject({ status: "not_due" });
+      expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        nextRunAt: String(at + hour),
+      });
+      at += 24 * hour;
+    }
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    expect(
+      hoisted.markOnboardingSubscriberGoalCancelled,
+    ).not.toHaveBeenCalled();
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue(
+      healthyInventory,
+    );
+    await expect(run(at)).resolves.toMatchObject({ status: "sent" });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+  });
+
   it("keeps upgrade account recovery paused beyond 48 hours and resumes without an exhaustion notice", async () => {
     const {
       automaticGoalPrerequisiteMaxAgeMs,

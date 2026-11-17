@@ -598,41 +598,62 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     );
   });
 
-  it("cleans up moderator-removed posts without updating or requeueing", async () => {
-    const infoSpy = vi
-      .spyOn(console, "info")
-      .mockImplementation(() => undefined);
-    hoisted.context.subredditName = "CorporateGifts";
-    hoisted.getQueuedUpdates.mockResolvedValue(["t3_removed"]);
-    hoisted.reddit.getPostById.mockResolvedValue({
-      id: "t3_removed",
-      removedByCategory: "moderator",
+  it.each([
+    "moderator",
+    "automod_filtered",
+    "reddit",
+    "community_ops",
+    "new_remover",
+  ])(
+    "pauses %s removal without losing queued work, then resumes when active",
+    async (category) => {
+      hoisted.context.subredditName = "CorporateGifts";
+      hoisted.getQueuedUpdates.mockResolvedValue(["t3_removed"]);
+      const post = {
+        id: "t3_removed",
+        removedByCategory: category as string | undefined,
+      };
+      hoisted.reddit.getPostById.mockResolvedValue(post);
+      await onPostsUpdaterJob();
+      expect(hoisted.retireSubscriberGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
+      expect(hoisted.untrackPost).not.toHaveBeenCalled();
+      expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+      expect(hoisted.removeSubscriberGoalPost).not.toHaveBeenCalled();
+      expect(
+        hoisted.queueConfirmedSourceDeletionCleanup,
+      ).not.toHaveBeenCalled();
+      expect(hoisted.applyTextFallback).not.toHaveBeenCalled();
+      expect(hoisted.applyGoalPostFrameStyle).not.toHaveBeenCalled();
+      expect(hoisted.queueUpdate).not.toHaveBeenCalled();
+      post.removedByCategory = undefined;
+      await onPostsUpdaterJob();
+      expect(hoisted.applyTextFallback).toHaveBeenCalledOnce();
+      expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledOnce();
+      expect(hoisted.queueUpdate).toHaveBeenCalledWith(
+        expect.anything(),
+        "t3_removed",
+        expect.any(Date),
+      );
+      expect(hoisted.retireSubscriberGoalPost).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not reconcile completion or update a filtered goal before checking removal", async () => {
+    hoisted.getQueuedUpdates.mockResolvedValue(["t3_filtered"]);
+    hoisted.getSubGoalData.mockResolvedValue({
+      goal: 5,
+      completedTime: 0,
+      postHeight: "regular",
     });
-
+    hoisted.reddit.getPostById.mockResolvedValue({
+      id: "t3_filtered",
+      spam: true,
+    });
     await onPostsUpdaterJob();
-
-    expect(hoisted.cancelUpdates).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_removed",
-    );
-    expect(hoisted.queueConfirmedSourceDeletionCleanup).not.toHaveBeenCalled();
-    expect(hoisted.untrackPost).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_removed",
-    );
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_removed",
-    );
-    expect(hoisted.removeSubscriberGoalPost).toHaveBeenCalledWith(
-      expect.anything(),
-      "t3_removed",
-    );
+    expect(hoisted.checkCompletionStatus).not.toHaveBeenCalled();
     expect(hoisted.applyTextFallback).not.toHaveBeenCalled();
-    expect(hoisted.queueUpdate).not.toHaveBeenCalled();
-    expect(infoSpy).toHaveBeenCalledWith(
-      "[updater] cleaned up inactive post: postId=t3_removed reason=removedByCategory:moderator",
-    );
+    expect(hoisted.retireSubscriberGoalPost).not.toHaveBeenCalled();
   });
 
   it("cleans up deleted posts without updating or requeueing", async () => {

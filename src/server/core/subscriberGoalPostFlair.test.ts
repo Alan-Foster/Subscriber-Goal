@@ -57,6 +57,25 @@ describe("Subscriber Goal post flair", () => {
     expect(reddit.createPostFlairTemplate).not.toHaveBeenCalled();
   });
 
+  it("pauses flair repair on removed posts and resumes after approval", async () => {
+    const post = { id: "t3_paused", subredditId: "t5_local", removed: true };
+    const reddit = {
+      getPostById: vi.fn(async () => post),
+      setPostFlair: vi.fn(),
+    };
+    const repair = () =>
+      backfillSubscriberGoalPostFlair(
+        reddit as never,
+        { id: "t5_local", name: "ExampleSub" },
+        [post.id],
+        "flair_1",
+      );
+    await expect(repair()).resolves.toEqual({ applied: 0, failed: [] });
+    expect(reddit.setPostFlair).not.toHaveBeenCalled();
+    post.removed = false;
+    await expect(repair()).resolves.toEqual({ applied: 1, failed: [] });
+  });
+
   it("backfills valid local goal posts and isolates individual failures", async () => {
     const reddit = {
       getPostById: vi.fn(async (id: string) => {

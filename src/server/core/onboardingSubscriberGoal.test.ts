@@ -1490,6 +1490,46 @@ describe("onboarding subscriber goal", () => {
     });
   });
 
+  it("keeps a known removed creation pending beyond 48 hours without losing its operation", async () => {
+    const {
+      PostTemporarilyUnavailableError,
+      temporarilyRemovedPostRecheckDelayMs: hour,
+    } = await import("../utils/postStatus");
+    await initializeOnboardingSubscriberGoal(redis as never, {
+      lifecycleSource: "install",
+      nowMs,
+    });
+    const initial = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new PostTemporarilyUnavailableError("t3_submitted", "moderator"),
+    );
+    for (const at of [
+      Number(initial.nextRunAt),
+      Number(initial.nextRunAt) + 72 * hour,
+    ]) {
+      await processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: settings,
+        nowMs: at,
+      });
+      expect(
+        await redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        operationId: initial.operationId,
+        nextRunAt: String(at + hour),
+      });
+    }
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    expect(
+      hoisted.createSubscriberGoal.mock.calls.every(
+        ([call]) => call.options.operationId === initial.operationId,
+      ),
+    ).toBe(true);
+  });
+
   it("preserves pending onboarding through repeated inventory uncertainty", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",

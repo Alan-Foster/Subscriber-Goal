@@ -33,10 +33,7 @@ import {
 } from "../core/onboardingSubscriberGoal";
 import { processDueOnboardingReminder } from "../core/onboardingReminder";
 import { applyGoalPostFrameStyle } from "../core/post";
-import {
-  getTerminalRemovedByCategory,
-  isMissingPostError,
-} from "../utils/postStatus";
+import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
@@ -468,6 +465,51 @@ export async function onPostsUpdaterJob(): Promise<void> {
         continue;
       }
 
+      if (!isLinkId(postId)) {
+        logDiagnostic("error", "scheduler_post_update_failed", {
+          workflow: "post_update",
+          phase: "invalid_post_id",
+          postId,
+        });
+        await cleanupInactivePost(postId, "invalid_post_id");
+        continue;
+      }
+      const post = await reddit.getPostById(postId);
+      const availability = getPostAvailability(post);
+      if (availability.status === "temporarily_removed") {
+        logDiagnostic("info", "subscriber_goal_update_paused", {
+          workflow: "post_update",
+          phase: "post_availability",
+          postId,
+          category: availability.category ?? "unknown",
+        });
+        continue;
+      }
+      if (availability.status === "terminal") {
+        const removedByCategory = availability.category;
+        if (removedByCategory === "deleted") {
+          await queueConfirmedSourceDeletionCleanup(
+            reddit,
+            redis,
+            appSettings,
+            {
+              postId,
+              subredditId: subreddit.id,
+              subredditName: subreddit.name,
+            },
+          );
+        }
+        await retireSubscriberGoalPost(
+          redis,
+          postId,
+          `removedByCategory:${removedByCategory}`,
+        );
+        console.info(
+          `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
+        );
+        continue;
+      }
+
       let effectiveGoal = subGoalData.goal;
       let effectiveSubscribers = subreddit.numberOfSubscribers;
       if (!isUsableSubscriberGoal(effectiveGoal)) {
@@ -493,40 +535,6 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const completedTime = subGoalData.completedTime
         ? new Date(subGoalData.completedTime)
         : null;
-      if (!isLinkId(postId)) {
-        logDiagnostic("error", "scheduler_post_update_failed", {
-          workflow: "post_update",
-          phase: "invalid_post_id",
-          postId,
-        });
-        await cleanupInactivePost(postId, "invalid_post_id");
-        continue;
-      }
-      const post = await reddit.getPostById(postId);
-      const removedByCategory = getTerminalRemovedByCategory(post);
-      if (removedByCategory) {
-        if (removedByCategory === "deleted") {
-          await queueConfirmedSourceDeletionCleanup(
-            reddit,
-            redis,
-            appSettings,
-            {
-              postId,
-              subredditId: subreddit.id,
-              subredditName: subreddit.name,
-            },
-          );
-        }
-        await retireSubscriberGoalPost(
-          redis,
-          postId,
-          `removedByCategory:${removedByCategory}`,
-        );
-        console.info(
-          `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
-        );
-        continue;
-      }
       const archived = post.archived === true;
       const locked = post.locked === true;
       const previousOperationalState = await getPostOperationalState(

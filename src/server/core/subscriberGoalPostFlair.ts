@@ -1,3 +1,4 @@
+import { getPostAvailability } from "../utils/postStatus";
 import { isLinkId, type RedditClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 
@@ -69,7 +70,11 @@ export async function backfillSubscriberGoalPostFlair(
     if (!isLinkId(postId)) continue;
     try {
       const post = await reddit.getPostById(postId);
-      if (post.subredditId !== subreddit.id) continue;
+      if (
+        post.subredditId !== subreddit.id ||
+        getPostAvailability(post).status !== "active"
+      )
+        continue;
       await reddit.setPostFlair({
         subredditName: subreddit.name,
         postId,

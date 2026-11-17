@@ -49,7 +49,9 @@ import {
   registerSubscriberGoalPost,
 } from "../data/subscriberGoalPostRegistry";
 import {
-  getTerminalRemovedByCategory,
+  getPostAvailability,
+  PostTemporarilyUnavailableError,
+  temporarilyRemovedPostRecheckDelayMs,
   isMissingPostError,
 } from "../utils/postStatus";
 import {
@@ -1341,6 +1343,22 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   } catch (error) {
     inspected = getDetectionDiagnosticsFromError(error) ?? inspected;
     const errorMessage = String(error);
+    if (error instanceof PostTemporarilyUnavailableError) {
+      await saveOnboardingState(redis, {
+        ...activeState,
+        status: "pending",
+        nextRunAt: nowMs + temporarilyRemovedPostRecheckDelayMs,
+        errorMessage,
+      });
+      logDiagnostic("info", "onboarding_goal_post_paused", {
+        workflow: "onboarding_subscriber_goal",
+        phase: "post_availability",
+        operationId: activeState.operationId,
+        postId: error.postId,
+        category: error.category ?? "unknown",
+      });
+      return { status: "failed", errorMessage, ...inspected };
+    }
     if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
       const pending =
         error.reconciliationStatus === "pending" &&
@@ -1538,14 +1556,22 @@ export async function findValidSubscriberGoals(
     if (!postId || seen.has(postId) || !isLinkId(postId)) return;
     seen.add(postId);
     if (await isSubscriberGoalPostRetired(redis, postId)) return;
+    const availability = getPostAvailability(post);
+    const isCandidate = await isSubscriberGoalCandidate(
+      redis,
+      post,
+      subreddit,
+      appUser.username,
+    );
+    // An empty inventory could authorize a replacement. Pause reconciliation
+    // while preserving known goals, but ignore unrelated removed highlights.
     if (
-      !(await isSubscriberGoalCandidate(
-        redis,
-        post,
-        subreddit,
-        appUser.username,
-      ))
+      availability.status === "temporarily_removed" &&
+      (pruneInvalid || isCandidate)
     ) {
+      throw new PostTemporarilyUnavailableError(postId, availability.category);
+    }
+    if (!isCandidate) {
       if (pruneInvalid) {
         await pruneStaleCandidate(redis, postId);
         diagnostics.stalePruned += 1;
@@ -2745,7 +2771,7 @@ async function isSubscriberGoalCandidate(
   if (
     !post.id ||
     post.authorName?.toLowerCase() !== appUsername.toLowerCase() ||
-    getTerminalRemovedByCategory(post) !== undefined
+    getPostAvailability(post).status === "terminal"
   ) {
     return false;
   }

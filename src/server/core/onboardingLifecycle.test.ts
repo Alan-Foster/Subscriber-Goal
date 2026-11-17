@@ -324,6 +324,83 @@ describe("onboarding lifecycle reconciliation", () => {
     });
   });
 
+  it.each([
+    "moderator",
+    "automod_filtered",
+    "reddit",
+    "community_ops",
+    "unknown_remover",
+  ])(
+    "preserves inventory and pending work during %s removal, then restores the same goal",
+    async (category) => {
+      const post = {
+        ...makeLifecycleGoalPost({ id: "t3_paused" }),
+        removedByCategory: category as string | undefined,
+      };
+      await seedGoalData(redis, post.id, { goal: 3000 });
+      for (const key of [
+        "subscriber_goal_post_registry_v1",
+        "posts",
+        "updater",
+        autoCreateNextGoalQueueKey,
+      ]) {
+        await redis.zAdd(key, { member: post.id, score: nowMs });
+      }
+      const beforeHashes = new Map(
+        [...redis.hashes].map(([k, v]) => [k, new Map(v)]),
+      );
+      const beforeSets = new Map(
+        [...redis.sortedSets].map(([k, v]) => [k, new Map(v)]),
+      );
+      const reddit = createReddit({ posts: [post] });
+      for (const time of [nowMs, nowMs + 72 * 60 * 60 * 1000]) {
+        await expect(
+          ensureExistingSubscriberGoalHighlighted({
+            reddit: reddit as never,
+            redis: redis as never,
+            nowMs: time,
+          }),
+        ).rejects.toMatchObject({
+          name: "PostTemporarilyUnavailableError",
+          postId: post.id,
+        });
+        expect(redis.hashes).toEqual(beforeHashes);
+        expect(redis.sortedSets).toEqual(beforeSets);
+        expect(redis.values.has(`retired_subscriber_goal_v1:${post.id}`)).toBe(
+          false,
+        );
+      }
+      expect(post.highlight).not.toHaveBeenCalled();
+      expect(lifecycleHoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      post.removedByCategory = undefined;
+      await expect(
+        ensureExistingSubscriberGoalHighlighted({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        }),
+      ).resolves.toMatchObject({ status: "existing", postId: post.id });
+      expect(post.highlight).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("ignores unrelated removed highlights while inventorying goals", async () => {
+    const unrelated = {
+      ...makeLifecycleGoalPost({ id: "t3_unrelated", highlighted: true }),
+      authorName: "someone-else",
+      removedByCategory: "moderator",
+    };
+    await expect(
+      ensureExistingSubscriberGoalHighlighted({
+        reddit: createReddit({ posts: [unrelated] }) as never,
+        redis: redis as never,
+        nowMs,
+      }),
+    ).resolves.toMatchObject({ status: "missing" });
+    expect(unrelated.highlight).not.toHaveBeenCalled();
+    expect(unrelated.unhighlight).not.toHaveBeenCalled();
+  });
+
   it("arms a fresh workflow when no highlighted goal exists", async () => {
     const reddit = createReddit();
 
