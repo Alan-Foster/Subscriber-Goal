@@ -40,8 +40,7 @@ export async function onAppChanged({
 
   let subredditName = context.subredditName;
   let currentSubreddit:
-    | Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>
-    | undefined;
+    Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | undefined;
   if (!subredditName) {
     try {
       currentSubreddit = await reddit.getCurrentSubreddit();
@@ -84,7 +83,10 @@ export async function onAppChanged({
       ...(installerUsername ? { installerUsername } : {}),
     });
   }
-  await scheduleAppRepair(redis);
+  await scheduleAppRepair(redis, Date.now(), undefined, {
+    force: lifecycleSource === "install" || lifecycleSource === "upgrade",
+    reason: `lifecycle_${lifecycleSource}`,
+  });
 
   await runPhase("subreddit_display_name", () =>
     ensureSavedSubredditDisplayName(redis, subredditName),
@@ -194,11 +196,9 @@ export async function onAppChanged({
 
 function describeOnboardingNextAction(
   goalState:
-    | Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>>
-    | undefined,
+    Awaited<ReturnType<typeof getOnboardingSubscriberGoalState>> | undefined,
   reminderState:
-    | Awaited<ReturnType<typeof getOnboardingReminderState>>
-    | undefined,
+    Awaited<ReturnType<typeof getOnboardingReminderState>> | undefined,
 ): string {
   if (reminderState?.status === "pending") return "awaiting_modmail_timer";
   if (

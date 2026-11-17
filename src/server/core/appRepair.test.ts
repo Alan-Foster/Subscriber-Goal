@@ -109,7 +109,8 @@ describe("scheduled app repair", () => {
     ]);
     hoisted.getTrackedPosts.mockResolvedValue(["t3_tracked"]);
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
-      status: "missing",
+      status: "existing",
+      reconciliationOutcome: "complete",
     });
   });
 
@@ -142,6 +143,26 @@ describe("scheduled app repair", () => {
     });
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "complete",
+    });
+  });
+
+  it("can schedule another lifecycle repair after completion", async () => {
+    await redis.hSet(appRepairStateKey, {
+      version: "app_repair_community_highlights_v3",
+      status: "complete",
+      completedAt: "90",
+      attempts: "4",
+      lastError: "old failure",
+    });
+
+    await scheduleAppRepair(redis as never, 100, 0);
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      nextRunAt: "100",
+      attempts: "0",
+      lastError: "",
+      scheduledAt: "100",
     });
   });
 
@@ -189,6 +210,27 @@ describe("scheduled app repair", () => {
       status: "pending",
       attempts: "1",
       lastError: expect.stringContaining("six Community Highlight slots"),
+    });
+  });
+
+  it("retries when no eligible post can be found", async () => {
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "missing",
+    });
+    await scheduleAppRepair(redis as never, 100, 0);
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("retry");
+
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      lastError: expect.stringContaining("reconciliation failed"),
     });
   });
 

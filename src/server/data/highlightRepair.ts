@@ -23,7 +23,14 @@ export async function scheduleHighlightRepair(
   const current = await redis.hGetAll(appRepairStateKey);
   const existingPending =
     current.version === appRepairVersion && current.status === "pending";
-  if (current.version === appRepairVersion && !force) return;
+  const restartingCompleted =
+    current.version === appRepairVersion && current.status === "complete";
+  if (
+    current.version === appRepairVersion &&
+    !force &&
+    current.status !== "complete"
+  )
+    return;
   const requestedRunAt = nowMs + Math.max(0, delayMs);
   const existingRunAt = Number(current.nextRunAt);
   const nextRunAt =
@@ -33,11 +40,14 @@ export async function scheduleHighlightRepair(
   await redis.hSet(appRepairStateKey, {
     version: appRepairVersion,
     status: "pending",
-    attempts: force ? current.attempts || "0" : "0",
+    attempts: restartingCompleted ? "0" : force ? current.attempts || "0" : "0",
     nextRunAt: String(nextRunAt),
-    scheduledAt: current.scheduledAt || String(nowMs),
-    lastError: force ? current.lastError || "" : "",
+    scheduledAt: restartingCompleted
+      ? String(nowMs)
+      : current.scheduledAt || String(nowMs),
+    lastError: restartingCompleted ? "" : force ? current.lastError || "" : "",
     reason,
-    targetPostId: targetPostId ?? current.targetPostId ?? "",
+    targetPostId:
+      targetPostId ?? (restartingCompleted ? "" : current.targetPostId) ?? "",
   });
 }

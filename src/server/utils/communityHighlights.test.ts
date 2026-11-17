@@ -316,7 +316,7 @@ describe("Community Highlights manager", () => {
     expect(harness.getIds()).toEqual(["t3_target", "t3_b"]);
   });
 
-  it("rolls back a plausible concurrent seventh-post eviction", async () => {
+  it("preserves the live list after a concurrent moderator replacement", async () => {
     const original = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e"];
     const harness = createHarness(original);
     harness.target.highlight.mockImplementationOnce(async () => {
@@ -333,14 +333,21 @@ describe("Community Highlights manager", () => {
     );
 
     expect(result).toMatchObject({
-      status: "not_highlighted",
+      status: "highlighted",
       capacityOutcome: "concurrent_change",
-      rollbackOutcome: "restored",
+      rollbackOutcome: "not_needed",
     });
     expect(result.issues.map(({ category }) => category)).toContain(
       "concurrency",
     );
-    expect(harness.getIds()).toEqual([...original, "t3_moderator"]);
+    expect(harness.getIds()).toEqual([
+      "t3_target",
+      "t3_b",
+      "t3_c",
+      "t3_d",
+      "t3_e",
+      "t3_moderator",
+    ]);
   });
 
   it("reports the final state when the target disappears during reordering", async () => {

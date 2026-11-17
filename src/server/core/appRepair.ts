@@ -23,8 +23,6 @@ import {
   withCommunityGoalMutationLease,
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
-import { isSubscriberGoalPostRetired } from "./postRetirement";
-import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 
 export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
@@ -177,15 +175,6 @@ async function processDueAppRepairUnderLease({
         );
       }
       await runPhase("highlight_reconciliation", async () => {
-        const targetStopped = state.targetPostId
-          ? (await isSubscriberGoalPostRetired(redis, state.targetPostId)) ||
-            Boolean(
-              await redis.hGet(
-                autoCreateNextGoalSuccessorsKey,
-                state.targetPostId,
-              ),
-            )
-          : false;
         const result = await ensureExistingSubscriberGoalHighlighted({
           reddit,
           redis,
@@ -195,12 +184,10 @@ async function processDueAppRepairUnderLease({
           mutationLease,
         });
         if (
-          !targetStopped &&
-          !result.moderatorOverride &&
-          !result.failureCategories?.includes("post_state") &&
-          (result.status === "existing_not_highlighted" ||
-            result.reconciliationOutcome === "degraded" ||
-            result.reconciliationOutcome === "failed")
+          result.status === "missing" ||
+          result.status === "existing_not_highlighted" ||
+          result.reconciliationOutcome === "degraded" ||
+          result.reconciliationOutcome === "failed"
         ) {
           throw new Error(
             result.errorMessage ??
