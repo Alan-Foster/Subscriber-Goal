@@ -33,7 +33,11 @@ import {
 } from "../core/onboardingSubscriberGoal";
 import { processDueOnboardingReminder } from "../core/onboardingReminder";
 import { applyGoalPostFrameStyle } from "../core/post";
-import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
+import {
+  getPostAvailability,
+  isMissingPostError,
+  temporarilyRemovedPostRecheckDelayMs,
+} from "../utils/postStatus";
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
@@ -456,6 +460,9 @@ export async function onPostsUpdaterJob(): Promise<void> {
 
   for (const postId of postIds) {
     try {
+      const recheckKey = `subscriber_goal_update_recheck_v1:${postId}`;
+      const recheckAt = Number(await redis.get(recheckKey));
+      if (recheckAt > Date.now()) continue;
       const subGoalData = await getSubGoalData(redis, postId);
       if (
         !isUsableSubscriberGoal(subGoalData.goal) &&
@@ -477,6 +484,10 @@ export async function onPostsUpdaterJob(): Promise<void> {
       const post = await reddit.getPostById(postId);
       const availability = getPostAvailability(post);
       if (availability.status === "temporarily_removed") {
+        const nextCheckAt = Date.now() + temporarilyRemovedPostRecheckDelayMs;
+        await redis.set(recheckKey, String(nextCheckAt), {
+          expiration: new Date(nextCheckAt),
+        });
         logDiagnostic("info", "subscriber_goal_update_paused", {
           workflow: "post_update",
           phase: "post_availability",
@@ -485,6 +496,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
         });
         continue;
       }
+      if (recheckAt) await redis.del(recheckKey);
       if (availability.status === "terminal") {
         const removedByCategory = availability.category;
         if (removedByCategory === "deleted") {

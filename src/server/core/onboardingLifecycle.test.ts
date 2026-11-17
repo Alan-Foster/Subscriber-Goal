@@ -360,9 +360,11 @@ describe("onboarding lifecycle reconciliation", () => {
             redis: redis as never,
             nowMs: time,
           }),
-        ).rejects.toMatchObject({
-          name: "PostTemporarilyUnavailableError",
+        ).resolves.toMatchObject({
+          status: "existing_not_highlighted",
           postId: post.id,
+          eligiblePostIds: [post.id],
+          unhighlightedEligiblePostIds: [post.id],
         });
         expect(redis.hashes).toEqual(beforeHashes);
         expect(redis.sortedSets).toEqual(beforeSets);
@@ -381,6 +383,128 @@ describe("onboarding lifecycle reconciliation", () => {
         }),
       ).resolves.toMatchObject({ status: "existing", postId: post.id });
       expect(post.highlight).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["completed", "tiny", "cta"])(
+    "skips removed %s posts without pruning their state",
+    async (kind) => {
+      const post = {
+        ...makeLifecycleGoalPost({ id: "t3_removed", highlighted: true }),
+        removedByCategory: "moderator",
+        postData: {
+          postKind:
+            kind === "tiny"
+              ? "subscribe-only-v1"
+              : kind === "cta"
+                ? "cta-only-v1"
+                : "subscriber-goal-v1",
+          postHeight: kind === "completed" ? "regular" : kind,
+        },
+      };
+      if (kind === "completed")
+        await seedGoalData(redis, post.id, {
+          goal: 1500,
+          completedTime: nowMs - 1000,
+        });
+      await redis.zAdd("subscriber_goal_post_registry_v1", {
+        member: post.id,
+        score: nowMs,
+      });
+      const beforeHashes = new Map(
+        [...redis.hashes].map(([k, v]) => [k, new Map(v)]),
+      );
+      const beforeSets = new Map(
+        [...redis.sortedSets].map(([k, v]) => [k, new Map(v)]),
+      );
+      await expect(
+        ensureExistingSubscriberGoalHighlighted({
+          reddit: createReddit({ posts: [post] }) as never,
+          redis: redis as never,
+          nowMs,
+        }),
+      ).resolves.toMatchObject({ status: "missing", candidateCount: 0 });
+      expect(redis.hashes).toEqual(beforeHashes);
+      expect(redis.sortedSets).toEqual(beforeSets);
+      expect(redis.values.has(`retired_subscriber_goal_v1:${post.id}`)).toBe(
+        false,
+      );
+      expect(post.highlight).not.toHaveBeenCalled();
+      expect(post.unhighlight).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    "allows unrelated successor creation unless a removed classic is unfinished (unfinished=%s)",
+    async (unfinished) => {
+      const hour = 60 * 60 * 1000;
+      const completedTime = nowMs - 48 * hour;
+      const old = {
+        ...makeLifecycleGoalPost({ id: "t3_removed_old" }),
+        removedByCategory: "moderator" as string | undefined,
+      };
+      const source = makeLifecycleGoalPost({ id: "t3_due_source" });
+      await seedGoalData(redis, old.id, {
+        goal: 3000,
+        completedTime: unfinished ? 0 : completedTime - hour,
+      });
+      await seedGoalData(redis, source.id, { goal: 1500, completedTime });
+      for (const post of [old, source])
+        await redis.zAdd("subscriber_goal_post_registry_v1", {
+          member: post.id,
+          score: nowMs,
+        });
+      await redis.zAdd(autoCreateNextGoalQueueKey, {
+        member: source.id,
+        score: nowMs,
+      });
+      const module =
+        (await import("./autoCreateNextGoal")) as typeof import("./autoCreateNextGoal") & {
+          actualProcessDueAutoCreateNextGoals: typeof import("./autoCreateNextGoal").processDueAutoCreateNextGoals;
+        };
+      const reddit = createReddit({ posts: [old, source] });
+      for (const at of unfinished ? [nowMs, nowMs + 72 * hour] : [nowMs]) {
+        await expect(
+          module.actualProcessDueAutoCreateNextGoals({
+            reddit: reddit as never,
+            redis: redis as never,
+            appSettings: { promoSubreddit: "SubscriberGoal" } as never,
+            nowMs: at,
+          }),
+        ).resolves.toMatchObject({
+          created: unfinished ? 0 : 1,
+          rescheduled: unfinished ? 1 : 0,
+          failed: 0,
+          exhausted: 0,
+        });
+        expect(
+          await redis.hGet("subscriber_goals", `${source.id}_completed_time`),
+        ).toBe(String(completedTime));
+        expect(await redis.hGetAll(autoCreateNextGoalRetryAttemptsKey)).toEqual(
+          {},
+        );
+        expect(await redis.hGetAll(autoCreateNextGoalExhaustedKey)).toEqual({});
+      }
+      expect(lifecycleHoisted.createSubscriberGoal).toHaveBeenCalledTimes(
+        unfinished ? 0 : 1,
+      );
+      expect(old.highlight).not.toHaveBeenCalled();
+      expect(old.unhighlight).not.toHaveBeenCalled();
+      expect(
+        await redis.zScore("subscriber_goal_post_registry_v1", old.id),
+      ).toBe(nowMs);
+      expect(redis.values.has(`retired_subscriber_goal_v1:${old.id}`)).toBe(
+        false,
+      );
+      if (unfinished) {
+        old.removedByCategory = undefined;
+        await ensureExistingSubscriberGoalHighlighted({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: nowMs + 73 * hour,
+        });
+        expect(old.highlight).toHaveBeenCalledOnce();
+      }
     },
   );
 

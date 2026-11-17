@@ -1510,7 +1510,10 @@ export async function findValidSubscriberGoals(
   nowMs = Date.now(),
   includeRecovery = true,
 ): Promise<
-  OnboardingDetectionDiagnostics & { candidates: OnboardingGoalCandidate[] }
+  OnboardingDetectionDiagnostics & {
+    candidates: OnboardingGoalCandidate[];
+    removedActiveGoals: OnboardingGoalCandidate[];
+  }
 > {
   const diagnostics: OnboardingDetectionDiagnostics = {
     registeredInspected: 0,
@@ -1545,6 +1548,7 @@ export async function findValidSubscriberGoals(
   diagnostics.highlightedInspected = highlightedPosts.length;
 
   const candidates: OnboardingGoalCandidate[] = [];
+  const removedActiveGoals: OnboardingGoalCandidate[] = [];
   const seen = new Set<string>();
   let discoveryOrder = 0;
   const inspect = async (
@@ -1563,13 +1567,34 @@ export async function findValidSubscriberGoals(
       subreddit,
       appUser.username,
     );
-    // An empty inventory could authorize a replacement. Pause reconciliation
-    // while preserving known goals, but ignore unrelated removed highlights.
-    if (
-      availability.status === "temporarily_removed" &&
-      (pruneInvalid || isCandidate)
-    ) {
-      throw new PostTemporarilyUnavailableError(postId, availability.category);
+    if (availability.status === "temporarily_removed") {
+      // Historical removals must not block unrelated work. Only an unfinished
+      // classic goal prevents a replacement; none of these posts are pruned.
+      if (isCandidate) {
+        const metadata = await getGoalCandidateMetadata(redis, post);
+        if (metadata.classification === "classic") {
+          const goalData = await getSubGoalData(
+            redis,
+            postId,
+            post.postData ?? post.customPostData,
+          );
+          if (!goalData.completedTime) {
+            const createdAtMs = getCreatedAtMs(post.createdAt);
+            removedActiveGoals.push({
+              postId,
+              post,
+              source,
+              ...(createdAtMs === undefined ? {} : { createdAtMs }),
+              isHighlighted: false,
+              ...metadata,
+              goal: goalData.goal,
+              completedTime: goalData.completedTime,
+              discoveryOrder: discoveryOrder++,
+            });
+          }
+        }
+      }
+      return;
     }
     if (!isCandidate) {
       if (pruneInvalid) {
@@ -1676,7 +1701,7 @@ export async function findValidSubscriberGoals(
     for (const post of searchedPosts) await inspect(post, "search", false);
   }
 
-  return { ...diagnostics, candidates };
+  return { ...diagnostics, candidates, removedActiveGoals };
 }
 
 export async function ensureExistingSubscriberGoalHighlighted({
@@ -1733,7 +1758,29 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   mutationLease: CommunityGoalMutationLease;
 }): Promise<OnboardingHighlightEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
-  const { candidates, ...diagnostics } = discovery;
+  const { candidates, removedActiveGoals, ...diagnostics } = discovery;
+  if (removedActiveGoals.length > 0) {
+    const selected = newestGoalCandidate(removedActiveGoals);
+    const result: OnboardingHighlightEnsuranceResult = {
+      ...emptyHighlightEnsuranceResult(),
+      ...diagnostics,
+      status: "existing_not_highlighted",
+      postId: selected.postId,
+      source: selected.source,
+      classification: selected.classification,
+      classificationConfidence: selected.classificationConfidence,
+      candidateCount: candidates.length + removedActiveGoals.length,
+      eligiblePostIds: removedActiveGoals.map(({ postId }) => postId),
+      unhighlightedEligiblePostIds: removedActiveGoals.map(
+        ({ postId }) => postId,
+      ),
+      selectedWasAlreadyHighlighted: false,
+      verificationResult: "not_highlighted",
+      notificationOutcome: "not_requested",
+    };
+    logHighlightEnsurance(result.status, result);
+    return result;
+  }
   {
     let subscriberCount: number | undefined;
     for (const candidate of candidates) {
