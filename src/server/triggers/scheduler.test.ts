@@ -40,9 +40,13 @@ const hoisted = vi.hoisted(() => ({
   reddit: {
     getCurrentSubreddit: vi.fn(),
     getPostById: vi.fn(),
+    getAppUser: vi.fn(),
   },
   redis: {
     hGet: vi.fn(),
+    hGetAll: vi.fn(),
+    hSet: vi.fn(),
+    del: vi.fn(),
   },
   getAppSettings: vi.fn(),
   processCrosspostDispatchQueue: vi.fn(),
@@ -224,6 +228,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.reddit.getCurrentSubreddit.mockReset();
     hoisted.reddit.getPostById.mockReset();
     hoisted.redis.hGet.mockReset();
+    hoisted.redis.hGetAll.mockReset();
+    hoisted.redis.hSet.mockReset();
+    hoisted.redis.del.mockReset();
+    hoisted.reddit.getAppUser.mockReset();
     hoisted.getAppSettings.mockReset();
     hoisted.processCrosspostDispatchQueue.mockReset();
     hoisted.countPendingCrossposts.mockReset();
@@ -464,6 +472,75 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
       expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
       expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
+    },
+  );
+
+  it.each(["posts", "all"])(
+    "resumes gated work after exhausted health retries verify %s through the real health worker",
+    async (permission) => {
+      const health = await vi.importActual<
+        typeof import("../core/appAccountHealth")
+      >("../core/appAccountHealth");
+      const hashes = new Map<string, Record<string, string>>([
+        [
+          health.appAccountHealthRetryStateKey,
+          {
+            status: "exhausted",
+            attempts: "3",
+            nextRunAt: "1000",
+            subredditName: "CorporateGifts",
+            lastError: "missing_posts_permission",
+          },
+        ],
+        [health.appAccountHealthStateKey, { status: "unhealthy" }],
+        [
+          "app_account_recovery_v1_state",
+          { status: "healthy", incidentToken: "existing" },
+        ],
+      ]);
+      hoisted.redis.hGetAll.mockImplementation(async (key: string) => ({
+        ...hashes.get(key),
+      }));
+      hoisted.redis.hSet.mockImplementation(
+        async (key: string, fields: Record<string, string>) => {
+          hashes.set(key, { ...hashes.get(key), ...fields });
+        },
+      );
+      hoisted.redis.del.mockImplementation(async (key: string) => {
+        hashes.delete(key);
+      });
+      hoisted.processDueAppAccountRecovery.mockResolvedValue({
+        status: "healthy",
+      });
+      hoisted.processDueAppAccountHealthCheck.mockImplementation(
+        health.processDueAppAccountHealthCheck,
+      );
+      hoisted.reddit.getAppUser.mockResolvedValue({
+        username: "subscriber-goal",
+        getModPermissionsForSubreddit: async () => [permission],
+      });
+      const now = vi.spyOn(Date, "now").mockReturnValue(999);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
+      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledOnce();
+
+      now.mockReturnValue(1000);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
+      expect(hashes.has(health.appAccountHealthRetryStateKey)).toBe(false);
+      expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+      expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
+
+      now.mockReturnValue(2000);
+      await onPostsUpdaterJob();
+      expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
+      expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledTimes(2);
     },
   );
 

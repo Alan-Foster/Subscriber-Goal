@@ -5,6 +5,7 @@ import {
   appAccountHealthRetryStateKey,
   appAccountInstallerKey,
   checkAppAccountHealth,
+  processDueAppAccountHealthCheck,
   rememberAppInstaller,
 } from "./appAccountHealth";
 
@@ -187,7 +188,7 @@ describe("app account health", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("caps unknown-health retries instead of retrying indefinitely", async () => {
+  it("marks repeated unknown-health failures for continued backoff", async () => {
     reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
 
     await check();
@@ -200,6 +201,88 @@ describe("app account health", () => {
       subredditName: "ExampleSub",
     });
   });
+
+  it.each([
+    { failure: "unhealthy", restoredPermission: "posts" },
+    { failure: "unhealthy", restoredPermission: "all" },
+    { failure: "unknown", restoredPermission: "posts" },
+    { failure: "unknown", restoredPermission: "all" },
+  ])(
+    "rechecks exhausted $failure health and restores $restoredPermission without an event",
+    async ({ failure, restoredPermission }) => {
+      permissions = [];
+      if (failure === "unknown")
+        reddit.getAppUser.mockRejectedValue(
+          new Error("temporary Reddit failure"),
+        );
+      await check();
+      const tick = (nowMs: number) =>
+        processDueAppAccountHealthCheck({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        });
+      for (let attempt = 2; attempt <= 3; attempt++) {
+        const retry = await redis.hGetAll(appAccountHealthRetryStateKey);
+        await tick(Number(retry.nextRunAt));
+      }
+      const exhausted = await redis.hGetAll(appAccountHealthRetryStateKey);
+      expect(exhausted).toMatchObject({ status: "exhausted", attempts: "3" });
+      permissions = [restoredPermission];
+      reddit.getAppUser.mockResolvedValue({
+        username: "subscriber-goal",
+        getModPermissionsForSubreddit: async () => permissions,
+      });
+      const calls = reddit.getAppUser.mock.calls.length;
+      await expect(
+        tick(Number(exhausted.nextRunAt) - 1),
+      ).resolves.toMatchObject({ healthy: false, status: failure });
+      expect(reddit.getAppUser).toHaveBeenCalledTimes(calls);
+      await expect(tick(Number(exhausted.nextRunAt))).resolves.toMatchObject({
+        status: "healthy",
+        healthy: true,
+      });
+      expect(reddit.getAppUser).toHaveBeenCalledTimes(calls + 1);
+      expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toEqual({});
+      expect(
+        await redis.hGetAll("app_repair_community_highlights_v3_state"),
+      ).toMatchObject({ status: "pending", reason: "permissions_restored" });
+      expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(
+        failure === "unhealthy" ? 1 : 0,
+      );
+    },
+  );
+
+  it.each(["unhealthy", "unknown"])(
+    "continues %s checks with bounded counters and at most hourly backoff",
+    async (failure) => {
+      permissions = [];
+      if (failure === "unknown")
+        reddit.getAppUser.mockRejectedValue(
+          new Error("temporary Reddit failure"),
+        );
+      await check();
+      for (let attempt = 2; attempt <= 12; attempt++) {
+        const nowMs = Number(
+          (await redis.hGetAll(appAccountHealthRetryStateKey)).nextRunAt,
+        );
+        await processDueAppAccountHealthCheck({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        });
+        const next = await redis.hGetAll(appAccountHealthRetryStateKey);
+        expect(next.attempts).toBe(String(Math.min(7, attempt)));
+        expect(Number(next.nextRunAt) - nowMs).toBe(
+          Math.min(3_600_000, 60_000 * 2 ** (attempt - 1)),
+        );
+      }
+      expect(reddit.getAppUser).toHaveBeenCalledTimes(12);
+      expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(
+        failure === "unhealthy" ? 1 : 0,
+      );
+    },
+  );
 
   it("can fail closed without scheduling a permission retry", async () => {
     reddit.getAppUser.mockRejectedValue(new Error("permission denied"));

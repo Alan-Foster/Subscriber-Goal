@@ -16,6 +16,16 @@ export const appAccountHealthRetryStateKey =
   "app_account_health_v1_retry_state";
 export const subscriberGoalAppUsername = "subscriber-goal";
 export const appAccountHealthMaxRetryAttempts = 3;
+// Seven attempts reach the one-hour ceiling; keep that counter bounded while
+// exhausted records continue periodic verification for missed permission events.
+const maxHealthBackoffAttempts = 7;
+
+function nextHealthRetryAttempt(previousAttempts: string | undefined): number {
+  return Math.min(
+    maxHealthBackoffAttempts,
+    Math.max(0, parseInt(previousAttempts ?? "0", 10) || 0) + 1,
+  );
+}
 
 export type AppAccountHealthStatus = "healthy" | "unhealthy" | "unknown";
 
@@ -85,7 +95,7 @@ export async function checkAppAccountHealth({
   } catch (error) {
     if (scheduleUnknownRetry) {
       const previousRetry = await redis.hGetAll(appAccountHealthRetryStateKey);
-      const attempts = (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+      const attempts = nextHealthRetryAttempt(previousRetry.attempts);
       const retryDelayMs = Math.min(
         60 * 60 * 1000,
         60_000 * 2 ** (attempts - 1),
@@ -173,7 +183,8 @@ export async function checkAppAccountHealth({
     if (
       restoredRecovery ||
       previousHealth.status === "unhealthy" ||
-      previousRetry.status === "pending"
+      previousRetry.status === "pending" ||
+      previousRetry.status === "exhausted"
     ) {
       await scheduleHighlightRepair(redis, {
         nowMs,
@@ -191,8 +202,7 @@ export async function checkAppAccountHealth({
     };
   }
 
-  const healthRetryAttempts =
-    (parseInt(previousRetry.attempts ?? "0", 10) || 0) + 1;
+  const healthRetryAttempts = nextHealthRetryAttempt(previousRetry.attempts);
   const healthRetryDelayMs = Math.min(
     60 * 60 * 1000,
     60_000 * 2 ** (healthRetryAttempts - 1),
@@ -351,7 +361,7 @@ export async function processDueAppAccountHealthCheck({
 }): Promise<AppAccountHealthResult | undefined> {
   const retry = await redis.hGetAll(appAccountHealthRetryStateKey);
   if (
-    retry.status !== "pending" ||
+    (retry.status !== "pending" && retry.status !== "exhausted") ||
     !retry.subredditName ||
     !Number.isFinite(Number(retry.nextRunAt)) ||
     nowMs < Number(retry.nextRunAt)
