@@ -434,13 +434,27 @@ describe("onboarding lifecycle reconciliation", () => {
     },
   );
 
-  it.each([false, true])(
-    "allows unrelated successor creation unless a removed classic is unfinished (unfinished=%s)",
-    async (unfinished) => {
+  it.each([
+    { unfinished: false, age: "newer", blocks: false },
+    { unfinished: true, age: "newer", blocks: true },
+    { unfinished: true, age: "older", blocks: false },
+    { unfinished: true, age: "same", blocks: false },
+    { unfinished: true, age: "unknown", blocks: true },
+  ])(
+    "handles successor creation with a $age removed classic (unfinished=$unfinished, blocks=$blocks)",
+    async ({ unfinished, age, blocks }) => {
       const hour = 60 * 60 * 1000;
       const completedTime = nowMs - 48 * hour;
       const old = {
         ...makeLifecycleGoalPost({ id: "t3_removed_old" }),
+        createdAt:
+          age === "unknown"
+            ? undefined
+            : new Date(
+                nowMs -
+                  60_000 +
+                  (age === "newer" ? 1000 : age === "older" ? -1000 : 0),
+              ),
         removedByCategory: "moderator" as string | undefined,
       };
       const source = makeLifecycleGoalPost({ id: "t3_due_source" });
@@ -463,7 +477,7 @@ describe("onboarding lifecycle reconciliation", () => {
           actualProcessDueAutoCreateNextGoals: typeof import("./autoCreateNextGoal").processDueAutoCreateNextGoals;
         };
       const reddit = createReddit({ posts: [old, source] });
-      for (const at of unfinished ? [nowMs, nowMs + 72 * hour] : [nowMs]) {
+      for (const at of blocks ? [nowMs, nowMs + 72 * hour] : [nowMs]) {
         await expect(
           module.actualProcessDueAutoCreateNextGoals({
             reddit: reddit as never,
@@ -472,8 +486,8 @@ describe("onboarding lifecycle reconciliation", () => {
             nowMs: at,
           }),
         ).resolves.toMatchObject({
-          created: unfinished ? 0 : 1,
-          rescheduled: unfinished ? 1 : 0,
+          created: blocks ? 0 : 1,
+          rescheduled: blocks ? 1 : 0,
           failed: 0,
           exhausted: 0,
         });
@@ -486,7 +500,7 @@ describe("onboarding lifecycle reconciliation", () => {
         expect(await redis.hGetAll(autoCreateNextGoalExhaustedKey)).toEqual({});
       }
       expect(lifecycleHoisted.createSubscriberGoal).toHaveBeenCalledTimes(
-        unfinished ? 0 : 1,
+        blocks ? 0 : 1,
       );
       expect(old.highlight).not.toHaveBeenCalled();
       expect(old.unhighlight).not.toHaveBeenCalled();
@@ -496,7 +510,7 @@ describe("onboarding lifecycle reconciliation", () => {
       expect(redis.values.has(`retired_subscriber_goal_v1:${old.id}`)).toBe(
         false,
       );
-      if (unfinished) {
+      if (blocks && age !== "unknown") {
         old.removedByCategory = undefined;
         await ensureExistingSubscriberGoalHighlighted({
           reddit: reddit as never,
@@ -505,6 +519,54 @@ describe("onboarding lifecycle reconciliation", () => {
         });
         expect(old.highlight).toHaveBeenCalledOnce();
       }
+    },
+  );
+
+  it.each([
+    { age: "older", blocks: false },
+    { age: "newer", blocks: true },
+    { age: "unknown", blocks: true },
+  ])(
+    "repairs a live classic with a $age removed unfinished goal (blocks=$blocks)",
+    async ({ age, blocks }) => {
+      const removed = {
+        ...makeLifecycleGoalPost({ id: "t3_removed" }),
+        createdAt:
+          age === "unknown"
+            ? undefined
+            : new Date(nowMs - (age === "older" ? 120_000 : 30_000)),
+        removedByCategory: "moderator",
+      };
+      const live = makeLifecycleGoalPost({
+        id: "t3_live",
+        createdAt: nowMs - 60_000,
+      });
+      await seedGoalData(redis, removed.id, { goal: 3000 });
+      await seedGoalData(redis, live.id, { goal: 3000 });
+      for (const post of [removed, live])
+        await redis.zAdd("subscriber_goal_post_registry_v1", {
+          member: post.id,
+          score: nowMs,
+        });
+      const result = await ensureExistingSubscriberGoalHighlighted({
+        reddit: createReddit({ posts: [removed, live] }) as never,
+        redis: redis as never,
+        nowMs,
+      });
+      expect(result).toMatchObject({
+        status: blocks ? "existing_not_highlighted" : "existing",
+        postId: blocks ? removed.id : live.id,
+        eligiblePostIds: [blocks ? removed.id : live.id],
+      });
+      expect(live.highlight).toHaveBeenCalledTimes(blocks ? 0 : 1);
+      expect(removed.highlight).not.toHaveBeenCalled();
+      expect(removed.unhighlight).not.toHaveBeenCalled();
+      expect(
+        await redis.zScore("subscriber_goal_post_registry_v1", removed.id),
+      ).toBe(nowMs);
+      expect(redis.values.has(`retired_subscriber_goal_v1:${removed.id}`)).toBe(
+        false,
+      );
     },
   );
 

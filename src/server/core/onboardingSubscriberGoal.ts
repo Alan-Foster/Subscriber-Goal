@@ -1759,8 +1759,25 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
 }): Promise<OnboardingHighlightEnsuranceResult> {
   const discovery = await findValidSubscriberGoals(reddit, redis, nowMs);
   const { candidates, removedActiveGoals, ...diagnostics } = discovery;
-  if (removedActiveGoals.length > 0) {
-    const selected = newestGoalCandidate(removedActiveGoals);
+  const newestLiveClassicAt = candidates
+    .filter((candidate) => candidate.classification === "classic")
+    .reduce(
+      (newest, candidate) =>
+        Math.max(newest, candidate.createdAtMs ?? Number.POSITIVE_INFINITY),
+      Number.NEGATIVE_INFINITY,
+    );
+  // A newer live classic supersedes an older removed goal, even if the live
+  // one is completed. Unknown removal dates remain conservative blockers.
+  const blockingRemovedGoals = removedActiveGoals.filter(
+    (candidate) =>
+      candidate.createdAtMs === undefined ||
+      candidate.createdAtMs > newestLiveClassicAt,
+  );
+  if (blockingRemovedGoals.length > 0) {
+    const selected =
+      blockingRemovedGoals.find(
+        ({ createdAtMs }) => createdAtMs === undefined,
+      ) ?? newestGoalCandidate(blockingRemovedGoals);
     const result: OnboardingHighlightEnsuranceResult = {
       ...emptyHighlightEnsuranceResult(),
       ...diagnostics,
@@ -1769,9 +1786,9 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       source: selected.source,
       classification: selected.classification,
       classificationConfidence: selected.classificationConfidence,
-      candidateCount: candidates.length + removedActiveGoals.length,
-      eligiblePostIds: removedActiveGoals.map(({ postId }) => postId),
-      unhighlightedEligiblePostIds: removedActiveGoals.map(
+      candidateCount: candidates.length + blockingRemovedGoals.length,
+      eligiblePostIds: blockingRemovedGoals.map(({ postId }) => postId),
+      unhighlightedEligiblePostIds: blockingRemovedGoals.map(
         ({ postId }) => postId,
       ),
       selectedWasAlreadyHighlighted: false,
