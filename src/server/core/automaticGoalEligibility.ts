@@ -1,8 +1,7 @@
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 
 export type AutomaticGoalIneligibilityReason =
-  | "subreddit_not_public"
-  | "subreddit_not_sfw";
+  "subreddit_not_public" | "subreddit_not_sfw";
 
 export type AutomaticGoalEligibility =
   | {
@@ -49,4 +48,16 @@ export function getAutomaticGoalEligibility(subreddit: {
     };
   }
   return { eligible: true, subredditType, isSfw, safetyStatus };
+}
+
+export function isAutomaticGoalEligibilityUncertain(eligibility: {
+  safetyStatus: "sfw" | "nsfw" | "unknown";
+  subredditType: string;
+}): boolean {
+  return (
+    eligibility.safetyStatus !== "nsfw" &&
+    (eligibility.subredditType === "unknown" ||
+      (eligibility.subredditType === "public" &&
+        eligibility.safetyStatus === "unknown"))
+  );
 }

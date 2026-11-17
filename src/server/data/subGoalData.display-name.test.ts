@@ -986,6 +986,147 @@ describe("subGoalData subreddit display name", () => {
     ).resolves.toBe("2");
   });
 
+  it.each([true, false])(
+    "rearms ordinary exhaustion at the original deadline (future=%s)",
+    async (future) => {
+      const redis = new InMemoryRedis();
+      const completedTime = 1_000;
+      const deadline = completedTime + 86_400_000;
+      await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_source: "6" });
+      await redis.hSet(autoCreateNextGoalRetryAttemptsKey, { t3_source: "6" });
+      await expect(
+        repairAutoCreateNextGoal(
+          redis as never,
+          "t3_source",
+          completedTime,
+          future ? 2_000 : deadline + 1_000,
+          true,
+        ),
+      ).resolves.toEqual({
+        status: "scheduled",
+        runAt: deadline,
+        failureCount: 0,
+      });
+      await expect(
+        redis.hGet(autoCreateNextGoalExhaustedKey, "t3_source"),
+      ).resolves.toBeUndefined();
+      await expect(
+        redis.hGet(autoCreateNextGoalRetryAttemptsKey, "t3_source"),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it("preserves an existing prerequisite deferral on upgrade", async () => {
+    const redis = new InMemoryRedis();
+    await redis.zAdd(autoCreateNextGoalQueueKey, {
+      member: "t3_source",
+      score: 9_000,
+    });
+    await expect(
+      repairAutoCreateNextGoal(redis as never, "t3_source", 1_000, 2_000, true),
+    ).resolves.toMatchObject({ status: "queued", runAt: 9_000 });
+  });
+
+  it.each([true, false])(
+    "only rearms ambiguous exhaustion with safe original metadata (complete=%s)",
+    async (complete) => {
+      const redis = new InMemoryRedis();
+      const operationId = "auto-next:t3_source";
+      await redis.hSet(autoCreateNextGoalReconciliationExhaustedKey, {
+        t3_source: operationId,
+      });
+      await redis.hSet("subscriber_goal_creation_v1:" + operationId, {
+        status: "submission_unknown",
+        reconciliationStatus: "exhausted",
+        ...(complete
+          ? {
+              submissionMarker: "original-marker",
+              subredditId: "t5_example",
+              subredditName: "ExampleSub",
+            }
+          : {}),
+      });
+      await expect(
+        repairAutoCreateNextGoal(
+          redis as never,
+          "t3_source",
+          1_000,
+          100_000_000,
+          true,
+        ),
+      ).resolves.toMatchObject({
+        status: complete ? "scheduled" : "exhausted",
+      });
+      await expect(
+        redis.hGet("subscriber_goal_creation_v1:" + operationId, "status"),
+      ).resolves.toBe("submission_unknown");
+      if (complete)
+        await expect(
+          redis.hGet(
+            "subscriber_goal_creation_v1:" + operationId,
+            "submissionMarker",
+          ),
+        ).resolves.toBe("original-marker");
+    },
+  );
+
+  it("starts a fresh prerequisite window and permits a new notice after an exhausted successor is re-armed", async () => {
+    const {
+      automaticGoalPrerequisiteRetriesKey,
+      nextAutomaticGoalPrerequisiteRetry,
+      notifyAutomaticGoalExhausted,
+    } = await import("../core/automaticGoalRetry");
+    const redis = new InMemoryRedis();
+    const operationId = "auto-next:t3_source";
+    const typedRedis = redis as never;
+    const send = vi.fn(async () => undefined);
+    const reddit = {
+      getCurrentSubreddit: vi.fn(async () => ({
+        id: "t5_test",
+        language: "en",
+      })),
+      modMail: { createModNotification: send },
+    };
+    const notify = () =>
+      notifyAutomaticGoalExhausted({
+        redis: typedRedis,
+        reddit: reddit as never,
+        operationId,
+        unresolved: false,
+      });
+    await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_source: "53" });
+    await nextAutomaticGoalPrerequisiteRetry(typedRedis, operationId, 1_000);
+    await notify();
+    await notify();
+    expect(send).toHaveBeenCalledOnce();
+    await expect(
+      repairAutoCreateNextGoal(
+        typedRedis,
+        "t3_source",
+        1_000,
+        48 * 3_600_000,
+        true,
+      ),
+    ).resolves.toMatchObject({ status: "scheduled", runAt: 86_401_000 });
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+    await expect(
+      nextAutomaticGoalPrerequisiteRetry(
+        typedRedis,
+        operationId,
+        48 * 3_600_000,
+      ),
+    ).resolves.toEqual({ attempts: 1, retryAt: 48 * 3_600_000 + 300_000 });
+    await notify();
+    await notify();
+    expect(send).toHaveBeenCalledTimes(2);
+    await cancelAutoCreateNextGoal(typedRedis, "t3_source");
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+  });
+
   it("does not repair exhausted auto-create work", async () => {
     const redis = new InMemoryRedis();
     await redis.hSet(autoCreateNextGoalExhaustedKey, { t3_exhausted: "6" });

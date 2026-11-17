@@ -116,6 +116,7 @@ async function reconcileCompletedGoalUnderLease({
     sourcePostId,
     completedTime,
     nowMs,
+    true,
   );
   if (repaired.status === "exhausted") {
     return {

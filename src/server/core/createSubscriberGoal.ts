@@ -1,3 +1,4 @@
+import { AutomaticGoalPrerequisiteError } from "./automaticGoalRetry";
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
@@ -402,6 +403,17 @@ export async function createSubscriberGoal({
   } catch (error) {
     if (error instanceof CommunityGoalMutationInProgressError) {
       throw new SubscriberGoalCreationInProgressError(options.language);
+    }
+    // With an operation ID, submission failures are converted into the
+    // explicit unknown-outcome error before reaching this boundary. Other
+    // unclassified API/Redis failures must not exhaust automatic creation.
+    if (
+      options.automaticPermissionCheck &&
+      !(error instanceof SubscriberGoalCreationOutcomeUnknownError) &&
+      !(error instanceof SubscriberGoalModeratorPermissionError) &&
+      !(error instanceof ProhibitedSubredditError)
+    ) {
+      throw new AutomaticGoalPrerequisiteError(error);
     }
     throw error;
   }

@@ -1,3 +1,8 @@
+import {
+  rearmAutomaticGoalReconciliation,
+  beginAutomaticGoalRetryGeneration,
+  resetAutomaticGoalPrerequisiteRetry,
+} from "../core/automaticGoalRetry";
 import type { RedditClient, RedisClient } from "../types";
 import { isLinkId } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -699,6 +704,7 @@ export async function repairAutoCreateNextGoal(
   postId: string,
   completedTime: number,
   nowMs = Date.now(),
+  rearmExhausted = false,
 ): Promise<AutoCreateNextGoalRepairResult> {
   const [pending, rawFailureCount, exhausted, reconciliationExhausted] =
     await Promise.all([
@@ -707,12 +713,30 @@ export async function repairAutoCreateNextGoal(
       redis.hGet(autoCreateNextGoalExhaustedKey, postId),
       redis.hGet(autoCreateNextGoalReconciliationExhaustedKey, postId),
     ]);
-  const failureCount = Number(rawFailureCount) || 0;
+  let failureCount = Number(rawFailureCount) || 0;
+  const queued = pending.find((entry) => entry.member === postId);
+  if (
+    reconciliationExhausted &&
+    rearmExhausted &&
+    (await rearmAutomaticGoalReconciliation(
+      redis,
+      reconciliationExhausted,
+      nowMs,
+      true,
+    ))
+  ) {
+    await redis.hDel(autoCreateNextGoalReconciliationExhaustedKey, [postId]);
+    const runAt = Math.max(
+      queued?.score ?? nowMs,
+      completedTime + autoCreateNextGoalDelayMs,
+    );
+    await scheduleAutoCreateNextGoalReconciliation(redis, postId, runAt);
+    return { status: "scheduled", runAt, failureCount };
+  }
   if (reconciliationExhausted) {
     await redis.zRem(autoCreateNextGoalQueueKey, [postId]);
     return { status: "exhausted", failureCount };
   }
-  const queued = pending.find((entry) => entry.member === postId);
   if (queued) {
     return {
       status: failureCount > 0 ? "retrying" : "queued",
@@ -720,7 +744,17 @@ export async function repairAutoCreateNextGoal(
       failureCount,
     };
   }
-  if (exhausted) {
+  if (
+    rearmExhausted &&
+    (exhausted || failureCount > autoCreateNextGoalRetryDelayMs.length)
+  ) {
+    await beginAutomaticGoalRetryGeneration(redis, `auto-next:${postId}`);
+    await Promise.all([
+      redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),
+      redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
+    ]);
+    failureCount = 0;
+  } else if (exhausted) {
     return {
       status: "exhausted",
       failureCount: Number(exhausted) || failureCount,
@@ -814,6 +848,7 @@ export async function cancelAutoCreateNextGoal(
   postId: string,
 ): Promise<void> {
   await Promise.all([
+    resetAutomaticGoalPrerequisiteRetry(redis, `auto-next:${postId}`),
     redis.zRem(autoCreateNextGoalQueueKey, [postId]),
     redis.hDel(autoCreateNextGoalRetryAttemptsKey, [postId]),
     redis.hDel(autoCreateNextGoalExhaustedKey, [postId]),

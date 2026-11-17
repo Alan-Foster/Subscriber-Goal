@@ -92,7 +92,11 @@ class InMemoryRedis {
     this.hashes.set(key, hash);
   }
 
-  async hIncrBy(key: string, field: string, increment: number): Promise<number> {
+  async hIncrBy(
+    key: string,
+    field: string,
+    increment: number,
+  ): Promise<number> {
     const hash = this.hashes.get(key) ?? new Map<string, string>();
     const value = Number(hash.get(field) ?? 0) + increment;
     hash.set(field, String(value));
@@ -461,6 +465,91 @@ describe("onboarding lifecycle reconciliation", () => {
     },
   );
 
+  it.each([true, false])(
+    "resumes exhausted onboarding lookup only with complete original metadata (safe=%s)",
+    async (safe) => {
+      await seedCompleted(redis, "submission_reconciliation_exhausted", "sent");
+      const previous = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+      await redis.hSet("subscriber_goal_creation_v1:" + previous.operationId, {
+        status: "submission_unknown",
+        reconciliationStatus: "exhausted",
+        reconciliationAttempts: "6",
+        ...(safe
+          ? {
+              submissionMarker: "onboarding-original",
+              subredditId: "t5_example",
+              subredditName: "ExampleSub",
+            }
+          : {}),
+      });
+      const result = await reconcileOnboardingForLifecycle(
+        createReddit() as never,
+        redis as never,
+        { lifecycleSource: "upgrade", nowMs },
+      );
+      expect(result.status).toBe(safe ? "rearmed" : "unchanged");
+      await expect(
+        redis.hGetAll(onboardingSubscriberGoalStateKey),
+      ).resolves.toMatchObject({
+        operationId: previous.operationId,
+        status: safe ? "pending" : "complete",
+        resultStatus: safe
+          ? "submission_reconciliation_pending"
+          : "submission_reconciliation_exhausted",
+      });
+      if (safe) {
+        await expect(
+          redis.hGetAll("subscriber_goal_creation_v1:" + previous.operationId),
+        ).resolves.toMatchObject({
+          status: "submission_unknown",
+          submissionMarker: "onboarding-original",
+          reconciliationAttempts: "0",
+          reconciliationNextAt: String(nowMs),
+        });
+        await expect(
+          reconcileOnboardingForLifecycle(
+            createReddit() as never,
+            redis as never,
+            { lifecycleSource: "upgrade", nowMs: nowMs + 1 },
+          ),
+        ).resolves.toMatchObject({ status: "unchanged" });
+      }
+    },
+  );
+
+  it("re-arms prerequisite exhaustion with the same operation and a fresh window", async () => {
+    const {
+      automaticGoalPrerequisiteRetriesKey,
+      automaticGoalRetryGenerationsKey,
+    } = await import("./automaticGoalRetry");
+    await seedCompleted(redis, "retry_exhausted", "sent");
+    const previous = await redis.hGetAll(onboardingSubscriberGoalStateKey);
+    await redis.hSet(automaticGoalPrerequisiteRetriesKey, {
+      [previous.operationId!]: "53",
+      [previous.operationId + ":firstDeferredAt"]: String(
+        nowMs - 48 * 3_600_000,
+      ),
+    });
+    await expect(
+      reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs,
+      }),
+    ).resolves.toMatchObject({
+      status: "rearmed",
+      operationId: previous.operationId,
+    });
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
+    );
+    expect(
+      await redis.hGet(automaticGoalRetryGenerationsKey, previous.operationId!),
+    ).toBe("1");
+    expect(await redis.hGetAll(onboardingSubscriberGoalStateKey)).toMatchObject(
+      { status: "awaiting_warning", operationId: previous.operationId },
+    );
+  });
+
   it("preserves active operation identity and timers when no highlight exists", async () => {
     await seedCompleted(redis);
     await redis.hSet(onboardingSubscriberGoalStateKey, {
@@ -762,8 +851,8 @@ describe("onboarding lifecycle reconciliation", () => {
       completedTime: nowMs - 48 * 60 * 60 * 1000,
       autoCreateNextGoal: false,
     });
-    const autoCreateNextGoalModule = (await import("./autoCreateNextGoal")) as
-      typeof import("./autoCreateNextGoal") & {
+    const autoCreateNextGoalModule =
+      (await import("./autoCreateNextGoal")) as typeof import("./autoCreateNextGoal") & {
         actualProcessDueAutoCreateNextGoals: typeof import("./autoCreateNextGoal").processDueAutoCreateNextGoals;
       };
     lifecycleHoisted.processDueAutoCreateNextGoals.mockImplementation(
@@ -1094,7 +1183,7 @@ describe("onboarding lifecycle reconciliation", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("preserves exhausted replacement state during upgrade", async () => {
+  it("rearms ordinary exhausted replacement state during upgrade", async () => {
     const post = makeLifecycleGoalPost({ id: "t3_exhausted" });
     await seedGoalData(redis, post.id, {
       goal: 1_500,
@@ -1108,22 +1197,24 @@ describe("onboarding lifecycle reconciliation", () => {
         redis as never,
         { lifecycleSource: "upgrade", nowMs },
       ),
-    ).resolves.toMatchObject({ status: "replacement_exhausted" });
+    ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
-    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([]);
+    await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
+      { member: post.id, score: nowMs - 24 * 60 * 60 * 1000 },
+    ]);
     await expect(
       redis.hGet(autoCreateNextGoalExhaustedKey, post.id),
-    ).resolves.toBe("6");
+    ).resolves.toBeUndefined();
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
       status: "complete",
-      resultStatus: "replacement_exhausted",
+      resultStatus: "replacement_scheduled",
       postId: post.id,
     });
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledOnce();
   });
 });
 

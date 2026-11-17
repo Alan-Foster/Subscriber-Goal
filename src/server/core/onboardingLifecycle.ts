@@ -1,3 +1,8 @@
+import {
+  rearmAutomaticGoalReconciliation,
+  beginAutomaticGoalRetryGeneration,
+  resetAutomaticGoalPrerequisiteRetry,
+} from "./automaticGoalRetry";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
@@ -144,6 +149,35 @@ async function reconcileOnboardingForLifecycleUnderLease(
           previousReminder,
         );
         return { status: "unchanged", reason };
+      }
+
+      if (
+        previousGoal?.resultStatus === "submission_reconciliation_exhausted"
+      ) {
+        const rearmed = await rearmAutomaticGoalReconciliation(
+          redis,
+          previousGoal.operationId,
+          nowMs,
+          true,
+        );
+        if (!rearmed)
+          return {
+            status: "unchanged",
+            reason: "legacy_ambiguous_submission_preserved",
+          };
+        await saveOnboardingState(redis, {
+          ...previousGoal,
+          status: "pending",
+          nextRunAt: nowMs,
+          resultStatus: "submission_reconciliation_pending",
+        });
+        return { status: "rearmed", operationId: previousGoal.operationId };
+      }
+      if (previousGoal?.resultStatus === "submission_reconciliation_pending") {
+        return {
+          status: "unchanged",
+          reason: "submission_reconciliation_pending",
+        };
       }
 
       const highlighted = await ensureExistingSubscriberGoalHighlighted({
@@ -413,7 +447,18 @@ async function reconcileOnboardingForLifecycleUnderLease(
       }
       const creationStaggerMinutes = selectOnboardingGoalStaggerMinutes();
       const reminderStaggerMinutes = selectOnboardingReminderStaggerMinutes();
-      const operationId = createOperationId(nowMs);
+      const operationId =
+        previousGoal?.resultStatus === "retry_exhausted"
+          ? previousGoal.operationId
+          : createOperationId(nowMs);
+      if (previousGoal) {
+        if (previousGoal.operationId !== operationId)
+          await resetAutomaticGoalPrerequisiteRetry(
+            redis,
+            previousGoal.operationId,
+          );
+        await beginAutomaticGoalRetryGeneration(redis, operationId);
+      }
       const nextGoal: OnboardingSubscriberGoalState = {
         version: onboardingSubscriberGoalVersion,
         status: "awaiting_warning",
