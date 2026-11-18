@@ -853,7 +853,6 @@ async function submitCreateGoalStepTwo(
           return;
         }
 
-        const subreddit = await reddit.getCurrentSubreddit();
         const postTitle = values.postTitle?.trim();
         if (!postTitle) {
           res.json({
@@ -864,6 +863,20 @@ async function submitCreateGoalStepTwo(
           });
           return;
         }
+        const maxPostTitleCharacters = 300;
+        if (Array.from(postTitle).length > maxPostTitleCharacters) {
+          res.json({
+            showToast: translate(
+              draft.language,
+              "moderator.form.postTitleTooLong",
+              {
+                max: maxPostTitleCharacters,
+              },
+            ),
+          });
+          return;
+        }
+        const subreddit = await reddit.getCurrentSubreddit();
         const colorTheme = resolveSubGoalColorTheme(
           "colorTheme" in values ? values.colorTheme?.[0] : undefined,
         );

@@ -2052,6 +2052,68 @@ describe("internalUi color theme create goal routes", () => {
     expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    [
+      "regular",
+      internalRoutes.forms.createSubscriberGoal,
+      internalRoutes.forms.createSubscriberGoalFollowUp,
+    ],
+    [
+      "short",
+      internalRoutes.forms.createSubscriberGoal,
+      internalRoutes.forms.createSubscriberGoalFollowUp,
+    ],
+    [
+      "tiny",
+      internalRoutes.forms.createSubscribeOnly,
+      internalRoutes.forms.createSubscribeOnlyFollowUp,
+    ],
+    [
+      "cta",
+      internalRoutes.forms.createCtaOnly,
+      internalRoutes.forms.createCtaOnlyFollowUp,
+    ],
+  ] as const)(
+    "rejects a 301-character %s title and accepts a corrected 300-character title",
+    async (postHeight, detailsRoute, followUpRoute) => {
+      seedCreateGoalDraft(postHeight, "en", { stage: "details" });
+      const draft = hoisted.redisValues.get(testDraftKey());
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const submitTitle = (postTitle: string) =>
+        routes.get(detailsRoute)!(
+          {
+            body: { postTitle, subscriberGoal: 200, colorTheme: ["red"] },
+          } as Request,
+          { json } as unknown as Response,
+        );
+      const title = "a".repeat(299) + "🎉";
+
+      await submitTitle(title + "b");
+
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        showToast: "Title must be 300 characters or fewer.",
+      });
+      expect(hoisted.redisValues.get(testDraftKey())).toBe(draft);
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.reddit.submitPost).not.toHaveBeenCalled();
+
+      json.mockClear();
+      await submitTitle(`  ${title}  `);
+
+      expect(json).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ showForm: expect.anything() }),
+      );
+      await routes.get(followUpRoute)!(
+        { body: {} } as Request,
+        { json } as unknown as Response,
+      );
+      expect(hoisted.createGoalPost).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ title, postHeight }),
+      );
+    },
+  );
+
   it("retains the draft when subscriber-goal validation fails", async () => {
     seedCreateGoalDraft("regular", "en", { stage: "details" });
     const routes = createRouteHarness();
