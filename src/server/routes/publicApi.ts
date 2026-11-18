@@ -300,13 +300,14 @@ const buildState = async (
       : null,
   );
 
+  const subredditNsfw = getCurrentSubredditNsfw(subreddit);
   return {
     goal,
     recentSubscriber:
-      options?.recentSubscriberOverride ??
-      (subGoalData.recentSubscriber && subGoalData.recentSubscriber.length > 0
-        ? subGoalData.recentSubscriber
-        : null),
+      subredditNsfw === false
+        ? (options?.recentSubscriberOverride ??
+          (subGoalData.recentSubscriber || null))
+        : null,
     completedTime: subGoalData.completedTime ? subGoalData.completedTime : null,
     headerText: subGoalData.headerText ?? null,
     colorTheme: subGoalData.colorTheme,
@@ -324,7 +325,7 @@ const buildState = async (
       name: subGoalData.subredditDisplayName ?? subreddit.name,
       icon: subredditIcon,
       subscribers,
-      isNsfw: getCurrentSubredditNsfw(subreddit) === true,
+      isNsfw: subredditNsfw === true,
     },
   };
 };
