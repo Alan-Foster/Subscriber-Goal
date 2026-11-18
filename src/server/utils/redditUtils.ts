@@ -6,6 +6,7 @@ export type WikiPageRevision = {
   id: string;
   reason: string;
   dateMs?: number;
+  authorId?: string;
 };
 
 export const WIKI_REVISION_FETCH_LIMIT = 100;
@@ -107,6 +108,7 @@ export async function safeGetWikiPageRevisions(
       return {
         id: revision.id,
         reason: revision.reason ?? "",
+        ...(revision.authorId ? { authorId: revision.authorId } : {}),
         ...(typeof dateMs === "number" ? { dateMs } : {}),
       };
     });

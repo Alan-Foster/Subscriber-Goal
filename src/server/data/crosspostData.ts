@@ -120,6 +120,7 @@ export type PendingCrosspost = {
   lastError: string | null;
   status: PendingCrosspostStatus;
   revisionDateMs?: number;
+  revisionAuthorId?: string;
   createdCrosspostId?: LinkId;
   persistenceFailureReason?: string;
   reconciliationAttemptCount?: number;
@@ -183,6 +184,9 @@ function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
 
   if (typeof candidate.revisionDateMs === 'number' && Number.isFinite(candidate.revisionDateMs)) {
     normalized.revisionDateMs = Math.floor(candidate.revisionDateMs);
+  }
+  if (typeof candidate.revisionAuthorId === 'string' && candidate.revisionAuthorId) {
+    normalized.revisionAuthorId = candidate.revisionAuthorId;
   }
   if (
     typeof candidate.createdCrosspostId === 'string' &&
