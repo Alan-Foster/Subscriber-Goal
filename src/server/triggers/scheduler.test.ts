@@ -587,8 +587,71 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     );
   });
 
-  it("runs crosspost ingestion from the authority install", async () => {
+  it.each(["dispatch", "pending_depth"])(
+    "isolates crosspost %s failure and continues the same scheduler tick",
+    async (phase) => {
+      const errorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      hoisted.context.subredditName = "SubGoal";
+      const failure = new Error(`crosspost ${phase} unavailable`);
+      if (phase === "dispatch")
+        hoisted.processCrosspostDispatchQueue.mockRejectedValue(failure);
+      else hoisted.countPendingCrossposts.mockRejectedValue(failure);
+      hoisted.getQueuedUpdates.mockResolvedValue(["t3_active"]);
+      hoisted.reddit.getPostById.mockResolvedValue({ id: "t3_active" });
+
+      await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(
+            `scheduler_task_failed.*crosspost_dispatch.*crosspost ${phase} unavailable.*stack`,
+          ),
+        ),
+      );
+      expect(
+        hoisted.processCrosspostDispatchQueue,
+      ).toHaveBeenCalledExactlyOnceWith(
+        baseSettings,
+        "scheduler_posts_updater",
+      );
+      expect(hoisted.countPendingCrossposts).toHaveBeenCalledTimes(
+        phase === "dispatch" ? 0 : 1,
+      );
+      expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
+      expect(
+        hoisted.processSubscriberStatsMigrationBatch,
+      ).toHaveBeenCalledOnce();
+      expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+      expect(hoisted.applyTextFallback).toHaveBeenCalledOnce();
+      expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledOnce();
+      expect(hoisted.queueUpdate).toHaveBeenCalledWith(
+        hoisted.redis,
+        "t3_active",
+        expect.any(Date),
+      );
+    },
+  );
+
+  it("skips crosspost dispatch and depth reads on a permission-gated authority tick", async () => {
     hoisted.context.subredditName = "SubGoal";
+    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+      status: "missing",
+    });
+    await onPostsUpdaterJob();
+    expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
+    expect(hoisted.countPendingCrossposts).not.toHaveBeenCalled();
+    expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
+  });
+
+  it("runs crosspost ingestion from the authority install", async () => {
+    const infoSpy = vi
+      .spyOn(console, "info")
+      .mockImplementation(() => undefined);
+    hoisted.context.subredditName = "SubGoal";
+    hoisted.countPendingCrossposts.mockResolvedValue(1);
 
     await onPostsUpdaterJob();
 
@@ -599,6 +662,11 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.countPendingCrossposts).toHaveBeenCalledWith(
       expect.anything(),
       "SubGoal",
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\[crosspost\] scheduler ingestion summary: status=success.*pendingDepth=1 error=none/,
+      ),
     );
   });
 
