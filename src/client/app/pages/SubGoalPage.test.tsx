@@ -452,31 +452,33 @@ describe("SubGoalPage", () => {
     },
   );
 
-  it.each([true, undefined])(
-    "displays the automatic button when the NSFW flag is %s",
-    (nsfw) => {
-      const html = renderToStaticMarkup(
-        <SubGoalPage
-          {...commonProps}
-          state={{
-            ...baseState,
-            subscribed: true,
-            subreddit: {
-              ...baseState.subreddit,
-              isNsfw: nsfw as boolean,
-            },
-            afterSubscribeAction: {
-              type: "top-post-day",
-              buttonText: "Featured pick",
-              colorTheme: "green",
-            },
-          }}
-        />,
-      );
-      expect(html).toContain("View the Most Recent Post");
-      expect(html).toContain('data-sg-theme="blue"');
-    },
-  );
+  it.each([
+    { community: "NSFW communities", nsfw: true },
+    { community: "communities with unknown safety", nsfw: undefined },
+  ])("shows the automatic second button in $community", ({ nsfw }) => {
+    const html = renderToStaticMarkup(
+      <SubGoalPage
+        {...commonProps}
+        state={{
+          ...baseState,
+          subscribed: true,
+          subreddit: {
+            ...baseState.subreddit,
+            isNsfw: nsfw as boolean,
+          },
+          afterSubscribeAction: {
+            type: "top-post-day",
+            buttonText: "Featured pick",
+            colorTheme: "green",
+          },
+        }}
+      />,
+    );
+    expect(html).toContain('data-subgoal-action-area="two-actions"');
+    expect(html).toContain("Featured pick");
+    expect(html).toContain("View the Most Recent Post");
+    expect(html).toContain('data-sg-theme="blue"');
+  });
 
   it("does not add attention glow while submitting", () => {
     const html = renderToStaticMarkup(
