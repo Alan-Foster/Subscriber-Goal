@@ -1600,7 +1600,7 @@ describe("processDueAutoCreateNextGoals", () => {
       exhausted: 0,
     });
 
-    expect(hoisted.notifyHighlightFailure).toHaveBeenCalledWith({
+    expect(hoisted.notifyHighlightFailure).toHaveBeenCalledExactlyOnceWith({
       reddit: hoisted.reddit,
       subredditId: "t5_example",
       subredditName: "examplesub",

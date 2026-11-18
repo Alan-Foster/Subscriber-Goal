@@ -44,7 +44,8 @@ vi.mock("./createSubscriberGoal", () => ({
   },
 }));
 
-vi.mock("../utils/communityHighlights", () => ({
+vi.mock("../utils/communityHighlights", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/communityHighlights")>()),
   highlightAndVerifyPost: vi.fn(async () => ({
     status: "highlighted",
     selectedPostId: "t3_existing",
@@ -77,7 +78,10 @@ vi.mock("../utils/communityHighlights", () => ({
   highlightVerificationMaxWaitMs: 30_000,
 }));
 
-vi.mock("../utils/highlightFailureNotifications", () => ({
+vi.mock("../utils/highlightFailureNotifications", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../utils/highlightFailureNotifications")
+  >()),
   notifyHighlightFailureIncident: hoisted.notifyHighlightFailure,
   clearHighlightFailureIncident: vi.fn(),
   clearActiveHighlightFailureIncident: vi.fn(),
