@@ -2222,30 +2222,111 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
-  it("records external CTA clicks without requiring authentication", async () => {
+  it.each(["subscriber-goal-v1", "subscribe-only-v1"])(
+    "requires a tracked subscriber for %s public activity",
+    async (postKind) => {
+      hoisted.getSubGoalData.mockResolvedValue({
+        postKind,
+        afterSubscribePreset: "discord",
+        afterSubscribeAction: { type: "link" },
+      });
+      hoisted.isClickActivityPreset.mockReturnValue(true);
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+      const request = {
+        header: () => "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        body: { userId: "t2_forged", postId: "t3_forged" },
+      } as unknown as Request;
+      for (const userId of [null, "t2_untracked"]) {
+        hoisted.context.userId = userId;
+        await routes.get(apiRoutes.ctaClick)?.(request, {
+          json,
+          status,
+        } as unknown as Response);
+        expect(status).toHaveBeenLastCalledWith(400);
+      }
+      expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
+      hoisted.context.userId = "t2_tracked";
+      hoisted.isTrackedSubscriber.mockResolvedValue(true);
+      await routes.get(apiRoutes.ctaClick)?.(request, {
+        json,
+        status,
+      } as unknown as Response);
+      expect(hoisted.isTrackedSubscriber).toHaveBeenLastCalledWith(
+        hoisted.redis,
+        "t2_tracked",
+      );
+      expect(hoisted.recordCtaClick).toHaveBeenCalledExactlyOnceWith(
+        hoisted.redis,
+        "t3_post",
+        "user:t2_tracked",
+      );
+      expect(json).toHaveBeenLastCalledWith({ status: "ok" });
+    },
+  );
+
+  it.each([
+    {
+      visitor: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+      identity: "visitor:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    },
+    { visitor: undefined, identity: undefined },
+    { visitor: "invalid", identity: undefined },
+    { visitor: "t2_forged", identity: undefined },
+  ])(
+    "allows anonymous CTA-only navigation and records only usable visitor identity ($visitor)",
+    async ({ visitor, identity }) => {
+      hoisted.getSubGoalData.mockResolvedValue({
+        postKind: "cta-only-v1",
+        afterSubscribePreset: "discord",
+        afterSubscribeAction: { type: "link" },
+      });
+      hoisted.isClickActivityPreset.mockReturnValue(true);
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      await routes.get(apiRoutes.ctaClick)?.(
+        { header: () => visitor } as unknown as Request,
+        { json } as unknown as Response,
+      );
+      if (identity)
+        expect(hoisted.recordCtaClick).toHaveBeenCalledExactlyOnceWith(
+          hoisted.redis,
+          "t3_post",
+          identity,
+        );
+      else expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
+      expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledWith({ status: "ok" });
+    },
+  );
+
+  it("uses the trusted signed-in identity on CTA-only posts even if the visitor header changes", async () => {
     hoisted.getSubGoalData.mockResolvedValue({
-      afterSubscribePreset: "discord",
-      afterSubscribeAction: {
-        type: "link",
-        buttonText: "Join the Discord",
-        url: "https://discord.gg/example",
-        colorTheme: "blue",
-      },
+      postKind: "cta-only-v1",
+      afterSubscribePreset: "wiki",
+      afterSubscribeAction: { type: "link" },
     });
     hoisted.isClickActivityPreset.mockReturnValue(true);
+    hoisted.context.userId = "t2_viewer";
     const routes = createRouteHarness();
     const json = vi.fn();
-
-    await routes.get(apiRoutes.ctaClick)?.(
-      {} as Request,
-      { json } as unknown as Response,
-    );
-
-    expect(hoisted.recordCtaClick).toHaveBeenCalledWith(
-      hoisted.redis,
-      "t3_post",
-    );
-    expect(json).toHaveBeenCalledWith({ status: "ok" });
+    for (const visitor of [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ]) {
+      await routes.get(apiRoutes.ctaClick)?.(
+        { header: () => visitor } as unknown as Request,
+        { json } as unknown as Response,
+      );
+    }
+    expect(hoisted.recordCtaClick).toHaveBeenCalledTimes(2);
+    expect(
+      hoisted.recordCtaClick.mock.calls.every(
+        (call) => call[2] === "user:t2_viewer",
+      ),
+    ).toBe(true);
+    expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
   });
 
   it("rejects click recording for post-activity CTAs", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../types";
 import {
+  anonymousCtaDailyLimit,
   ensureCommunityPostActivityBackfill,
   getCtaActivityMetric,
   recordCommunityPostCreated,
@@ -10,6 +11,8 @@ import {
 class FakeRedis {
   values = new Map<string, string>();
   sorted = new Map<string, Map<string, number>>();
+  expirations = new Map<string, Date>();
+  setReply = "OK";
 
   async get(key: string): Promise<string | undefined> {
     return this.values.get(key);
@@ -17,11 +20,12 @@ class FakeRedis {
   async set(
     key: string,
     value: string,
-    options?: { nx?: boolean },
+    options?: { nx?: boolean; expiration?: Date },
   ): Promise<string> {
-    if (options?.nx && this.values.has(key)) return "";
+    if (options?.nx && this.values.has(key)) return this.setReply;
     this.values.set(key, value);
-    return "OK";
+    if (options?.expiration) this.expirations.set(key, options.expiration);
+    return this.setReply;
   }
   async del(...keys: string[]): Promise<void> {
     keys.forEach((key) => this.values.delete(key));
@@ -50,7 +54,9 @@ class FakeRedis {
   async zCard(key: string): Promise<number> {
     return this.sorted.get(key)?.size ?? 0;
   }
-  async expire(): Promise<void> {}
+  async expire(key: string, seconds: number): Promise<void> {
+    this.expirations.set(key, new Date(now + seconds * 1000));
+  }
 }
 
 const asRedis = (redis: FakeRedis): RedisClient => redis as never;
@@ -94,12 +100,16 @@ describe("CTA activity storage", () => {
     ).resolves.toEqual({ kind: "posts", count: 1, period: "today" });
   });
 
-  it("sums seven days of repeat clicks and isolates each CTA post", async () => {
+  it("sums eligible daily activations across seven days and isolates each CTA post", async () => {
     const redis = new FakeRedis();
-    await recordCtaClick(asRedis(redis), "t3_a", { nowMs: now });
-    await recordCtaClick(asRedis(redis), "t3_a", { nowMs: now });
-    await recordCtaClick(asRedis(redis), "t3_a", { nowMs: now - 6 * day });
-    await recordCtaClick(asRedis(redis), "t3_a", { nowMs: now - 7 * day });
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer-0", { nowMs: now });
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer-1", { nowMs: now });
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer-2", {
+      nowMs: now - 6 * day,
+    });
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer-3", {
+      nowMs: now - 7 * day,
+    });
 
     await expect(
       getCtaActivityMetric(asRedis(redis), "t3_a", "discord", { nowMs: now }),
@@ -107,6 +117,205 @@ describe("CTA activity storage", () => {
     await expect(
       getCtaActivityMetric(asRedis(redis), "t3_b", "wiki", { nowMs: now }),
     ).resolves.toEqual({ kind: "clicks", count: 0, period: "week" });
+  });
+
+  it("atomically claims one activation per post, viewer and UTC day", async () => {
+    const redis = new FakeRedis();
+    await Promise.all(
+      Array.from({ length: 50 }, () =>
+        recordCtaClick(asRedis(redis), "t3_a", "user:t2_one", { nowMs: now }),
+      ),
+    );
+    await recordCtaClick(asRedis(redis), "t3_a", "user:t2_two", { nowMs: now });
+    await recordCtaClick(asRedis(redis), "t3_b", "user:t2_one", { nowMs: now });
+    await recordCtaClick(asRedis(redis), "t3_a", "user:t2_one", {
+      nowMs: Date.UTC(2026, 8, 8),
+    });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "web-link", {
+        nowMs: Date.UTC(2026, 8, 8),
+      }),
+    ).resolves.toMatchObject({ count: 3 });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_b", "wiki", { nowMs: now }),
+    ).resolves.toMatchObject({ count: 1 });
+    const claims = [...redis.values.keys()].filter((key) =>
+      key.startsWith("cta_click_claim_v1:"),
+    );
+    expect(claims).toHaveLength(4);
+    for (const key of claims) {
+      expect(key).toMatch(/^cta_click_claim_v1:[a-f0-9]{64}$/);
+      expect(redis.expirations.get(key)?.getTime()).toBeLessThanOrEqual(
+        Date.UTC(2026, 8, 10),
+      );
+    }
+  });
+
+  it.each(["OK", ""])(
+    "verifies claim ownership without relying on SET reply %j",
+    async (reply) => {
+      const redis = new FakeRedis();
+      redis.setReply = reply;
+      await Promise.all(
+        Array.from({ length: 50 }, () =>
+          recordCtaClick(asRedis(redis), "t3_a", "user:t2_one", { nowMs: now }),
+        ),
+      );
+      await recordCtaClick(asRedis(redis), "t3_a", "user:t2_one", {
+        nowMs: now,
+      });
+      await expect(
+        getCtaActivityMetric(asRedis(redis), "t3_a", "wiki", { nowMs: now }),
+      ).resolves.toMatchObject({ count: 1 });
+    },
+  );
+
+  it("caps rotating anonymous IDs per post and UTC day with fixed expiring storage", async () => {
+    const redis = new FakeRedis();
+    await Promise.all(
+      Array.from({ length: 100 }, (_, index) =>
+        recordCtaClick(asRedis(redis), "t3_a", `visitor:${index}`, {
+          nowMs: now,
+        }),
+      ),
+    );
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "wiki", { nowMs: now }),
+    ).resolves.toMatchObject({ count: anonymousCtaDailyLimit });
+    const slots = [...redis.values.keys()].filter((key) =>
+      key.startsWith("cta_click_anonymous_slot_v1:"),
+    );
+    expect(slots).toHaveLength(anonymousCtaDailyLimit);
+    expect(
+      [...redis.values.keys()].some((key) =>
+        key.startsWith("cta_click_claim_v1:"),
+      ),
+    ).toBe(false);
+    for (const key of slots) {
+      expect(redis.expirations.get(key)).toEqual(
+        new Date(Date.UTC(2026, 8, 9)),
+      );
+      expect(redis.values.get(key)).toMatch(/^[a-f0-9]{64}:[a-f0-9-]{36}$/);
+    }
+    const before = new Map(redis.expirations);
+    await recordCtaClick(asRedis(redis), "t3_a", "visitor:another", {
+      nowMs: now,
+    });
+    expect(redis.expirations).toEqual(before);
+    await recordCtaClick(asRedis(redis), "t3_a", "user:t2_signedin", {
+      nowMs: now,
+    });
+    await recordCtaClick(asRedis(redis), "t3_b", "visitor:another", {
+      nowMs: now,
+    });
+    await recordCtaClick(asRedis(redis), "t3_a", "visitor:another", {
+      nowMs: Date.UTC(2026, 8, 8),
+    });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "wiki", {
+        nowMs: Date.UTC(2026, 8, 8),
+      }),
+    ).resolves.toMatchObject({ count: anonymousCtaDailyLimit + 2 });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_b", "wiki", { nowMs: now }),
+    ).resolves.toMatchObject({ count: 1 });
+  });
+
+  it("deduplicates concurrent anonymous deliveries without consuming extra quota slots", async () => {
+    const redis = new FakeRedis();
+    await Promise.all(
+      Array.from({ length: 50 }, () =>
+        recordCtaClick(asRedis(redis), "t3_a", "visitor:same", { nowMs: now }),
+      ),
+    );
+    expect(
+      [...redis.values.keys()].filter((key) =>
+        key.startsWith("cta_click_anonymous_slot_v1:"),
+      ),
+    ).toHaveLength(1);
+    await recordCtaClick(asRedis(redis), "t3_a", "visitor:different", {
+      nowMs: now,
+    });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "wiki", { nowMs: now }),
+    ).resolves.toMatchObject({ count: 2 });
+  });
+
+  it("resets at UTC midnight and never extends a daily claim on replay", async () => {
+    const redis = new FakeRedis();
+    const midnight = Date.UTC(2026, 8, 8);
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", {
+      nowMs: midnight - 1,
+    });
+    const expirations = new Map(redis.expirations);
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", {
+      nowMs: midnight - 1,
+    });
+    expect(redis.expirations).toEqual(expirations);
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: midnight });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "discord", {
+        nowMs: midnight,
+      }),
+    ).resolves.toMatchObject({ count: 2 });
+    const claims = [...redis.values.keys()].filter((key) =>
+      key.startsWith("cta_click_claim_v1:"),
+    );
+    expect(
+      claims.map((key) => redis.expirations.get(key)?.getTime()).sort(),
+    ).toEqual([midnight + day, midnight + 2 * day]);
+  });
+
+  it("keeps legacy totals alongside new deduped counts until their UTC days age out", async () => {
+    const redis = new FakeRedis();
+    const today = Date.UTC(2026, 8, 7);
+    redis.values.set(`cta_click_activity:t3_a:${today}`, "5");
+    redis.values.set(`cta_click_activity:t3_a:${today - 6 * day}`, "3");
+    redis.values.set(`cta_click_activity:t3_a:${today - 7 * day}`, "99");
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now });
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "discord", { nowMs: now }),
+    ).resolves.toMatchObject({ count: 9 });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "discord", {
+        nowMs: now + day,
+      }),
+    ).resolves.toMatchObject({ count: 6 });
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "discord", {
+        nowMs: now + 7 * day,
+      }),
+    ).resolves.toMatchObject({ count: 0 });
+  });
+
+  it("does not double-count after an increment commits but its response is lost", async () => {
+    const redis = new FakeRedis();
+    const increment = redis.incrBy.bind(redis);
+    vi.spyOn(redis, "incrBy").mockImplementation(async (key, amount) => {
+      await increment(key, amount);
+      throw new Error("response lost");
+    });
+    await expect(
+      recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now }),
+    ).rejects.toThrow("response lost");
+    await recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now });
+    expect(redis.incrBy).toHaveBeenCalledOnce();
+    await expect(
+      getCtaActivityMetric(asRedis(redis), "t3_a", "wiki", { nowMs: now }),
+    ).resolves.toMatchObject({ count: 1 });
+  });
+
+  it("skips missing identity and never increments when claiming fails", async () => {
+    const redis = new FakeRedis();
+    await recordCtaClick(asRedis(redis), "t3_a", "", { nowMs: now });
+    expect(redis.values.size).toBe(0);
+    vi.spyOn(redis, "set").mockRejectedValue(new Error("unavailable"));
+    const increment = vi.spyOn(redis, "incrBy");
+    await expect(
+      recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now }),
+    ).rejects.toThrow("unavailable");
+    expect(increment).not.toHaveBeenCalled();
   });
 
   it("backfills recent posts once and shares trigger deduplication", async () => {

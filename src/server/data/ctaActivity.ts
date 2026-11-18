@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type { AfterSubscribePreset } from "../../shared/afterSubscribeAction";
 import type { CompactCtaActivityMetric } from "../../shared/types/api";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -6,6 +7,7 @@ import { getUtcDayStartMs } from "./subscriberDailyStats";
 
 const utcDayMs = 24 * 60 * 60 * 1000;
 const rollingWindowDays = 7;
+export const anonymousCtaDailyLimit = 10;
 const retainedSeconds = 9 * 24 * 60 * 60;
 const postBackfillLimit = 1_000;
 const postBackfillCompleteKey = "community_post_activity_backfill_v1";
@@ -95,10 +97,42 @@ export async function ensureCommunityPostActivityBackfill(
 export async function recordCtaClick(
   redis: RedisClient,
   postId: string,
+  viewerIdentity: string,
   options: { nowMs?: number } = {},
 ): Promise<void> {
+  if (!viewerIdentity) return;
   const dayStartMs = getUtcDayStartMs(options.nowMs ?? Date.now());
+  // Scope the digest to this post and day, and expire the claim atomically.
+  // No raw viewer identifiers or durable cross-day visitor history are stored.
+  const digest = createHash("sha256")
+    .update(JSON.stringify([postId, dayStartMs, viewerIdentity]))
+    .digest("hex");
+  const token = `${digest}:${randomUUID()}`;
+  const anonymous = viewerIdentity.startsWith("visitor:");
+  let claimed = false;
+  // Anonymous identities are client supplied. A fixed number of daily slots
+  // bounds both their contribution and storage even if IDs rotate endlessly.
+  for (let slot = 0; slot < (anonymous ? anonymousCtaDailyLimit : 1); slot++) {
+    const claimKey = anonymous
+      ? `cta_click_anonymous_slot_v1:${postId}:${dayStartMs}:${slot}`
+      : `cta_click_claim_v1:${digest}`;
+    await redis.set(claimKey, token, {
+      nx: true,
+      expiration: new Date(dayStartMs + 2 * utcDayMs),
+    });
+    const owner = await redis.get(claimKey);
+    if (owner === token) {
+      claimed = true;
+      break;
+    }
+    // Another delivery from this viewer already owns a slot. Never count it
+    // again, regardless of SET's return value on an unsuccessful NX write.
+    if (owner?.startsWith(`${digest}:`)) return;
+  }
+  if (!claimed) return;
   const key = clickDayKey(postId, dayStartMs);
+  // Retain the claim if incrementing fails: a retry must never double-count an
+  // increment whose response was lost. Public activity is best-effort.
   await redis.incrBy(key, 1);
   await redis.expire(key, retainedSeconds);
 }

@@ -20,7 +20,10 @@ import type { GoalJourneyContext } from "../../../shared/goalJourneyAnalytics";
 import { logDiagnostic } from "../../../shared/diagnostics";
 import { requestJsonWithRetry } from "../../utils/fetchWithRetry";
 import { localizeError } from "../../../shared/i18n/errors";
-import { recordStatisticsEvent } from "../../analytics/statisticsAnalytics";
+import {
+  recordStatisticsEvent,
+  statisticsRequestHeaders,
+} from "../../analytics/statisticsAnalytics";
 
 type ActionableAfterSubscribeAction = Exclude<
   AfterSubscribeAction,
@@ -53,7 +56,21 @@ export const AfterSubscribeButton = ({
       return;
     }
     resolvingRef.current = true;
-    if (!automaticAction) recordStatisticsEvent("cta_click");
+    if (!automaticAction) {
+      try {
+        recordStatisticsEvent("cta_click");
+      } catch (error) {
+        logDiagnostic(
+          "warn",
+          "statistics_event_failed",
+          {
+            workflow: "after_subscribe_cta",
+            phase: "cta_click",
+          },
+          error,
+        );
+      }
+    }
     const actionType = getAfterSubscribeAnalyticsActionType(action);
     if (analyticsContext && !automaticAction) {
       goalJourneyAnalytics.afterSubscribeCtaActivated(
@@ -63,10 +80,16 @@ export const AfterSubscribeButton = ({
     }
     if (action.type === "link") {
       if (trackClicks && !automaticAction) {
-        void fetch(apiRoutes.ctaClick, {
-          method: "POST",
-          keepalive: true,
-        })
+        // Defer identity generation and recording so even synchronous failures
+        // cannot interrupt the click-through.
+        void Promise.resolve()
+          .then(() =>
+            fetch(apiRoutes.ctaClick, {
+              method: "POST",
+              keepalive: true,
+              headers: statisticsRequestHeaders(),
+            }),
+          )
           .then((response) => {
             if (!response.ok) {
               logDiagnostic("warn", "cta_click_tracking_failed", {

@@ -556,7 +556,7 @@ export function registerPublicApiRoutes(router: Router): void {
     },
   );
 
-  router.post(apiRoutes.ctaClick, async (_req, res): Promise<void> => {
+  router.post(apiRoutes.ctaClick, async (req, res): Promise<void> => {
     const { postId } = context;
     if (!postId) {
       res.status(400).json(localizedError("errors.api.postIdRequired"));
@@ -573,7 +573,25 @@ export function registerPublicApiRoutes(router: Router): void {
           .json(localizedError("errors.api.ctaActivityUnsupported"));
         return;
       }
-      await recordCtaClick(redis, postId);
+      if (
+        subGoalData.postKind !== ctaOnlyPostKind &&
+        (!context.userId || !(await isTrackedSubscriber(redis, context.userId)))
+      ) {
+        res
+          .status(400)
+          .json(localizedError("errors.api.ctaActivityUnsupported"));
+        return;
+      }
+      const identity = visitorIdentity(req);
+      if (identity) {
+        await recordCtaClick(
+          redis,
+          postId,
+          context.userId
+            ? `user:${context.userId}`
+            : `visitor:${identity.toLowerCase()}`,
+        );
+      }
       res.json({ status: "ok" } satisfies RecordCtaClickResponse);
     } catch (error) {
       logDiagnostic(
