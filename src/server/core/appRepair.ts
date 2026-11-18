@@ -7,7 +7,6 @@ import {
 } from "./subscriberGoalPostFlair";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAfterSubscribeActionMigration";
-import { initializeNsfwAfterSubscribeActionMigration } from "../data/nsfwAfterSubscribeActionMigration";
 import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
@@ -142,12 +141,6 @@ async function processDueAppRepairUnderLease({
           candidatePostIds!,
           { name: subreddit.name, type: subreddit.type },
         ),
-      );
-      await runPhase("nsfw_after_subscribe_action_migration", () =>
-        initializeNsfwAfterSubscribeActionMigration(redis, candidatePostIds!, {
-          name: subreddit.name,
-          nsfw: subreddit.nsfw,
-        }),
       );
       if (trackedPosts.length > 0) {
         await runPhase("update_queue", () =>

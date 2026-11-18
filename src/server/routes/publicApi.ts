@@ -804,18 +804,9 @@ export function registerPublicApiRoutes(router: Router): void {
         const subreddit = await reddit.getCurrentSubreddit();
         if (
           hasAutomaticSelector &&
-          (getCurrentSubredditNsfw(subreddit) === true ||
-            (await isSubredditBlacklisted(reddit, subreddit.name)))
+          (await isSubredditBlacklisted(reddit, subreddit.name))
         ) {
           res.status(403).json(localizedError("errors.api.forbidden"));
-          return;
-        }
-        if (getCurrentSubredditNsfw(subreddit) === true) {
-          res.json({
-            target: {
-              url: `https://www.reddit.com/r/${subreddit.name}/submit/`,
-            },
-          } satisfies AfterSubscribeTargetResponse);
           return;
         }
         let target: NavigationTarget | undefined;
@@ -1445,7 +1436,6 @@ function createPostNavigationTarget(
     | {
         id?: string;
         authorName?: string;
-        nsfw?: boolean;
         url?: string;
         permalink?: string | null;
       }
@@ -1457,7 +1447,6 @@ function createPostNavigationTarget(
   if (
     !post ||
     getPostAvailability(post).status !== "active" ||
-    post.nsfw === true ||
     author === "[deleted]" ||
     (!allowAppAccountPosts && author === appAccountUsername) ||
     post.id?.toLowerCase() === goalPostId.toLowerCase()

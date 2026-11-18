@@ -25,7 +25,6 @@ import { countPendingCrossposts } from "../data/crosspostData";
 import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
-import { processNsfwAfterSubscribeActionMigrationBatch } from "../data/nsfwAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
 import {
   onboardingSubscriberGoalStateKey,
@@ -345,21 +344,6 @@ export async function onPostsUpdaterJob(): Promise<void> {
       "error",
       "scheduler_task_failed",
       { workflow: "after_subscribe_action_migration" },
-      error,
-    );
-  }
-  try {
-    if (subreddit) {
-      await processNsfwAfterSubscribeActionMigrationBatch(redis, {
-        name: subreddit.name,
-        nsfw: subreddit.nsfw,
-      });
-    }
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "nsfw_after_subscribe_action_migration" },
       error,
     );
   }

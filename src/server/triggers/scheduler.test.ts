@@ -383,6 +383,22 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
   });
 
+  it("does not migrate dynamic presets during an NSFW scheduler tick", async () => {
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      name: "CorporateGifts",
+      type: "public",
+      nsfw: true,
+      numberOfSubscribers: 10,
+    });
+    await onPostsUpdaterJob();
+    expect(
+      hoisted.processNsfwAfterSubscribeActionMigrationBatch,
+    ).not.toHaveBeenCalled();
+    expect(
+      hoisted.processLegacyAfterSubscribeActionMigrationBatch,
+    ).toHaveBeenCalledOnce();
+  });
+
   it("records the aggregate total even with no queued posts", async () => {
     hoisted.context.subredditName = "CorporateGifts";
 

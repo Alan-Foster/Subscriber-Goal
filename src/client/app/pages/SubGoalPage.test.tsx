@@ -427,7 +427,7 @@ describe("SubGoalPage", () => {
     },
   );
 
-  it.each(["NSFW", "logged out", "unconfirmed", "submitting", "completed"])(
+  it.each(["logged out", "unconfirmed", "submitting", "completed"])(
     "does not add an automatic action for %s",
     (reason) => {
       const state = {
@@ -435,7 +435,6 @@ describe("SubGoalPage", () => {
         subscribed: reason !== "unconfirmed",
         user: reason === "logged out" ? null : baseState.user,
         completedTime: reason === "completed" ? 1_000 : null,
-        subreddit: { ...baseState.subreddit, isNsfw: reason === "NSFW" },
         afterSubscribeAction: {
           type: "top-post-day" as const,
           buttonText: "Featured pick",
@@ -453,28 +452,31 @@ describe("SubGoalPage", () => {
     },
   );
 
-  it("allows unknown community safety under the existing dynamic action policy", () => {
-    const html = renderToStaticMarkup(
-      <SubGoalPage
-        {...commonProps}
-        state={{
-          ...baseState,
-          subscribed: true,
-          subreddit: {
-            ...baseState.subreddit,
-            isNsfw: undefined as unknown as boolean,
-          },
-          afterSubscribeAction: {
-            type: "top-post-day",
-            buttonText: "Featured pick",
-            colorTheme: "green",
-          },
-        }}
-      />,
-    );
-    expect(html).toContain("View the Most Recent Post");
-    expect(html).toContain('data-sg-theme="blue"');
-  });
+  it.each([true, undefined])(
+    "displays the automatic button when the NSFW flag is %s",
+    (nsfw) => {
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          {...commonProps}
+          state={{
+            ...baseState,
+            subscribed: true,
+            subreddit: {
+              ...baseState.subreddit,
+              isNsfw: nsfw as boolean,
+            },
+            afterSubscribeAction: {
+              type: "top-post-day",
+              buttonText: "Featured pick",
+              colorTheme: "green",
+            },
+          }}
+        />,
+      );
+      expect(html).toContain("View the Most Recent Post");
+      expect(html).toContain('data-sg-theme="blue"');
+    },
+  );
 
   it("does not add attention glow while submitting", () => {
     const html = renderToStaticMarkup(

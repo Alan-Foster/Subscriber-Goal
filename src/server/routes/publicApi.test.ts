@@ -1795,7 +1795,6 @@ describe("publicApi routes", () => {
     "Tiny",
     "completed",
     "blacklisted",
-    "NSFW",
     "disabled",
   ])(
     "rejects automatic actions for %s before any listing lookup",
@@ -1820,11 +1819,6 @@ describe("publicApi routes", () => {
         });
       if (reason === "blacklisted")
         hoisted.isSubredditBlacklisted.mockResolvedValue(true);
-      if (reason === "NSFW")
-        hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-          name: "ExampleSub",
-          nsfw: true,
-        });
       const res = await requestAction({ automaticAction: "newest-post" });
       expect(res.status).toHaveBeenCalledWith(
         reason === "disabled" ? 400 : 403,
@@ -1848,8 +1842,8 @@ describe("publicApi routes", () => {
     },
   );
 
-  it.each([undefined, "unknown"])(
-    "permits automatic actions when community safety metadata is %j",
+  it.each([true, undefined, "unknown"])(
+    "permits automatic actions when the community NSFW flag is %j",
     async (nsfw) => {
       seedAutomaticCard();
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -2212,7 +2206,7 @@ describe("publicApi routes", () => {
     { type: "top-post-day", hasEligiblePost: false },
     { type: "newest-post", hasEligiblePost: false },
   ])(
-    "filters unavailable and NSFW $type candidates (eligible post: $hasEligiblePost)",
+    "skips unavailable $type candidates and accepts NSFW-tagged posts (eligible post: $hasEligiblePost)",
     async ({ type, hasEligiblePost }) => {
       hoisted.context.userId = "t2_user";
       hoisted.isTrackedSubscriber.mockResolvedValue(true);
@@ -2225,7 +2219,6 @@ describe("publicApi routes", () => {
         { spam: true },
         { removedByCategory: "deleted" },
         { authorName: "[deleted]" },
-        { nsfw: true },
       ].map((flags, i) => ({
         id: "t3_excluded" + i,
         url: "https://www.reddit.com/comments/excluded" + i,
@@ -2239,7 +2232,12 @@ describe("publicApi routes", () => {
             hasEligiblePost
               ? [
                   ...candidates,
-                  { id: "t3_eligible", url: targetUrl, spoiler: true },
+                  {
+                    id: "t3_eligible",
+                    url: targetUrl,
+                    spoiler: true,
+                    nsfw: true,
+                  },
                 ]
               : candidates,
           ),
@@ -2515,7 +2513,7 @@ describe("publicApi routes", () => {
     );
   });
 
-  it("returns Create Post without loading dynamic listings in NSFW communities", async () => {
+  it("opens the NSFW-tagged top post in an NSFW community", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -2531,6 +2529,12 @@ describe("publicApi routes", () => {
         colorTheme: "blue",
       },
     });
+    const topUrl = "https://www.reddit.com/r/ExampleSub/comments/top";
+    hoisted.reddit.getTopPosts.mockReturnValue({
+      all: vi
+        .fn()
+        .mockResolvedValue([{ id: "t3_top", url: topUrl, nsfw: true }]),
+    });
     const routes = createRouteHarness();
     const json = vi.fn();
 
@@ -2540,9 +2544,11 @@ describe("publicApi routes", () => {
     );
 
     expect(json).toHaveBeenCalledWith({
-      target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+      target: { url: topUrl },
     });
-    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ timeframe: "day" }),
+    );
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
