@@ -60,6 +60,7 @@ import {
   persistAcceptedSubscriberTracking,
 } from "../data/subscriberTracking";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
+import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import { translate, type MessageKey } from "../../shared/i18n/catalog";
 import { isPrivateSubredditAccessError } from "../utils/redditPermissionErrors";
@@ -803,18 +804,9 @@ export function registerPublicApiRoutes(router: Router): void {
         const subreddit = await reddit.getCurrentSubreddit();
         if (
           hasAutomaticSelector &&
-          (getCurrentSubredditNsfw(subreddit) === true ||
-            (await isSubredditBlacklisted(reddit, subreddit.name)))
+          (await isSubredditBlacklisted(reddit, subreddit.name))
         ) {
           res.status(403).json(localizedError("errors.api.forbidden"));
-          return;
-        }
-        if (getCurrentSubredditNsfw(subreddit) === true) {
-          res.json({
-            target: {
-              url: `https://www.reddit.com/r/${subreddit.name}/submit/`,
-            },
-          } satisfies AfterSubscribeTargetResponse);
           return;
         }
         let target: NavigationTarget | undefined;
@@ -833,15 +825,11 @@ export function registerPublicApiRoutes(router: Router): void {
               .all();
 
             for (const candidate of candidates) {
-              if (candidate.id.toLowerCase() === postId.toLowerCase()) continue;
-              if (
-                !allowAppAccountPosts &&
-                normalizeRedditUsername(candidate.authorName) ===
-                  appAccountUsername
-              ) {
-                continue;
-              }
-              target = createPostNavigationTarget(candidate);
+              target = createPostNavigationTarget(
+                candidate,
+                postId,
+                allowAppAccountPosts,
+              );
               if (target) break;
             }
             if (target) break;
@@ -855,19 +843,11 @@ export function registerPublicApiRoutes(router: Router): void {
             })
             .all();
           for (const candidate of candidates) {
-            if (
-              typeof candidate.id === "string" &&
-              candidate.id.toLowerCase() === postId.toLowerCase()
-            ) {
-              continue;
-            }
-            if (
-              !allowAppAccountPosts &&
-              normalizeRedditUsername(candidate.authorName) ===
-                appAccountUsername
-            )
-              continue;
-            target = createPostNavigationTarget(candidate);
+            target = createPostNavigationTarget(
+              candidate,
+              postId,
+              allowAppAccountPosts,
+            );
             if (target) break;
           }
         }
@@ -1241,6 +1221,10 @@ export function registerPublicApiRoutes(router: Router): void {
       let trackingCreated = false;
 
       if (!acceptance) {
+        if (await isJoinGoalUnavailable(postId)) {
+          res.status(400).json(localizedError("errors.join.goalUnavailable"));
+          return;
+        }
         await reddit.subscribeToCurrentSubreddit();
         redditAccepted = true;
         logSubscribePhase(operationId, postId, "reddit_subscribed");
@@ -1420,15 +1404,55 @@ function hasUsableNavigationUrl(value: unknown): value is string {
   }
 }
 
+async function isJoinGoalUnavailable(
+  postId: NonNullable<typeof context.postId>,
+): Promise<boolean> {
+  let goalPostId = postId;
+  try {
+    let goal = await reddit.getPostById(goalPostId);
+    if (goal?.crosspostParentId) {
+      goalPostId = goal.crosspostParentId;
+      goal = await reddit.getPostById(goalPostId);
+    }
+    return !!goal && getPostAvailability(goal).status !== "active";
+  } catch (error) {
+    if (isMissingPostError(error, goalPostId)) return true;
+    logDiagnostic(
+      "info",
+      "subscribe_post_availability_unknown",
+      {
+        workflow: "subscribe",
+        phase: "availability_check",
+        postId: goalPostId,
+      },
+      error,
+    );
+    return false;
+  }
+}
+
 function createPostNavigationTarget(
   post:
     | {
+        id?: string;
+        authorName?: string;
         url?: string;
         permalink?: string | null;
       }
     | undefined,
+  goalPostId: string,
+  allowAppAccountPosts: boolean,
 ): NavigationTarget | undefined {
-  if (typeof post?.permalink === "string" && post.permalink.trim().length > 0) {
+  const author = normalizeRedditUsername(post?.authorName);
+  if (
+    !post ||
+    getPostAvailability(post).status !== "active" ||
+    author === "[deleted]" ||
+    (!allowAppAccountPosts && author === appAccountUsername) ||
+    post.id?.toLowerCase() === goalPostId.toLowerCase()
+  )
+    return undefined;
+  if (typeof post.permalink === "string" && post.permalink.trim().length > 0) {
     try {
       const permalink = post.permalink.trim();
       const url = new URL(permalink, "https://www.reddit.com");

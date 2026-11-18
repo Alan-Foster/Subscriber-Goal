@@ -1092,7 +1092,7 @@ describe("internalUi color theme create goal routes", () => {
     }
   });
 
-  it("removes dynamic post choices and defaults every NSFW post type to Create Post", async () => {
+  it("offers both dynamic choices and uses the community type default for NSFW goals", async () => {
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -1122,11 +1122,11 @@ describe("internalUi color theme create goal routes", () => {
       const actionField = fields.find(
         (field) => field.name === "afterSubscribePreset",
       );
-      expect(actionField?.defaultValue).toEqual(["create-post"]);
-      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
+      expect(actionField?.defaultValue).toEqual(["top-post-day"]);
+      expect(actionField?.options?.map(({ value }) => value)).toContain(
         "top-post-day",
       );
-      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
+      expect(actionField?.options?.map(({ value }) => value)).toContain(
         "newest-post",
       );
     }
@@ -2389,52 +2389,54 @@ describe("internalUi color theme create goal routes", () => {
     },
   );
 
-  it("normalizes a stale NSFW dynamic-action draft to default Create Post settings", async () => {
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      type: "public",
-      nsfw: true,
-    });
-    seedCreateGoalDraft("regular", "es", {
-      colorTheme: "green",
-      afterSubscribePreset: "newest-post",
-    });
-    const routes = createRouteHarness();
+  it.each(["top-post-day", "newest-post"] as const)(
+    "keeps %s and its settings when creating an NSFW goal",
+    async (preset) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        type: "public",
+        nsfw: true,
+      });
+      seedCreateGoalDraft("regular", "es", {
+        colorTheme: "green",
+        afterSubscribePreset: preset,
+      });
+      const routes = createRouteHarness();
 
-    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
-      {
-        body: {
-          afterSubscribeButtonText: "Keep this forged text",
-          afterSubscribeColorTheme: ["pink"],
+      await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+        {
+          body: {
+            afterSubscribeButtonText: "My dynamic button",
+            afterSubscribeColorTheme: ["pink"],
+          },
+        } as Request,
+        { json: vi.fn() } as unknown as Response,
+      );
+
+      expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
+        hoisted.reddit,
+        hoisted.redis,
+        expect.anything(),
+        expect.objectContaining({ id: "t3_newpost" }),
+        200,
+        false,
+        "ExampleSub",
+        "green",
+        true,
+        "es",
+        undefined,
+        "regular",
+        {
+          type: preset,
+          buttonText: "My dynamic button",
+          colorTheme: "pink",
         },
-      } as Request,
-      { json: vi.fn() } as unknown as Response,
-    );
-
-    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledWith(
-      hoisted.reddit,
-      hoisted.redis,
-      expect.anything(),
-      expect.objectContaining({ id: "t3_newpost" }),
-      200,
-      false,
-      "ExampleSub",
-      "green",
-      true,
-      "es",
-      undefined,
-      "regular",
-      {
-        type: "link",
-        buttonText: "Crear una publicación",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
-        colorTheme: "blue",
-      },
-      "create-post",
-    );
-  });
+        preset,
+      );
+    },
+  );
 
   it("creates tiny posts without requiring or registering a subscriber goal", async () => {
     seedCreateGoalDraft("tiny", "en");

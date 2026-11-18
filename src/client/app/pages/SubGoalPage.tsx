@@ -106,8 +106,7 @@ export const SubGoalPage = ({
     state.subscribed &&
     authenticated &&
     !isSubmitting &&
-    state.completedTime === null &&
-    state.subreddit.isNsfw !== true
+    state.completedTime === null
       ? getAutomaticAfterSubscribeAction(
           state.afterSubscribeAction,
           state.language,

@@ -427,7 +427,7 @@ describe("SubGoalPage", () => {
     },
   );
 
-  it.each(["NSFW", "logged out", "unconfirmed", "submitting", "completed"])(
+  it.each(["logged out", "unconfirmed", "submitting", "completed"])(
     "does not add an automatic action for %s",
     (reason) => {
       const state = {
@@ -435,7 +435,6 @@ describe("SubGoalPage", () => {
         subscribed: reason !== "unconfirmed",
         user: reason === "logged out" ? null : baseState.user,
         completedTime: reason === "completed" ? 1_000 : null,
-        subreddit: { ...baseState.subreddit, isNsfw: reason === "NSFW" },
         afterSubscribeAction: {
           type: "top-post-day" as const,
           buttonText: "Featured pick",
@@ -453,7 +452,10 @@ describe("SubGoalPage", () => {
     },
   );
 
-  it("allows unknown community safety under the existing dynamic action policy", () => {
+  it.each([
+    { community: "NSFW communities", nsfw: true },
+    { community: "communities with unknown safety", nsfw: undefined },
+  ])("shows the automatic second button in $community", ({ nsfw }) => {
     const html = renderToStaticMarkup(
       <SubGoalPage
         {...commonProps}
@@ -462,7 +464,7 @@ describe("SubGoalPage", () => {
           subscribed: true,
           subreddit: {
             ...baseState.subreddit,
-            isNsfw: undefined as unknown as boolean,
+            isNsfw: nsfw as boolean,
           },
           afterSubscribeAction: {
             type: "top-post-day",
@@ -472,6 +474,8 @@ describe("SubGoalPage", () => {
         }}
       />,
     );
+    expect(html).toContain('data-subgoal-action-area="two-actions"');
+    expect(html).toContain("Featured pick");
     expect(html).toContain("View the Most Recent Post");
     expect(html).toContain('data-sg-theme="blue"');
   });

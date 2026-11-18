@@ -119,7 +119,13 @@ describe("scheduled app repair", () => {
     });
   });
 
-  it("discovers candidates before initializing migrations", async () => {
+  it("discovers candidates and skips dynamic preset migration in NSFW communities", async () => {
+    reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      type: "public",
+      nsfw: true,
+    });
     await scheduleAppRepair(redis as never, 100, 0);
 
     await expect(
@@ -142,10 +148,7 @@ describe("scheduled app repair", () => {
     });
     expect(
       hoisted.initializeNsfwAfterSubscribeActionMigration,
-    ).toHaveBeenCalledWith(expect.anything(), ["t3_registered"], {
-      name: "ExampleSub",
-      nsfw: false,
-    });
+    ).not.toHaveBeenCalled();
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "complete",
       recurring: "true",

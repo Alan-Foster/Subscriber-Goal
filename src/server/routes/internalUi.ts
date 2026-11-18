@@ -62,10 +62,7 @@ import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
-import {
-  getCurrentSubredditNsfw,
-  isCrosspostEligible,
-} from "../utils/subredditSafety";
+import { isCrosspostEligible } from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import {
   defaultAfterSubscribeColorTheme,
@@ -475,7 +472,6 @@ function buildCreateGoalDetailsForm(
           getAfterSubscribeActionField(
             subreddit.type,
             "after-subscribe",
-            getCurrentSubredditNsfw(subreddit) === true,
             draft.language,
           ),
         ],
@@ -496,19 +492,13 @@ function buildCreateGoalDetailsForm(
         cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: [
           commonFields.postTitle,
-          getAfterSubscribeActionField(
-            subreddit.type,
-            "cta",
-            getCurrentSubredditNsfw(subreddit) === true,
-            draft.language,
-          ),
+          getAfterSubscribeActionField(subreddit.type, "cta", draft.language),
         ],
       },
     };
   }
 
   const appSettings = getAppSettings();
-  const sourceSubredditIsNsfw = getCurrentSubredditNsfw(subreddit) === true;
   const shouldCrosspost = isCrosspostEligible(
     subreddit,
     appSettings.promoSubreddit,
@@ -550,7 +540,6 @@ function buildCreateGoalDetailsForm(
         getAfterSubscribeActionField(
           subreddit.type,
           "after-subscribe",
-          sourceSubredditIsNsfw,
           draft.language,
         ),
         ...(shouldCrosspost
@@ -709,7 +698,6 @@ function getColorOptions(
 function getAfterSubscribeActionField(
   subredditType: unknown,
   context: "after-subscribe" | "cta" = "after-subscribe",
-  isNsfw = false,
   language: SubGoalLanguage = defaultSubGoalLanguage,
 ) {
   const options = [
@@ -741,10 +729,7 @@ function getAfterSubscribeActionField(
       label: translate(language, "moderator.followUp.wiki"),
       value: "wiki",
     },
-  ].filter(
-    ({ value }) =>
-      !isNsfw || (value !== "top-post-day" && value !== "newest-post"),
-  );
+  ];
   return {
     name: "afterSubscribePreset",
     label:
@@ -752,9 +737,7 @@ function getAfterSubscribeActionField(
         ? translate(language, "moderator.followUp.actionCta")
         : translate(language, "moderator.followUp.action"),
     type: "select" as const,
-    defaultValue: [
-      isNsfw ? "create-post" : getDefaultAfterSubscribePreset(subredditType),
-    ],
+    defaultValue: [getDefaultAfterSubscribePreset(subredditType)],
     options,
     helpText:
       context === "cta"
@@ -762,15 +745,6 @@ function getAfterSubscribeActionField(
         : translate(language, "moderator.followUp.actionHelp"),
     required: true,
   };
-}
-
-function normalizeAfterSubscribePresetForNsfw(
-  preset: AfterSubscribePreset,
-  isNsfw: boolean,
-): AfterSubscribePreset {
-  return isNsfw && (preset === "top-post-day" || preset === "newest-post")
-    ? "create-post"
-    : preset;
 }
 
 function getAfterSubscribePresetDefaults(
@@ -894,13 +868,9 @@ async function submitCreateGoalStepTwo(
           "colorTheme" in values ? values.colorTheme?.[0] : undefined,
         );
         const requestedPreset = values.afterSubscribePreset?.[0];
-        const selectedPreset = isAfterSubscribePreset(requestedPreset)
+        const afterSubscribePreset = isAfterSubscribePreset(requestedPreset)
           ? requestedPreset
           : getDefaultAfterSubscribePreset(subreddit.type);
-        const afterSubscribePreset = normalizeAfterSubscribePresetForNsfw(
-          selectedPreset,
-          getCurrentSubredditNsfw(subreddit) === true,
-        );
         let details: CreateGoalDraftDetails;
         if (expectedKind === "subscribe-only") {
           details = {
@@ -1144,32 +1114,24 @@ async function submitCreateGoalFollowUp(
           return;
         }
 
-        const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
-        const normalizedPreset = normalizeAfterSubscribePresetForNsfw(
-          draft.details.afterSubscribePreset,
-          isNsfw,
-        );
-        const replacedNsfwDynamicPreset =
-          normalizedPreset !== draft.details.afterSubscribePreset;
+        const persistedAfterSubscribePreset =
+          draft.details.afterSubscribePreset;
         const presetDefaults = getAfterSubscribePresetDefaults(
-          normalizedPreset,
+          persistedAfterSubscribePreset,
           draft.language,
         );
         const resolvedActionInput = resolvePresetActionInput(
-          normalizedPreset,
+          persistedAfterSubscribePreset,
           subreddit.name,
           values.afterSubscribeUrl,
         );
         const afterSubscribeResult = resolveAfterSubscribeAction({
           type: resolvedActionInput.type,
-          buttonText: replacedNsfwDynamicPreset
-            ? presetDefaults.buttonText
-            : (values.afterSubscribeButtonText ?? presetDefaults.buttonText),
+          buttonText:
+            values.afterSubscribeButtonText ?? presetDefaults.buttonText,
           url: resolvedActionInput.url,
-          colorTheme: replacedNsfwDynamicPreset
-            ? presetDefaults.colorTheme
-            : (values.afterSubscribeColorTheme?.[0] ??
-              presetDefaults.colorTheme),
+          colorTheme:
+            values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme,
           fallbackColorTheme:
             draft.details.kind === "cta-only"
               ? defaultAfterSubscribeColorTheme
@@ -1185,7 +1147,6 @@ async function submitCreateGoalFollowUp(
           });
           return;
         }
-        const persistedAfterSubscribePreset = normalizedPreset;
         const appSettings = getAppSettings();
         const crosspostEligible = isCrosspostEligible(
           subreddit,
