@@ -977,6 +977,113 @@ describe("publicApi routes", () => {
     expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { postHeight: "regular", shareUsername: true },
+    { postHeight: "regular", shareUsername: false },
+    { postHeight: "short", shareUsername: true },
+    { postHeight: "short", shareUsername: false },
+  ])(
+    "honors the SFW $postHeight checkbox (shareUsername=$shareUsername)",
+    async ({ postHeight, shareUsername }) => {
+      hoisted.context.userId = "t2_user";
+      const goalData = await hoisted.getSubGoalData();
+      hoisted.getSubGoalData.mockResolvedValue({ ...goalData, postHeight });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      await routes.get(apiRoutes.subscribe)?.(
+        { body: { shareUsername } } as Request,
+        { json } as unknown as Response,
+      );
+      expect(hoisted.persistAcceptedSubscriberTracking).toHaveBeenCalledWith(
+        hoisted.redis,
+        expect.objectContaining({ shareUsername }),
+      );
+      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+        hoisted.redis,
+        "t3_post",
+        101,
+        { id: "t2_user", username: "TinyUser" },
+        shareUsername,
+      );
+      expect(hoisted.realtime.send).toHaveBeenCalledExactlyOnceWith(
+        "subscriber_updates",
+        {
+          type: "sub",
+          newSubscriberCount: 101,
+          ...(shareUsername ? { recentSubscriber: "TinyUser" } : {}),
+        },
+      );
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "subscribe",
+          state: expect.objectContaining({
+            postHeight,
+            recentSubscriber: shareUsername ? "TinyUser" : null,
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([true, false])(
+    "preserves the stored Tiny sharing decision on replay without a new announcement (stored=%s)",
+    async (shareUsername) => {
+      hoisted.context.userId = "t2_user";
+      const goalData = await hoisted.getSubGoalData();
+      hoisted.getSubGoalData.mockResolvedValue({
+        ...goalData,
+        postKind: "subscribe-only-v1",
+        postHeight: "tiny",
+        goal: 0,
+      });
+      const pending = {
+        operationId: "historical-tiny-operation",
+        userId: "t2_user",
+        postId: "t3_post",
+        username: "TinyUser",
+        subscribers: 101,
+        timestamp: Date.now(),
+        shareUsername,
+        erasureGeneration: "",
+        phase: "pending",
+        attempts: 0,
+      };
+      hoisted.getSubscriptionAcceptanceEvidence.mockResolvedValue({
+        postId: "t3_post",
+        userId: "t2_user",
+        acceptedAt: pending.timestamp,
+        expiresAt: pending.timestamp + 120_000,
+      });
+      hoisted.getPendingSubscriberTracking.mockResolvedValue(pending);
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      await routes.get(apiRoutes.subscribe)?.(
+        { body: { attemptId, shareUsername: !shareUsername } } as Request,
+        { json } as unknown as Response,
+      );
+      expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
+        hoisted.redis,
+        pending,
+      );
+      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+        hoisted.redis,
+        "t3_post",
+        101,
+        { id: "t2_user", username: "TinyUser" },
+        shareUsername,
+      );
+      expect(hoisted.persistAcceptedSubscriberTracking).not.toHaveBeenCalled();
+      expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
+      expect(hoisted.realtime.send).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "subscribe",
+          state: expect.objectContaining({ postHeight: "tiny" }),
+        }),
+      );
+    },
+  );
+
   it("overrides username sharing for regular goals in NSFW subreddits", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -1002,7 +1109,7 @@ describe("publicApi routes", () => {
     );
   });
 
-  it("records and broadcasts Tiny subscriptions through the normal subscriber path", async () => {
+  it("keeps SFW Tiny usernames private while tracking, confirming, and broadcasting counts", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -1021,7 +1128,7 @@ describe("publicApi routes", () => {
     const json = vi.fn();
 
     await routes.get(apiRoutes.subscribe)?.(
-      { body: { shareUsername: true } } as Request,
+      { body: { shareUsername: true, attemptId } } as Request,
       { json } as unknown as Response,
     );
 
@@ -1044,7 +1151,17 @@ describe("publicApi routes", () => {
       "t3_post",
       101,
       { id: "t2_user", username: "TinyUser" },
-      true,
+      false,
+    );
+    expect(hoisted.persistAcceptedSubscriberTracking).toHaveBeenCalledWith(
+      hoisted.redis,
+      expect.objectContaining({ shareUsername: false, attemptId }),
+    );
+    expect(hoisted.storeSubscriptionAttemptReceipt).toHaveBeenCalledWith(
+      hoisted.redis,
+      attemptId,
+      "t3_post",
+      "t2_user",
     );
     expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
@@ -1060,7 +1177,6 @@ describe("publicApi routes", () => {
     expect(hoisted.realtime.send).toHaveBeenCalledWith("subscriber_updates", {
       type: "sub",
       newSubscriberCount: 101,
-      recentSubscriber: "TinyUser",
     });
   });
 

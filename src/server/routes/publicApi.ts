@@ -1219,7 +1219,7 @@ export function registerPublicApiRoutes(router: Router): void {
       const sourceSubredditNsfw = getCurrentSubredditNsfw(subreddit);
       const shareUsername =
         subGoalData.postKind === subscribeOnlyPostKind
-          ? sourceSubredditNsfw === false
+          ? false // Tiny cards have no username-sharing control.
           : resolveShareUsername(
               body?.shareUsername === true,
               sourceSubredditNsfw !== false,
