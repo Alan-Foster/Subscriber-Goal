@@ -33,8 +33,9 @@ export const defaultAfterSubscribeColorTheme: SubGoalColorTheme = "blue";
 
 export function getDefaultAfterSubscribePreset(
   _subredditType: unknown,
+  isNsfw = false,
 ): AfterSubscribePreset {
-  return "top-post-day";
+  return isNsfw ? "newest-post" : "top-post-day";
 }
 
 export type AfterSubscribeAction =
@@ -131,6 +132,55 @@ export function createDefaultCreatePostAction({
     buttonText: getAfterSubscribePresetMessages(language).createNewPost,
     url: `https://www.reddit.com/r/${subredditName}/submit/`,
     colorTheme: defaultAfterSubscribeColorTheme,
+  };
+}
+
+// Resolve the slots together so an existing Most Recent or Create Post action
+// keeps its place. These are display choices, never writes to the saved preset.
+export function getEffectiveAfterSubscribeActions(
+  configured: AfterSubscribeAction,
+  {
+    language,
+    subredditName,
+    isNsfw,
+  }: {
+    language: SubGoalLanguage;
+    subredditName: string;
+    isNsfw: boolean;
+  },
+): { primary: AfterSubscribeAction; secondary: AfterSubscribeAction | null } {
+  if (!isNsfw || configured.type === "disabled") {
+    return {
+      primary: configured,
+      secondary: getAutomaticAfterSubscribeAction(configured, language),
+    };
+  }
+  const create = createDefaultCreatePostAction({ language, subredditName });
+  const recent: AutomaticAfterSubscribeAction = {
+    type: "newest-post",
+    buttonText:
+      getAfterSubscribePresetMessages(language).viewMostRecentPostToday,
+    colorTheme: configured.colorTheme === "green" ? "blue" : "green",
+  };
+  if (configured.type === "top-post-day") {
+    return {
+      primary: { ...create, colorTheme: configured.colorTheme },
+      secondary: recent,
+    };
+  }
+  if (
+    configured.type === "link" &&
+    configured.url.replace(/\/$/, "").toLowerCase() ===
+      create.url.slice(0, -1).toLowerCase()
+  ) {
+    return { primary: configured, secondary: recent };
+  }
+  return {
+    primary: configured,
+    secondary: {
+      ...create,
+      colorTheme: configured.colorTheme === "blue" ? "green" : "blue",
+    },
   };
 }
 

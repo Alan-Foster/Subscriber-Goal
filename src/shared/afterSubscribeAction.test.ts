@@ -5,6 +5,7 @@ import {
   createTopPostFallbackAction,
   defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
+  getEffectiveAfterSubscribeActions,
   resolveAfterSubscribeAction,
   resolveAfterSubscribePreset,
 } from "./afterSubscribeAction";
@@ -228,5 +229,60 @@ describe("automatic post-Join pairing", () => {
         "es",
       )?.buttonText,
     ).toBe("Ver la publicación más reciente");
+  });
+});
+
+describe("effective actions in NSFW communities", () => {
+  const context = {
+    language: "en",
+    subredditName: "ExampleSub",
+    isNsfw: true,
+  } as const;
+
+  it("pairs Most Recent with Create Post using the actual subreddit name", () => {
+    const configured = {
+      type: "newest-post",
+      buttonText: "My Latest Post",
+      colorTheme: "green",
+    } as const;
+    expect(getEffectiveAfterSubscribeActions(configured, context)).toEqual({
+      primary: configured,
+      secondary: {
+        type: "link",
+        buttonText: "Create a New Post",
+        colorTheme: "blue",
+        url: "https://www.reddit.com/r/ExampleSub/submit/",
+      },
+    });
+  });
+
+  it.each([
+    ["https://example.com/custom", "link"],
+    ["https://www.reddit.com/r/ExampleSub/submit/", "newest-post"],
+  ])(
+    "preserves a configured link and does not duplicate it (%s)",
+    (url, secondaryType) => {
+      const configured = {
+        type: "link",
+        buttonText: "My community link",
+        colorTheme: "pink",
+        url,
+      } as const;
+      expect(
+        getEffectiveAfterSubscribeActions(configured, context),
+      ).toMatchObject({
+        primary: configured,
+        secondary: { type: secondaryType },
+      });
+    },
+  );
+
+  it("honors an explicitly disabled action", () => {
+    expect(
+      getEffectiveAfterSubscribeActions({ type: "disabled" }, context),
+    ).toEqual({
+      primary: { type: "disabled" },
+      secondary: null,
+    });
   });
 });

@@ -480,6 +480,41 @@ describe("SubGoalPage", () => {
     expect(html).toContain('data-sg-theme="blue"');
   });
 
+  it.each([false, true])(
+    "renders the effective NSFW pair when subscribed is %s",
+    (subscribed) => {
+      const html = renderToStaticMarkup(
+        <SubGoalPage
+          {...commonProps}
+          state={{
+            ...baseState,
+            subscribed,
+            subreddit: { ...baseState.subreddit, isNsfw: true },
+            afterSubscribeAction: {
+              type: "newest-post",
+              buttonText: "View the Most Recent Post",
+              colorTheme: "blue",
+            },
+            automaticAfterSubscribeAction: {
+              type: "link",
+              buttonText: "Create a New Post",
+              url: "https://www.reddit.com/r/ExampleSub/submit/",
+              colorTheme: "green",
+            },
+          }}
+        />,
+      );
+      expect(html).toContain('data-subgoal-action-area="two-actions"');
+      expect(html).toContain("View the Most Recent Post");
+      if (subscribed) {
+        expect(html).toContain("Create a New Post");
+      } else {
+        expect(html).toContain('data-subscription-button-mode="subscribe"');
+        expect(html).not.toContain("Create a New Post");
+      }
+    },
+  );
+
   it("does not add attention glow while submitting", () => {
     const html = renderToStaticMarkup(
       <SubGoalPage state={baseState} {...commonProps} isSubmitting />,

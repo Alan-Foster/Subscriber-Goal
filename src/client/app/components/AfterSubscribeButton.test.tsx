@@ -415,6 +415,37 @@ describe("AfterSubscribeButton", () => {
     },
   );
 
+  it.each([
+    ["newest-post", "View the Most Recent Post"],
+    ["create-post", "Create a New Post"],
+  ])(
+    "announces %s before navigating to the fallback destination",
+    async (fallbackAction, label) => {
+      const target = { url: "https://www.reddit.com/r/ExampleSub/submit/" };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(JSON.stringify({ target, fallbackAction }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+        ),
+      );
+      await renderButton({
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "blue",
+      });
+      await act(async () => container.querySelector("button")?.click());
+      expect(hoisted.showToast).toHaveBeenCalledWith(label);
+      expect(onNavigate).toHaveBeenCalledWith(target);
+      expect(hoisted.showToast.mock.invocationCallOrder[0]).toBeLessThan(
+        onNavigate.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
   it("does not navigate when a successful response has a malformed target", async () => {
     vi.stubGlobal(
       "fetch",

@@ -2,13 +2,19 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AfterSubscribePreset } from "../../shared/afterSubscribeAction";
 import type { CompactCtaActivityMetric } from "../../shared/types/api";
 import { logDiagnostic } from "../../shared/diagnostics";
-import type { RedditClient, RedisClient } from "../types";
+import {
+  isLinkId,
+  type LinkId,
+  type RedditClient,
+  type RedisClient,
+} from "../types";
 import { getUtcDayStartMs } from "./subscriberDailyStats";
 
 const utcDayMs = 24 * 60 * 60 * 1000;
 const rollingWindowDays = 7;
 export const anonymousCtaDailyLimit = 10;
 const retainedSeconds = 9 * 24 * 60 * 60;
+const recentPostCandidateLimit = 10;
 const postBackfillLimit = 1_000;
 const postBackfillCompleteKey = "community_post_activity_backfill_v1";
 const postBackfillLockKey = "community_post_activity_backfill_lock_v1";
@@ -48,6 +54,32 @@ export async function recordCommunityPostCreated(
   const key = postDayKey(dayStartMs);
   await redis.zAdd(key, { member: postId, score: createdAtMs });
   await redis.expire(key, retainedSeconds);
+}
+
+export async function getRecentCommunityPostIds(
+  redis: RedisClient,
+  nowMs = Date.now(),
+): Promise<LinkId[]> {
+  const today = getUtcDayStartMs(nowMs);
+  const ids = new Set<LinkId>();
+  // A bucket can remain live into the ninth previous UTC day.
+  for (
+    let daysAgo = 0;
+    daysAgo <= (retainedSeconds * 1000) / utcDayMs;
+    daysAgo++
+  ) {
+    const entries = await redis.zRange(
+      postDayKey(today - daysAgo * utcDayMs),
+      0,
+      recentPostCandidateLimit - 1,
+      { by: "rank", reverse: true },
+    );
+    for (const { member } of entries) {
+      if (isLinkId(member)) ids.add(member);
+      if (ids.size === recentPostCandidateLimit) return [...ids];
+    }
+  }
+  return [...ids];
 }
 
 export async function ensureCommunityPostActivityBackfill(

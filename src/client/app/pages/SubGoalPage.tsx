@@ -107,10 +107,12 @@ export const SubGoalPage = ({
     authenticated &&
     !isSubmitting &&
     state.completedTime === null
-      ? getAutomaticAfterSubscribeAction(
-          state.afterSubscribeAction,
-          state.language,
-        )
+      ? state.automaticAfterSubscribeAction === undefined
+        ? getAutomaticAfterSubscribeAction(
+            state.afterSubscribeAction,
+            state.language,
+          )
+        : state.automaticAfterSubscribeAction
       : null;
   const secondaryAction =
     (!state.subscribed || automaticAction) &&
@@ -150,7 +152,7 @@ export const SubGoalPage = ({
         onNavigate={onAfterSubscribeNavigate}
         trackClicks={state.trackCtaClicks === true}
       />
-      {automaticAction ? (
+      {automaticAction && automaticAction.type !== "disabled" ? (
         <AfterSubscribeButton
           action={automaticAction}
           automaticAction={automaticAction.type}

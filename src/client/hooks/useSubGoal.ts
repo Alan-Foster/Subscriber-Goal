@@ -312,6 +312,9 @@ export const isSubGoalState = (value: unknown): value is SubGoalState => {
     isFiniteNumber(subreddit.subscribers) &&
     subreddit.subscribers >= 0 &&
     typeof subreddit.isNsfw === "boolean" &&
+    (value.automaticAfterSubscribeAction === undefined ||
+      value.automaticAfterSubscribeAction === null ||
+      isAfterSubscribeAction(value.automaticAfterSubscribeAction)) &&
     typeof value.subscribed === "boolean" &&
     typeof value.moderatorInstallPromoEligible === "boolean" &&
     typeof value.canViewStatistics === "boolean" &&
