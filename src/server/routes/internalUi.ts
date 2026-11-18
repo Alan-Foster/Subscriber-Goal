@@ -62,7 +62,10 @@ import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
-import { isCrosspostEligible } from "../utils/subredditSafety";
+import {
+  getCurrentSubredditNsfw,
+  isCrosspostEligible,
+} from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import {
   defaultAfterSubscribeColorTheme,
@@ -470,7 +473,7 @@ function buildCreateGoalDetailsForm(
             required: true,
           },
           getAfterSubscribeActionField(
-            subreddit.type,
+            subreddit,
             "after-subscribe",
             draft.language,
           ),
@@ -492,7 +495,7 @@ function buildCreateGoalDetailsForm(
         cancelLabel: translate(draft.language, "moderator.common.cancel"),
         fields: [
           commonFields.postTitle,
-          getAfterSubscribeActionField(subreddit.type, "cta", draft.language),
+          getAfterSubscribeActionField(subreddit, "cta", draft.language),
         ],
       },
     };
@@ -538,7 +541,7 @@ function buildCreateGoalDetailsForm(
           required: true,
         },
         getAfterSubscribeActionField(
-          subreddit.type,
+          subreddit,
           "after-subscribe",
           draft.language,
         ),
@@ -696,10 +699,11 @@ function getColorOptions(
 }
 
 function getAfterSubscribeActionField(
-  subredditType: unknown,
+  subreddit: { type?: unknown; nsfw?: unknown },
   context: "after-subscribe" | "cta" = "after-subscribe",
   language: SubGoalLanguage = defaultSubGoalLanguage,
 ) {
+  const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
   const options = [
     {
       label: translate(language, "moderator.followUp.topPost"),
@@ -729,7 +733,7 @@ function getAfterSubscribeActionField(
       label: translate(language, "moderator.followUp.wiki"),
       value: "wiki",
     },
-  ];
+  ].filter(({ value }) => !isNsfw || value !== "top-post-day");
   return {
     name: "afterSubscribePreset",
     label:
@@ -737,7 +741,7 @@ function getAfterSubscribeActionField(
         ? translate(language, "moderator.followUp.actionCta")
         : translate(language, "moderator.followUp.action"),
     type: "select" as const,
-    defaultValue: [getDefaultAfterSubscribePreset(subredditType)],
+    defaultValue: [getDefaultAfterSubscribePreset(subreddit.type, isNsfw)],
     options,
     helpText:
       context === "cta"
@@ -881,9 +885,12 @@ async function submitCreateGoalStepTwo(
           "colorTheme" in values ? values.colorTheme?.[0] : undefined,
         );
         const requestedPreset = values.afterSubscribePreset?.[0];
-        const afterSubscribePreset = isAfterSubscribePreset(requestedPreset)
-          ? requestedPreset
-          : getDefaultAfterSubscribePreset(subreddit.type);
+        const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
+        const afterSubscribePreset =
+          isAfterSubscribePreset(requestedPreset) &&
+          !(isNsfw && requestedPreset === "top-post-day")
+            ? requestedPreset
+            : getDefaultAfterSubscribePreset(subreddit.type, isNsfw);
         let details: CreateGoalDraftDetails;
         if (expectedKind === "subscribe-only") {
           details = {
@@ -1127,8 +1134,12 @@ async function submitCreateGoalFollowUp(
           return;
         }
 
-        const persistedAfterSubscribePreset =
-          draft.details.afterSubscribePreset;
+        const presetChanged =
+          draft.details.afterSubscribePreset === "top-post-day" &&
+          getCurrentSubredditNsfw(subreddit) === true;
+        const persistedAfterSubscribePreset = presetChanged
+          ? "newest-post"
+          : draft.details.afterSubscribePreset;
         const presetDefaults = getAfterSubscribePresetDefaults(
           persistedAfterSubscribePreset,
           draft.language,
@@ -1140,8 +1151,9 @@ async function submitCreateGoalFollowUp(
         );
         const afterSubscribeResult = resolveAfterSubscribeAction({
           type: resolvedActionInput.type,
-          buttonText:
-            values.afterSubscribeButtonText ?? presetDefaults.buttonText,
+          buttonText: presetChanged
+            ? presetDefaults.buttonText
+            : (values.afterSubscribeButtonText ?? presetDefaults.buttonText),
           url: resolvedActionInput.url,
           colorTheme:
             values.afterSubscribeColorTheme?.[0] ?? presetDefaults.colorTheme,

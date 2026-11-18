@@ -1092,7 +1092,7 @@ describe("internalUi color theme create goal routes", () => {
     }
   });
 
-  it("offers both dynamic choices and uses the community type default for NSFW goals", async () => {
+  it("defaults NSFW goal forms to Most Recent and omits Top Post", async () => {
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -1122,8 +1122,8 @@ describe("internalUi color theme create goal routes", () => {
       const actionField = fields.find(
         (field) => field.name === "afterSubscribePreset",
       );
-      expect(actionField?.defaultValue).toEqual(["top-post-day"]);
-      expect(actionField?.options?.map(({ value }) => value)).toContain(
+      expect(actionField?.defaultValue).toEqual(["newest-post"]);
+      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
         "top-post-day",
       );
       expect(actionField?.options?.map(({ value }) => value)).toContain(
@@ -2452,7 +2452,7 @@ describe("internalUi color theme create goal routes", () => {
   );
 
   it.each(["top-post-day", "newest-post"] as const)(
-    "keeps %s and its settings when creating an NSFW goal",
+    "normalizes a stale %s draft when creating an NSFW goal",
     async (preset) => {
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
@@ -2491,11 +2491,14 @@ describe("internalUi color theme create goal routes", () => {
         undefined,
         "regular",
         {
-          type: preset,
-          buttonText: "My dynamic button",
+          type: "newest-post",
+          buttonText:
+            preset === "top-post-day"
+              ? "Ver la publicación más reciente"
+              : "My dynamic button",
           colorTheme: "pink",
         },
-        preset,
+        "newest-post",
       );
     },
   );

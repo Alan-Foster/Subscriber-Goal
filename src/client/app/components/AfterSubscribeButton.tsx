@@ -36,7 +36,7 @@ type AfterSubscribeButtonProps = {
   onNavigate: (target: string | NavigationTarget) => void;
   analyticsContext?: GoalJourneyContext;
   trackClicks?: boolean;
-  automaticAction?: DynamicAfterSubscribeActionType;
+  automaticAction?: DynamicAfterSubscribeActionType | "link";
 };
 
 export const AfterSubscribeButton = ({
@@ -168,6 +168,13 @@ export const AfterSubscribeButton = ({
         goalJourneyAnalytics.afterSubscribeCtaOpened(
           analyticsContext,
           actionType,
+        );
+      }
+      if (result.data.fallbackAction) {
+        showToast(
+          result.data.fallbackAction === "create-post"
+            ? messages.createNewPost
+            : messages.viewMostRecentPostToday,
         );
       }
       onNavigate(result.data.target);

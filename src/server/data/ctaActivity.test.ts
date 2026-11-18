@@ -4,6 +4,7 @@ import {
   anonymousCtaDailyLimit,
   ensureCommunityPostActivityBackfill,
   getCtaActivityMetric,
+  getRecentCommunityPostIds,
   recordCommunityPostCreated,
   recordCtaClick,
 } from "./ctaActivity";
@@ -51,6 +52,17 @@ class FakeRedis {
     this.sorted.set(key, set);
     return added;
   }
+  async zRange(
+    key: string,
+    start: number,
+    end: number,
+    options: { reverse?: boolean },
+  ) {
+    return [...(this.sorted.get(key) ?? [])]
+      .sort((a, b) => (options.reverse ? b[1] - a[1] : a[1] - b[1]))
+      .slice(start, end + 1)
+      .map(([member, score]) => ({ member, score }));
+  }
   async zCard(key: string): Promise<number> {
     return this.sorted.get(key)?.size ?? 0;
   }
@@ -64,6 +76,27 @@ const day = 24 * 60 * 60 * 1000;
 const now = Date.UTC(2026, 8, 7, 12);
 
 describe("CTA activity storage", () => {
+  it("reads no more than ten distinct recent post IDs by creation time across day buckets", async () => {
+    const redis = new FakeRedis();
+    const client = asRedis(redis);
+    await recordCommunityPostCreated(client, "t3_first", now - 5000);
+    await recordCommunityPostCreated(client, "t3_newest", now);
+    for (let i = 0; i < 12; i++) {
+      await recordCommunityPostCreated(
+        client,
+        "t3_old" + i,
+        now - day - i * 1000,
+      );
+    }
+    await recordCommunityPostCreated(client, "t3_newest", now - day + 5000);
+    await recordCommunityPostCreated(client, "t3_first", now - 5000);
+    await expect(getRecentCommunityPostIds(client, now)).resolves.toEqual([
+      "t3_newest",
+      "t3_first",
+      ...Array.from({ length: 8 }, (_, i) => "t3_old" + i),
+    ]);
+  });
+
   it("deduplicates post-create retries and applies the minimum weekly value", async () => {
     const redis = new FakeRedis();
     await recordCommunityPostCreated(asRedis(redis), "t3_one", now);

@@ -34,6 +34,7 @@ type SharedPostState = {
 };
 
 export type SubscriberGoalState = SharedPostState & {
+  automaticAfterSubscribeAction?: AfterSubscribeAction | null;
   postHeight: Exclude<SubGoalPostHeight, "tiny" | "cta">;
   goal: number | null;
   recentSubscriber: string | null;
@@ -48,11 +49,7 @@ export type SubscriberGoalState = SharedPostState & {
 };
 
 export type StatisticsComparisonStatus =
-  | "increase"
-  | "decrease"
-  | "unchanged"
-  | "new"
-  | "unavailable";
+  "increase" | "decrease" | "unchanged" | "new" | "unavailable";
 
 export type StatisticsComparableValue = {
   value: number | null;
@@ -191,9 +188,7 @@ export type CtaOnlyState = SharedPostState & {
 };
 
 export type SubGoalState =
-  | SubscriberGoalState
-  | SubscribeOnlyState
-  | CtaOnlyState;
+  SubscriberGoalState | SubscribeOnlyState | CtaOnlyState;
 
 export type InitResponse = {
   type: "init";
@@ -224,6 +219,7 @@ export type NavigationTarget = { url: string; permalink?: string };
 
 export type AfterSubscribeTargetResponse = {
   target: NavigationTarget;
+  fallbackAction?: "newest-post" | "create-post";
 };
 
 export type RecordCtaClickResponse = {

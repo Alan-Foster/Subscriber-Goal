@@ -1,5 +1,7 @@
 import {
-  getAutomaticAfterSubscribeAction,
+  createDefaultCreatePostAction,
+  defaultAfterSubscribeAction,
+  getEffectiveAfterSubscribeActions,
   dynamicAfterSubscribeActionTypes,
 } from "../../shared/afterSubscribeAction";
 import type { Request, Response, Router } from "express";
@@ -43,6 +45,7 @@ import {
 } from "../analytics/goalJourneyAnalytics";
 import {
   getCtaActivityMetric,
+  getRecentCommunityPostIds,
   isClickActivityPreset,
   recordCtaClick,
 } from "../data/ctaActivity";
@@ -302,6 +305,7 @@ const buildState = async (
   );
 
   const subredditNsfw = getCurrentSubredditNsfw(subreddit);
+  const actions = effectiveGoalActions(subGoalData, subreddit);
   return {
     goal,
     recentSubscriber:
@@ -312,7 +316,8 @@ const buildState = async (
     completedTime: subGoalData.completedTime ? subGoalData.completedTime : null,
     headerText: subGoalData.headerText ?? null,
     colorTheme: subGoalData.colorTheme,
-    afterSubscribeAction: subGoalData.afterSubscribeAction,
+    afterSubscribeAction: actions.primary,
+    automaticAfterSubscribeAction: actions.secondary,
     trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: subGoalData.postHeight === "short" ? "short" : "regular",
     language: subGoalData.language,
@@ -385,9 +390,7 @@ const buildSubscribeOnlyState = async (
       ? isTrackedSubscriber(redis, context.userId)
       : Promise.resolve(false));
   const subredditPromise =
-    options?.observedSubscribers === undefined
-      ? (dependencies.subredditPromise ?? reddit.getCurrentSubreddit())
-      : null;
+    dependencies.subredditPromise ?? reddit.getCurrentSubreddit();
   const [subscribed, subreddit] = await Promise.all([
     subscribedPromise,
     subredditPromise,
@@ -403,7 +406,7 @@ const buildSubscribeOnlyState = async (
   ]);
   return {
     colorTheme: subGoalData.colorTheme,
-    afterSubscribeAction: subGoalData.afterSubscribeAction,
+    afterSubscribeAction: effectiveGoalActions(subGoalData, subreddit).primary,
     trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: "tiny",
     promoSubreddit: getPublicAppSettings().promoSubreddit,
@@ -434,7 +437,7 @@ const buildCtaOnlyState = async (
   ]);
   return {
     colorTheme: subGoalData.colorTheme,
-    afterSubscribeAction: subGoalData.afterSubscribeAction,
+    afterSubscribeAction: effectiveGoalActions(subGoalData, subreddit).primary,
     trackCtaClicks: isClickActivityPreset(subGoalData.afterSubscribePreset),
     postHeight: "cta",
     promoSubreddit: getPublicAppSettings().promoSubreddit,
@@ -765,14 +768,24 @@ export function registerPublicApiRoutes(router: Router): void {
           postId,
           context.postData,
         );
+        const subreddit = await reddit.getCurrentSubreddit();
+        const actions = effectiveGoalActions(subGoalData, subreddit);
+        const canOpenBeforeJoin =
+          !hasAutomaticSelector &&
+          getCurrentSubredditNsfw(subreddit) === true &&
+          subGoalData.postKind === subscriberGoalPostKind &&
+          (subGoalData.postHeight === "regular" ||
+            subGoalData.postHeight === "short") &&
+          actions.primary.type === "newest-post";
         if (
           (hasAutomaticSelector || subGoalData.postKind !== ctaOnlyPostKind) &&
-          (!userId || !(await isTrackedSubscriber(redis, userId)))
+          (!userId ||
+            (!canOpenBeforeJoin && !(await isTrackedSubscriber(redis, userId))))
         ) {
           res.status(403).json(localizedError("errors.join.required"));
           return;
         }
-        let action = subGoalData.afterSubscribeAction;
+        let action = actions.primary;
         if (hasAutomaticSelector) {
           if (
             subGoalData.postKind !== subscriberGoalPostKind ||
@@ -783,17 +796,13 @@ export function registerPublicApiRoutes(router: Router): void {
             res.status(403).json(localizedError("errors.api.forbidden"));
             return;
           }
-          const automaticAction = getAutomaticAfterSubscribeAction(
-            action,
-            subGoalData.language,
-          );
-          if (!automaticAction || automaticAction.type !== selector) {
+          if (!actions.secondary || actions.secondary.type !== selector) {
             res
               .status(400)
               .json(localizedError("errors.api.dynamicTargetUnsupported"));
             return;
           }
-          action = automaticAction;
+          action = actions.secondary;
         }
         if (action.type !== "top-post-day" && action.type !== "newest-post") {
           res
@@ -801,65 +810,21 @@ export function registerPublicApiRoutes(router: Router): void {
             .json(localizedError("errors.api.dynamicTargetUnsupported"));
           return;
         }
-        const subreddit = await reddit.getCurrentSubreddit();
         if (
-          hasAutomaticSelector &&
+          (hasAutomaticSelector || canOpenBeforeJoin) &&
           (await isSubredditBlacklisted(reddit, subreddit.name))
         ) {
           res.status(403).json(localizedError("errors.api.forbidden"));
           return;
         }
-        let target: NavigationTarget | undefined;
-        const promoSubreddit = getPublicAppSettings().promoSubreddit;
-        const allowAppAccountPosts =
-          subreddit.name.toLowerCase() === promoSubreddit.toLowerCase();
-        if (action.type === "top-post-day") {
-          for (const timeframe of ["day", "week", "month", "all"] as const) {
-            const candidates = await reddit
-              .getTopPosts({
-                subredditName: subreddit.name,
-                timeframe,
-                limit: dynamicPostCandidateLimit,
-                pageSize: dynamicPostCandidateLimit,
-              })
-              .all();
-
-            for (const candidate of candidates) {
-              target = createPostNavigationTarget(
-                candidate,
-                postId,
-                allowAppAccountPosts,
-              );
-              if (target) break;
-            }
-            if (target) break;
-          }
-        } else {
-          const candidates = await reddit
-            .getNewPosts({
-              subredditName: subreddit.name,
-              limit: dynamicPostCandidateLimit,
-              pageSize: dynamicPostCandidateLimit,
-            })
-            .all();
-          for (const candidate of candidates) {
-            target = createPostNavigationTarget(
-              candidate,
-              postId,
-              allowAppAccountPosts,
-            );
-            if (target) break;
-          }
-        }
-        if (!target) {
-          res
-            .status(404)
-            .json(localizedError("afterJoin.dynamicPostUnavailable"));
-          return;
-        }
-        res.json({
-          target,
-        } satisfies AfterSubscribeTargetResponse);
+        res.json(
+          await resolveDynamicPostDestination(
+            action.type,
+            postId,
+            subreddit,
+            subGoalData.language,
+          ),
+        );
       } catch (error) {
         logDiagnostic(
           "error",
@@ -1328,10 +1293,15 @@ export function registerPublicApiRoutes(router: Router): void {
 
       const state =
         subGoalData.postKind === subscribeOnlyPostKind
-          ? await buildSubscribeOnlyState(postId, subGoalData, {
-              subscribersOverride: displayedSubscriberCount,
-              observedSubscribers: subreddit.numberOfSubscribers,
-            })
+          ? await buildSubscribeOnlyState(
+              postId,
+              subGoalData,
+              {
+                subscribersOverride: displayedSubscriberCount,
+                observedSubscribers: subreddit.numberOfSubscribers,
+              },
+              { subredditPromise: Promise.resolve(subreddit) },
+            )
           : await buildState(
               postId,
               {
@@ -1431,22 +1401,150 @@ async function isJoinGoalUnavailable(
   }
 }
 
+function effectiveGoalActions(
+  data: SubGoalData,
+  subreddit: Pick<CurrentSubreddit, "name" | "nsfw">,
+) {
+  return getEffectiveAfterSubscribeActions(
+    data.afterSubscribeAction ?? defaultAfterSubscribeAction,
+    {
+      language: data.language ?? "en",
+      subredditName: subreddit.name,
+      isNsfw: getCurrentSubredditNsfw(subreddit) === true,
+    },
+  );
+}
+
+async function resolveDynamicPostDestination(
+  type: "top-post-day" | "newest-post",
+  goalPostId: string,
+  subreddit: CurrentSubreddit,
+  language: SubGoalData["language"],
+): Promise<AfterSubscribeTargetResponse> {
+  const allowAppAccountPosts =
+    subreddit.name.toLowerCase() ===
+    getPublicAppSettings().promoSubreddit.toLowerCase();
+  const options = {
+    subredditName: subreddit.name,
+    limit: dynamicPostCandidateLimit,
+    pageSize: dynamicPostCandidateLimit,
+  };
+  let uncertainty: { error: unknown } | undefined;
+  try {
+    const timeframes =
+      type === "top-post-day"
+        ? (["day", "week", "month", "all"] as const)
+        : ([undefined] as const);
+    for (const timeframe of timeframes) {
+      const posts = await (
+        timeframe
+          ? reddit.getTopPosts({ ...options, timeframe })
+          : reddit.getNewPosts(options)
+      ).all();
+      for (const post of posts) {
+        const target = createPostNavigationTarget(
+          post,
+          goalPostId,
+          allowAppAccountPosts,
+        );
+        if (target) return { target };
+      }
+    }
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "dynamic_post_listing_failed",
+      {
+        workflow: "after_subscribe_target",
+        phase: "listing",
+        postId: goalPostId,
+        action: type,
+      },
+      error,
+    );
+    if (!isDynamicDestinationAccessDenied(error)) uncertainty = { error };
+  }
+
+  for (const candidateId of await getRecentCommunityPostIds(redis)) {
+    if (candidateId === goalPostId) continue;
+    try {
+      const post = await reddit.getPostById(candidateId);
+      if (
+        !post ||
+        post.subredditName?.toLowerCase() !== subreddit.name.toLowerCase()
+      )
+        continue;
+      const target = createPostNavigationTarget(
+        post,
+        goalPostId,
+        allowAppAccountPosts,
+        true,
+      );
+      if (target)
+        return {
+          target,
+          ...(type === "top-post-day" ? { fallbackAction: "newest-post" } : {}),
+        };
+    } catch (error) {
+      if (
+        isMissingPostError(error, candidateId) ||
+        isDynamicDestinationAccessDenied(error)
+      )
+        continue;
+      logDiagnostic(
+        "warn",
+        "dynamic_post_lookup_failed",
+        {
+          workflow: "after_subscribe_target",
+          phase: "indexed_lookup",
+          postId: candidateId,
+        },
+        error,
+      );
+      uncertainty ??= { error };
+    }
+  }
+  if (uncertainty) throw uncertainty.error;
+  const create = createDefaultCreatePostAction({
+    language: language ?? "en",
+    subredditName: subreddit.name,
+  });
+  return { target: { url: create.url }, fallbackAction: "create-post" };
+}
+
+function isDynamicDestinationAccessDenied(error: unknown): boolean {
+  const response = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    code?: unknown;
+  } | null;
+  return (
+    Number(response?.status ?? response?.statusCode ?? response?.code) ===
+      403 ||
+    response?.code === "PERMISSION_DENIED" ||
+    isPrivateSubredditAccessError(error)
+  );
+}
+
 function createPostNavigationTarget(
   post:
     | {
         id?: string;
         authorName?: string;
+        hidden?: boolean;
         url?: string;
         permalink?: string | null;
       }
     | undefined,
   goalPostId: string,
   allowAppAccountPosts: boolean,
+  requirePermalink = false,
 ): NavigationTarget | undefined {
   const author = normalizeRedditUsername(post?.authorName);
   if (
     !post ||
     getPostAvailability(post).status !== "active" ||
+    post.hidden === true ||
     author === "[deleted]" ||
     (!allowAppAccountPosts && author === appAccountUsername) ||
     post.id?.toLowerCase() === goalPostId.toLowerCase()
@@ -1458,7 +1556,9 @@ function createPostNavigationTarget(
       const url = new URL(permalink, "https://www.reddit.com");
       if (
         (url.protocol === "https:" || url.protocol === "http:") &&
-        isRedditHostname(url.hostname)
+        isRedditHostname(url.hostname) &&
+        (!requirePermalink ||
+          /\/comments\/[a-z0-9]+(?:\/|$)/i.test(url.pathname))
       ) {
         return { url: url.toString(), permalink };
       }
@@ -1467,7 +1567,9 @@ function createPostNavigationTarget(
       // Fall back to an absolute post URL below.
     }
   }
-  return hasUsableNavigationUrl(post?.url) ? { url: post.url } : undefined;
+  return !requirePermalink && hasUsableNavigationUrl(post.url)
+    ? { url: post.url }
+    : undefined;
 }
 
 function isRedditHostname(hostname: string): boolean {

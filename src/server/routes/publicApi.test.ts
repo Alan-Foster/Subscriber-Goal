@@ -47,6 +47,7 @@ const hoisted = vi.hoisted(() => ({
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
   getCtaActivityMetric: vi.fn(),
+  getRecentCommunityPostIds: vi.fn(),
   isClickActivityPreset: vi.fn(),
   recordCtaClick: vi.fn(),
   getStatisticsReport: vi.fn(),
@@ -121,6 +122,7 @@ vi.mock("../utils/subredditBlacklist", () => ({
 
 vi.mock("../data/ctaActivity", () => ({
   getCtaActivityMetric: hoisted.getCtaActivityMetric,
+  getRecentCommunityPostIds: hoisted.getRecentCommunityPostIds,
   isClickActivityPreset: hoisted.isClickActivityPreset,
   recordCtaClick: hoisted.recordCtaClick,
 }));
@@ -230,6 +232,7 @@ describe("publicApi routes", () => {
       isModerator: false,
     });
     hoisted.isSubredditBlacklisted.mockResolvedValue(false);
+    hoisted.getRecentCommunityPostIds.mockResolvedValue([]);
     hoisted.getCtaActivityMetric.mockResolvedValue({
       kind: "posts",
       count: 1,
@@ -2226,21 +2229,19 @@ describe("publicApi routes", () => {
       }));
       const targetUrl = "https://www.reddit.com/comments/eligible";
       const listing = {
-        all: vi
-          .fn()
-          .mockResolvedValue(
-            hasEligiblePost
-              ? [
-                  ...candidates,
-                  {
-                    id: "t3_eligible",
-                    url: targetUrl,
-                    spoiler: true,
-                    nsfw: true,
-                  },
-                ]
-              : candidates,
-          ),
+        all: vi.fn().mockResolvedValue(
+          hasEligiblePost
+            ? [
+                ...candidates,
+                {
+                  id: "t3_eligible",
+                  url: targetUrl,
+                  spoiler: true,
+                  nsfw: true,
+                },
+              ]
+            : candidates,
+        ),
       };
       const fetchListing =
         type === "top-post-day"
@@ -2261,12 +2262,10 @@ describe("publicApi routes", () => {
         });
         expect(fetchListing).toHaveBeenCalledOnce();
       } else {
-        expect(status).toHaveBeenCalledExactlyOnceWith(404);
-        expect(json).toHaveBeenCalledWith(
-          expect.objectContaining({
-            messageKey: "afterJoin.dynamicPostUnavailable",
-          }),
-        );
+        expect(json).toHaveBeenCalledWith({
+          target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+          fallbackAction: "create-post",
+        });
         if (type === "top-post-day") {
           expect(
             fetchListing.mock.calls.map(([request]) => request.timeframe),
@@ -2276,7 +2275,7 @@ describe("publicApi routes", () => {
     },
   );
 
-  it("returns unavailable when the most recent post has no valid target", async () => {
+  it("falls back to Create Post when Most Recent has no valid target", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -2306,12 +2305,15 @@ describe("publicApi routes", () => {
 
     await routes.get(apiRoutes.afterSubscribeTarget)?.(
       {} as Request,
-      { status } as unknown as Response,
+      { json, status } as unknown as Response,
     );
 
     expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
-    expect(status).toHaveBeenCalledWith(404);
+    expect(json).toHaveBeenCalledWith({
+      target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+      fallbackAction: "create-post",
+    });
   });
 
   it("rejects dynamic navigation for unsubscribed viewers", async () => {
@@ -2406,7 +2408,7 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
-  it("returns unavailable when every timeframe contains only excluded candidates", async () => {
+  it("falls back to Create Post when every timeframe contains only excluded candidates", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
     hoisted.getSubGoalData.mockResolvedValue({
@@ -2432,22 +2434,19 @@ describe("publicApi routes", () => {
 
     await routes.get(apiRoutes.afterSubscribeTarget)?.(
       {} as Request,
-      { status } as unknown as Response,
+      { json, status } as unknown as Response,
     );
 
-    expect(status).toHaveBeenCalledWith(404);
+    expect(json).toHaveBeenCalledWith({
+      target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+      fallbackAction: "create-post",
+    });
     expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(4);
     expect(
       hoisted.reddit.getTopPosts.mock.calls.map(
         ([options]) => options.timeframe,
       ),
     ).toEqual(["day", "week", "month", "all"]);
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "error",
-        message: "No post is currently available.",
-      }),
-    );
   });
 
   it("does not hide a top-post API failure behind a broader fallback", async () => {
@@ -2513,9 +2512,178 @@ describe("publicApi routes", () => {
     );
   });
 
-  it("opens the NSFW-tagged top post in an NSFW community", async () => {
+  it.each([
+    { nsfw: true, requested: "newest-post", fallbackAction: undefined },
+    { nsfw: false, requested: "top-post-day", fallbackAction: "newest-post" },
+    {
+      nsfw: undefined,
+      requested: "top-post-day",
+      fallbackAction: "newest-post",
+    },
+  ])(
+    "uses the activity index for $requested when NSFW is $nsfw",
+    async ({ nsfw, requested, fallbackAction }) => {
+      hoisted.context.userId = "t2_user";
+      hoisted.isTrackedSubscriber.mockResolvedValue(true);
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        name: "ExampleSub",
+        nsfw,
+      });
+      hoisted.getSubGoalData.mockResolvedValue({
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        afterSubscribeAction: { type: requested, colorTheme: "blue" },
+      });
+      const listing = { all: vi.fn().mockResolvedValue([]) };
+      hoisted.reddit.getNewPosts.mockReturnValue(listing);
+      hoisted.reddit.getTopPosts.mockReturnValue(listing);
+      const indexed = [
+        "t3_removed",
+        "t3_spam",
+        "t3_deleted",
+        "t3_hidden",
+        "t3_other",
+        "t3_external",
+        "t3_valid",
+      ];
+      hoisted.getRecentCommunityPostIds.mockResolvedValue(indexed);
+      hoisted.reddit.getPostById.mockImplementation(async (id) => {
+        const regular = {
+          id,
+          subredditName: "ExampleSub",
+          permalink: "/r/ExampleSub/comments/" + id.slice(3) + "/",
+        };
+        if (id === "t3_removed")
+          return { ...regular, removedByCategory: "automod_filtered" };
+        if (id === "t3_spam") return { ...regular, spam: true };
+        if (id === "t3_deleted")
+          throw Object.assign(new Error("missing"), { status: 404 });
+        if (id === "t3_hidden") return { ...regular, hidden: true };
+        if (id === "t3_other") return { ...regular, subredditName: "OtherSub" };
+        if (id === "t3_external")
+          return { ...regular, permalink: null, url: "https://example.com" };
+        return { ...regular, nsfw: true };
+      });
+
+      const json = vi.fn();
+      await createRouteHarness().get(apiRoutes.afterSubscribeTarget)!(
+        {} as Request,
+        { json } as unknown as Response,
+      );
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        target: {
+          url: "https://www.reddit.com/r/ExampleSub/comments/valid/",
+          permalink: "/r/ExampleSub/comments/valid/",
+        },
+        ...(fallbackAction ? { fallbackAction } : {}),
+      });
+      expect(hoisted.reddit.getPostById.mock.calls.flat()).toEqual(indexed);
+    },
+  );
+
+  it("opens Create Post when Reddit denies access to both existing-post sources", async () => {
+    seedAutomaticCard("newest-post");
+    const denial = Object.assign(new Error("permission denied"), {
+      status: 403,
+    });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockRejectedValue(denial),
+    });
+    hoisted.getRecentCommunityPostIds.mockResolvedValue(["t3_inaccessible"]);
+    hoisted.reddit.getPostById.mockRejectedValue(denial);
+    const res = await requestAction();
+    expect(res.json).toHaveBeenCalledExactlyOnceWith({
+      target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
+      fallbackAction: "create-post",
+    });
+  });
+
+  it("retains the retry response when an indexed post lookup is inconclusive", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      afterSubscribeAction: { type: "newest-post" },
+    });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([]),
+    });
+    hoisted.getRecentCommunityPostIds.mockResolvedValue(["t3_uncertain"]);
+    hoisted.reddit.getPostById.mockRejectedValue(new Error("Reddit timed out"));
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+    await createRouteHarness().get(apiRoutes.afterSubscribeTarget)!(
+      {} as Request,
+      { status } as unknown as Response,
+    );
+    expect(status).toHaveBeenCalledExactlyOnceWith(503);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ messageKey: "errors.api.postTargetFailed" }),
+    );
+  });
+
+  it("publishes the same NSFW replacement pair that its dynamic selector accepts, and restores the saved pair in SFW", async () => {
+    seedAutomaticCard("top-post-day");
+    const subreddit = {
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      nsfw: true,
+    };
+    hoisted.reddit.getCurrentSubreddit.mockImplementation(
+      async () => subreddit,
+    );
+    const routes = createRouteHarness();
+    const json = vi.fn();
+    const init = () =>
+      routes.get(apiRoutes.init)!(
+        {} as Request,
+        { json } as unknown as Response,
+      );
+    await init();
+    expect(json).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          afterSubscribeAction: expect.objectContaining({
+            type: "link",
+            url: "https://www.reddit.com/r/ExampleSub/submit/",
+          }),
+          automaticAfterSubscribeAction: expect.objectContaining({
+            type: "newest-post",
+          }),
+        }),
+      }),
+    );
+
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([]),
+    });
+    const targetResult = await requestAction({
+      automaticAction: "newest-post",
+    });
+    expect(targetResult.json).toHaveBeenCalledWith(
+      expect.objectContaining({ fallbackAction: "create-post" }),
+    );
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+
+    subreddit.nsfw = false;
+    await init();
+    expect(json).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({
+          afterSubscribeAction: expect.objectContaining({
+            type: "top-post-day",
+          }),
+          automaticAfterSubscribeAction: expect.objectContaining({
+            type: "newest-post",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("opens the NSFW-tagged newest post before Join in an NSFW community", async () => {
+    hoisted.context.userId = "t2_user";
+    hoisted.isTrackedSubscriber.mockResolvedValue(false);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -2523,14 +2691,16 @@ describe("publicApi routes", () => {
       nsfw: true,
     });
     hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
       afterSubscribeAction: {
-        type: "top-post-day",
-        buttonText: "View the Top Post Today",
+        type: "newest-post",
+        buttonText: "View the Most Recent Post",
         colorTheme: "blue",
       },
     });
     const topUrl = "https://www.reddit.com/r/ExampleSub/comments/top";
-    hoisted.reddit.getTopPosts.mockReturnValue({
+    hoisted.reddit.getNewPosts.mockReturnValue({
       all: vi
         .fn()
         .mockResolvedValue([{ id: "t3_top", url: topUrl, nsfw: true }]),
@@ -2546,10 +2716,8 @@ describe("publicApi routes", () => {
     expect(json).toHaveBeenCalledWith({
       target: { url: topUrl },
     });
-    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ timeframe: "day" }),
-    );
-    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
   });
 
   it.each(["subscriber-goal-v1", "subscribe-only-v1"])(
