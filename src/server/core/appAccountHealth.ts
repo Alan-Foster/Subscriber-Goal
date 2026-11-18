@@ -7,6 +7,10 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import type { RedditClient, RedisClient } from "../types";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
+import {
+  highlightPermissionIncidentKey,
+  notifyHighlightPermissionIncident,
+} from "../utils/highlightFailureNotifications";
 
 export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
@@ -171,6 +175,9 @@ export async function checkAppAccountHealth({
     }
 
     await redis.del(appAccountHealthRetryStateKey);
+    if (previousHealth.status === "unhealthy" || previousRetry.lastError) {
+      await redis.del(highlightPermissionIncidentKey);
+    }
     await redis.hSet(appAccountHealthStateKey, {
       status: "healthy",
       checkedAt: String(nowMs),
@@ -246,7 +253,8 @@ export async function checkAppAccountHealth({
 
   try {
     const previous = await redis.hGetAll(appAccountHealthStateKey);
-    const duplicateIncident = previous.status === "unhealthy";
+    const duplicateIncident =
+      previous.status === "unhealthy" && previous.notification !== "not_needed";
     let notification: AppAccountHealthResult["notification"] = notify
       ? "failed"
       : "not_needed";
@@ -268,12 +276,20 @@ export async function checkAppAccountHealth({
       const message = buildAppAccountRecoveryMessage(subredditName, language);
       if (subredditId) {
         try {
-          await reddit.modMail.createModNotification({
-            subredditId: subredditId as `t5_${string}`,
-            subject: message.subject,
-            bodyMarkdown: message.bodyMarkdown,
-          });
-          notification = "modmail";
+          const outcome = await notifyHighlightPermissionIncident(
+            redis,
+            async () => {
+              await reddit.modMail.createModNotification({
+                subredditId: subredditId as `t5_${string}`,
+                subject: message.subject,
+                bodyMarkdown: message.bodyMarkdown,
+              });
+              return "sent";
+            },
+            nowMs,
+          );
+          notification =
+            outcome === "skipped_duplicate" ? "deduplicated" : "modmail";
         } catch (error) {
           logDiagnostic(
             "warn",
@@ -321,7 +337,10 @@ export async function checkAppAccountHealth({
         appUsername: appUsername ?? "",
         permissions: permissions.join(","),
         incidentFingerprint: fingerprint,
-        notification,
+        notification:
+          !notify && duplicateIncident
+            ? (previous.notification ?? notification)
+            : notification,
         ...(duplicateIncident ? {} : { incidentStartedAt: String(nowMs) }),
       });
     logDiagnostic("warn", "app_account_unhealthy", {

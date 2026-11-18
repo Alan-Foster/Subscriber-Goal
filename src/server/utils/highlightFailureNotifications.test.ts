@@ -159,6 +159,30 @@ describe("highlight failure notifications", () => {
     expect(createModNotification).toHaveBeenCalledTimes(3);
   });
 
+  it("shares a permission incident across alternating posts and overlapping sends", async () => {
+    const redis = new IncidentRedis();
+    const client = reddit();
+    const notify = (postId: LinkId) =>
+      notifyHighlightFailureIncident({
+        ...baseNotification,
+        redis: redis as never,
+        reddit: client as never,
+        postId,
+        result: {
+          ...result(postId),
+          issues: [
+            { category: "permission", message: "permission denied", postId },
+          ],
+        },
+      });
+    await expect(
+      Promise.all([notify("t3_first"), notify("t3_second")]),
+    ).resolves.toEqual(["sent", "skipped_duplicate"]);
+    await expect(notify("t3_third")).resolves.toBe("skipped_duplicate");
+    await expect(notify("t3_first")).resolves.toBe("skipped_duplicate");
+    expect(client.modMail.createModNotification).toHaveBeenCalledOnce();
+  });
+
   it("clears replaced and resolved active incidents", async () => {
     const redis = new IncidentRedis();
     const client = reddit();

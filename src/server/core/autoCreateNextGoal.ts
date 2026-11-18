@@ -33,6 +33,7 @@ import { isLinkId } from "../types";
 import {
   getPostUrl,
   notifyHighlightFailure,
+  notifyHighlightFailureIncident,
 } from "../utils/highlightFailureNotifications";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { isCrosspostEligible } from "../utils/subredditSafety";
@@ -446,7 +447,7 @@ export async function processDueAutoCreateNextGoals({
           rollbackOutcome: highlightResult.rollbackOutcome,
           reorderOutcome: highlightResult.reorderOutcome,
         });
-        await notifyHighlightFailure({
+        const notification = {
           reddit,
           subredditId: subreddit.id,
           subredditName: subreddit.name,
@@ -455,7 +456,22 @@ export async function processDueAutoCreateNextGoals({
           errorMessage: highlightResult.errorMessage,
           highlightResult,
           language: sourceGoalData.language,
-        });
+        };
+        if (
+          highlightResult.issues.some(
+            ({ category }) => category === "permission",
+          )
+        ) {
+          await notifyHighlightFailureIncident({
+            ...notification,
+            redis,
+            postId: post.id,
+            result: highlightResult,
+            nowMs,
+          });
+        } else {
+          await notifyHighlightFailure(notification);
+        }
       }
       await redis.hSet(autoCreateNextGoalSuccessorsKey, {
         [sourcePostId]: post.id,

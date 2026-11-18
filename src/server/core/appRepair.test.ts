@@ -280,6 +280,30 @@ describe("scheduled app repair", () => {
     },
   );
 
+  it("completes a capacity-only pass and schedules the normal recurring check", async () => {
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "existing_not_highlighted",
+      capacityOnly: true,
+      reconciliationOutcome: "failed",
+      eligiblePostIds: ["t3_full"],
+      unhighlightedEligiblePostIds: ["t3_full"],
+    });
+    await scheduleAppRepair(redis as never, 100, 0);
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("complete");
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "complete",
+      recurring: "true",
+      attempts: "0",
+      nextRunAt: String(100 + recurringHighlightRepairIntervalMs),
+    });
+  });
+
   it("retries when Community Highlight reconciliation cannot safely complete", async () => {
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
       status: "existing_not_highlighted",

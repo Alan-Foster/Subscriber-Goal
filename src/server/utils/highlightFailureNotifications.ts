@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
@@ -8,6 +9,32 @@ const activeHighlightIncidentKey = "highlight_failure_incident_active_v1";
 const highlightIncidentRetryMs = 60 * 60 * 1000;
 const highlightIncidentLockMs = 5 * 60 * 1000;
 const highlightIncidentRetentionSeconds = 30 * 24 * 60 * 60;
+export const highlightPermissionIncidentKey =
+  "highlight_permission_incident_v1";
+
+export async function notifyHighlightPermissionIncident(
+  redis: RedisClient,
+  send: () => Promise<"sent" | "failed">,
+  nowMs = Date.now(),
+): Promise<"sent" | "failed" | "skipped_duplicate"> {
+  const key = highlightPermissionIncidentKey;
+  if (await redis.get(key)) return "skipped_duplicate";
+  const lockKey = `${key}:lock`;
+  const token = randomUUID();
+  await redis.set(lockKey, token, {
+    nx: true,
+    expiration: new Date(nowMs + highlightIncidentLockMs),
+  });
+  if ((await redis.get(lockKey)) !== token) return "skipped_duplicate";
+  try {
+    if (await redis.get(key)) return "skipped_duplicate";
+    const outcome = await send();
+    if (outcome === "sent") await redis.set(key, token);
+    return outcome;
+  } finally {
+    if ((await redis.get(lockKey)) === token) await redis.del(lockKey);
+  }
+}
 
 export type HighlightNotificationOutcome =
   "sent" | "failed" | "skipped_duplicate" | "not_requested";
@@ -19,6 +46,7 @@ type HighlightFailureNotificationParams = {
   moderatorUsername?: string | undefined;
   postTitle: string;
   postUrl?: string | undefined;
+  additionalPostUrls?: readonly string[] | undefined;
   errorMessage?: string | undefined;
   postOrigin?: "created" | "existing";
   highlightResult?: HighlightResult;
@@ -35,6 +63,7 @@ export function buildHighlightFailureMessage({
   moderatorUsername,
   postTitle,
   postUrl,
+  additionalPostUrls,
   postOrigin = "created",
   highlightResult,
   language,
@@ -72,7 +101,10 @@ export function buildHighlightFailureMessage({
       `${translate(language, "outbound.highlight.preservation")}\n\n` +
       `${translate(language, "outbound.highlight.subreddit", { subredditName })}\n` +
       `${moderatorLine}\n\n` +
-      `${translate(language, "outbound.highlight.goalHeading", { origin: isExisting ? "Existing" : "New" })}\n${postTitle}${postUrlLine}`,
+      `${translate(language, "outbound.highlight.goalHeading", { origin: isExisting ? "Existing" : "New" })}\n${postTitle}${postUrlLine}` +
+      (additionalPostUrls?.length
+        ? `\n\n${additionalPostUrls.join("\n\n")}`
+        : ""),
   };
 }
 
@@ -129,6 +161,7 @@ export async function notifyHighlightFailure({
   moderatorUsername,
   postTitle,
   postUrl,
+  additionalPostUrls,
   errorMessage,
   postOrigin = "created",
   highlightResult,
@@ -139,6 +172,7 @@ export async function notifyHighlightFailure({
     moderatorUsername,
     postTitle,
     postUrl,
+    additionalPostUrls,
     errorMessage,
     postOrigin,
     ...(highlightResult ? { highlightResult } : {}),
@@ -224,10 +258,7 @@ export async function clearHighlightFailureIncident(
 ): Promise<void> {
   await redis.del(incidentKey(postId));
   const activePostId = await redis.get(activeHighlightIncidentKey);
-  if (activePostId && activePostId !== postId) {
-    await redis.del(incidentKey(activePostId as LinkId));
-  }
-  if (activePostId) await redis.del(activeHighlightIncidentKey);
+  if (activePostId === postId) await redis.del(activeHighlightIncidentKey);
 }
 
 export async function clearActiveHighlightFailureIncident(
@@ -252,15 +283,25 @@ export async function notifyHighlightFailureIncident({
   result: HighlightResult;
   nowMs?: number;
 }): Promise<Exclude<HighlightNotificationOutcome, "not_requested">> {
+  if (result.issues.some(({ category }) => category === "permission")) {
+    return notifyHighlightPermissionIncident(
+      redis,
+      () =>
+        notifyHighlightFailure({ ...notification, highlightResult: result }),
+      nowMs,
+    );
+  }
   const key = incidentKey(postId);
   const fingerprint = incidentFingerprint(result);
-  const activePostId = await redis.get(activeHighlightIncidentKey);
-  if (activePostId && activePostId !== postId) {
-    await redis.del(incidentKey(activePostId as LinkId));
+  if (notification.postOrigin !== "existing") {
+    const activePostId = await redis.get(activeHighlightIncidentKey);
+    if (activePostId && activePostId !== postId) {
+      await redis.del(incidentKey(activePostId as LinkId));
+    }
+    await redis.set(activeHighlightIncidentKey, postId, {
+      expiration: new Date(nowMs + highlightIncidentRetentionSeconds * 1000),
+    });
   }
-  await redis.set(activeHighlightIncidentKey, postId, {
-    expiration: new Date(nowMs + highlightIncidentRetentionSeconds * 1000),
-  });
   const existing = await redis.hGetAll(key);
   if (
     existing.fingerprint === fingerprint &&

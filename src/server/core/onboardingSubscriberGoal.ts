@@ -30,6 +30,7 @@ import {
   clearActiveHighlightFailureIncident,
   clearHighlightFailureIncident,
   getPostUrl,
+  highlightPermissionIncidentKey,
   notifyHighlightFailureIncident,
   type HighlightNotificationOutcome,
 } from "../utils/highlightFailureNotifications";
@@ -60,6 +61,7 @@ import {
 } from "./createSubscriberGoal";
 import {
   createFailedHighlightResult,
+  isCapacityOnlyHighlightFailure,
   highlightAndVerifyPost,
   highlightVerificationIntervalMs,
   highlightVerificationMaxWaitMs,
@@ -325,6 +327,7 @@ export type OnboardingHighlightEnsuranceResult =
     reconciliationOutcome?: "complete" | "degraded" | "failed";
     failureCategories?: HighlightResult["issues"][number]["category"][];
     capacityOutcome?: HighlightResult["capacityOutcome"];
+    capacityOnly?: boolean;
     cleanupOutcome?: HighlightResult["cleanupOutcome"];
     rollbackOutcome?: HighlightResult["rollbackOutcome"];
     reorderOutcome?: HighlightResult["reorderOutcome"];
@@ -2026,6 +2029,7 @@ async function reconcileLiveSubscriberGoalHighlights({
                   selected: candidate,
                   nowMs,
                   notifyOnFailure,
+                  deferPermissionNotice: true,
                   removableManagedPostIds: removableCompletedIds,
                   reconciliationContext,
                   ...(highlightVerification ? { highlightVerification } : {}),
@@ -2035,6 +2039,7 @@ async function reconcileLiveSubscriberGoalHighlights({
                   redis,
                   selected: candidate,
                   notifyOnFailure,
+                  deferPermissionNotice: true,
                   removableManagedPostIds: removableCompletedIds,
                   nowMs,
                   ...(highlightVerification ? { highlightVerification } : {}),
@@ -2053,8 +2058,51 @@ async function reconcileLiveSubscriberGoalHighlights({
       base.unhighlightedEligiblePostIds.push(
         ...failed.map(({ candidate }) => candidate.postId),
       );
+      const permissionFailures = degraded.filter(({ highlightResult }) =>
+        highlightResult.issues.some(
+          ({ category }) => category === "permission",
+        ),
+      );
+      let permissionNotice: HighlightNotificationOutcome = "not_requested";
+      if (notifyOnFailure && permissionFailures.length > 0) {
+        const [first, ...others] = permissionFailures;
+        const { candidate, highlightResult } = first!;
+        permissionNotice = await notifyExistingHighlightFailure({
+          reddit,
+          redis,
+          selected: candidate,
+          highlightResult,
+          nowMs,
+          additionalPostUrls: others.map(
+            ({ candidate }) =>
+              getPostUrl(candidate.post) ??
+              "https://www.reddit.com/comments/" + candidate.postId.slice(3),
+          ),
+        });
+      }
+      if (
+        degraded.length === 0 &&
+        reconciliations.some(
+          ({ highlightResult }) =>
+            highlightResult.verifiedHighlighted &&
+            (highlightResult.capacityOutcome === "slot_available" ||
+              highlightResult.capacityOutcome === "managed_slot_freed"),
+        )
+      ) {
+        await redis.del(highlightPermissionIncidentKey);
+      }
       const selectedReconciliation =
-        failed[0] ?? degraded[0] ?? reconciliations[0]!;
+        failed.find(
+          ({ highlightResult }) =>
+            !isCapacityOnlyHighlightFailure(highlightResult),
+        ) ??
+        degraded.find(
+          ({ highlightResult }) =>
+            !isCapacityOnlyHighlightFailure(highlightResult),
+        ) ??
+        failed[0] ??
+        degraded[0] ??
+        reconciliations[0]!;
       const { candidate: selected, highlightResult } = selectedReconciliation;
       const deferredCompletedGoal =
         activeGoals.length === 0 && completedGoals.length > 0
@@ -2076,7 +2124,15 @@ async function reconcileLiveSubscriberGoalHighlights({
         classificationConfidence: selected.classificationConfidence,
         selectedWasAlreadyHighlighted: selected.isHighlighted,
         ...reconciliationDetails(highlightResult),
-        notificationOutcome: selectedReconciliation.notificationOutcome,
+        capacityOnly:
+          degraded.length > 0 &&
+          degraded.every(({ highlightResult }) =>
+            isCapacityOnlyHighlightFailure(highlightResult),
+          ),
+        notificationOutcome:
+          permissionNotice === "not_requested"
+            ? selectedReconciliation.notificationOutcome
+            : permissionNotice,
         ...(deferredCompletedGoal?.completedTime === undefined
           ? {}
           : {
@@ -2255,6 +2311,7 @@ async function reconcileCanonicalClassicGoal({
   selected,
   nowMs,
   notifyOnFailure,
+  deferPermissionNotice = false,
   highlightVerification,
   removableManagedPostIds,
   reconciliationContext,
@@ -2264,6 +2321,7 @@ async function reconcileCanonicalClassicGoal({
   selected: OnboardingGoalCandidate;
   nowMs: number;
   notifyOnFailure: boolean;
+  deferPermissionNotice?: boolean;
   highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
   removableManagedPostIds: LinkId[];
   reconciliationContext: HighlightReconciliationContext;
@@ -2507,7 +2565,7 @@ async function reconcileCanonicalClassicGoal({
         reconciledAt: nowMs,
       });
       await clearHighlightFailureIncident(redis, selected.postId);
-    } else {
+    } else if (!isCapacityOnlyHighlightFailure(highlightResult)) {
       await scheduleHighlightRepair(redis, {
         delayMs: 5 * 60 * 1000,
         force: true,
@@ -2535,6 +2593,7 @@ async function reconcileCanonicalClassicGoal({
     redis,
     selected,
     notifyOnFailure,
+    deferPermissionNotice,
     removableManagedPostIds,
     nowMs,
     ...(highlightVerification ? { highlightVerification } : {}),
@@ -2577,6 +2636,7 @@ async function highlightExistingGoal({
   redis,
   selected,
   notifyOnFailure,
+  deferPermissionNotice = false,
   highlightVerification,
   removableManagedPostIds,
   nowMs = Date.now(),
@@ -2585,6 +2645,7 @@ async function highlightExistingGoal({
   redis: RedisClient;
   selected: OnboardingGoalCandidate;
   notifyOnFailure: boolean;
+  deferPermissionNotice?: boolean;
   highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
   removableManagedPostIds?: LinkId[];
   nowMs?: number;
@@ -2676,6 +2737,10 @@ async function highlightExistingGoal({
     return { highlightResult, notificationOutcome: "not_requested" };
   }
 
+  if (isCapacityOnlyHighlightFailure(highlightResult)) {
+    return { highlightResult, notificationOutcome: "not_requested" };
+  }
+
   await scheduleHighlightRepair(redis, {
     delayMs: 5 * 60 * 1000,
     force: true,
@@ -2683,41 +2748,70 @@ async function highlightExistingGoal({
     nowMs,
   });
 
-  let notificationOutcome: HighlightNotificationOutcome = "not_requested";
-  if (notifyOnFailure) {
-    try {
-      const subreddit = await reddit.getCurrentSubreddit();
-      notificationOutcome = await notifyHighlightFailureIncident({
-        reddit,
-        redis,
+  const notificationOutcome =
+    notifyOnFailure &&
+    !(
+      deferPermissionNotice &&
+      highlightResult.issues.some(({ category }) => category === "permission")
+    )
+      ? await notifyExistingHighlightFailure({
+          reddit,
+          redis,
+          selected,
+          highlightResult,
+          nowMs,
+        })
+      : "not_requested";
+  return { highlightResult, notificationOutcome };
+}
+
+async function notifyExistingHighlightFailure({
+  reddit,
+  redis,
+  selected,
+  highlightResult,
+  nowMs,
+  additionalPostUrls,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  selected: OnboardingGoalCandidate;
+  highlightResult: HighlightResult;
+  nowMs: number;
+  additionalPostUrls?: readonly string[];
+}): Promise<HighlightNotificationOutcome> {
+  try {
+    const subreddit = await reddit.getCurrentSubreddit();
+    return await notifyHighlightFailureIncident({
+      reddit,
+      redis,
+      postId: selected.postId,
+      result: highlightResult,
+      subredditId: subreddit.id,
+      subredditName: subreddit.name,
+      postTitle: selected.post.title ?? "Subscriber Goal",
+      postUrl:
+        getPostUrl(selected.post) ??
+        "https://www.reddit.com/comments/" + selected.postId.slice(3),
+      additionalPostUrls,
+      errorMessage: highlightResult.errorMessage,
+      postOrigin: "existing",
+      language: subreddit.language,
+      nowMs,
+    });
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "onboarding_existing_goal_notification_failed",
+      {
+        workflow: "onboarding_highlight_ensurance",
+        phase: "highlight_notification",
         postId: selected.postId,
-        result: highlightResult,
-        subredditId: subreddit.id,
-        subredditName: subreddit.name,
-        postTitle: selected.post.title ?? "Subscriber Goal",
-        postUrl: getPostUrl(selected.post),
-        errorMessage: highlightResult.errorMessage,
-        postOrigin: "existing",
-        language: subreddit.language,
-      });
-    } catch (error) {
-      notificationOutcome = "failed";
-      logDiagnostic(
-        "warn",
-        "onboarding_existing_goal_notification_failed",
-        {
-          workflow: "onboarding_highlight_ensurance",
-          phase: "highlight_notification",
-          postId: selected.postId,
-        },
-        error,
-      );
-    }
+      },
+      error,
+    );
+    return "failed";
   }
-  return {
-    highlightResult,
-    notificationOutcome,
-  };
 }
 
 function reconciliationDetails(
@@ -2728,6 +2822,7 @@ function reconciliationDetails(
   | "reconciliationOutcome"
   | "failureCategories"
   | "capacityOutcome"
+  | "capacityOnly"
   | "cleanupOutcome"
   | "rollbackOutcome"
   | "reorderOutcome"
@@ -2746,6 +2841,7 @@ function reconciliationDetails(
           : "complete",
     failureCategories: highlightResult.issues.map(({ category }) => category),
     capacityOutcome: highlightResult.capacityOutcome,
+    capacityOnly: isCapacityOnlyHighlightFailure(highlightResult),
     cleanupOutcome: highlightResult.cleanupOutcome,
     rollbackOutcome: highlightResult.rollbackOutcome,
     reorderOutcome: highlightResult.reorderOutcome,

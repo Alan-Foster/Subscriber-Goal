@@ -17,6 +17,7 @@ import {
   appRepairStateKey,
   appRepairVersion,
   scheduleHighlightRepair,
+  recurringHighlightRepairIntervalMs,
 } from "../data/highlightRepair";
 import {
   CommunityGoalMutationInProgressError,
@@ -29,7 +30,7 @@ import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
-export const recurringHighlightRepairIntervalMs = 6 * 60 * 60 * 1000;
+export { recurringHighlightRepairIntervalMs };
 
 export async function scheduleAppRepair(
   redis: RedisClient,
@@ -118,15 +119,6 @@ async function processDueAppRepairUnderLease({
     });
     const subreddit = await reddit.getCurrentSubreddit();
 
-    await runPhase("app_account_health", () =>
-      checkAppAccountHealth({
-        reddit,
-        redis,
-        subredditName: subreddit.name,
-        subredditId: subreddit.id,
-        language: subreddit.language,
-      }),
-    );
     await runPhase("activity_backfill", () =>
       ensureCommunityPostActivityBackfill(reddit, redis, subreddit.name),
     );
@@ -187,7 +179,9 @@ async function processDueAppRepairUnderLease({
           reconciliationContext: "repair",
           mutationLease,
         });
-        recurringHighlightCheck = (result.eligiblePostIds?.length ?? 0) > 0;
+        recurringHighlightCheck =
+          result.capacityOnly === true ||
+          (result.eligiblePostIds?.length ?? 0) > 0;
         const onlyRemovedGoalsUnhighlighted =
           result.pausedByRemovedGoal &&
           (result.unhighlightedEligiblePostIds?.length ?? 0) > 0 &&
@@ -203,10 +197,11 @@ async function processDueAppRepairUnderLease({
           : false;
         if (
           (result.status === "missing" && expectedTargetOutstanding) ||
-          (result.status === "existing_not_highlighted" &&
-            !onlyRemovedGoalsUnhighlighted) ||
-          result.reconciliationOutcome === "degraded" ||
-          result.reconciliationOutcome === "failed"
+          (!result.capacityOnly &&
+            ((result.status === "existing_not_highlighted" &&
+              !onlyRemovedGoalsUnhighlighted) ||
+              result.reconciliationOutcome === "degraded" ||
+              result.reconciliationOutcome === "failed"))
         ) {
           throw new Error(
             result.errorMessage ??
@@ -217,6 +212,16 @@ async function processDueAppRepairUnderLease({
     } else {
       failures.push("migration_discovery: incomplete");
     }
+
+    await runPhase("app_account_health", () =>
+      checkAppAccountHealth({
+        reddit,
+        redis,
+        subredditName: subreddit.name,
+        subredditId: subreddit.id,
+        language: subreddit.language,
+      }),
+    );
 
     if (failures.length === 0) {
       await redis.hSet(appRepairStateKey, {

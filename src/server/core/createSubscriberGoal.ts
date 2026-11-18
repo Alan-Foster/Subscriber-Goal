@@ -28,6 +28,7 @@ import {
 import { isLinkId } from "../types";
 import {
   createFailedHighlightResult,
+  isCapacityOnlyHighlightFailure,
   highlightAndVerifyPost,
   highlightVerificationIntervalMs,
   highlightVerificationMaxWaitMs,
@@ -64,7 +65,10 @@ import {
   saveHighlightManagementBaseline,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
-import { scheduleHighlightRepair } from "../data/highlightRepair";
+import {
+  recurringHighlightRepairIntervalMs,
+  scheduleHighlightRepair,
+} from "../data/highlightRepair";
 import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
 import {
   isSubscriberGoalPostRetired,
@@ -1064,9 +1068,14 @@ async function createSubscriberGoalInternal(
     });
     await clearHighlightContradictionIncident(redis);
   } else if (highlightResult.issues.length > 0) {
+    const capacityOnly =
+      options.automaticPermissionCheck &&
+      isCapacityOnlyHighlightFailure(highlightResult);
     await scheduleHighlightRepair(redis, {
-      delayMs: 5 * 60 * 1000,
-      force: true,
+      delayMs: capacityOnly
+        ? recurringHighlightRepairIntervalMs
+        : 5 * 60 * 1000,
+      force: !capacityOnly,
       reason: `${options.reconciliationContext ?? "manual_creation"}_highlight_degraded`,
       targetPostId: post.id,
     });

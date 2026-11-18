@@ -2,6 +2,7 @@ import type { RedisClient } from "../types";
 
 export const appRepairStateKey = "app_repair_community_highlights_v3_state";
 export const appRepairLockKey = "app_repair_community_highlights_v3_lock";
+export const recurringHighlightRepairIntervalMs = 6 * 60 * 60 * 1000;
 export const appRepairVersion = "app_repair_community_highlights_v3";
 
 export async function scheduleHighlightRepair(

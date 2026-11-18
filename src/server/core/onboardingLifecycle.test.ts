@@ -1696,6 +1696,119 @@ describe("existing goal highlight ensurance", () => {
     };
   };
 
+  it("fills available slots newest first and quietly restores a waiting goal when a slot opens", async () => {
+    const protectedPosts = Array.from({ length: 4 }, (_, i) => ({
+      ...makePost({
+        id: `t3_protected${i}`,
+        createdAt: "2026-09-14",
+        highlighted: true,
+      }),
+      authorName: i % 2 ? "moderator" : "other-app",
+    }));
+    const older = makePost({
+      id: "t3_older",
+      createdAt: "2026-09-15",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+    });
+    const tiny = makePost({
+      id: "t3_tiny",
+      createdAt: "2026-09-16",
+      postKind: "subscribe-only-v1",
+      postHeight: "tiny",
+    });
+    const cta = makePost({
+      id: "t3_cta",
+      createdAt: "2026-09-17",
+      postKind: "cta-only-v1",
+      postHeight: "cta",
+    });
+    const redis = new InMemoryRedis();
+    await seedGoalData(redis, older.id, { goal: 3000 });
+    const reddit = makeReddit([older, tiny, cta, ...protectedPosts]);
+    const run = (time: number) =>
+      ensureExistingSubscriberGoalHighlighted({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: time,
+        notifyOnFailure: true,
+        reconciliationContext: "repair",
+      });
+    const blocked = await run(nowMs);
+    expect(blocked).toMatchObject({
+      capacityOnly: true,
+      unhighlightedEligiblePostIds: [older.id],
+    });
+    expect(cta.highlight.mock.invocationCallOrder[0]).toBeLessThan(
+      tiny.highlight.mock.invocationCallOrder[0]!,
+    );
+    expect(older.highlight).not.toHaveBeenCalled();
+    await run(nowMs + 60_000);
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    expect(
+      await redis.hGetAll("app_repair_community_highlights_v3_state"),
+    ).toEqual({});
+    for (const post of protectedPosts)
+      expect(post.unhighlight).not.toHaveBeenCalled();
+    await protectedPosts[0]!.unhighlight();
+    await expect(run(nowMs + 6 * 60 * 60 * 1000)).resolves.toMatchObject({
+      status: "existing",
+      unhighlightedEligiblePostIds: [],
+    });
+    expect(older.highlight).toHaveBeenCalledOnce();
+    expect(tiny.unhighlight).not.toHaveBeenCalled();
+    expect(cta.unhighlight).not.toHaveBeenCalled();
+    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("sends one permission Modmail for multiple goals and reopens the incident after recovery", async () => {
+    const posts = Array.from({ length: 3 }, (_, i) =>
+      makePost({
+        id: `t3_goal${i}`,
+        createdAt: `2026-09-1${i + 4}`,
+        postKind: "subscribe-only-v1",
+        postHeight: "tiny",
+      }),
+    );
+    const reddit = makeReddit(posts);
+    const permissions = vi.fn(async (): Promise<string[]> => []);
+    reddit.getAppUser.mockResolvedValue({
+      username: "subscriber-goal-app",
+      getModPermissionsForSubreddit: permissions,
+    });
+    const redis = new InMemoryRedis();
+    const run = (time: number) =>
+      ensureExistingSubscriberGoalHighlighted({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: time,
+        notifyOnFailure: true,
+        reconciliationContext: "repair",
+      });
+    await expect(run(nowMs)).resolves.toMatchObject({
+      notificationOutcome: "sent",
+      failureCategories: ["permission"],
+    });
+    const message = reddit.modMail.createModNotification.mock
+      .calls[0] as unknown as [{ bodyMarkdown: string }];
+    for (const post of posts) {
+      expect(message[0].bodyMarkdown).toContain(
+        "/comments/" + post.id.slice(3),
+      );
+      expect(post.highlight).not.toHaveBeenCalled();
+    }
+    await expect(run(nowMs + 60_000)).resolves.toMatchObject({
+      notificationOutcome: "skipped_duplicate",
+    });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    permissions.mockResolvedValue(["posts"]);
+    await run(nowMs + 120_000);
+    for (const post of posts) await post.unhighlight();
+    permissions.mockResolvedValue([]);
+    await run(nowMs + 180_000);
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(2);
+  });
+
   it("restores an unhighlighted protected Tiny post", async () => {
     const older = makePost({
       id: "t3_older",

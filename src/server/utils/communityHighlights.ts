@@ -138,6 +138,15 @@ function resultWithIssues(
   };
 }
 
+export function isCapacityOnlyHighlightFailure(
+  result: HighlightResult,
+): boolean {
+  return (
+    result.issues.length > 0 &&
+    result.issues.every(({ category }) => category === "capacity")
+  );
+}
+
 export function createFailedHighlightResult(
   selectedPostId: LinkId,
   category: HighlightFailureCategory,
@@ -578,11 +587,18 @@ export async function highlightAndVerifyPost(
       await post.highlight();
     } catch (error) {
       writeError = toErrorMessage(error);
+      const response = error as { status?: number; statusCode?: number } | null;
+      const status = response?.status ?? response?.statusCode;
+      const permissionDenied =
+        status === 403 ||
+        /\b(?:PERMISSION_DENIED|403\s+Forbidden)\b/i.test(writeError);
       issues.push({
         category:
           post.archived && isArchivedPostMutationError(error)
             ? "post_state"
-            : "write",
+            : permissionDenied
+              ? "permission"
+              : "write",
         postId: post.id,
         message: writeError,
       });
