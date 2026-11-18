@@ -1084,30 +1084,87 @@ describe("publicApi routes", () => {
     },
   );
 
-  it("overrides username sharing for regular goals in NSFW subreddits", async () => {
-    hoisted.context.userId = "t2_user";
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      nsfw: true,
-    });
-    const routes = createRouteHarness();
-    const json = vi.fn();
+  it.each([
+    { nsfw: true, expected: null, scenario: "NSFW" },
+    { nsfw: undefined, expected: null, scenario: "unknown safety" },
+    { nsfw: false, expected: "EarlierUser", scenario: "confirmed SFW" },
+  ])(
+    "returns the expected stored subscriber on Init and Refresh for $scenario",
+    async ({ nsfw, expected }) => {
+      const data = await hoisted.getSubGoalData();
+      hoisted.getSubGoalData.mockResolvedValue({
+        ...data,
+        recentSubscriber: "EarlierUser",
+      });
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        ...(nsfw === undefined ? {} : { nsfw }),
+      });
+      const routes = createRouteHarness();
 
-    await routes.get(apiRoutes.subscribe)?.(
-      { body: { shareUsername: true } } as Request,
-      { json } as unknown as Response,
-    );
+      for (const route of [apiRoutes.init, apiRoutes.refresh]) {
+        const json = vi.fn();
+        await routes.get(route)!(
+          {} as Request,
+          { json } as unknown as Response,
+        );
+        expect(json).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            state: expect.objectContaining({ recentSubscriber: expected }),
+          }),
+        );
+      }
+    },
+  );
 
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
-      hoisted.redis,
-      "t3_post",
-      101,
-      { id: "t2_user", username: "TinyUser" },
-      false,
-    );
-  });
+  it.each([true, undefined])(
+    "keeps Join responses and realtime updates private when NSFW status is %s",
+    async (nsfw) => {
+      hoisted.context.userId = "t2_user";
+      const data = await hoisted.getSubGoalData();
+      hoisted.getSubGoalData.mockResolvedValue({
+        ...data,
+        postHeight: "regular",
+        recentSubscriber: "EarlierUser",
+      });
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        ...(nsfw === undefined ? {} : { nsfw }),
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(apiRoutes.subscribe)?.(
+        { body: { shareUsername: true } } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+        hoisted.redis,
+        "t3_post",
+        101,
+        { id: "t2_user", username: "TinyUser" },
+        false,
+      );
+      expect(json).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          type: "subscribe",
+          state: expect.objectContaining({ recentSubscriber: null }),
+        }),
+      );
+      expect(hoisted.realtime.send).toHaveBeenCalledExactlyOnceWith(
+        "subscriber_updates",
+        {
+          type: "sub",
+          newSubscriberCount: 101,
+        },
+      );
+    },
+  );
 
   it("keeps SFW Tiny usernames private while tracking, confirming, and broadcasting counts", async () => {
     hoisted.context.userId = "t2_user";
