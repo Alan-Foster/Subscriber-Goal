@@ -5,7 +5,6 @@ import {
   crosspostListKey,
   crosspostWikiPages,
   getCrosspostPendingByRevisionKey,
-  upsertPendingCrosspost,
 } from '../data/crosspostData';
 import { postsKey } from '../data/updaterData';
 import type { ServerAppSettings } from '../settings';
@@ -16,7 +15,6 @@ const hoisted = vi.hoisted(() => ({
     subredditId?: string;
   },
   mockReddit: {
-    getAppUser: vi.fn(),
     getCurrentSubreddit: vi.fn(),
     getPostById: vi.fn(),
     getSubredditInfoById: vi.fn(),
@@ -35,7 +33,6 @@ const mockContext = hoisted.mockContext;
 const mockReddit = hoisted.mockReddit;
 const safeGetWikiPageRevisionsMock = hoisted.safeGetWikiPageRevisionsMock;
 const loggedEvents = hoisted.loggedEvents;
-const appUserId = 't2_app';
 
 type ZEntry = { member: string; score: number };
 type SetOptions = {
@@ -249,7 +246,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     hoisted.redisState.redisMock = redisMock;
     mockContext.subredditName = undefined;
     mockContext.subredditId = undefined;
-    mockReddit.getAppUser.mockReset().mockResolvedValue({ id: appUserId });
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
@@ -374,7 +370,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             ? [
                 {
                   id: 'rev_create_page',
-                  authorId: appUserId,
                   reason: 'Create Page',
                   dateMs: Date.now(),
                 },
@@ -452,32 +447,24 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it.each([
-    ['removed before processing', { removed: true }, 'source_post_unavailable'],
-    ['marked as spam', { spam: true }, 'source_post_unavailable'],
-    ['NSFW-tagged', { nsfw: true }, 'source_post_nsfw'],
-    ['authored by another user', { authorId: 't2_moderator' }, 'source_post_non_app_author'],
-  ])('does not crosspost a source %s', async (_label, sourceFlags, reason) => {
+  it('terminally skips an NSFW-tagged source in a SFW community', async () => {
     mockContext.subredditName = 'SubGoal';
+    const now = Date.now();
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subreddit: string, page: string) => ({
         ok: true,
-        revisions: page === crosspostWikiPages.newPost ? [{
-          id: 'rev_source',
-          authorId: appUserId,
-          reason: 'Post t3_source with goal 100',
-          dateMs: Date.now(),
-        }] : [],
+        revisions: page === crosspostWikiPages.newPost
+          ? [{ id: 'rev_nsfw', reason: 'Post t3_nsfw with goal 100', dateMs: now }]
+          : [],
         durationMs: 1,
       })
     );
     mockReddit.getPostById.mockResolvedValue({
-      id: 't3_source',
+      id: 't3_nsfw',
       subredditId: 't5_source',
       subredditName: 'CorporateGifts',
-      authorId: appUserId,
-      createdAt: new Date(),
-      ...sourceFlags,
+      createdAt: new Date(now),
+      nsfw: true,
     });
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
 
@@ -485,98 +472,12 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(summary.crosspostsSkipped).toBe(1);
     expect(mockReddit.crosspost).not.toHaveBeenCalled();
-    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_source')).toBeUndefined();
+    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_nsfw')).toBeUndefined();
     expect(loggedEvents).toContainEqual(expect.objectContaining({
       event: 'crosspost_attempt_skipped',
-      reason,
-      revisionId: 'rev_source',
+      reason: 'source_post_nsfw',
+      revisionId: 'rev_nsfw',
     }));
-  });
-
-  it('ignores new post and action revisions not authored by the app and logs missing authors', async () => {
-    mockContext.subredditName = 'SubGoal';
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const dateMs = Date.now();
-    const revisionsByPage = {
-      [crosspostWikiPages.newPost]: [
-        { id: 'rev_other', authorId: 't2_moderator', reason: 'Post t3_source with goal 100', dateMs },
-        { id: 'rev_missing', reason: 'Post t3_source with goal 100', dateMs },
-      ],
-      [crosspostWikiPages.action.delete]: [
-        { id: 'rev_delete_other', authorId: 't2_moderator', reason: 'Dispatch delete for t3_source', dateMs },
-      ],
-    };
-    safeGetWikiPageRevisionsMock.mockImplementation(
-      async (_reddit: unknown, _subreddit: string, page: keyof typeof revisionsByPage) => ({
-        ok: true,
-        revisions: revisionsByPage[page] ?? [],
-        durationMs: 1,
-      })
-    );
-
-    try {
-      const summary = await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
-      await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
-
-      expect(summary.newPostsSeen).toBe(0);
-      expect(mockReddit.getPostById).not.toHaveBeenCalled();
-      expect(mockReddit.crosspost).not.toHaveBeenCalled();
-      expect(await redisMock.hGet(crosspostDeletionMarkersKey, 't3_source')).toBeUndefined();
-      const warnings = warn.mock.calls.map(([message]) => String(message));
-      expect(warnings.filter((message) => message.includes('non_app_revision_author'))).toHaveLength(2);
-      expect(warnings.filter((message) => message.includes('missing_revision_author'))).toHaveLength(1);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it.each([appUserId, 't2_moderator'])('rechecks the author of a previously queued revision by %s', async (authorId) => {
-    mockContext.subredditName = 'SubGoal';
-    const redis = hoisted.redisState.redisMock as Parameters<typeof upsertPendingCrosspost>[0];
-    const now = Date.now();
-    await upsertPendingCrosspost(redis, 'SubGoal', {
-      revisionId: 'rev_legacy',
-      postId: 't3_legacy',
-      goal: 100,
-      firstSeenMs: now,
-      nextAttemptMs: now,
-      attemptCount: 0,
-      lastError: null,
-      status: 'queued_for_crosspost',
-      revisionDateMs: now,
-    });
-    await redisMock.hSet('processedRevisions', { rev_legacy: 't3_legacy' });
-    safeGetWikiPageRevisionsMock.mockImplementation(
-      async (_reddit: unknown, _subreddit: string, page: string) => ({
-        ok: true,
-        revisions: page === crosspostWikiPages.newPost ? [{
-          id: 'rev_legacy',
-          authorId,
-          reason: 'Post t3_legacy with goal 100',
-          dateMs: now,
-        }] : [],
-        durationMs: 1,
-      })
-    );
-    mockReddit.getPostById.mockResolvedValue({
-      id: 't3_legacy',
-      subredditId: 't5_source',
-      subredditName: 'CorporateGifts',
-      authorId: appUserId,
-      createdAt: new Date(now),
-      removed: false,
-      removedByCategory: null,
-    });
-    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
-    mockReddit.crosspost.mockResolvedValue({ id: 't3_mirror' });
-
-    const summary = await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
-
-    expect(summary.newPostsSeen).toBe(0);
-    const expectedCreates = authorId === appUserId ? 1 : 0;
-    expect(summary.crosspostsCreated).toBe(expectedCreates);
-    expect(mockReddit.crosspost).toHaveBeenCalledTimes(expectedCreates);
-    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_legacy')).toBeUndefined();
   });
 
   it('terminally skips stale source posts older than freshness window', async () => {
@@ -589,7 +490,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_old',
-                authorId: appUserId,
                 reason: 'Post t3_abc123 with goal 100',
                 dateMs: Date.now(),
               },
@@ -607,7 +507,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_abc123',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 11 * 60 * 1000),
       nsfw: false,
@@ -644,7 +543,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_expire',
-                authorId: appUserId,
                 reason: 'Post t3_expire with goal 100',
                 dateMs: Date.now(),
               },
@@ -658,7 +556,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_expire',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 11 * 60 * 1000),
       nsfw: false,
@@ -723,7 +620,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_secs',
-                authorId: appUserId,
                 reason: 'Post t3_secs with goal 15000',
                 dateMs: Date.now(),
               },
@@ -738,7 +634,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_secs',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: secondsAgoFiveMinutes,
       nsfw: false,
@@ -771,7 +666,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_unknown',
-                authorId: appUserId,
                 reason: 'Post t3_unknown with goal 100',
                 dateMs: Date.now(),
               },
@@ -785,7 +679,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_unknown',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: 'not-a-date',
       nsfw: false,
@@ -855,7 +748,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         if (page === crosspostWikiPages.newPost) {
           return {
             ok: true,
-            revisions: [{ id: 'rev_unknown_age', authorId: appUserId, reason: 'Post t3_u1 with goal 10' }],
+            revisions: [{ id: 'rev_unknown_age', reason: 'Post t3_u1 with goal 10' }],
             durationMs: 1,
           };
         }
@@ -890,9 +783,9 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           return {
             ok: true,
             revisions: [
-              { id: 'rev_run_1', authorId: appUserId, reason: 'Post t3_run1 with goal 10', dateMs: Date.now() },
-              { id: 'rev_run_2', authorId: appUserId, reason: 'Post t3_run2 with goal 10', dateMs: Date.now() },
-              { id: 'rev_run_3', authorId: appUserId, reason: 'Post t3_run3 with goal 10', dateMs: Date.now() },
+              { id: 'rev_run_1', reason: 'Post t3_run1 with goal 10', dateMs: Date.now() },
+              { id: 'rev_run_2', reason: 'Post t3_run2 with goal 10', dateMs: Date.now() },
+              { id: 'rev_run_3', reason: 'Post t3_run3 with goal 10', dateMs: Date.now() },
             ],
             durationMs: 1,
           };
@@ -903,7 +796,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockImplementation(async (postId: string) => ({
       id: postId,
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -946,7 +838,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           return {
             ok: true,
             revisions: [
-              { id: 'rev_hourly', authorId: appUserId, reason: 'Post t3_hourly with goal 10', dateMs: Date.now() },
+              { id: 'rev_hourly', reason: 'Post t3_hourly with goal 10', dateMs: Date.now() },
             ],
             durationMs: 1,
           };
@@ -985,7 +877,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         if (page === crosspostWikiPages.newPost) {
           return {
             ok: true,
-            revisions: [{ id: 'rev_cool', authorId: appUserId, reason: 'Post t3_cool with goal 10', dateMs: Date.now() }],
+            revisions: [{ id: 'rev_cool', reason: 'Post t3_cool with goal 10', dateMs: Date.now() }],
             durationMs: 1,
           };
         }
@@ -995,7 +887,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_cool',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1027,7 +918,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         if (page === crosspostWikiPages.newPost) {
           return {
             ok: true,
-            revisions: [{ id: 'rev_partial', authorId: appUserId, reason: 'Post t3_partial with goal 10', dateMs: Date.now() }],
+            revisions: [{ id: 'rev_partial', reason: 'Post t3_partial with goal 10', dateMs: Date.now() }],
             durationMs: 1,
           };
         }
@@ -1037,7 +928,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_partial',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1091,7 +981,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         if (page === crosspostWikiPages.newPost) {
           return {
             ok: true,
-            revisions: [{ id: 'rev_total_fail', authorId: appUserId, reason: 'Post t3_total with goal 10', dateMs: Date.now() }],
+            revisions: [{ id: 'rev_total_fail', reason: 'Post t3_total with goal 10', dateMs: Date.now() }],
             durationMs: 1,
           };
         }
@@ -1101,7 +991,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_total',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1175,7 +1064,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_inflight',
-                authorId: appUserId,
                 reason: 'Post t3_inflight with goal 10',
                 dateMs: Date.now(),
               },
@@ -1189,7 +1077,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_inflight',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1213,7 +1100,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it('reconciles an existing target even if the source has since been removed', async () => {
+  it('detects existing target crosspost and skips duplicate creation', async () => {
     mockContext.subredditName = 'SubGoal';
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subredditName: string, page: string) => {
@@ -1223,7 +1110,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_existing',
-                authorId: appUserId,
                 reason: 'Post t3_existing with goal 10',
                 dateMs: Date.now(),
               },
@@ -1237,11 +1123,9 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_existing',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
-      removed: true,
     });
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
     mockReddit.getNewPosts.mockReturnValue({
@@ -1285,7 +1169,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_invalid_crosspost_thing',
-                authorId: appUserId,
                 reason: 'Post t3_invalidroot with goal 10',
                 dateMs: Date.now(),
               },
@@ -1299,7 +1182,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_invalidroot',
       subredditId: 't5_source',
-      authorId: appUserId,
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1339,7 +1221,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           return {
             ok: true,
             revisions: [
-              { id: 'rev_delete_first', authorId: appUserId, reason: 'Dispatch delete for t3_late' },
+              { id: 'rev_delete_first', reason: 'Dispatch delete for t3_late' },
             ],
             durationMs: 1,
           };
@@ -1350,7 +1232,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_create_late',
-                authorId: appUserId,
                 reason: 'Post t3_late with goal 10',
                 dateMs: Date.now(),
               },
@@ -1391,7 +1272,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_racing_create',
-                authorId: appUserId,
                 reason: 'Post t3_racing with goal 10',
                 dateMs: Date.now(),
               },
@@ -1405,7 +1285,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
             revisions: [
               {
                 id: 'rev_racing_delete',
-                authorId: appUserId,
                 reason: 'Dispatch delete for t3_racing',
               },
             ],
@@ -1425,7 +1304,6 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         : {
             id: 't3_racing',
             subredditId: 't5_source',
-            authorId: appUserId,
             subredditName: 'CorporateGifts',
             createdAt: new Date(Date.now() - 60_000),
             nsfw: false,
@@ -1493,8 +1371,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           ? {
               ok: true,
               revisions: [
-                { id: 'rev_delete_a', authorId: appUserId, reason: 'Dispatch delete for t3_dup' },
-                { id: 'rev_delete_b', authorId: appUserId, reason: 'Dispatch delete for t3_dup' },
+                { id: 'rev_delete_a', reason: 'Dispatch delete for t3_dup' },
+                { id: 'rev_delete_b', reason: 'Dispatch delete for t3_dup' },
               ],
               durationMs: 1,
             }
@@ -1553,7 +1431,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           ? {
               ok: true,
               revisions: [
-                { id: 'rev_marker_retry', authorId: appUserId, reason: 'Dispatch delete for t3_retry' },
+                { id: 'rev_marker_retry', reason: 'Dispatch delete for t3_retry' },
               ],
               durationMs: 1,
             }
@@ -1639,7 +1517,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           return {
             ok: true,
             revisions: [
-              { id: 'rev_remove', authorId: appUserId, reason: 'Dispatch remove for t3_remove' },
+              { id: 'rev_remove', reason: 'Dispatch remove for t3_remove' },
             ],
             durationMs: 1,
           };
@@ -1648,7 +1526,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
           return {
             ok: true,
             revisions: [
-              { id: 'rev_approve', authorId: appUserId, reason: 'Dispatch approve for t3_approve' },
+              { id: 'rev_approve', reason: 'Dispatch approve for t3_approve' },
             ],
             durationMs: 1,
           };

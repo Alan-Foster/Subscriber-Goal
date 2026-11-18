@@ -147,14 +147,13 @@ describe("safeGetWikiPageRevisions", () => {
     logSpy.mockRestore();
   });
 
-  it("retains the revision author ID and normalizes dates expressed in seconds", async () => {
+  it("normalizes numeric revision dates expressed in seconds to milliseconds", async () => {
     const listing = {
       get: vi.fn(async () => [
         {
           id: "rev_1",
           reason: "Post t3_abc123 with goal 69",
           date: 1_776_433_730,
-          authorId: "t2_app",
         },
       ]),
     };
@@ -174,7 +173,6 @@ describe("safeGetWikiPageRevisions", () => {
         id: "rev_1",
         reason: "Post t3_abc123 with goal 69",
         dateMs: 1_776_433_730_000,
-        authorId: "t2_app",
       },
     ]);
   });

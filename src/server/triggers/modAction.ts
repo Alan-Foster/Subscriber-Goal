@@ -33,8 +33,7 @@ import {
   upsertPendingCrosspost,
 } from '../data/crosspostData';
 import { getTrackedPosts } from '../data/updaterData';
-import { getPostAvailability } from '../utils/postStatus';
-import { safeGetWikiPageRevisions, type WikiPageRevision } from '../utils/redditUtils';
+import { safeGetWikiPageRevisions } from '../utils/redditUtils';
 import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
 import { isLinkId, type LinkId, type RedisClient } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
@@ -638,31 +637,10 @@ export async function cleanupCrosspostBookkeeping(
   await redisClient.set(crosspostBookkeepingCleanupLastRunKey, nowMs.toString());
 }
 
-async function isAppRevision(
-  revision: WikiPageRevision,
-  appUserId: string,
-  page: string
-): Promise<boolean> {
-  if (revision.authorId === appUserId) return true;
-
-  const phase = revision.authorId ? 'non_app_revision_author' : 'missing_revision_author';
-  if (await shouldLogUnexpectedRevision(redis, revision.id, phase)) {
-    logDiagnostic('warn', 'crosspost_revision_skipped', {
-      workflow: 'crosspost',
-      phase,
-      category: page,
-      recordId: revision.id,
-    });
-  }
-  return false;
-}
-
 async function getNewPosts(
-  appSettings: ServerAppSettings,
-  appUserId: string
+  appSettings: ServerAppSettings
 ): Promise<{
   events: NewPostEvent[];
-  revisions: WikiPageRevision[];
   revisionsFetched: number;
   ok: boolean;
   errorMessage?: string;
@@ -675,7 +653,6 @@ async function getNewPosts(
   if (!result.ok) {
     return {
       events: [],
-      revisions: [],
       revisionsFetched: 0,
       ok: false,
       ...withErrorMessage(result.errorMessage),
@@ -688,9 +665,6 @@ async function getNewPosts(
       (await isProcessedRevision(redis, revision.id)) ||
       (await isTerminalRevisionMarked(redis, revision.id))
     ) {
-      continue;
-    }
-    if (!(await isAppRevision(revision, appUserId, crosspostWikiPages.newPost))) {
       continue;
     }
 
@@ -742,7 +716,6 @@ async function getNewPosts(
 
   return {
     events: Array.from(newPosts),
-    revisions: result.revisions,
     revisionsFetched: result.revisions.length,
     ok: true,
   };
@@ -750,7 +723,6 @@ async function getNewPosts(
 
 async function getNewPostActions(
   appSettings: ServerAppSettings,
-  appUserId: string,
   actionType: 'remove' | 'approve' | 'delete'
 ): Promise<{
   events: PostActionEvent[];
@@ -758,11 +730,10 @@ async function getNewPostActions(
   ok: boolean;
   errorMessage?: string;
 }> {
-  const page = crosspostWikiPages.action[actionType];
   const result = await safeGetWikiPageRevisions(
     reddit,
     appSettings.promoSubreddit,
-    page
+    crosspostWikiPages.action[actionType]
   );
   if (!result.ok) {
     return {
@@ -776,9 +747,6 @@ async function getNewPostActions(
   const newPosts: Set<PostActionEvent> = new Set();
   for (const revision of result.revisions) {
     if (await isProcessedRevision(redis, revision.id)) {
-      continue;
-    }
-    if (!(await isAppRevision(revision, appUserId, page))) {
       continue;
     }
 
@@ -838,7 +806,6 @@ async function getNewPostActions(
 
 async function updateFromWikis(
   appSettings: ServerAppSettings,
-  appUserId: string,
   options: {
     sourcePostFreshnessWindowMs: number;
     revisionFreshnessWindowMs: number;
@@ -934,7 +901,7 @@ async function updateFromWikis(
     }
   }
 
-  const newPostBatch = await getNewPosts(appSettings, appUserId);
+  const newPostBatch = await getNewPosts(appSettings);
   summary.revisionsFetched += newPostBatch.revisionsFetched;
   if (newPostBatch.ok) {
     fetchSuccessCount += 1;
@@ -956,7 +923,6 @@ async function updateFromWikis(
       );
       await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
         revisionId: newPost.revisionId,
-        revisionAuthorId: appUserId,
         postId: newPost.postId,
         goal: newPost.goal,
         firstSeenMs: existing?.firstSeenMs ?? nowMs,
@@ -1342,39 +1308,9 @@ async function updateFromWikis(
         }
       }
 
-      if (getPostAvailability(post).status !== 'active') {
-        await markTerminalFailure(pending, 'source_post_unavailable');
-        continue;
-      }
       if (post.nsfw === true) {
         await markTerminalFailure(pending, 'source_post_nsfw');
         continue;
-      }
-      if (post.authorId !== appUserId) {
-        await markTerminalFailure(pending, 'source_post_non_app_author');
-        continue;
-      }
-      // Pending work from before authors were stored must be checked against Reddit.
-      if (pending.revisionAuthorId !== appUserId) {
-        if (!newPostBatch.ok) {
-          await scheduleRetry(pending, 'revision_author_lookup_failed');
-          continue;
-        }
-        const revision = newPostBatch.revisions.find(({ id }) => id === pending.revisionId);
-        const request = revision && parseNewPostDispatchReason(revision.reason);
-        if (
-          !revision ||
-          !(await isAppRevision(revision, appUserId, crosspostWikiPages.newPost)) ||
-          request?.postId !== pending.postId ||
-          request.goal !== pending.goal
-        ) {
-          await markTerminalFailure(pending, 'revision_author_unverified');
-          continue;
-        }
-        await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
-          ...pending,
-          revisionAuthorId: appUserId,
-        });
       }
 
       sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
@@ -1400,7 +1336,7 @@ async function updateFromWikis(
             goal: formatSubscriberCount(pending.goal),
           }),
           postId: post.id,
-          nsfw: false,
+          nsfw: post.nsfw ?? sourceSubredditInfo.isNsfw,
         });
         crosspostId = crosspost.id;
         if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
@@ -1572,9 +1508,9 @@ async function updateFromWikis(
   }
 
   const actionBatches = await Promise.all([
-    getNewPostActions(appSettings, appUserId, 'remove'),
-    getNewPostActions(appSettings, appUserId, 'approve'),
-    getNewPostActions(appSettings, appUserId, 'delete'),
+    getNewPostActions(appSettings, 'remove'),
+    getNewPostActions(appSettings, 'approve'),
+    getNewPostActions(appSettings, 'delete'),
   ]);
   const postActions = actionBatches.flatMap((batch) => batch.events);
   for (const batch of actionBatches) {
@@ -1900,17 +1836,13 @@ export async function processCrosspostDispatchQueue(
       }
 
       const summary = emptySummary();
-      const appUser = await reddit.getAppUser();
-      if (!appUser?.id) {
-        throw new Error('Cannot verify crosspost authors because the app account ID is unavailable.');
-      }
       const runErrorMessages: string[] = [];
       const maxPasses =
         reason === 'scheduler_posts_updater'
           ? crosspostSchedulerDaisyChainMaxPasses
           : 1;
       for (let pass = 1; pass <= maxPasses; pass += 1) {
-        const passSummary = await updateFromWikis(appSettings, appUser.id, {
+        const passSummary = await updateFromWikis(appSettings, {
           sourcePostFreshnessWindowMs: freshnessWindowMs,
           revisionFreshnessWindowMs,
           maxCrosspostsPerRun,
