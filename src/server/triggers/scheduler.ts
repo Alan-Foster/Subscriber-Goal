@@ -279,40 +279,49 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
-  if (
-    permissionWorkAllowed &&
-    currentSubredditName &&
-    isCrosspostAuthorityInstall(appSettings, currentSubredditName)
-  ) {
-    const ingestionSummary = await processCrosspostDispatchQueue(
-      appSettings,
-      "scheduler_posts_updater",
-    );
-    const pendingDepth = await countPendingCrossposts(
-      redis,
-      appSettings.promoSubreddit,
-    );
-    const crosspostWorkOccurred =
-      ingestionSummary.revisionsFetched > 0 ||
-      ingestionSummary.newPostsSeen > 0 ||
-      ingestionSummary.crosspostsCreated > 0 ||
-      ingestionSummary.crosspostsSkipped > 0 ||
-      ingestionSummary.crosspostsFailed > 0 ||
-      ingestionSummary.actionsMirrored > 0 ||
-      ingestionSummary.actionsFailed > 0 ||
-      ingestionSummary.crosspostPersistenceFailedAfterCreate > 0 ||
-      ingestionSummary.crosspostsSkippedBySourceCooldown > 0 ||
-      ingestionSummary.crosspostsSkippedByInFlight > 0 ||
-      ingestionSummary.crosspostsSkippedByExistingDetection > 0;
+  try {
     if (
-      crosspostWorkOccurred ||
-      pendingDepth > 0 ||
-      ingestionSummary.status !== "success"
+      permissionWorkAllowed &&
+      currentSubredditName &&
+      isCrosspostAuthorityInstall(appSettings, currentSubredditName)
     ) {
-      console.info(
-        `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} crosspostPersistenceFailedAfterCreate=${ingestionSummary.crosspostPersistenceFailedAfterCreate} crosspostsSkippedBySourceCooldown=${ingestionSummary.crosspostsSkippedBySourceCooldown} crosspostsSkippedByInFlight=${ingestionSummary.crosspostsSkippedByInFlight} crosspostsSkippedByExistingDetection=${ingestionSummary.crosspostsSkippedByExistingDetection} pendingDepth=${pendingDepth} error=${ingestionSummary.errorMessage ?? "none"}`,
+      const ingestionSummary = await processCrosspostDispatchQueue(
+        appSettings,
+        "scheduler_posts_updater",
       );
+      const pendingDepth = await countPendingCrossposts(
+        redis,
+        appSettings.promoSubreddit,
+      );
+      const crosspostWorkOccurred =
+        ingestionSummary.revisionsFetched > 0 ||
+        ingestionSummary.newPostsSeen > 0 ||
+        ingestionSummary.crosspostsCreated > 0 ||
+        ingestionSummary.crosspostsSkipped > 0 ||
+        ingestionSummary.crosspostsFailed > 0 ||
+        ingestionSummary.actionsMirrored > 0 ||
+        ingestionSummary.actionsFailed > 0 ||
+        ingestionSummary.crosspostPersistenceFailedAfterCreate > 0 ||
+        ingestionSummary.crosspostsSkippedBySourceCooldown > 0 ||
+        ingestionSummary.crosspostsSkippedByInFlight > 0 ||
+        ingestionSummary.crosspostsSkippedByExistingDetection > 0;
+      if (
+        crosspostWorkOccurred ||
+        pendingDepth > 0 ||
+        ingestionSummary.status !== "success"
+      ) {
+        console.info(
+          `[crosspost] scheduler ingestion summary: status=${ingestionSummary.status} revisionsFetched=${ingestionSummary.revisionsFetched} newPostsSeen=${ingestionSummary.newPostsSeen} crosspostsCreated=${ingestionSummary.crosspostsCreated} crosspostsSkipped=${ingestionSummary.crosspostsSkipped} crosspostsFailed=${ingestionSummary.crosspostsFailed} actionsMirrored=${ingestionSummary.actionsMirrored} actionsFailed=${ingestionSummary.actionsFailed} crosspostPersistenceFailedAfterCreate=${ingestionSummary.crosspostPersistenceFailedAfterCreate} crosspostsSkippedBySourceCooldown=${ingestionSummary.crosspostsSkippedBySourceCooldown} crosspostsSkippedByInFlight=${ingestionSummary.crosspostsSkippedByInFlight} crosspostsSkippedByExistingDetection=${ingestionSummary.crosspostsSkippedByExistingDetection} pendingDepth=${pendingDepth} error=${ingestionSummary.errorMessage ?? "none"}`,
+        );
+      }
     }
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "crosspost_dispatch" },
+      error,
+    );
   }
   try {
     await processPostKindMigrationBatch(reddit, redis);
