@@ -34,6 +34,7 @@ import { processDueOnboardingReminder } from "../core/onboardingReminder";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
   getPostAvailability,
+  getPostUpdateRecheckKey,
   isMissingPostError,
   temporarilyRemovedPostRecheckDelayMs,
 } from "../utils/postStatus";
@@ -475,7 +476,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
 
   for (const postId of postIds) {
     try {
-      const recheckKey = `subscriber_goal_update_recheck_v1:${postId}`;
+      const recheckKey = getPostUpdateRecheckKey(postId);
       const recheckAt = Number(await redis.get(recheckKey));
       if (recheckAt > Date.now()) continue;
       const subGoalData = await getSubGoalData(redis, postId);

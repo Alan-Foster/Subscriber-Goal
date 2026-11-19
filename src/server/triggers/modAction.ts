@@ -44,6 +44,7 @@ import {
 } from '../core/appAccountHealth';
 import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
 import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
+import { getPostUpdateRecheckKey } from '../utils/postStatus';
 
 export type ModActionEvent = {
   action?: string;
@@ -2127,13 +2128,12 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     });
   }
 
-  if (
-    toNormalizedSubredditName(subredditName) === authoritySubreddit
-  ) {
+  const isAuthority = toNormalizedSubredditName(subredditName) === authoritySubreddit;
+  if (isAuthority) {
     if (event.action === 'wikirevise') {
       await processCrosspostDispatchQueue(appSettings, 'mod_action_wikirevise');
     }
-    return;
+    if (event.action !== 'approvelink') return;
   }
 
   if (event.action === 'unsticky') {
@@ -2178,6 +2178,18 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   if (event.targetPost.authorId !== appAccount.id) {
     return;
   }
+
+  if (event.action === 'approvelink' && isLinkId(event.targetPost.id)) {
+    try {
+      await redis.del(getPostUpdateRecheckKey(event.targetPost.id));
+    } catch (error) {
+      logDiagnostic('warn', 'subscriber_goal_update_recheck_clear_failed', {
+        workflow: 'mod_action',
+        postId: event.targetPost.id,
+      }, error);
+    }
+  }
+  if (isAuthority) return;
 
   if (event.action === 'unsticky') {
     const moderator = event.moderator?.name?.trim().toLowerCase();

@@ -93,6 +93,13 @@ export function registerEraseDataRoutes(router: Router): void {
     async (req, res: Response<UiResponse>) => {
       const language = await resolveCurrentSubredditLanguage();
       const { username, userId, confirm } = req.body as EraseDataFormValues;
+      const normalizedUsername =
+        typeof username === "string"
+          ? username
+              .trim()
+              .replace(/^\/?u\//i, "")
+              .trim()
+          : undefined;
 
       if (!confirm) {
         res.json({
@@ -101,7 +108,7 @@ export function registerEraseDataRoutes(router: Router): void {
         return;
       }
 
-      if (!username && !userId) {
+      if (!normalizedUsername && !userId) {
         res.json({
           showToast: translate(language, "moderator.data.detailsRequired"),
         });
@@ -118,7 +125,7 @@ export function registerEraseDataRoutes(router: Router): void {
       }
 
       let resolvedUserId = userId;
-      let resolvedUsername = username;
+      let resolvedUsername = userId ? undefined : normalizedUsername;
       let identityLookupWarning: string | null = null;
 
       if (resolvedUserId && !resolvedUserId.startsWith("t2_")) {

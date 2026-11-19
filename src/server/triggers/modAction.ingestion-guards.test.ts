@@ -301,6 +301,9 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     'preserves the crosspost dispatch for %s',
     async (action, page) => {
       mockContext.subredditName = 'ExampleSub';
+      const recheckKey = 'subscriber_goal_update_recheck_v1:t3_goal';
+      const nextCheck = String(Date.now() + 60 * 60_000);
+      await redisMock.set(recheckKey, nextCheck);
       await onModAction({
         action,
         moderator: { name: 'ExampleMod' },
@@ -309,9 +312,32 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       expect(mockReddit.updateWikiPage).toHaveBeenCalledWith({
         subredditName: 'SubGoal', page, content: 't3_goal', reason: `Dispatch ${page} for t3_goal`,
       });
+      expect(await redisMock.get(recheckKey)).toBe(
+        action === 'approvelink' ? undefined : nextCheck,
+      );
       expect(await redisMock.hGetAll(scheduledPostDisplacementKey)).toEqual({});
     },
   );
+
+  it.each([
+    ['SubGoal', 'ExampleMod', 't2_app', true],
+    ['ExampleSub', 'subscriber-goal', 't2_app', false],
+    ['ExampleSub', 'ExampleMod', 't2_other', false],
+  ] as const)('only clears moderator-approved app posts (%s, %s, %s)', async (subredditName, moderator, authorId, clears) => {
+    mockContext.subredditName = subredditName;
+    const recheckKey = 'subscriber_goal_update_recheck_v1:t3_goal';
+    const nextCheck = String(Date.now() + 60 * 60_000);
+    await redisMock.set(recheckKey, nextCheck);
+
+    await onModAction({
+      action: 'approvelink',
+      moderator: { name: moderator },
+      targetPost: { id: 't3_goal', authorId },
+    });
+
+    expect(await redisMock.get(recheckKey)).toBe(clears ? undefined : nextCheck);
+    expect(mockReddit.updateWikiPage).not.toHaveBeenCalled();
+  });
 
   it.each([
     'removemoderator',

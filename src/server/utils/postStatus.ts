@@ -57,6 +57,8 @@ export const getTerminalRemovedByCategory = (
 // A known removal is a pause, not a failed creation attempt. Keep rechecking
 // without using the finite error budgets or replacing the known post.
 export const temporarilyRemovedPostRecheckDelayMs = 60 * 60 * 1000;
+export const getPostUpdateRecheckKey = (postId: string): string =>
+  `subscriber_goal_update_recheck_v1:${postId}`;
 
 export class PostTemporarilyUnavailableError extends Error {
   constructor(
