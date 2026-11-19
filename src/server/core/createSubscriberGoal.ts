@@ -1462,7 +1462,11 @@ async function prepareSubscriberGoalFlair({
   }
 
   try {
-    const flair = await ensureSubscriberGoalPostFlair(reddit, redis, subredditName);
+    const flair = await ensureSubscriberGoalPostFlair(
+      reddit,
+      redis,
+      subredditName,
+    );
     return { status: "applied", flairId: flair.id };
   } catch (error) {
     logDiagnostic(

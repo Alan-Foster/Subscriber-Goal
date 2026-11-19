@@ -22,6 +22,7 @@ export type SourcePostDeletionIntent = {
   nextAttemptMs: number;
   attemptCount: number;
   deleteAttemptCount: number;
+  deleteLeaseToken?: string | undefined;
   lastError: string | null;
   dispatchedAtMs?: number;
 };

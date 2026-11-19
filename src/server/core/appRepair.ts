@@ -18,7 +18,10 @@ import {
   scheduleHighlightRepair,
   recurringHighlightRepairIntervalMs,
 } from "../data/highlightRepair";
-import { withCommunityGoalMutationLease } from "./communityGoalMutation";
+import {
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+} from "./communityGoalMutation";
 import { isSubscriberGoalPostRetired } from "./postRetirement";
 import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 
@@ -71,11 +74,24 @@ export async function processDueAppRepair({
   if ((await redis.get(appRepairLockKey)) !== lockToken) return "not_due";
 
   const failures: string[] = [];
+  let highlightDeferred = false;
   let recurringHighlightCheck = false;
   const runPhase = async (phase: string, operation: () => Promise<unknown>) => {
     try {
       await operation();
     } catch (error) {
+      if (
+        phase === "highlight_reconciliation" &&
+        error instanceof CommunityGoalMutationInProgressError
+      ) {
+        highlightDeferred = true;
+        logDiagnostic("info", "app_repair_phase_deferred", {
+          workflow: "app_repair",
+          phase,
+          reason: "mutation_lease_busy",
+        });
+        return;
+      }
       failures.push(
         `${phase}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -202,6 +218,14 @@ export async function processDueAppRepair({
     );
 
     if (failures.length === 0) {
+      if (highlightDeferred) {
+        await redis.hSet(appRepairStateKey, {
+          ...state,
+          status: "pending",
+          nextRunAt: String(nowMs + retryBaseMs),
+        });
+        return "retry";
+      }
       await redis.hSet(appRepairStateKey, {
         ...state,
         status: "complete",

@@ -52,7 +52,6 @@ export async function withCommunityGoalMutationLease<T>(
     await new Promise<void>((resolve) =>
       setTimeout(resolve, Math.min(retry.intervalMs, remaining)),
     );
-    if (Date.now() > deadline) break;
     lease = await acquireCommunityGoalMutationLease(redis);
   }
   if (!lease) throw new CommunityGoalMutationInProgressError();

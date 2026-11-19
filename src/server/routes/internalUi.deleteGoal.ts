@@ -14,6 +14,7 @@ import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
   communityGoalMutationLockKey,
   CommunityGoalMutationInProgressError,
+  type CommunityGoalMutationLease,
   withCommunityGoalMutationLease,
 } from "../core/communityGoalMutation";
 import {
@@ -31,7 +32,8 @@ import {
 } from "../data/sourcePostDeletion";
 import { resolvePostKindFromPostData } from "../../shared/postKind";
 
-// Devvit Web caps the whole request at 30 seconds. Reserve time for Reddit deletion and cleanup.
+// Leave time for Reddit deletion and cleanup within Devvit Web's server request budget.
+// https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview#limitations
 const deleteGoalLeaseRetry = { maxWaitMs: 4_000, intervalMs: 500 };
 
 export function registerDeleteGoalRoutes(router: Router): void {
@@ -115,9 +117,6 @@ export function registerDeleteGoalRoutes(router: Router): void {
             postId as LinkId,
           ),
         );
-        const verificationMayBeInFlight =
-          existingIntent?.status === "verify_source" &&
-          Boolean(await redis.get(communityGoalMutationLockKey));
         const post = await reddit.getPostById(postId);
         const isCurrentSubredditPost =
           post.subredditId === subreddit.id &&
@@ -175,6 +174,12 @@ export function registerDeleteGoalRoutes(router: Router): void {
           res.json({ showToast: actorAuthority.message });
           return;
         }
+        phase = "mutation_lease";
+        const verificationMayBeInFlight =
+          existingIntent?.status === "verify_source" &&
+          existingIntent.deleteLeaseToken !== undefined &&
+          (await redis.get(communityGoalMutationLockKey)) ===
+            existingIntent.deleteLeaseToken;
         let cleanupDispatched = false;
         let sourceDeletionConfirmed = false;
         let internalRecordsPending = false;
@@ -190,7 +195,9 @@ export function registerDeleteGoalRoutes(router: Router): void {
             error,
           );
         }
-        const deleteUnderLease = async () => {
+        const deleteUnderLease = async (
+          mutationLease: CommunityGoalMutationLease,
+        ) => {
           phase = "deletion_intent_persistence";
           let intent = await prepareSourcePostDeletionIntent(redis, {
             postId: postId as LinkId,
@@ -245,7 +252,9 @@ export function registerDeleteGoalRoutes(router: Router): void {
           // This durable transition is deliberately before Reddit. If the
           // delete response is lost, the updater knows to verify, never repeat.
           phase = "deletion_attempt_persistence";
-          intent = await recordSourceDeleteAttempt(redis, intent);
+          intent = await recordSourceDeleteAttempt(redis, intent, {
+            leaseToken: mutationLease.token,
+          });
           phase = "reddit_post_delete";
           await post.delete();
           sourceDeletionConfirmed = true;
@@ -290,7 +299,6 @@ export function registerDeleteGoalRoutes(router: Router): void {
             );
           }
         };
-        phase = "mutation_lease";
         await withCommunityGoalMutationLease(
           redis,
           deleteUnderLease,

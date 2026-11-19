@@ -200,31 +200,33 @@ describe("scheduled app repair", () => {
     ).toHaveBeenCalledOnce();
   });
 
-  it("backs off a busy highlight phase while completing other phases", async () => {
+  it("defers three busy highlight phases at the base delay without counting failures", async () => {
     await redis.set(communityGoalMutationLockKey, "manual-creation");
     await scheduleAppRepair(redis as never, 100, 0);
 
-    await expect(
-      processDueAppRepair({
-        reddit: reddit as never,
-        redis: redis as never,
-        nowMs: 100,
-      }),
-    ).resolves.toBe("retry");
+    for (const nowMs of [100, 300_100, 600_100]) {
+      await expect(
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        }),
+      ).resolves.toBe("retry");
+      expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        nextRunAt: String(nowMs + 300_000),
+        lastError: "",
+      });
+    }
     expect(
       hoisted.ensureExistingSubscriberGoalHighlighted,
     ).not.toHaveBeenCalled();
-    expect(hoisted.backfillSubscriberGoalPostFlair).toHaveBeenCalledOnce();
-    expect(hoisted.checkAppAccountHealth).toHaveBeenCalledOnce();
+    expect(hoisted.backfillSubscriberGoalPostFlair).toHaveBeenCalledTimes(3);
+    expect(hoisted.checkAppAccountHealth).toHaveBeenCalledTimes(3);
     expect(await redis.get(communityGoalMutationLockKey)).toBe(
       "manual-creation",
     );
-    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
-      status: "pending",
-      attempts: "1",
-      nextRunAt: "300100",
-      lastError: expect.stringContaining("highlight_reconciliation:"),
-    });
   });
 
   it("rechecks due state after acquiring the app repair lock", async () => {

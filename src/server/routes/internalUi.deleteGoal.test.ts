@@ -330,6 +330,71 @@ describe("internalUi deleteGoal routes", () => {
     }
   });
 
+  it("makes the final acquire attempt when each retry timer wakes one millisecond late", async () => {
+    vi.useFakeTimers();
+    const schedule = globalThis.setTimeout;
+    const timer = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((callback, delay, ...args) =>
+        schedule(callback, (delay ?? 0) + 1, ...args),
+      );
+    try {
+      hoisted.redisValues.set(communityGoalMutationLockKey, "app-repair");
+      const json = vi.fn();
+      const request = createRouteHarness().get(
+        internalRoutes.forms.deleteGoal,
+      )?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(hoisted.deletePost).not.toHaveBeenCalled();
+      hoisted.redisValues.delete(communityGoalMutationLockKey);
+      await vi.advanceTimersByTimeAsync(2);
+      await request;
+      expect(hoisted.deletePost).toHaveBeenCalledOnce();
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Post deleted."),
+      });
+    } finally {
+      timer.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a Redis write error at lease acquisition without persisting an intent or deleting", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      hoisted.redis.set.mockRejectedValueOnce(
+        new Error("storage quota exceeded"),
+      );
+      const json = vi.fn();
+      await createRouteHarness().get(internalRoutes.forms.deleteGoal)?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+      expect(hoisted.redis.set).toHaveBeenCalledExactlyOnceWith(
+        communityGoalMutationLockKey,
+        expect.any(String),
+        expect.objectContaining({ nx: true }),
+      );
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Couldn’t delete this post"),
+      });
+      expect(error).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /"event":"delete_goal_failed".*"phase":"mutation_lease".*"errorMessage":"storage quota exceeded"/,
+        ),
+      );
+      expect(hoisted.redisHashes.has("source_post_deletion_intents_v1")).toBe(
+        false,
+      );
+      expect(hoisted.deletePost).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("reports mutation lease contention without persisting an intent or deleting", async () => {
     vi.useFakeTimers();
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -444,7 +509,62 @@ describe("internalUi deleteGoal routes", () => {
     });
   });
 
+  it("retries a stale verification after an unrelated background lease releases", async () => {
+    vi.useFakeTimers();
+    try {
+      const routes = createRouteHarness();
+      const submit = (json: ReturnType<typeof vi.fn>) =>
+        routes.get(internalRoutes.forms.deleteGoal)?.(
+          { body: { confirm: true } } as Request,
+          { json } as unknown as Response,
+        );
+      hoisted.deletePost.mockRejectedValueOnce(
+        new Error("delete response unknown"),
+      );
+      await submit(vi.fn());
+      await vi.advanceTimersByTimeAsync(16 * 60_000);
+      hoisted.redisValues.set(communityGoalMutationLockKey, "app-repair");
+      const json = vi.fn();
+      const retry = submit(json);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(hoisted.deletePost).toHaveBeenCalledOnce();
+      hoisted.redisValues.delete(communityGoalMutationLockKey);
+      await vi.advanceTimersByTimeAsync(500);
+      await retry;
+
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Post deleted."),
+      });
+      expect(hoisted.deletePost).toHaveBeenCalledTimes(2);
+      expect(hoisted.dispatchPostAction).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("blocks deletion after Manage Posts is revoked", async () => {
+    hoisted.redisHashes.set(
+      "source_post_deletion_intents_v1",
+      new Map([
+        [
+          "t5_example:t3_post",
+          JSON.stringify({
+            id: "t5_example:t3_post",
+            subredditId: "t5_example",
+            subredditName: "ExampleSub",
+            postId: "t3_post",
+            status: "verify_source",
+            createdAtMs: 1,
+            updatedAtMs: 2,
+            nextAttemptMs: 3,
+            attemptCount: 0,
+            deleteAttemptCount: 1,
+            deleteLeaseToken: "held",
+          }),
+        ],
+      ]),
+    );
+    hoisted.redisValues.set(communityGoalMutationLockKey, "held");
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
     hoisted.reddit.getPostById.mockResolvedValue({
       id: "t3_post",
@@ -479,6 +599,14 @@ describe("internalUi deleteGoal routes", () => {
     expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
     expect(hoisted.deletePost).not.toHaveBeenCalled();
     expect(hoisted.removeSubscriberGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.redis.get).not.toHaveBeenCalledWith(
+      communityGoalMutationLockKey,
+    );
+    expect(hoisted.redis.set).not.toHaveBeenCalledWith(
+      communityGoalMutationLockKey,
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it("rejects deletion for a post outside the trusted current subreddit", async () => {

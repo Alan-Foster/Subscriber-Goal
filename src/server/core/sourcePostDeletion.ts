@@ -58,7 +58,10 @@ export async function prepareSourcePostDeletionIntent(
 export async function recordSourceDeleteAttempt(
   redis: RedisClient,
   intent: SourcePostDeletionIntent,
-  nowMs = Date.now(),
+  {
+    nowMs = Date.now(),
+    leaseToken,
+  }: { nowMs?: number; leaseToken?: string } = {},
 ): Promise<SourcePostDeletionIntent> {
   return saveSourcePostDeletionIntent(redis, {
     ...intent,
@@ -66,6 +69,7 @@ export async function recordSourceDeleteAttempt(
     updatedAtMs: nowMs,
     nextAttemptMs: nowMs + retryBaseMs,
     deleteAttemptCount: intent.deleteAttemptCount + 1,
+    deleteLeaseToken: leaseToken,
     lastError: null,
   });
 }
@@ -78,6 +82,7 @@ export async function recordSourceDeletionConfirmed(
   return saveSourcePostDeletionIntent(redis, {
     ...intent,
     status: "dispatch_pending",
+    deleteLeaseToken: undefined,
     updatedAtMs: nowMs,
     nextAttemptMs: nowMs,
     lastError: null,

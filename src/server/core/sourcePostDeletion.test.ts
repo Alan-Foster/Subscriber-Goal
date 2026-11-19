@@ -87,7 +87,7 @@ describe("durable source post deletion", () => {
     const attempted = await recordSourceDeleteAttempt(
       redis as never,
       prepared,
-      1_000,
+      { nowMs: 1_000 },
     );
     // Make the verification due now, as the next real scheduler tick would.
     await redis.zAdd(sourcePostDeletionDueKey, {
@@ -125,7 +125,7 @@ describe("durable source post deletion", () => {
     const attempted = await recordSourceDeleteAttempt(
       redis as never,
       prepared,
-      1_000,
+      { nowMs: 1_000 },
     );
     await redis.zAdd(sourcePostDeletionDueKey, {
       member: attempted.id,
@@ -189,7 +189,7 @@ describe("durable source post deletion", () => {
     const attempted = await recordSourceDeleteAttempt(
       redis as never,
       prepared,
-      1_000,
+      { nowMs: 1_000 },
     );
     await redis.zAdd(sourcePostDeletionDueKey, {
       member: attempted.id,
