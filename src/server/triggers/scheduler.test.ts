@@ -80,6 +80,7 @@ const hoisted = vi.hoisted(() => ({
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppAccountRecovery: vi.fn(),
   processDueAppRepair: vi.fn(),
+  processDueScheduledPostDisplacementChecks: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getPostOperationalState: vi.fn(),
   savePostOperationalState: vi.fn(),
@@ -211,6 +212,9 @@ vi.mock("../core/appAccountRecovery", () => ({
 vi.mock("../core/appRepair", () => ({
   processDueAppRepair: hoisted.processDueAppRepair,
 }));
+vi.mock("../core/scheduledPostDisplacement", () => ({
+  processDueScheduledPostDisplacementChecks: hoisted.processDueScheduledPostDisplacementChecks,
+}));
 vi.mock("../core/sourcePostDeletion", () => ({
   processDueSourcePostDeletions: hoisted.processDueSourcePostDeletions,
   queueConfirmedSourceDeletionCleanup:
@@ -264,6 +268,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppAccountRecovery.mockReset();
     hoisted.processDueAppRepair.mockReset();
+    hoisted.processDueScheduledPostDisplacementChecks.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
     hoisted.getPostOperationalState.mockReset();
     hoisted.savePostOperationalState.mockReset();
@@ -424,6 +429,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
     expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+    expect(hoisted.processDueScheduledPostDisplacementChecks).not.toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
     expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
@@ -436,6 +442,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
     await onPostsUpdaterJob();
     expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.processDueScheduledPostDisplacementChecks).toHaveBeenCalledOnce();
     expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
     expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
     expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
@@ -671,6 +678,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     await onPostsUpdaterJob();
 
+    expect(hoisted.processDueScheduledPostDisplacementChecks).not.toHaveBeenCalled();
     expect(hoisted.processCrosspostDispatchQueue).toHaveBeenCalledWith(
       baseSettings,
       "scheduler_posts_updater",

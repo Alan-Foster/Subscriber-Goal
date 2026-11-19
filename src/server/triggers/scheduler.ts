@@ -43,6 +43,7 @@ import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
+import { processDueScheduledPostDisplacementChecks } from "../core/scheduledPostDisplacement";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
@@ -278,6 +279,27 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
+  try {
+    if (
+      permissionWorkAllowed &&
+      subreddit &&
+      currentSubredditName &&
+      !isCrosspostAuthorityInstall(appSettings, currentSubredditName)
+    ) {
+      await processDueScheduledPostDisplacementChecks({
+        reddit,
+        redis,
+        subreddit,
+      });
+    }
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "scheduler_task_failed",
+      { workflow: "scheduled_post_displacement" },
+      error,
+    );
+  }
   try {
     if (
       permissionWorkAllowed &&

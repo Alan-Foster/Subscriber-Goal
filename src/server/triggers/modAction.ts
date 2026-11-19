@@ -43,6 +43,7 @@ import {
   subscriberGoalAppUsername,
 } from '../core/appAccountHealth';
 import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
+import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
 
 export type ModActionEvent = {
   action?: string;
@@ -2135,7 +2136,16 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     return;
   }
 
+  if (event.action === 'unsticky') {
+    logDiagnostic('info', 'scheduled_post_displacement_unpin_received', {
+      workflow: 'scheduled_post_displacement',
+      postId: event.targetPost?.id,
+      hasActionedAt: Boolean(event.actionedAt),
+    });
+  }
+
   if (
+    event.action !== 'unsticky' &&
     event.action !== 'removelink' &&
     event.action !== 'approvelink' &&
     event.action !== 'spamlink'
@@ -2166,6 +2176,22 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   }
 
   if (event.targetPost.authorId !== appAccount.id) {
+    return;
+  }
+
+  if (event.action === 'unsticky') {
+    const moderator = event.moderator?.name?.trim().toLowerCase();
+    if (
+      moderator &&
+      moderator !== appAccount.username.toLowerCase() &&
+      isLinkId(event.targetPost.id)
+    ) {
+      await recordScheduledPostDisplacementCheck(
+        redis,
+        event.targetPost.id,
+        event.actionedAt
+      );
+    }
     return;
   }
 
