@@ -351,6 +351,9 @@ export function registerDeleteGoalRoutes(router: Router): void {
           );
         }
         phase = "response_completion";
+        const navigation = sourceDeletionConfirmed
+          ? { navigateTo: `https://www.reddit.com/r/${subredditName}/` }
+          : {};
         if (cleanupFailures.length > 0 || internalRecordsPending) {
           logDiagnostic("warn", "delete_goal_partially_completed", {
             operationId,
@@ -363,6 +366,7 @@ export function registerDeleteGoalRoutes(router: Router): void {
             showToast: translate(language, "moderator.delete.cleanupPending", {
               operationId,
             }),
+            ...navigation,
           });
           return;
         }
@@ -375,6 +379,7 @@ export function registerDeleteGoalRoutes(router: Router): void {
                 : "moderator.delete.cleanupQueued"
               : "moderator.delete.success",
           ),
+          ...navigation,
         });
         logDiagnostic("info", "delete_goal_completed", {
           operationId,
