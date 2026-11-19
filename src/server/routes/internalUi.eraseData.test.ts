@@ -210,7 +210,9 @@ describe("internalUi eraseData routes", () => {
     const res = { json } as unknown as Response;
 
     await routes.get(internalRoutes.forms.eraseData)?.(
-      { body: { userId: "user", confirm: true } } as Request,
+      {
+        body: { userId: "user", username: "/u/OtherUser", confirm: true },
+      } as Request,
       res,
     );
 
@@ -219,12 +221,67 @@ describe("internalUi eraseData routes", () => {
       "t2_user",
       undefined,
     );
+    expect(hoisted.reddit.getUserByUsername).not.toHaveBeenCalled();
     expect(json).toHaveBeenCalledTimes(1);
     expect(json).toHaveBeenCalledWith({
       showToast: expect.stringContaining(
         "Some Subscriber Goal data was removed",
       ),
     });
+  });
+
+  it.each(["u/Alice", " /u/Alice "])(
+    "erases a moderator-entered username %s",
+    async (username) => {
+      hoisted.reddit.getUserByUsername.mockResolvedValue({
+        id: "t2_alice",
+        username: "Alice",
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(internalRoutes.forms.eraseData)?.(
+        { body: { username, confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+
+      expect(hoisted.reddit.getUserByUsername).toHaveBeenCalledExactlyOnceWith(
+        "Alice",
+      );
+      expect(hoisted.untrackSubscriberById).toHaveBeenCalledExactlyOnceWith(
+        hoisted.redis,
+        "t2_alice",
+        "Alice",
+      );
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        showToast: "User data has been erased successfully.",
+      });
+    },
+  );
+
+  it("uses the supplied account ID before a prefixed username", async () => {
+    hoisted.reddit.getUserById.mockResolvedValue({
+      id: "t2_bob",
+      username: "Bob",
+    });
+    const routes = createRouteHarness();
+
+    await routes.get(internalRoutes.forms.eraseData)?.(
+      {
+        body: { userId: "t2_bob", username: "u/Alice", confirm: true },
+      } as Request,
+      { json: vi.fn() } as unknown as Response,
+    );
+
+    expect(hoisted.reddit.getUserById).toHaveBeenCalledExactlyOnceWith(
+      "t2_bob",
+    );
+    expect(hoisted.reddit.getUserByUsername).not.toHaveBeenCalled();
+    expect(hoisted.untrackSubscriberById).toHaveBeenCalledExactlyOnceWith(
+      hoisted.redis,
+      "t2_bob",
+      "Bob",
+    );
   });
 
   it.each([
