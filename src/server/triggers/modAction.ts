@@ -44,7 +44,7 @@ import {
 } from '../core/appAccountHealth';
 import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
 import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
-import { getPostUpdateRecheckKey } from '../utils/postStatus';
+import { getPostAvailability, getPostUpdateRecheckKey } from '../utils/postStatus';
 
 export type ModActionEvent = {
   action?: string;
@@ -1103,6 +1103,7 @@ async function updateFromWikis(
       !pending.createdCrosspostId
   );
 
+  let appUserLookup: ReturnType<typeof reddit.getAppUser> | undefined;
   for (const pending of [...reconciliationFirstPending, ...normalPending]) {
     let sourceSubredditIsNsfw = false;
     let sourceCreateLock:
@@ -1312,6 +1313,28 @@ async function updateFromWikis(
 
       if (post.nsfw === true) {
         await markTerminalFailure(pending, 'source_post_nsfw');
+        continue;
+      }
+      if (getPostAvailability(post).status !== 'active') {
+        await markTerminalFailure(pending, 'source_post_unavailable');
+        continue;
+      }
+
+      let appUserId: string | undefined;
+      try {
+        appUserId = (await (appUserLookup ??= reddit.getAppUser()))?.id;
+      } catch (error) {
+        logDiagnostic('warn', 'crosspost_source_author_lookup_failed', {
+          workflow: 'crosspost',
+          postId: pending.postId,
+        }, error);
+      }
+      if (!appUserId) {
+        await scheduleRetry(pending, 'source_author_lookup_failed');
+        continue;
+      }
+      if (post.authorId !== appUserId) {
+        await markTerminalFailure(pending, 'source_post_non_app_author');
         continue;
       }
 
