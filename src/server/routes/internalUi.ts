@@ -1250,7 +1250,6 @@ async function submitCreateGoalFollowUp(
             capacityOutcome: highlightResult.capacityOutcome,
             cleanupOutcome: highlightResult.cleanupOutcome,
             rollbackOutcome: highlightResult.rollbackOutcome,
-            reorderOutcome: highlightResult.reorderOutcome,
           });
           const moderatorUsername = await resolveCurrentUsername();
           await notifyHighlightFailure({

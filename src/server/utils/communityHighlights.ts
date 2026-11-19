@@ -14,8 +14,7 @@ export type HighlightFailureCategory =
   | "verification"
   | "cleanup"
   | "rollback"
-  | "concurrency"
-  | "reorder";
+  | "concurrency";
 
 export type HighlightIssue = {
   category: HighlightFailureCategory;
@@ -27,6 +26,7 @@ export type HighlightResult = {
   status: "highlighted" | "not_highlighted";
   selectedPostId: LinkId;
   verifiedHighlighted: boolean;
+  selectedPosition?: number;
   failureCategory?: HighlightFailureCategory;
   errorMessage?: string;
   issues: HighlightIssue[];
@@ -40,7 +40,6 @@ export type HighlightResult = {
   removedManagedHighlightIds: LinkId[];
   preservedHighlightIds: LinkId[];
   rollbackOutcome: "not_needed" | "restored" | "expired" | "failed";
-  reorderOutcome: "not_attempted" | "reordered" | "failed";
 };
 
 export type HighlightVerificationOptions = {
@@ -63,7 +62,6 @@ type HighlightablePost = {
 type HighlightableSubreddit = {
   name: string;
   getHighlightedPosts: () => Promise<HighlightedPostInfo[]>;
-  reorderHighlightedPosts: (postIds: readonly LinkId[]) => Promise<void>;
 };
 
 type RemovedHighlight = {
@@ -80,16 +78,6 @@ function toErrorMessage(error: unknown): string {
 
 function idsOf(snapshot: HighlightedPostInfo[]): LinkId[] {
   return snapshot.map(({ postId }) => postId as LinkId);
-}
-
-function sameOrder(
-  actual: readonly LinkId[],
-  expected: readonly LinkId[],
-): boolean {
-  return (
-    actual.length === expected.length &&
-    actual.every((postId, index) => postId === expected[index])
-  );
 }
 
 function highlightMetadata(info: HighlightedPostInfo | undefined): {
@@ -162,7 +150,6 @@ export function createFailedHighlightResult(
     removedManagedHighlightIds: [],
     preservedHighlightIds: [],
     rollbackOutcome: "not_needed",
-    reorderOutcome: "not_attempted",
   });
 }
 
@@ -231,82 +218,9 @@ async function pollForState(
   };
 }
 
-async function reorderTargetFirst(
-  subreddit: HighlightableSubreddit,
-  targetPostId: LinkId,
-): Promise<{ outcome: "reordered" | "failed"; issue?: HighlightIssue }> {
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const current = await subreddit.getHighlightedPosts();
-      const targetBefore = current.find(
-        ({ postId }) => postId === targetPostId,
-      );
-      if (!targetBefore) {
-        throw new Error(
-          "The selected Subscriber Goal is no longer highlighted.",
-        );
-      }
-      const intendedOrder = [
-        targetPostId,
-        ...idsOf(current).filter((postId) => postId !== targetPostId),
-      ];
-      await subreddit.reorderHighlightedPosts(intendedOrder);
-      const verifiedSnapshot = await subreddit.getHighlightedPosts();
-      const verifiedOrder = idsOf(verifiedSnapshot);
-      const targetAfter = verifiedSnapshot.find(
-        ({ postId }) => postId === targetPostId,
-      );
-      if (
-        sameOrder(verifiedOrder, intendedOrder) &&
-        sameHighlightMetadata(targetBefore, targetAfter)
-      ) {
-        return { outcome: "reordered" };
-      }
-      if (!sameHighlightMetadata(targetBefore, targetAfter)) {
-        logDiagnostic("warn", "highlight_metadata_changed", {
-          workflow: "community_highlights",
-          phase: "reorder_verification",
-          postId: targetPostId,
-          expected: JSON.stringify(highlightMetadata(targetBefore)),
-          actual: JSON.stringify(highlightMetadata(targetAfter)),
-        });
-        throw new Error(
-          "Reddit changed the Community Highlight label or expiration while reordering.",
-        );
-      }
-      throw new Error("Reddit did not confirm the requested highlight order.");
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "highlight_operation_failed",
-        {
-          workflow: "community_highlights",
-          phase: "reorder",
-          postId: targetPostId,
-          attempt,
-        },
-        error,
-      );
-      if (attempt === 2) {
-        return {
-          outcome: "failed",
-          issue: {
-            category: "reorder",
-            postId: targetPostId,
-            message:
-              "The Subscriber Goal is highlighted, but it could not be verified in the first position.",
-          },
-        };
-      }
-    }
-  }
-  return { outcome: "failed" };
-}
-
 async function restoreRemovedHighlights(
   subreddit: HighlightableSubreddit,
   removed: RemovedHighlight[],
-  originalOrder: LinkId[],
   options: HighlightVerificationOptions,
 ): Promise<"not_needed" | "restored" | "expired" | "failed"> {
   if (removed.length === 0) return "not_needed";
@@ -314,31 +228,31 @@ async function restoreRemovedHighlights(
   try {
     for (const { info, post } of removed) {
       const current = await subreddit.getHighlightedPosts();
-      if (current.some(({ postId }) => postId === info.postId)) continue;
-      if (
-        info.highlightedUntil &&
-        info.highlightedUntil.getTime() <= Date.now()
-      ) {
-        expired = true;
-        continue;
+      if (!current.some(({ postId }) => postId === info.postId)) {
+        if (
+          info.highlightedUntil &&
+          info.highlightedUntil.getTime() <= Date.now()
+        ) {
+          expired = true;
+          continue;
+        }
+        if (current.length >= communityHighlightLimit) return "failed";
+        if (typeof post.isHighlighted !== "function") return "failed";
+        await post.highlight({
+          ...(info.highlightedUntil
+            ? { highlightUntil: info.highlightedUntil }
+            : {}),
+          ...(info.highlightLabel
+            ? { highlightLabelType: info.highlightLabel }
+            : {}),
+        });
       }
-      if (current.length >= communityHighlightLimit) return "failed";
-      if (typeof post.isHighlighted !== "function") return "failed";
-      await post.highlight({
-        ...(info.highlightedUntil
-          ? { highlightUntil: info.highlightedUntil }
-          : {}),
-        ...(info.highlightLabel
-          ? { highlightLabelType: info.highlightLabel }
-          : {}),
-      });
-      if (!(await pollForState(subreddit, post, true, options)).matches) {
-        return "failed";
-      }
+      const verification = await pollForState(subreddit, post, true, options);
+      if (!verification.matches) return "failed";
       const restored = (await subreddit.getHighlightedPosts()).find(
         ({ postId }) => postId === info.postId,
       );
-      if (!sameHighlightMetadata(info, restored)) {
+      if (!restored || !sameHighlightMetadata(info, restored)) {
         logDiagnostic("warn", "highlight_metadata_changed", {
           workflow: "community_highlights",
           phase: "rollback_verification",
@@ -349,21 +263,7 @@ async function restoreRemovedHighlights(
         return "failed";
       }
     }
-    const current = await subreddit.getHighlightedPosts();
-    const currentIds = new Set(idsOf(current));
-    const restoredOrder = [
-      ...originalOrder.filter((postId) => currentIds.has(postId)),
-      ...idsOf(current).filter((postId) => !originalOrder.includes(postId)),
-    ];
-    await subreddit.reorderHighlightedPosts(restoredOrder);
-    return sameOrder(
-      idsOf(await subreddit.getHighlightedPosts()),
-      restoredOrder,
-    )
-      ? expired
-        ? "expired"
-        : "restored"
-      : "failed";
+    return expired ? "expired" : "restored";
   } catch (error) {
     logDiagnostic(
       "error",
@@ -391,8 +291,7 @@ export async function highlightAndVerifyPost(
   },
 ): Promise<HighlightResult> {
   const initial = await subreddit.getHighlightedPosts();
-  const originalOrder = idsOf(initial);
-  let rollbackOrder = originalOrder;
+  const initialIds = idsOf(initial);
   const removableIds = new Set(options.removableManagedPostIds ?? []);
   const removed: RemovedHighlight[] = [];
   const issues: HighlightIssue[] = [];
@@ -422,7 +321,6 @@ export async function highlightAndVerifyPost(
         (postId) => postId !== post.id,
       ),
       rollbackOutcome,
-      reorderOutcome: "not_attempted",
     });
   }
 
@@ -448,14 +346,12 @@ export async function highlightAndVerifyPost(
           capacityOutcome,
           cleanupOutcome,
           removedManagedHighlightIds: [],
-          preservedHighlightIds: originalOrder,
+          preservedHighlightIds: initialIds,
           rollbackOutcome,
-          reorderOutcome: "not_attempted",
         });
       }
 
       try {
-        rollbackOrder = idsOf(current);
         const removablePost = await fetchHighlightablePost(
           reddit,
           removableInfo.postId as LinkId,
@@ -513,7 +409,6 @@ export async function highlightAndVerifyPost(
         rollbackOutcome = await restoreRemovedHighlights(
           subreddit,
           removed,
-          rollbackOrder,
           options,
         );
         if (rollbackOutcome === "failed") {
@@ -535,7 +430,6 @@ export async function highlightAndVerifyPost(
           ),
           preservedHighlightIds: idsOf(await subreddit.getHighlightedPosts()),
           rollbackOutcome,
-          reorderOutcome: "not_attempted",
         });
       }
     }
@@ -553,7 +447,6 @@ export async function highlightAndVerifyPost(
       rollbackOutcome = await restoreRemovedHighlights(
         subreddit,
         removed,
-        rollbackOrder,
         options,
       );
       if (rollbackOutcome === "failed") {
@@ -575,7 +468,6 @@ export async function highlightAndVerifyPost(
         ),
         preservedHighlightIds: idsOf(await subreddit.getHighlightedPosts()),
         rollbackOutcome,
-        reorderOutcome: "not_attempted",
       });
     }
 
@@ -637,13 +529,11 @@ export async function highlightAndVerifyPost(
             (postId) => postId !== post.id,
           ),
           rollbackOutcome,
-          reorderOutcome: "not_attempted",
         });
       }
       rollbackOutcome = await restoreRemovedHighlights(
         subreddit,
         removed,
-        rollbackOrder,
         options,
       );
       if (rollbackOutcome === "failed") {
@@ -667,7 +557,6 @@ export async function highlightAndVerifyPost(
           await subreddit.getHighlightedPosts(),
         ).filter((postId) => postId !== post.id),
         rollbackOutcome,
-        reorderOutcome: "not_attempted",
       });
     }
 
@@ -719,10 +608,6 @@ export async function highlightAndVerifyPost(
         rollbackOutcome = await restoreRemovedHighlights(
           subreddit,
           [...removed, ...displacedPosts],
-          [
-            ...rollbackOrder,
-            ...unexpected.map(({ postId }) => postId as LinkId),
-          ],
           options,
         );
       } catch (error) {
@@ -774,7 +659,6 @@ export async function highlightAndVerifyPost(
           (postId) => postId !== post.id,
         ),
         rollbackOutcome,
-        reorderOutcome: "not_attempted",
       });
     }
   } else {
@@ -795,7 +679,6 @@ export async function highlightAndVerifyPost(
         removedManagedHighlightIds: [],
         preservedHighlightIds: idsOf(verification.snapshot),
         rollbackOutcome,
-        reorderOutcome: "not_attempted",
       });
     }
   }
@@ -848,10 +731,11 @@ export async function highlightAndVerifyPost(
     }
   }
 
-  const reorder = await reorderTargetFirst(subreddit, post.id);
-  if (reorder.issue) issues.push(reorder.issue);
   const finalVerification = await pollForState(subreddit, post, true, options);
   const finalSnapshot = finalVerification.snapshot;
+  const selectedPosition = finalSnapshot.findIndex(
+    ({ postId }) => postId === post.id,
+  );
   if (!finalVerification.matches) {
     issues.push({
       category: finalVerification.listed ? "verification" : "concurrency",
@@ -866,6 +750,7 @@ export async function highlightAndVerifyPost(
     status: finalVerification.listed ? "highlighted" : "not_highlighted",
     selectedPostId: post.id,
     verifiedHighlighted: finalVerification.matches,
+    ...(selectedPosition >= 0 ? { selectedPosition } : {}),
     issues,
     capacityOutcome,
     cleanupOutcome,
@@ -876,7 +761,6 @@ export async function highlightAndVerifyPost(
       (postId) => postId !== post.id,
     ),
     rollbackOutcome,
-    reorderOutcome: reorder.outcome,
   });
 }
 
@@ -998,6 +882,5 @@ export async function cleanupManagedHighlightsPreservingTarget(
       (postId) => postId !== post.id,
     ),
     rollbackOutcome: "not_needed",
-    reorderOutcome: "not_attempted",
   });
 }

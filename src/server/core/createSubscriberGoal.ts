@@ -1060,7 +1060,7 @@ async function createSubscriberGoalInternal(
     await saveHighlightManagementBaseline(redis, {
       canonicalPostId: post.id,
       highlighted: true,
-      position: 0,
+      position: highlightResult.selectedPosition ?? null,
       highlightLabel: null,
       highlightedUntil: null,
       moderatorOverride: "none",
@@ -1505,32 +1505,45 @@ function normalizeStoredHighlightResult(
       : typeof legacy.verifiedStickied === "boolean"
         ? legacy.verifiedStickied
         : status === "highlighted";
-  const failureCategory =
+  const storedFailureCategory =
     typeof legacy.failureCategory === "string"
       ? (legacy.failureCategory as HighlightResult["failureCategory"])
       : undefined;
-  const errorMessage =
+  const storedErrorMessage =
     typeof legacy.errorMessage === "string" ? legacy.errorMessage : undefined;
+  const storedIssues = Array.isArray(legacy.issues)
+    ? (legacy.issues as HighlightResult["issues"])
+    : storedFailureCategory && storedErrorMessage
+      ? [{ category: storedFailureCategory, message: storedErrorMessage, postId }]
+      : [];
+  const issues = storedIssues.filter(
+    ({ category }) => String(category) !== "reorder",
+  );
+  const hadReorderIssue =
+    legacy.failureCategory === "reorder" || issues.length !== storedIssues.length;
+  const failureCategory = hadReorderIssue
+    ? issues[0]?.category
+    : storedFailureCategory;
+  const errorMessage = hadReorderIssue
+    ? issues.map(({ message }) => message).join(" ")
+    : storedErrorMessage;
   const current = value as Partial<HighlightResult>;
   return {
-    ...current,
     status,
     selectedPostId:
       typeof legacy.selectedPostId === "string"
         ? (legacy.selectedPostId as `t3_${string}`)
         : postId,
     verifiedHighlighted,
-    issues: Array.isArray(legacy.issues)
-      ? (legacy.issues as HighlightResult["issues"])
-      : failureCategory && errorMessage
-        ? [{ category: failureCategory, message: errorMessage, postId }]
-        : [],
+    issues,
+    ...(typeof current.selectedPosition === "number"
+      ? { selectedPosition: current.selectedPosition }
+      : {}),
     capacityOutcome: current.capacityOutcome ?? "not_needed",
     cleanupOutcome: current.cleanupOutcome ?? "not_needed",
     removedManagedHighlightIds: current.removedManagedHighlightIds ?? [],
     preservedHighlightIds: current.preservedHighlightIds ?? [],
     rollbackOutcome: current.rollbackOutcome ?? "not_needed",
-    reorderOutcome: current.reorderOutcome ?? "not_attempted",
     ...(failureCategory ? { failureCategory } : {}),
     ...(errorMessage ? { errorMessage } : {}),
   };

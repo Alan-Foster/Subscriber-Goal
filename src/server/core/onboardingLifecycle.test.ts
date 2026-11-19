@@ -2013,6 +2013,49 @@ describe("existing goal highlight ensurance", () => {
     ).resolves.toBe(active.id);
   });
 
+  it.each(["none", "reordered"])("treats a slot change as informational with a stored %s override", async (moderatorOverride) => {
+    const scheduled = {
+      ...makePost({ id: "t3_scheduled", createdAt: "2026-09-16T00:00:00Z", highlighted: true }),
+      authorName: "ScheduleCreator",
+    };
+    const active = makePost({
+      id: "t3_active_slot",
+      createdAt: "2026-09-15T00:00:00Z",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      highlighted: true,
+    });
+    const reddit = makeReddit([scheduled, active]);
+    const redis = new InMemoryRedis();
+    await redis.hSet("subscriber_goals", { t3_active_slot_goal: "3000" });
+    await saveHighlightManagementBaseline(redis as never, {
+      canonicalPostId: active.id,
+      highlighted: true,
+      position: 0,
+      highlightLabel: null,
+      highlightedUntil: null,
+      moderatorOverride: "none",
+      reconciledAt: nowMs,
+    });
+    await redis.hSet(highlightManagementStateKey, { moderatorOverride });
+
+    const result = await ensureExistingSubscriberGoalHighlighted({
+      reddit: reddit as never,
+      redis: redis as never,
+      nowMs,
+      reconciliationContext: "repair",
+    });
+
+    expect(result.status).toBe("existing");
+    expect(result.moderatorOverride).toBeUndefined();
+    expect(active.highlight).not.toHaveBeenCalled();
+    expect(scheduled.unhighlight).not.toHaveBeenCalled();
+    await expect(redis.hGetAll(highlightManagementStateKey)).resolves.toMatchObject({
+      position: "1",
+      moderatorOverride: "none",
+    });
+  });
+
   it("restores a moderator-unhighlighted active goal", async () => {
     const active = makePost({
       id: "t3_moderator_override",

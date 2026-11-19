@@ -48,7 +48,7 @@ class IncidentRedis {
 
 function result(
   postId: LinkId,
-  category: "cleanup" | "reorder" = "cleanup",
+  category: "cleanup" | "verification" = "cleanup",
 ): HighlightResult {
   return {
     status: "highlighted",
@@ -62,7 +62,6 @@ function result(
     removedManagedHighlightIds: [],
     preservedHighlightIds: [],
     rollbackOutcome: "not_needed",
-    reorderOutcome: category === "reorder" ? "failed" : "reordered",
   };
 }
 
@@ -114,14 +113,17 @@ describe("highlight failure notifications", () => {
     };
 
     await expect(notifyHighlightFailureIncident(params)).resolves.toBe("sent");
+    const key = "highlight_failure_incident_v1:t3_goal";
+    const { fingerprint } = await redis.hGetAll(key);
+    await redis.hSet(key, {
+      fingerprint: fingerprint!.replace(/}$/, ',"reorderOutcome":"reordered"}'),
+    });
     await expect(
       notifyHighlightFailureIncident({ ...params, nowMs: 2_000 }),
     ).resolves.toBe("skipped_duplicate");
 
     expect(client.modMail.createModNotification).toHaveBeenCalledOnce();
-    expect(redis.expirations.get("highlight_failure_incident_v1:t3_goal")).toBe(
-      30 * 24 * 60 * 60,
-    );
+    expect(redis.expirations.get(key)).toBe(30 * 24 * 60 * 60);
   });
 
   it("retries failed delivery after backoff and alerts for a changed signature", async () => {
@@ -152,7 +154,7 @@ describe("highlight failure notifications", () => {
     await expect(
       notifyHighlightFailureIncident({
         ...params,
-        result: result("t3_goal", "reorder"),
+        result: result("t3_goal", "verification"),
         nowMs: 3_603_000,
       }),
     ).resolves.toBe("sent");

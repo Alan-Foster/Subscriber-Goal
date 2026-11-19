@@ -1660,12 +1660,6 @@
       "placeholders": {},
       "protectedTokens": []
     },
-    "outbound.highlight.result.reorder": {
-      "description": "Outbound moderator or member message: Highlight result reorder",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
     "outbound.highlight.result.concurrent": {
       "description": "Outbound moderator or member message: Highlight result concurrent",
       "policy": "fallback",
@@ -2495,7 +2489,6 @@
         "outbound.highlight.result.notConfirmed": "The goal was created, but Reddit did not confirm it as a Community Highlight.",
         "outbound.highlight.result.rollback": "Your post is highlighted, but the previous Community Highlights could not be restored. Check the Community Highlights list.",
         "outbound.highlight.result.cleanup": "Your post is highlighted, but the old goal is still highlighted too.",
-        "outbound.highlight.result.reorder": "The goal is highlighted, but it could not be verified in the first position.",
         "outbound.highlight.result.concurrent": "The Community Highlights changed while Subscriber Goal was updating them. Check the current list.",
         "outbound.highlight.result.review": "The Community Highlight needs moderator review.",
         "moderator.create.ctaLabel": "CTA post",

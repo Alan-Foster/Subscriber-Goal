@@ -14,11 +14,7 @@ export type HighlightReconciliationContext =
   | "manual_creation"
   | "automatic_successor";
 
-export type HighlightModeratorOverride =
-  | "none"
-  | "unhighlighted"
-  | "reordered"
-  | "expired";
+export type HighlightModeratorOverride = "none" | "unhighlighted" | "expired";
 
 export type HighlightManagementBaselineV2 = {
   version: typeof highlightManagementVersion;
@@ -54,7 +50,6 @@ export async function getHighlightManagementBaseline(
   const rawPosition = Number(raw.position);
   const moderatorOverride: HighlightModeratorOverride =
     raw.moderatorOverride === "unhighlighted" ||
-    raw.moderatorOverride === "reordered" ||
     raw.moderatorOverride === "expired"
       ? raw.moderatorOverride
       : "none";

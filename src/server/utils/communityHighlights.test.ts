@@ -38,7 +38,7 @@ function createHarness(initialIds: string[]) {
 }
 
 describe("Community Highlights manager", () => {
-  it("highlights a target, moves it first, and preserves relative order", async () => {
+  it("verifies a new highlight in the position Reddit assigns it", async () => {
     const harness = createHarness(["t3_a", "t3_b"]);
 
     const result = await highlightAndVerifyPost(
@@ -51,10 +51,11 @@ describe("Community Highlights manager", () => {
     expect(result).toMatchObject({
       status: "highlighted",
       verifiedHighlighted: true,
-      reorderOutcome: "reordered",
+      selectedPosition: 2,
     });
-    expect(harness.getIds()).toEqual(["t3_target", "t3_a", "t3_b"]);
+    expect(harness.getIds()).toEqual(["t3_a", "t3_b", "t3_target"]);
     expect(harness.target.highlight).toHaveBeenCalledWith();
+    expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
   it("does not attempt a seventh highlight when no managed slot is removable", async () => {
@@ -100,16 +101,16 @@ describe("Community Highlights manager", () => {
     expect(result.removedManagedHighlightIds).toEqual(["t3_oldgoal"]);
     expect(harness.posts.get("t3_oldgoal")?.unhighlight).toHaveBeenCalledOnce();
     expect(harness.getIds()).toEqual([
-      "t3_target",
       "t3_other1",
       "t3_other2",
       "t3_other3",
       "t3_other4",
       "t3_other5",
+      "t3_target",
     ]);
   });
 
-  it("restores a removed managed highlight and its order when replacement fails", async () => {
+  it("restores a removed managed highlight with its metadata in a different slot", async () => {
     const ids = [
       "t3_oldgoal",
       "t3_other1",
@@ -145,11 +146,12 @@ describe("Community Highlights manager", () => {
       failureCategory: "write",
       rollbackOutcome: "restored",
     });
-    expect(harness.getIds()).toEqual(ids);
+    expect(harness.getIds()).toEqual([...ids.slice(1), "t3_oldgoal"]);
     expect(harness.posts.get("t3_oldgoal")?.highlight).toHaveBeenCalledWith({
       highlightUntil: expiration,
       highlightLabelType: "EVENT",
     });
+    expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
   it("does not restore a managed highlight whose expiration passed during rollback", async () => {
@@ -182,29 +184,8 @@ describe("Community Highlights manager", () => {
     expect(harness.posts.get("t3_oldgoal")?.highlight).not.toHaveBeenCalled();
   });
 
-  it("refetches and retries once when reordering races with another moderator", async () => {
-    const harness = createHarness(["t3_a"]);
-    harness.subreddit.reorderHighlightedPosts
-      .mockRejectedValueOnce(new Error("order changed"))
-      .mockImplementationOnce(async (order) => {
-        const ids = [...order];
-        const current = harness.getIds();
-        current.splice(0, current.length, ...ids);
-      });
-
-    const result = await highlightAndVerifyPost(
-      harness.reddit as never,
-      harness.subreddit,
-      harness.target,
-      verification,
-    );
-
-    expect(result.reorderOutcome).toBe("reordered");
-    expect(harness.subreddit.reorderHighlightedPosts).toHaveBeenCalledTimes(2);
-  });
-
-  it("preserves target label and expiration while reordering", async () => {
-    const harness = createHarness(["t3_a"]);
+  it("leaves existing highlight metadata alone", async () => {
+    const harness = createHarness(["t3_a", "t3_target"]);
     const expiration = new Date(Date.now() + 60 * 60 * 1000);
     harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
       harness.getIds().map((postId) => ({
@@ -227,9 +208,10 @@ describe("Community Highlights manager", () => {
 
     expect(result).toMatchObject({
       status: "highlighted",
-      reorderOutcome: "reordered",
       issues: [],
     });
+    expect(harness.target.highlight).not.toHaveBeenCalled();
+    expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
   it("does not highlight when a full-capacity removal is a silent no-op", async () => {
@@ -313,7 +295,7 @@ describe("Community Highlights manager", () => {
       status: "highlighted",
       rollbackOutcome: "not_needed",
     });
-    expect(harness.getIds()).toEqual(["t3_target", "t3_b"]);
+    expect(harness.getIds()).toEqual(["t3_b", "t3_target"]);
   });
 
   it("rolls back when a concurrent sixth highlight makes the app write seventh", async () => {
@@ -341,37 +323,37 @@ describe("Community Highlights manager", () => {
       "concurrency",
     );
     expect(harness.getIds()).toEqual([
-      "t3_a",
       "t3_b",
       "t3_c",
       "t3_d",
       "t3_e",
       "t3_moderator",
+      "t3_a",
     ]);
+    expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
-  it("reports the final state when the target disappears during reordering", async () => {
-    const harness = createHarness(["t3_a"]);
-    harness.subreddit.reorderHighlightedPosts.mockImplementation(async () => {
-      const ids = harness.getIds();
-      ids.splice(ids.indexOf("t3_target"), 1);
-    });
+  it("reports the final state when the target disappears during cleanup", async () => {
+    const harness = createHarness(["t3_oldgoal", "t3_target"]);
+    harness.posts
+      .get("t3_oldgoal")
+      ?.unhighlight.mockImplementationOnce(async () => {
+        const ids = harness.getIds();
+        ids.splice(0, ids.length);
+      });
 
     const result = await highlightAndVerifyPost(
       harness.reddit as never,
       harness.subreddit,
       harness.target,
-      verification,
+      { ...verification, removableManagedPostIds: ["t3_oldgoal"] },
     );
 
     expect(result).toMatchObject({
       status: "not_highlighted",
       verifiedHighlighted: false,
-      reorderOutcome: "failed",
     });
-    expect(result.issues.map(({ category }) => category)).toEqual(
-      expect.arrayContaining(["reorder", "concurrency"]),
-    );
+    expect(result.failureCategory).toBe("concurrency");
   });
 
   it("does not mutate highlights when isHighlighted is unavailable", async () => {
@@ -420,8 +402,8 @@ describe("Community Highlights manager", () => {
     expect(harness.getIds()).toContain("t3_oldgoal");
   });
 
-  it("moves an already-highlighted target first", async () => {
-    const harness = createHarness(["t3_a", "t3_target", "t3_b"]);
+  it("leaves an already-highlighted goal in place behind a scheduled Sticky", async () => {
+    const harness = createHarness(["t3_scheduled", "t3_target", "t3_b"]);
 
     const result = await highlightAndVerifyPost(
       harness.reddit as never,
@@ -432,32 +414,12 @@ describe("Community Highlights manager", () => {
 
     expect(result).toMatchObject({
       status: "highlighted",
-      reorderOutcome: "reordered",
+      selectedPosition: 1,
       issues: [],
     });
     expect(harness.target.highlight).not.toHaveBeenCalled();
-    expect(harness.getIds()).toEqual(["t3_target", "t3_a", "t3_b"]);
-  });
-
-  it("reports reorder failure when Reddit never applies the requested order", async () => {
-    const harness = createHarness(["t3_a", "t3_target"]);
-    harness.subreddit.reorderHighlightedPosts.mockImplementation(
-      async () => undefined,
-    );
-
-    const result = await highlightAndVerifyPost(
-      harness.reddit as never,
-      harness.subreddit,
-      harness.target,
-      verification,
-    );
-
-    expect(result).toMatchObject({
-      status: "highlighted",
-      reorderOutcome: "failed",
-      failureCategory: "reorder",
-    });
-    expect(harness.subreddit.reorderHighlightedPosts).toHaveBeenCalledTimes(2);
+    expect(harness.getIds()).toEqual(["t3_scheduled", "t3_target", "t3_b"]);
+    expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
   it("retains both the triggering issue and a rollback failure", async () => {

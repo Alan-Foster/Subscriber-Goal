@@ -330,7 +330,6 @@ export type OnboardingHighlightEnsuranceResult =
     capacityOnly?: boolean;
     cleanupOutcome?: HighlightResult["cleanupOutcome"];
     rollbackOutcome?: HighlightResult["rollbackOutcome"];
-    reorderOutcome?: HighlightResult["reorderOutcome"];
     notificationOutcome?: HighlightNotificationOutcome;
     goal?: number;
     completedTime?: number;
@@ -2018,7 +2017,6 @@ async function reconcileLiveSubscriberGoalHighlights({
                     .map(({ postId }) => postId as LinkId)
                     .filter((postId) => postId !== candidate.postId),
                   rollbackOutcome: "not_needed" as const,
-                  reorderOutcome: "not_attempted" as const,
                 },
                 notificationOutcome: "not_requested" as const,
               }
@@ -2335,14 +2333,11 @@ async function reconcileCanonicalClassicGoal({
   const subreddit = await reddit.getCurrentSubreddit();
   let liveListed: boolean | undefined;
   let livePostState: boolean | undefined;
-  let livePosition: number | null = null;
   try {
     const snapshot = await subreddit.getHighlightedPosts();
-    const index = snapshot.findIndex(
+    liveListed = snapshot.some(
       ({ postId }) => postId === selected.postId,
     );
-    liveListed = index >= 0;
-    livePosition = index >= 0 ? index : null;
     livePostState = selected.post.isHighlighted
       ? await selected.post.isHighlighted()
       : undefined;
@@ -2497,12 +2492,7 @@ async function reconcileCanonicalClassicGoal({
             nowMs >= baseline.highlightedUntil
             ? "expired"
             : "unhighlighted"
-          : liveListed === true &&
-              livePostState === true &&
-              baseline.position !== null &&
-              livePosition !== baseline.position
-            ? "reordered"
-            : undefined;
+          : undefined;
   }
 
   if (moderatorOverride) {
@@ -2603,13 +2593,14 @@ async function reconcileCanonicalClassicGoal({
     reconciliation.highlightResult.issues.length === 0
   ) {
     const finalSnapshot = await subreddit.getHighlightedPosts();
-    const finalInfo = finalSnapshot.find(
+    const position = finalSnapshot.findIndex(
       ({ postId }) => postId === selected.postId,
     );
+    const finalInfo = finalSnapshot[position];
     await saveHighlightManagementBaseline(redis, {
       canonicalPostId: selected.postId,
       highlighted: true,
-      position: 0,
+      position: position >= 0 ? position : null,
       highlightLabel: finalInfo?.highlightLabel ?? null,
       highlightedUntil: finalInfo?.highlightedUntil?.getTime() ?? null,
       moderatorOverride: "none",
@@ -2825,7 +2816,6 @@ function reconciliationDetails(
   | "capacityOnly"
   | "cleanupOutcome"
   | "rollbackOutcome"
-  | "reorderOutcome"
   | "errorMessage"
 > {
   return {
@@ -2844,7 +2834,6 @@ function reconciliationDetails(
     capacityOnly: isCapacityOnlyHighlightFailure(highlightResult),
     cleanupOutcome: highlightResult.cleanupOutcome,
     rollbackOutcome: highlightResult.rollbackOutcome,
-    reorderOutcome: highlightResult.reorderOutcome,
     ...(highlightResult.errorMessage
       ? { errorMessage: highlightResult.errorMessage }
       : {}),
@@ -2963,7 +2952,6 @@ function logHighlightEnsurance(
     capacityOutcome: result.capacityOutcome ?? "not_attempted",
     cleanupOutcome: result.cleanupOutcome ?? "not_attempted",
     rollbackOutcome: result.rollbackOutcome ?? "not_attempted",
-    reorderOutcome: result.reorderOutcome ?? "not_attempted",
     notificationOutcome: result.notificationOutcome ?? "not_requested",
   });
 }
