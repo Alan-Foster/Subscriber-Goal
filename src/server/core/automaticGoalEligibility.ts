@@ -1,14 +1,13 @@
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 
-export type AutomaticGoalIneligibilityReason =
-  "subreddit_not_public" | "subreddit_not_sfw";
+export type AutomaticGoalIneligibilityReason = "subreddit_not_public";
 
 export type AutomaticGoalEligibility =
   | {
       eligible: true;
       subredditType: string;
-      isSfw: true;
-      safetyStatus: "sfw";
+      isSfw: boolean;
+      safetyStatus: "sfw" | "nsfw" | "unknown";
     }
   | {
       eligible: false;
@@ -38,26 +37,11 @@ export function getAutomaticGoalEligibility(subreddit: {
       reason: "subreddit_not_public",
     };
   }
-  if (!isSfw) {
-    return {
-      eligible: false,
-      subredditType,
-      isSfw,
-      safetyStatus,
-      reason: "subreddit_not_sfw",
-    };
-  }
   return { eligible: true, subredditType, isSfw, safetyStatus };
 }
 
 export function isAutomaticGoalEligibilityUncertain(eligibility: {
-  safetyStatus: "sfw" | "nsfw" | "unknown";
   subredditType: string;
 }): boolean {
-  return (
-    eligibility.safetyStatus !== "nsfw" &&
-    (eligibility.subredditType === "unknown" ||
-      (eligibility.subredditType === "public" &&
-        eligibility.safetyStatus === "unknown"))
-  );
+  return eligibility.subredditType === "unknown";
 }

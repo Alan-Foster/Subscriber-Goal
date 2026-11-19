@@ -910,38 +910,45 @@ describe("processDueAutoCreateNextGoals", () => {
     );
   });
 
-  it("suppresses automatic replacement in an NSFW subreddit", async () => {
-    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "examplesub",
-      numberOfSubscribers: 12,
-      type: "public",
-      nsfw: true,
-    });
-
-    await expect(
-      processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
-        appSettings: baseSettings,
-      }),
-    ).resolves.toEqual({
-      due: 1,
-      created: 0,
-      skipped: 1,
-      failed: 0,
-      rescheduled: 0,
-      exhausted: 0,
-    });
-
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
-  });
+  it.each([true, undefined])(
+    "creates a public successor without crossposting when nsfw=%s",
+    async (nsfw) => {
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "examplesub",
+        numberOfSubscribers: 12,
+        type: "public",
+        nsfw,
+      });
+      const action = {
+        type: "top-post-day",
+        buttonText: "Top today",
+        colorTheme: "blue",
+      };
+      hoisted.getSubGoalData.mockResolvedValue({
+        ...(await hoisted.getSubGoalData()),
+        afterSubscribeAction: action,
+        afterSubscribePreset: "top-post-day",
+      });
+      await expect(
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+        }),
+      ).resolves.toMatchObject({ created: 1, failed: 0, rescheduled: 0 });
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            crosspost: false,
+            afterSubscribeAction: action,
+            afterSubscribePreset: "top-post-day",
+          }),
+        }),
+      );
+    },
+  );
 
   it.each(["restricted", "private"])(
     "suppresses automatic replacement in a %s subreddit",
@@ -952,7 +959,7 @@ describe("processDueAutoCreateNextGoals", () => {
         name: "examplesub",
         numberOfSubscribers: 12,
         type,
-        nsfw: false,
+        nsfw: true,
       });
 
       await expect(
@@ -977,31 +984,6 @@ describe("processDueAutoCreateNextGoals", () => {
       expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
     },
   );
-
-  it("suppresses automatic replacement when safety metadata is missing", async () => {
-    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "examplesub",
-      numberOfSubscribers: 12,
-      type: "public",
-    });
-
-    await expect(
-      processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
-        appSettings: baseSettings,
-      }),
-    ).resolves.toMatchObject({ created: 0, skipped: 1, failed: 0 });
-
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
-  });
 
   it("reschedules when subreddit eligibility cannot be fetched", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
@@ -1270,10 +1252,10 @@ describe("processDueAutoCreateNextGoals", () => {
     },
   );
 
-  it("defers unknown NSFW metadata and resumes the same successor when verified SFW", async () => {
+  it("defers unknown subreddit type and resumes the same successor when public", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValueOnce({
-      type: "public",
+      nsfw: false,
       name: "ExampleSub",
     });
     const run = (nowMs: number) =>
@@ -1370,7 +1352,7 @@ describe("processDueAutoCreateNextGoals", () => {
     },
   );
 
-  it("keeps confirmed NSFW ineligibility terminal even when subreddit type is unknown", async () => {
+  it("retries an unknown subreddit type even when NSFW is confirmed", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: "ExampleSub",
@@ -1382,13 +1364,10 @@ describe("processDueAutoCreateNextGoals", () => {
       appSettings: baseSettings,
       nowMs: 1_000,
     });
-    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledWith(
-      hoisted.redis,
-      "t3_source",
-    );
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
     expect(
       hoisted.scheduleAutoCreateNextGoalReconciliation,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledOnce();
     expect(
       hoisted.ensureExistingSubscriberGoalHighlighted,
     ).not.toHaveBeenCalled();

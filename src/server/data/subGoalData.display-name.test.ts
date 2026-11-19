@@ -817,6 +817,7 @@ describe("subGoalData subreddit display name", () => {
     "skips manual crossposting when current subreddit nsfw is %s",
     async (nsfw, reason) => {
       const redis = new InMemoryRedis();
+      const updateWikiPage = vi.fn();
       const infoSpy = vi
         .spyOn(console, "info")
         .mockImplementation(() => undefined);
@@ -825,6 +826,7 @@ describe("subGoalData subreddit display name", () => {
       const result = await registerNewSubGoalPost(
         {
           getCurrentSubreddit: async () => ({ nsfw }),
+          updateWikiPage,
         } as never,
         redis as unknown as Parameters<typeof registerNewSubGoalPost>[1],
         { promoSubreddit: "SubGoal" } as never,
@@ -839,6 +841,7 @@ describe("subGoalData subreddit display name", () => {
       );
 
       expect(result).toEqual({ status: "skipped" });
+      expect(updateWikiPage).not.toHaveBeenCalled();
       expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining(reason));
       infoSpy.mockRestore();
     },
