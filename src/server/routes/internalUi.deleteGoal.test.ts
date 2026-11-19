@@ -5,6 +5,8 @@ import { captureUiRoutes } from "./internalUi.testHelpers";
 import { registerDeleteGoalRoutes } from "./internalUi.deleteGoal";
 import { communityGoalMutationLockKey } from "../core/communityGoalMutation";
 
+const communityUrl = "https://www.reddit.com/r/ExampleSub/";
+
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
   redisHashes: new Map<string, Map<string, string>>(),
@@ -40,6 +42,7 @@ const hoisted = vi.hoisted(() => ({
   getAppSettings: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   removeSubscriberGoalPost: vi.fn(),
+  hasCrosspost: vi.fn(),
   dispatchPostAction: vi.fn(),
   cancelUpdates: vi.fn(),
   untrackPost: vi.fn(),
@@ -76,6 +79,7 @@ vi.mock("../data/updaterData", () => ({
 
 vi.mock("../data/crosspostData", () => ({
   dispatchPostAction: hoisted.dispatchPostAction,
+  hasCrosspost: hoisted.hasCrosspost,
 }));
 
 vi.mock("../data/subscriberGoalPostRegistry", () => ({
@@ -197,6 +201,7 @@ describe("internalUi deleteGoal routes", () => {
     });
     hoisted.reddit.getPostData.mockResolvedValue(undefined);
     hoisted.dispatchPostAction.mockResolvedValue(undefined);
+    hoisted.hasCrosspost.mockResolvedValue(true);
     hoisted.cancelUpdates.mockResolvedValue(undefined);
     hoisted.untrackPost.mockResolvedValue(undefined);
     hoisted.removeSubscriberGoalPost.mockResolvedValue(undefined);
@@ -280,6 +285,7 @@ describe("internalUi deleteGoal routes", () => {
     expect(json).toHaveBeenCalledWith({
       showToast:
         "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
+      navigateTo: communityUrl,
     });
   });
 
@@ -324,6 +330,7 @@ describe("internalUi deleteGoal routes", () => {
       expect(json).toHaveBeenCalledOnce();
       expect(json).toHaveBeenCalledWith({
         showToast: expect.stringContaining("Post deleted."),
+        navigateTo: communityUrl,
       });
     } finally {
       vi.useRealTimers();
@@ -355,6 +362,7 @@ describe("internalUi deleteGoal routes", () => {
       expect(hoisted.deletePost).toHaveBeenCalledOnce();
       expect(json).toHaveBeenCalledWith({
         showToast: expect.stringContaining("Post deleted."),
+        navigateTo: communityUrl,
       });
     } finally {
       timer.mockRestore();
@@ -475,6 +483,7 @@ describe("internalUi deleteGoal routes", () => {
                 ? "confirm whether the post was deleted"
                 : "Post deleted.",
             ),
+            ...(uncertain ? {} : { navigateTo: communityUrl }),
           });
         }
       } finally {
@@ -534,6 +543,7 @@ describe("internalUi deleteGoal routes", () => {
 
       expect(json).toHaveBeenCalledWith({
         showToast: expect.stringContaining("Post deleted."),
+        navigateTo: communityUrl,
       });
       expect(hoisted.deletePost).toHaveBeenCalledTimes(2);
       expect(hoisted.dispatchPostAction).toHaveBeenCalledOnce();
@@ -638,6 +648,7 @@ describe("internalUi deleteGoal routes", () => {
 
   it("deletes a verified app post when its Redis registration is missing", async () => {
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([]);
+    hoisted.hasCrosspost.mockResolvedValue(false);
     hoisted.reddit.getPostById.mockResolvedValue({
       id: "t3_post",
       subredditId: "t5_example",
@@ -649,14 +660,19 @@ describe("internalUi deleteGoal routes", () => {
       postKind: "subscriber-goal-v1",
     });
     const routes = createRouteHarness();
+    const json = vi.fn();
 
     await routes.get(internalRoutes.forms.deleteGoal)?.(
       { body: { confirm: true } } as Request,
-      { json: vi.fn() } as unknown as Response,
+      { json } as unknown as Response,
     );
 
     expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
     expect(hoisted.deletePost).toHaveBeenCalledOnce();
+    expect(json).toHaveBeenCalledExactlyOnceWith({
+      showToast: "Post deleted.",
+      navigateTo: communityUrl,
+    });
   });
 
   it("rejects another app's post even when it uses a recognized post kind", async () => {
@@ -744,6 +760,7 @@ describe("internalUi deleteGoal routes", () => {
         showToast: expect.stringMatching(
           /^Post deleted\. Subscriber Goal couldn’t finish updating its records\. Reference: delete-goal-/,
         ),
+        navigateTo: communityUrl,
       });
       errorSpy.mockRestore();
     },
