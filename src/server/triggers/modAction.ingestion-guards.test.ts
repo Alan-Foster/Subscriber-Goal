@@ -526,24 +526,30 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it('terminally skips an NSFW-tagged source in a SFW community', async () => {
+  it.each([
+    ['an NSFW-tagged source in a SFW community', { nsfw: true }, 'source_post_nsfw'],
+    ['a source removed before processing', { removed: true, removedByCategory: 'moderator' }, 'source_post_unavailable'],
+    ['a source marked as spam', { spam: true }, 'source_post_unavailable'],
+    ['a source authored by another account', { authorId: 't2_mod' }, 'source_post_non_app_author'],
+  ] as const)('terminally skips %s', async (_label, sourceChanges, reason) => {
     mockContext.subredditName = 'SubGoal';
     const now = Date.now();
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subreddit: string, page: string) => ({
         ok: true,
         revisions: page === crosspostWikiPages.newPost
-          ? [{ id: 'rev_nsfw', reason: 'Post t3_nsfw with goal 100', dateMs: now }]
+          ? [{ id: 'rev_source', reason: 'Post t3_source with goal 100', dateMs: now }]
           : [],
         durationMs: 1,
       })
     );
     mockReddit.getPostById.mockResolvedValue({
-      id: 't3_nsfw',
+      id: 't3_source',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(now),
-      nsfw: true,
+      ...sourceChanges,
     });
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
 
@@ -551,11 +557,11 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
 
     expect(summary.crosspostsSkipped).toBe(1);
     expect(mockReddit.crosspost).not.toHaveBeenCalled();
-    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_nsfw')).toBeUndefined();
+    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_source')).toBeUndefined();
     expect(loggedEvents).toContainEqual(expect.objectContaining({
       event: 'crosspost_attempt_skipped',
-      reason: 'source_post_nsfw',
-      revisionId: 'rev_nsfw',
+      reason,
+      revisionId: 'rev_source',
     }));
   });
 
@@ -586,6 +592,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_abc123',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 11 * 60 * 1000),
       nsfw: false,
@@ -635,6 +642,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_expire',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 11 * 60 * 1000),
       nsfw: false,
@@ -713,6 +721,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_secs',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: secondsAgoFiveMinutes,
       nsfw: false,
@@ -758,6 +767,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_unknown',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: 'not-a-date',
       nsfw: false,
@@ -875,6 +885,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockImplementation(async (postId: string) => ({
       id: postId,
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -966,6 +977,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_cool',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1007,6 +1019,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_partial',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1070,6 +1083,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_total',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1156,6 +1170,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_inflight',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1179,7 +1194,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
-  it('detects existing target crosspost and skips duplicate creation', async () => {
+  it('backfills an existing crosspost mapping even if the source has since been removed', async () => {
     mockContext.subredditName = 'SubGoal';
     safeGetWikiPageRevisionsMock.mockImplementation(
       async (_reddit: unknown, _subredditName: string, page: string) => {
@@ -1202,9 +1217,11 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_existing',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
+      removed: true,
     });
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
     mockReddit.getNewPosts.mockReturnValue({
@@ -1261,6 +1278,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     mockReddit.getPostById.mockResolvedValue({
       id: 't3_invalidroot',
       subredditId: 't5_source',
+      authorId: 't2_app',
       subredditName: 'CorporateGifts',
       createdAt: new Date(Date.now() - 60_000),
       nsfw: false,
@@ -1383,6 +1401,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
         : {
             id: 't3_racing',
             subredditId: 't5_source',
+            authorId: 't2_app',
             subredditName: 'CorporateGifts',
             createdAt: new Date(Date.now() - 60_000),
             nsfw: false,
