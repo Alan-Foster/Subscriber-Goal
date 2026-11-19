@@ -1247,6 +1247,12 @@
       },
       "protectedTokens": []
     },
+    "moderator.delete.inProgress": {
+      "description": "Moderator workflow: another goal change is holding the deletion lease",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": []
+    },
     "moderator.delete.outcomeUncertain": {
       "description": "Moderator workflow: Reddit did not confirm whether deletion succeeded",
       "policy": "fallback",
@@ -2429,6 +2435,7 @@
         "moderator.delete.cleanupQueued": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
         "moderator.delete.cleanupDispatched": "Post deleted. If it was crossposted, Subscriber Goal will try to remove the copy.",
         "moderator.delete.failed": "Couldn’t delete this post. Try again. Reference: {operationId}",
+        "moderator.delete.inProgress": "Another Subscriber Goal change is in progress. Try again shortly.",
         "moderator.delete.outcomeUncertain": "We couldn’t confirm whether the post was deleted. Refresh the community before trying again. Reference: {operationId}",
         "moderator.delete.ineligible": "We couldn’t verify that this is a Subscriber Goal post in this community.",
         "moderator.authorization.loginRequired": "Please log in before performing this action.",

@@ -4,6 +4,17 @@ import {
   ensureSubscriberGoalPostFlair,
 } from "./subscriberGoalPostFlair";
 
+function flairRedis() {
+  const values = new Map<string, string>();
+  return {
+    set: async (key: string, value: string) => {
+      if (!values.has(key)) values.set(key, value);
+    },
+    get: async (key: string) => values.get(key),
+    del: async (key: string) => values.delete(key),
+  };
+}
+
 describe("Subscriber Goal post flair", () => {
   it("creates the canonical mod-only flair when absent", async () => {
     const created = { id: "flair_1" };
@@ -13,7 +24,11 @@ describe("Subscriber Goal post flair", () => {
     };
 
     await expect(
-      ensureSubscriberGoalPostFlair(reddit as never, "ExampleSub"),
+      ensureSubscriberGoalPostFlair(
+        reddit as never,
+        flairRedis() as never,
+        "ExampleSub",
+      ),
     ).resolves.toBe(created);
     expect(reddit.createPostFlairTemplate).toHaveBeenCalledWith({
       subredditName: "ExampleSub",
@@ -44,7 +59,11 @@ describe("Subscriber Goal post flair", () => {
     };
 
     await expect(
-      ensureSubscriberGoalPostFlair(reddit as never, "ExampleSub"),
+      ensureSubscriberGoalPostFlair(
+        reddit as never,
+        flairRedis() as never,
+        "ExampleSub",
+      ),
     ).resolves.toBe(normalized);
     expect(template.edit).toHaveBeenCalledWith({
       text: "Subscriber Goal",
@@ -55,6 +74,52 @@ describe("Subscriber Goal post flair", () => {
       textColor: "light",
     });
     expect(reddit.createPostFlairTemplate).not.toHaveBeenCalled();
+  });
+
+  it("prevents repair and creation from creating duplicate canonical templates", async () => {
+    const redis = flairRedis();
+    const template = {
+      id: "flair_1",
+      text: "Subscriber Goal",
+      allowableContent: "text",
+      backgroundColor: "#FF4500",
+      modOnly: true,
+      textColor: "light",
+      allowUserEdits: false,
+    };
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let finishCreation!: () => void;
+    const creation = new Promise<void>((resolve) => {
+      finishCreation = resolve;
+    });
+    let templates: (typeof template)[] = [];
+    const reddit = {
+      getPostFlairTemplates: vi.fn(async () => templates),
+      createPostFlairTemplate: vi.fn(async () => {
+        markStarted();
+        await creation;
+        templates = [template];
+        return template;
+      }),
+    };
+    const ensure = () =>
+      ensureSubscriberGoalPostFlair(
+        reddit as never,
+        redis as never,
+        "ExampleSub",
+      );
+    const first = ensure();
+    await started;
+    await expect(ensure()).rejects.toThrow(
+      "flair creation is already in progress",
+    );
+    finishCreation();
+    await expect(first).resolves.toBe(template);
+    await expect(ensure()).resolves.toBe(template);
+    expect(reddit.createPostFlairTemplate).toHaveBeenCalledOnce();
   });
 
   it("pauses flair repair on removed posts and resumes after approval", async () => {

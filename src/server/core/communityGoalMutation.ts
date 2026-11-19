@@ -41,9 +41,19 @@ export async function withCommunityGoalMutationLease<T>(
   redis: RedisClient,
   operation: (lease: CommunityGoalMutationLease) => Promise<T>,
   existingLease?: CommunityGoalMutationLease,
+  retry?: { maxWaitMs: number; intervalMs: number },
 ): Promise<T> {
   if (existingLease) return operation(existingLease);
-  const lease = await acquireCommunityGoalMutationLease(redis);
+  const deadline = Date.now() + (retry?.maxWaitMs ?? 0);
+  let lease = await acquireCommunityGoalMutationLease(redis);
+  while (!lease && retry) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(retry.intervalMs, remaining)),
+    );
+    lease = await acquireCommunityGoalMutationLease(redis);
+  }
   if (!lease) throw new CommunityGoalMutationInProgressError();
   try {
     return await operation(lease);

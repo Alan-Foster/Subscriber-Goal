@@ -11,7 +11,12 @@ import {
 import type { DeleteGoalFormValues } from "../../shared/types/api";
 import { getAppSettings } from "../settings";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
-import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
+import {
+  communityGoalMutationLockKey,
+  CommunityGoalMutationInProgressError,
+  type CommunityGoalMutationLease,
+  withCommunityGoalMutationLease,
+} from "../core/communityGoalMutation";
 import {
   dispatchConfirmedSourceDeletion,
   prepareSourcePostDeletionIntent,
@@ -21,7 +26,15 @@ import {
 import type { LinkId, SubredditId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { hasCrosspost } from "../data/crosspostData";
+import {
+  getSourcePostDeletionIntent,
+  sourcePostDeletionIntentId,
+} from "../data/sourcePostDeletion";
 import { resolvePostKindFromPostData } from "../../shared/postKind";
+
+// Leave time for Reddit deletion and cleanup within Devvit Web's server request budget.
+// https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview#limitations
+const deleteGoalLeaseRetry = { maxWaitMs: 4_000, intervalMs: 500 };
 
 export function registerDeleteGoalRoutes(router: Router): void {
   router.post(
@@ -97,6 +110,13 @@ export function registerDeleteGoalRoutes(router: Router): void {
         });
 
         phase = "post_lookup";
+        const existingIntent = await getSourcePostDeletionIntent(
+          redis,
+          sourcePostDeletionIntentId(
+            subreddit.id as SubredditId,
+            postId as LinkId,
+          ),
+        );
         const post = await reddit.getPostById(postId);
         const isCurrentSubredditPost =
           post.subredditId === subreddit.id &&
@@ -154,9 +174,16 @@ export function registerDeleteGoalRoutes(router: Router): void {
           res.json({ showToast: actorAuthority.message });
           return;
         }
+        phase = "mutation_lease";
+        const verificationMayBeInFlight =
+          existingIntent?.status === "verify_source" &&
+          existingIntent.deleteLeaseToken !== undefined &&
+          (await redis.get(communityGoalMutationLockKey)) ===
+            existingIntent.deleteLeaseToken;
         let cleanupDispatched = false;
         let sourceDeletionConfirmed = false;
         let internalRecordsPending = false;
+        let concurrentDeleteUncertain = false;
         let crosspostCleanupExpected = true;
         try {
           crosspostCleanupExpected = await hasCrosspost(redis, postId);
@@ -168,7 +195,9 @@ export function registerDeleteGoalRoutes(router: Router): void {
             error,
           );
         }
-        await withCommunityGoalMutationLease(redis, async () => {
+        const deleteUnderLease = async (
+          mutationLease: CommunityGoalMutationLease,
+        ) => {
           phase = "deletion_intent_persistence";
           let intent = await prepareSourcePostDeletionIntent(redis, {
             postId: postId as LinkId,
@@ -209,11 +238,23 @@ export function registerDeleteGoalRoutes(router: Router): void {
             }
             return;
           }
+          if (
+            intent.status === "verify_source" &&
+            (verificationMayBeInFlight ||
+              intent.deleteAttemptCount >
+                (existingIntent?.deleteAttemptCount ?? 0))
+          ) {
+            // The earlier post lookup cannot verify an attempt made by a concurrent submit.
+            concurrentDeleteUncertain = true;
+            return;
+          }
 
           // This durable transition is deliberately before Reddit. If the
           // delete response is lost, the updater knows to verify, never repeat.
           phase = "deletion_attempt_persistence";
-          intent = await recordSourceDeleteAttempt(redis, intent);
+          intent = await recordSourceDeleteAttempt(redis, intent, {
+            leaseToken: mutationLease.token,
+          });
           phase = "reddit_post_delete";
           await post.delete();
           sourceDeletionConfirmed = true;
@@ -257,7 +298,29 @@ export function registerDeleteGoalRoutes(router: Router): void {
               error,
             );
           }
-        });
+        };
+        await withCommunityGoalMutationLease(
+          redis,
+          deleteUnderLease,
+          undefined,
+          deleteGoalLeaseRetry,
+        );
+        if (concurrentDeleteUncertain) {
+          logDiagnostic("warn", "delete_goal_verification_pending", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+          });
+          res.json({
+            showToast: translate(
+              language,
+              "moderator.delete.outcomeUncertain",
+              { operationId },
+            ),
+          });
+          return;
+        }
         const cleanupFailures: string[] = [];
         const runCleanupPhase = async (
           cleanupPhase: string,
@@ -320,21 +383,26 @@ export function registerDeleteGoalRoutes(router: Router): void {
           postId,
         });
       } catch (error) {
+        const leaseBusy =
+          phase === "mutation_lease" &&
+          error instanceof CommunityGoalMutationInProgressError;
         logDiagnostic(
-          "error",
+          leaseBusy ? "warn" : "error",
           "delete_goal_failed",
           { operationId, workflow: "delete_goal", phase, postId },
           error,
         );
         const outcomeUncertain = phase === "reddit_post_delete";
         res.json({
-          showToast: translate(
-            language,
-            outcomeUncertain
-              ? "moderator.delete.outcomeUncertain"
-              : "moderator.delete.failed",
-            { operationId },
-          ),
+          showToast: leaseBusy
+            ? translate(language, "moderator.delete.inProgress")
+            : translate(
+                language,
+                outcomeUncertain
+                  ? "moderator.delete.outcomeUncertain"
+                  : "moderator.delete.failed",
+                { operationId },
+              ),
         });
       }
     },
