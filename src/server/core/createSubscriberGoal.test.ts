@@ -584,7 +584,12 @@ describe("createSubscriberGoal highlight handling", () => {
           JSON.stringify({
             status: "highlighted",
             verifiedHighlighted: true,
-            issues: [],
+            failureCategory: "reorder",
+            errorMessage: "The goal was not first.",
+            reorderOutcome: "failed",
+            issues: [
+              { category: "reorder", message: "The goal was not first." },
+            ],
           }),
         ],
         ["flairResult", JSON.stringify({ status: "applied", flairId: "f" })],
@@ -602,7 +607,13 @@ describe("createSubscriberGoal highlight handling", () => {
         subredditId: "t5_example",
         subredditName: "ExampleSub",
       }),
-    ).resolves.toMatchObject({ status: "complete", result: { post } });
+    ).resolves.toMatchObject({
+      status: "complete",
+      result: {
+        post,
+        highlightResult: { verifiedHighlighted: true, issues: [] },
+      },
+    });
     await expect(
       recoverSubscriberGoalCreation({
         reddit: hoisted.reddit as never,

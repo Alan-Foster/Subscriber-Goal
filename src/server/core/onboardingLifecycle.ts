@@ -200,7 +200,6 @@ async function reconcileOnboardingForLifecycleUnderLease(
         capacityOutcome: highlighted.capacityOutcome ?? "not_attempted",
         cleanupOutcome: highlighted.cleanupOutcome ?? "not_attempted",
         rollbackOutcome: highlighted.rollbackOutcome ?? "not_attempted",
-        reorderOutcome: highlighted.reorderOutcome ?? "not_attempted",
         postId: highlighted.postId ?? "none",
         existingSource: highlighted.source ?? "none",
         validated: highlighted.validated,

@@ -27,7 +27,6 @@ const successfulHighlightResult = {
   removedManagedHighlightIds: [],
   preservedHighlightIds: [],
   rollbackOutcome: "not_needed" as const,
-  reorderOutcome: "reordered" as const,
 };
 
 const hoisted = vi.hoisted(() => ({
@@ -1577,7 +1576,6 @@ describe("processDueAutoCreateNextGoals", () => {
         removedManagedHighlightIds: [],
         preservedHighlightIds: [],
         rollbackOutcome: "not_needed",
-        reorderOutcome: "not_attempted",
       },
     });
 

@@ -133,9 +133,6 @@ export function describeHighlightResult(
   if (result.cleanupOutcome === "failed") {
     return translate(language, "outbound.highlight.result.cleanup");
   }
-  if (result.reorderOutcome === "failed") {
-    return translate(language, "outbound.highlight.result.reorder");
-  }
   if (result.capacityOutcome === "concurrent_change") {
     return translate(language, "outbound.highlight.result.concurrent");
   }
@@ -248,8 +245,20 @@ function incidentFingerprint(result: HighlightResult): string {
     capacityOutcome: result.capacityOutcome,
     cleanupOutcome: result.cleanupOutcome,
     rollbackOutcome: result.rollbackOutcome,
-    reorderOutcome: result.reorderOutcome,
   });
+}
+
+function matchesIncidentFingerprint(
+  stored: string | undefined,
+  current: string,
+): boolean {
+  // Older incident fingerprints ended with the carousel reorder outcome.
+  return (
+    stored?.replace(
+      /,"reorderOutcome":"(?:not_attempted|reordered|failed)"}$/,
+      "}",
+    ) === current
+  );
 }
 
 export async function clearHighlightFailureIncident(
@@ -304,7 +313,7 @@ export async function notifyHighlightFailureIncident({
   }
   const existing = await redis.hGetAll(key);
   if (
-    existing.fingerprint === fingerprint &&
+    matchesIncidentFingerprint(existing.fingerprint, fingerprint) &&
     (existing.notifiedAt || Number(existing.nextAttemptAt ?? "0") > nowMs)
   ) {
     return "skipped_duplicate";
@@ -321,7 +330,7 @@ export async function notifyHighlightFailureIncident({
   try {
     const latest = await redis.hGetAll(key);
     if (
-      latest.fingerprint === fingerprint &&
+      matchesIncidentFingerprint(latest.fingerprint, fingerprint) &&
       (latest.notifiedAt || Number(latest.nextAttemptAt ?? "0") > nowMs)
     ) {
       return "skipped_duplicate";

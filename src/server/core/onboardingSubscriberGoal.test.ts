@@ -56,7 +56,6 @@ vi.mock("../utils/communityHighlights", async (importOriginal) => ({
     removedManagedHighlightIds: [],
     preservedHighlightIds: [],
     rollbackOutcome: "not_needed",
-    reorderOutcome: "reordered",
   })),
   createFailedHighlightResult: vi.fn(
     (selectedPostId: string, category: string, message: string) => ({
@@ -71,7 +70,6 @@ vi.mock("../utils/communityHighlights", async (importOriginal) => ({
       removedManagedHighlightIds: [],
       preservedHighlightIds: [],
       rollbackOutcome: "not_needed",
-      reorderOutcome: "not_attempted",
     }),
   ),
   highlightVerificationIntervalMs: 5_000,
@@ -290,7 +288,6 @@ describe("onboarding subscriber goal", () => {
         removedManagedHighlightIds: [],
         preservedHighlightIds: [],
         rollbackOutcome: "not_needed",
-        reorderOutcome: "reordered",
       },
     });
   });
@@ -1820,7 +1817,6 @@ describe("onboarding subscriber goal", () => {
         removedManagedHighlightIds: [],
         preservedHighlightIds: [],
         rollbackOutcome: "not_needed",
-        reorderOutcome: "not_attempted",
       },
     });
 

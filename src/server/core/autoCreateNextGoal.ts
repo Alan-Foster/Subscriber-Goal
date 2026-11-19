@@ -445,7 +445,6 @@ export async function processDueAutoCreateNextGoals({
           capacityOutcome: highlightResult.capacityOutcome,
           cleanupOutcome: highlightResult.cleanupOutcome,
           rollbackOutcome: highlightResult.rollbackOutcome,
-          reorderOutcome: highlightResult.reorderOutcome,
         });
         const notification = {
           reddit,
