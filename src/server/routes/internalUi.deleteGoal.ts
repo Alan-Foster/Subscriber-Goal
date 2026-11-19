@@ -11,7 +11,11 @@ import {
 import type { DeleteGoalFormValues } from "../../shared/types/api";
 import { getAppSettings } from "../settings";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
-import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
+import {
+  communityGoalMutationLockKey,
+  CommunityGoalMutationInProgressError,
+  withCommunityGoalMutationLease,
+} from "../core/communityGoalMutation";
 import {
   dispatchConfirmedSourceDeletion,
   prepareSourcePostDeletionIntent,
@@ -21,7 +25,14 @@ import {
 import type { LinkId, SubredditId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { hasCrosspost } from "../data/crosspostData";
+import {
+  getSourcePostDeletionIntent,
+  sourcePostDeletionIntentId,
+} from "../data/sourcePostDeletion";
 import { resolvePostKindFromPostData } from "../../shared/postKind";
+
+// Devvit Web caps the whole request at 30 seconds. Reserve time for Reddit deletion and cleanup.
+const deleteGoalLeaseRetry = { maxWaitMs: 4_000, intervalMs: 500 };
 
 export function registerDeleteGoalRoutes(router: Router): void {
   router.post(
@@ -97,6 +108,16 @@ export function registerDeleteGoalRoutes(router: Router): void {
         });
 
         phase = "post_lookup";
+        const existingIntent = await getSourcePostDeletionIntent(
+          redis,
+          sourcePostDeletionIntentId(
+            subreddit.id as SubredditId,
+            postId as LinkId,
+          ),
+        );
+        const verificationMayBeInFlight =
+          existingIntent?.status === "verify_source" &&
+          Boolean(await redis.get(communityGoalMutationLockKey));
         const post = await reddit.getPostById(postId);
         const isCurrentSubredditPost =
           post.subredditId === subreddit.id &&
@@ -157,6 +178,7 @@ export function registerDeleteGoalRoutes(router: Router): void {
         let cleanupDispatched = false;
         let sourceDeletionConfirmed = false;
         let internalRecordsPending = false;
+        let concurrentDeleteUncertain = false;
         let crosspostCleanupExpected = true;
         try {
           crosspostCleanupExpected = await hasCrosspost(redis, postId);
@@ -168,7 +190,7 @@ export function registerDeleteGoalRoutes(router: Router): void {
             error,
           );
         }
-        await withCommunityGoalMutationLease(redis, async () => {
+        const deleteUnderLease = async () => {
           phase = "deletion_intent_persistence";
           let intent = await prepareSourcePostDeletionIntent(redis, {
             postId: postId as LinkId,
@@ -207,6 +229,16 @@ export function registerDeleteGoalRoutes(router: Router): void {
                 error,
               );
             }
+            return;
+          }
+          if (
+            intent.status === "verify_source" &&
+            (verificationMayBeInFlight ||
+              intent.deleteAttemptCount >
+                (existingIntent?.deleteAttemptCount ?? 0))
+          ) {
+            // The earlier post lookup cannot verify an attempt made by a concurrent submit.
+            concurrentDeleteUncertain = true;
             return;
           }
 
@@ -257,7 +289,30 @@ export function registerDeleteGoalRoutes(router: Router): void {
               error,
             );
           }
-        });
+        };
+        phase = "mutation_lease";
+        await withCommunityGoalMutationLease(
+          redis,
+          deleteUnderLease,
+          undefined,
+          deleteGoalLeaseRetry,
+        );
+        if (concurrentDeleteUncertain) {
+          logDiagnostic("warn", "delete_goal_verification_pending", {
+            operationId,
+            workflow: "delete_goal",
+            phase,
+            postId,
+          });
+          res.json({
+            showToast: translate(
+              language,
+              "moderator.delete.outcomeUncertain",
+              { operationId },
+            ),
+          });
+          return;
+        }
         const cleanupFailures: string[] = [];
         const runCleanupPhase = async (
           cleanupPhase: string,
@@ -320,21 +375,26 @@ export function registerDeleteGoalRoutes(router: Router): void {
           postId,
         });
       } catch (error) {
+        const leaseBusy =
+          phase === "mutation_lease" &&
+          error instanceof CommunityGoalMutationInProgressError;
         logDiagnostic(
-          "error",
+          leaseBusy ? "warn" : "error",
           "delete_goal_failed",
           { operationId, workflow: "delete_goal", phase, postId },
           error,
         );
         const outcomeUncertain = phase === "reddit_post_delete";
         res.json({
-          showToast: translate(
-            language,
-            outcomeUncertain
-              ? "moderator.delete.outcomeUncertain"
-              : "moderator.delete.failed",
-            { operationId },
-          ),
+          showToast: leaseBusy
+            ? translate(language, "moderator.delete.inProgress")
+            : translate(
+                language,
+                outcomeUncertain
+                  ? "moderator.delete.outcomeUncertain"
+                  : "moderator.delete.failed",
+                { operationId },
+              ),
         });
       }
     },

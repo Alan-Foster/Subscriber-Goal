@@ -18,11 +18,7 @@ import {
   scheduleHighlightRepair,
   recurringHighlightRepairIntervalMs,
 } from "../data/highlightRepair";
-import {
-  CommunityGoalMutationInProgressError,
-  withCommunityGoalMutationLease,
-  type CommunityGoalMutationLease,
-} from "./communityGoalMutation";
+import { withCommunityGoalMutationLease } from "./communityGoalMutation";
 import { isSubscriberGoalPostRetired } from "./postRetirement";
 import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 
@@ -30,6 +26,16 @@ export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
 const retryMaxMs = 60 * 60 * 1000;
 export { recurringHighlightRepairIntervalMs };
+
+function isAppRepairDue(state: Record<string, string>, nowMs: number): boolean {
+  const nextRunAt = Number(state.nextRunAt);
+  return (
+    state.version === appRepairVersion &&
+    (state.status !== "complete" || state.recurring === "true") &&
+    Number.isFinite(nextRunAt) &&
+    nowMs >= nextRunAt
+  );
+}
 
 export async function scheduleAppRepair(
   redis: RedisClient,
@@ -54,36 +60,8 @@ export async function processDueAppRepair({
   redis: RedisClient;
   nowMs?: number;
 }): Promise<"not_due" | "complete" | "retry"> {
-  try {
-    return await withCommunityGoalMutationLease(redis, (mutationLease) =>
-      processDueAppRepairUnderLease({ reddit, redis, nowMs, mutationLease }),
-    );
-  } catch (error) {
-    if (error instanceof CommunityGoalMutationInProgressError) return "retry";
-    throw error;
-  }
-}
-
-async function processDueAppRepairUnderLease({
-  reddit,
-  redis,
-  nowMs = Date.now(),
-  mutationLease,
-}: {
-  reddit: RedditClient;
-  redis: RedisClient;
-  nowMs?: number;
-  mutationLease: CommunityGoalMutationLease;
-}): Promise<"not_due" | "complete" | "retry"> {
-  const state = await redis.hGetAll(appRepairStateKey);
-  if (
-    state.version !== appRepairVersion ||
-    (state.status === "complete" && state.recurring !== "true") ||
-    !Number.isFinite(Number(state.nextRunAt)) ||
-    nowMs < Number(state.nextRunAt)
-  ) {
-    return "not_due";
-  }
+  let state = await redis.hGetAll(appRepairStateKey);
+  if (!isAppRepairDue(state, nowMs)) return "not_due";
 
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(appRepairLockKey, lockToken, {
@@ -111,6 +89,8 @@ async function processDueAppRepairUnderLease({
   };
 
   try {
+    state = await redis.hGetAll(appRepairStateKey);
+    if (!isAppRepairDue(state, nowMs)) return "not_due";
     await redis.hSet(appRepairStateKey, {
       ...state,
       status: "processing",
@@ -150,8 +130,9 @@ async function processDueAppRepairUnderLease({
 
       let flairId: string | undefined;
       await runPhase("flair_ensure", async () => {
-        flairId = (await ensureSubscriberGoalPostFlair(reddit, subreddit.name))
-          .id;
+        flairId = (
+          await ensureSubscriberGoalPostFlair(reddit, redis, subreddit.name)
+        ).id;
       });
       if (flairId) {
         await runPhase("flair_backfill", () =>
@@ -164,14 +145,18 @@ async function processDueAppRepairUnderLease({
         );
       }
       await runPhase("highlight_reconciliation", async () => {
-        const result = await ensureExistingSubscriberGoalHighlighted({
-          reddit,
+        const result = await withCommunityGoalMutationLease(
           redis,
-          nowMs,
-          notifyOnFailure: true,
-          reconciliationContext: "repair",
-          mutationLease,
-        });
+          (mutationLease) =>
+            ensureExistingSubscriberGoalHighlighted({
+              reddit,
+              redis,
+              nowMs,
+              notifyOnFailure: true,
+              reconciliationContext: "repair",
+              mutationLease,
+            }),
+        );
         recurringHighlightCheck =
           result.capacityOnly === true ||
           (result.eligiblePostIds?.length ?? 0) > 0;

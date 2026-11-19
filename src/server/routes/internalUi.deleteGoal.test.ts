@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { internalRoutes } from "../../shared/routes";
 import { captureUiRoutes } from "./internalUi.testHelpers";
 import { registerDeleteGoalRoutes } from "./internalUi.deleteGoal";
+import { communityGoalMutationLockKey } from "../core/communityGoalMutation";
 
 const hoisted = vi.hoisted(() => ({
   redisValues: new Map<string, string>(),
@@ -298,6 +299,124 @@ describe("internalUi deleteGoal routes", () => {
       showToast: expect.stringContaining("Couldn’t delete this post"),
     });
   });
+
+  it("deletes once when a background lease is released during the bounded wait", async () => {
+    vi.useFakeTimers();
+    try {
+      hoisted.redisValues.set(communityGoalMutationLockKey, "app-repair");
+      const json = vi.fn();
+      const request = createRouteHarness().get(
+        internalRoutes.forms.deleteGoal,
+      )?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+      await vi.advanceTimersByTimeAsync(750);
+      expect(hoisted.deletePost).not.toHaveBeenCalled();
+      hoisted.redisValues.delete(communityGoalMutationLockKey);
+      await vi.advanceTimersByTimeAsync(500);
+      await request;
+
+      expect(hoisted.deletePost).toHaveBeenCalledOnce();
+      expect(
+        hoisted.redisHashes.get("source_post_deletion_intents_v1")?.size,
+      ).toBe(1);
+      expect(json).toHaveBeenCalledOnce();
+      expect(json).toHaveBeenCalledWith({
+        showToast: expect.stringContaining("Post deleted."),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports mutation lease contention without persisting an intent or deleting", async () => {
+    vi.useFakeTimers();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      hoisted.redisValues.set(communityGoalMutationLockKey, "app-repair");
+      const json = vi.fn();
+      const request = createRouteHarness().get(
+        internalRoutes.forms.deleteGoal,
+      )?.(
+        { body: { confirm: true } } as Request,
+        { json } as unknown as Response,
+      );
+      await vi.advanceTimersByTimeAsync(3_999);
+      expect(json).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await request;
+
+      expect(json).toHaveBeenCalledWith({
+        showToast:
+          "Another Subscriber Goal change is in progress. Try again shortly.",
+      });
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /"event":"delete_goal_failed".*"phase":"mutation_lease".*"errorName":"CommunityGoalMutationInProgressError"/,
+        ),
+      );
+      expect(hoisted.redisHashes.has("source_post_deletion_intents_v1")).toBe(
+        false,
+      );
+      expect(hoisted.deletePost).not.toHaveBeenCalled();
+      expect(hoisted.dispatchPostAction).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    [false, 0],
+    [true, 0],
+    [true, 250],
+  ] as const)(
+    "sends one Reddit delete across concurrent submits (uncertain=%s, second submit delay=%d)",
+    async (uncertain, secondSubmitDelay) => {
+      vi.useFakeTimers();
+      try {
+        hoisted.deletePost.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              setTimeout(() => {
+                if (uncertain) reject(new Error("delete response unknown"));
+                else resolve();
+              }, 750);
+            }),
+        );
+        const routes = createRouteHarness();
+        const responses = [vi.fn(), vi.fn()];
+        const submit = (json: ReturnType<typeof vi.fn>) =>
+          routes.get(internalRoutes.forms.deleteGoal)?.(
+            { body: { confirm: true } } as Request,
+            { json } as unknown as Response,
+          );
+        const first = submit(responses[0]!);
+        if (secondSubmitDelay)
+          await vi.advanceTimersByTimeAsync(secondSubmitDelay);
+        const second = submit(responses[1]!);
+        await vi.advanceTimersByTimeAsync(1_500);
+        await Promise.all([first, second]);
+
+        expect(hoisted.deletePost).toHaveBeenCalledOnce();
+        expect(hoisted.dispatchPostAction).toHaveBeenCalledTimes(
+          uncertain ? 0 : 1,
+        );
+        for (const json of responses) {
+          expect(json).toHaveBeenCalledWith({
+            showToast: expect.stringContaining(
+              uncertain
+                ? "confirm whether the post was deleted"
+                : "Post deleted.",
+            ),
+          });
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("reuses one intent when a fresh authorized submit retries a live source", async () => {
     hoisted.deletePost

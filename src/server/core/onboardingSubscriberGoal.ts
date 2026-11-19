@@ -1817,7 +1817,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
       ...liveResult.unhighlightedEligiblePostIds,
     ],
   };
-  logHighlightEnsurance(result.status, result);
+  logHighlightEnsurance(result.status, result, reconciliationContext);
   return result;
 }
 
@@ -1919,7 +1919,7 @@ async function reconcileLiveSubscriberGoalHighlights({
   };
   if (candidates.length === 0) {
     await clearActiveHighlightFailureIncident(redis);
-    logHighlightEnsurance("missing", base);
+    logHighlightEnsurance("missing", base, reconciliationContext);
     return { status: "missing", ...base };
   }
 
@@ -2145,7 +2145,7 @@ async function reconcileLiveSubscriberGoalHighlights({
           ? { supersededCompletedPostIds }
           : {}),
       };
-      logHighlightEnsurance(result.status, result);
+      logHighlightEnsurance(result.status, result, reconciliationContext);
       return result;
     }
 
@@ -2184,7 +2184,7 @@ async function reconcileLiveSubscriberGoalHighlights({
                 selected.autoCreateNextGoalConfigured,
             }),
       };
-      logHighlightEnsurance(result.status, result);
+      logHighlightEnsurance(result.status, result, reconciliationContext);
       return result;
     }
   }
@@ -2232,7 +2232,7 @@ async function reconcileLiveSubscriberGoalHighlights({
         ...reconciliationDetails(reconciliation.highlightResult),
         notificationOutcome: reconciliation.notificationOutcome,
       };
-      logHighlightEnsurance(result.status, result);
+      logHighlightEnsurance(result.status, result, reconciliationContext);
       return result;
     }
     await clearActiveHighlightFailureIncident(redis);
@@ -2253,7 +2253,7 @@ async function reconcileLiveSubscriberGoalHighlights({
         : {}),
       notificationOutcome: "not_requested",
     };
-    logHighlightEnsurance(result.status, result);
+    logHighlightEnsurance(result.status, result, reconciliationContext);
     return result;
   }
 
@@ -2299,7 +2299,7 @@ async function reconcileLiveSubscriberGoalHighlights({
     ...reconciliationDetails(reconciliation.highlightResult),
     notificationOutcome: reconciliation.notificationOutcome,
   };
-  logHighlightEnsurance(result.status, result);
+  logHighlightEnsurance(result.status, result, reconciliationContext);
   return result;
 }
 
@@ -2928,10 +2928,12 @@ function logHighlightEnsurance(
   result:
     | Omit<OnboardingHighlightEnsuranceResult, "status">
     | OnboardingHighlightEnsuranceResult,
+  reconciliationContext: HighlightReconciliationContext,
 ): void {
   logDiagnostic("info", "onboarding_goal_highlight_ensurance_completed", {
     workflow: "onboarding_highlight_ensurance",
     phase: "reconcile",
+    reconciliationContext,
     outcome: status,
     candidateCount: result.candidateCount,
     selectedPostId: result.postId ?? "none",

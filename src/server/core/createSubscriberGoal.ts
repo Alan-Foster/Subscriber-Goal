@@ -798,6 +798,7 @@ async function createSubscriberGoalInternal(
 
   const flairResult = await prepareSubscriberGoalFlair({
     reddit,
+    redis,
     subredditName: subreddit.name,
     appUsername,
     canManageFlair: hasAllPermissions || permissions.includes("flair"),
@@ -1438,11 +1439,13 @@ async function persistTerminalCreationOutcome(
 
 async function prepareSubscriberGoalFlair({
   reddit,
+  redis,
   subredditName,
   appUsername,
   canManageFlair,
 }: {
   reddit: RedditClient;
+  redis: RedisClient;
   subredditName: string;
   appUsername: string | undefined;
   canManageFlair: boolean;
@@ -1459,7 +1462,7 @@ async function prepareSubscriberGoalFlair({
   }
 
   try {
-    const flair = await ensureSubscriberGoalPostFlair(reddit, subredditName);
+    const flair = await ensureSubscriberGoalPostFlair(reddit, redis, subredditName);
     return { status: "applied", flairId: flair.id };
   } catch (error) {
     logDiagnostic(
