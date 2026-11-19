@@ -58,35 +58,11 @@ vi.mock("../data/subGoalData", () => ({
     hoisted.initializeRecentSubscriberIndexMigration,
 }));
 
-vi.mock("../core/onboardingSubscriberGoal", () => ({
+vi.mock("../core/onboardingSubscriberGoal", async (importOriginal) => ({
   AUTOMATIC_ONBOARDING_ENABLED: true,
-  getOnboardingEligibility: (subreddit: {
-    numberOfSubscribers: number;
-    type?: unknown;
-    nsfw?: unknown;
-  }) => ({
-    eligible:
-      subreddit.numberOfSubscribers >= 1_000 &&
-      subreddit.type === "public" &&
-      subreddit.nsfw === false,
-    subscriberCount: subreddit.numberOfSubscribers,
-    subredditType:
-      typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    isSfw: subreddit.nsfw === false,
-    safetyStatus:
-      subreddit.nsfw === false
-        ? "sfw"
-        : subreddit.nsfw === true
-          ? "nsfw"
-          : "unknown",
-    ...(subreddit.numberOfSubscribers < 1_000
-      ? { reason: "subscriber_count" }
-      : subreddit.type !== "public"
-        ? { reason: "subreddit_not_public" }
-        : subreddit.nsfw !== false
-          ? { reason: "subreddit_not_sfw" }
-          : {}),
-  }),
+  getOnboardingEligibility: (
+    await importOriginal<typeof import("../core/onboardingSubscriberGoal")>()
+  ).getOnboardingEligibility,
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
@@ -467,7 +443,7 @@ describe("onAppChanged", () => {
     },
   );
 
-  it("marks onboarding terminally ineligible for an NSFW subreddit", async () => {
+  it("arms onboarding and the reminder for a public NSFW subreddit", async () => {
     hoisted.context.subredditName = "SubGoal";
     hoisted.getCurrentSubreddit.mockResolvedValue({
       id: "t5_subgoal",
@@ -479,22 +455,22 @@ describe("onAppChanged", () => {
 
     await onAppChanged({ lifecycleSource: "install" });
 
-    expect(hoisted.markOnboardingReminderIneligible).toHaveBeenCalledWith(
+    expect(hoisted.markOnboardingReminderIneligible).not.toHaveBeenCalled();
+    expect(
+      hoisted.markOnboardingSubscriberGoalIneligible,
+    ).not.toHaveBeenCalled();
+    expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalledWith(
       expect.anything(),
-      1_001,
-      expect.any(Number),
-      "subreddit_not_sfw",
+      { lifecycleSource: "install" },
     );
-    expect(hoisted.markOnboardingSubscriberGoalIneligible).toHaveBeenCalledWith(
+    expect(hoisted.scheduleOnboardingReminder).toHaveBeenCalledWith(
       expect.anything(),
-      1_001,
-      expect.any(Number),
-      "subreddit_not_sfw",
+      { lifecycleSource: "install" },
     );
     expect(hoisted.reconcileOnboardingForLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { lifecycleSource: "install", allowOnboardingRearm: false },
+      { lifecycleSource: "install", allowOnboardingRearm: true },
     );
   });
 

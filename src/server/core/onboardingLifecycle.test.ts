@@ -10,10 +10,12 @@ import {
   ensureExistingSubscriberGoalHighlighted,
   onboardingSubscriberGoalLockKey,
   onboardingSubscriberGoalStateKey,
+  processDueOnboardingSubscriberGoal,
 } from "./onboardingSubscriberGoal";
 import {
   onboardingReminderLockKey,
   onboardingReminderStateKey,
+  processDueOnboardingReminder,
 } from "./onboardingReminder";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import {
@@ -153,10 +155,12 @@ function createReddit({
   highlighted = false,
   posts,
   subscriberCount = 2_000,
+  nsfw = false,
 }: {
   highlighted?: boolean;
   posts?: Record<string, unknown>[];
   subscriberCount?: number;
+  nsfw?: boolean;
 } = {}) {
   const highlightedPost = {
     id: "t3_highlighted",
@@ -189,7 +193,7 @@ function createReddit({
       name: "ExampleSub",
       numberOfSubscribers: subscriberCount,
       type: "public",
-      nsfw: false,
+      nsfw,
       getHighlightedPosts,
       reorderHighlightedPosts,
     })),
@@ -202,6 +206,7 @@ function createReddit({
     ),
     searchPosts: vi.fn(() => ({ all: vi.fn(async () => availablePosts) })),
     getNewPosts: vi.fn(() => ({ all: vi.fn(async () => []) })),
+    modMail: { createModNotification: vi.fn(async () => undefined) },
   };
 }
 
@@ -322,6 +327,136 @@ describe("onboarding lifecycle reconciliation", () => {
       },
       highlightResult: { issues: [] },
     });
+  });
+
+  it("recovers legacy NSFW onboarding once across repeated upgrades", async () => {
+    await seedCompleted(redis);
+    for (const key of [
+      onboardingSubscriberGoalStateKey,
+      onboardingReminderStateKey,
+    ]) {
+      await redis.hSet(key, { ineligibilityReason: "subreddit_not_sfw" });
+    }
+    const posts: Record<string, unknown>[] = [];
+    const reddit = createReddit({ posts, nsfw: true });
+    const newPost = makeLifecycleGoalPost({
+      id: "t3_nsfw_onboarding",
+      highlighted: true,
+    });
+    lifecycleHoisted.createSubscriberGoal.mockImplementation(async () => {
+      posts.push(newPost);
+      await seedGoalData(redis, newPost.id, { goal: 3_000 });
+      return {
+        outcome: "created",
+        post: newPost,
+        highlightResult: { issues: [] },
+      };
+    });
+
+    const upgrade = (at: number) =>
+      reconcileOnboardingForLifecycle(reddit as never, redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs: at,
+      });
+    await expect(upgrade(nowMs)).resolves.toMatchObject({ status: "rearmed" });
+    const reminderAt = Number(
+      (await redis.hGetAll(onboardingReminderStateKey)).nextRunAt,
+    );
+    await expect(
+      processDueOnboardingReminder({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: reminderAt,
+      }),
+    ).resolves.toMatchObject({ status: "sent" });
+    const goalAt = Number(
+      (await redis.hGetAll(onboardingSubscriberGoalStateKey)).nextRunAt,
+    );
+    await expect(
+      processDueOnboardingSubscriberGoal({
+        reddit: reddit as never,
+        redis: redis as never,
+        appSettings: { promoSubreddit: "SubGoal" } as never,
+        nowMs: goalAt,
+      }),
+    ).resolves.toMatchObject({ status: "created", postId: newPost.id });
+
+    await expect(upgrade(goalAt + 60_000)).resolves.toMatchObject({
+      status: "existing",
+      postId: newPost.id,
+    });
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    expect(
+      lifecycleHoisted.createSubscriberGoal,
+    ).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          crosspost: false,
+          afterSubscribePreset: "newest-post",
+        }),
+      }),
+    );
+  });
+
+  it("recovers a cancelled successor for a highlighted NSFW goal once across upgrades", async () => {
+    const source = makeLifecycleGoalPost({
+      id: "t3_nsfw_completed",
+      highlighted: true,
+    });
+    const posts = [source];
+    const reddit = createReddit({ posts, nsfw: true });
+    await seedGoalData(redis, source.id, {
+      goal: 1_500,
+      completedTime: nowMs - 48 * 60 * 60 * 1000,
+    });
+    const next = makeLifecycleGoalPost({
+      id: "t3_nsfw_successor",
+      highlighted: true,
+    });
+    lifecycleHoisted.createSubscriberGoal.mockImplementation(async () => {
+      posts.push(next);
+      await seedGoalData(redis, next.id, { goal: 3_000 });
+      await source.unhighlight();
+      return {
+        outcome: "created",
+        post: next,
+        highlightResult: { issues: [] },
+      };
+    });
+    const module =
+      (await import("./autoCreateNextGoal")) as typeof import("./autoCreateNextGoal") & {
+        actualProcessDueAutoCreateNextGoals: typeof import("./autoCreateNextGoal").processDueAutoCreateNextGoals;
+      };
+    lifecycleHoisted.processDueAutoCreateNextGoals.mockImplementation(
+      module.actualProcessDueAutoCreateNextGoals,
+    );
+
+    const upgrade = (at: number) =>
+      reconcileOnboardingForLifecycle(reddit as never, redis as never, {
+        lifecycleSource: "upgrade",
+        nowMs: at,
+      });
+    expect(await redis.zRange(autoCreateNextGoalQueueKey)).toEqual([]);
+    await expect(upgrade(nowMs)).resolves.toMatchObject({
+      status: "replacement_created",
+    });
+    await expect(upgrade(nowMs + 60_000)).resolves.toMatchObject({
+      status: "existing",
+      postId: next.id,
+    });
+    expect(
+      lifecycleHoisted.createSubscriberGoal,
+    ).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          crosspost: false,
+          operationId: `auto-next:${source.id}`,
+        }),
+      }),
+    );
+    expect(await redis.hGet(autoCreateNextGoalSuccessorsKey, source.id)).toBe(
+      next.id,
+    );
   });
 
   it.each([

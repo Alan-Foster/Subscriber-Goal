@@ -348,20 +348,20 @@ describe("onboarding subscriber goal", () => {
     ).toMatchObject({ eligible: true });
   });
 
-  it("requires explicit SFW metadata for automatic onboarding", () => {
+  it("reports actual safety metadata for public onboarding", () => {
     expect(
       getOnboardingEligibility({
         numberOfSubscribers: 1_001,
         type: "public",
         nsfw: true,
       }),
-    ).toMatchObject({ eligible: false, reason: "subreddit_not_sfw" });
+    ).toMatchObject({ eligible: true, isSfw: false, safetyStatus: "nsfw" });
     expect(
       getOnboardingEligibility({
         numberOfSubscribers: 1_001,
         type: "public",
       }),
-    ).toMatchObject({ eligible: false, reason: "subreddit_not_sfw" });
+    ).toMatchObject({ eligible: true, isSfw: false, safetyStatus: "unknown" });
   });
 
   it("selects inclusive goal stagger boundaries", () => {
@@ -1099,7 +1099,48 @@ describe("onboarding subscriber goal", () => {
     },
   );
 
-  it("does not create an onboarding goal for an NSFW subreddit", async () => {
+  it.each([
+    [true, 1_001, "regular", "newest-post"],
+    [true, onboardingTinySubscriberThreshold + 1, "tiny", "newest-post"],
+    [undefined, 1_001, "regular", "top-post-day"],
+  ] as const)(
+    "creates public onboarding with nsfw=%s at %i subscribers",
+    async (nsfw, numberOfSubscribers, postHeight, preset) => {
+      await initializeOnboardingSubscriberGoal(redis as never, {
+        lifecycleSource: "install",
+        nowMs,
+      });
+      reddit.getCurrentSubreddit.mockResolvedValue({
+        ...highlightSubredditMethods,
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers,
+        type: "public",
+        nsfw,
+      });
+
+      await expect(
+        processDueOnboardingSubscriberGoal({
+          reddit: reddit as never,
+          redis: redis as never,
+          appSettings: settings,
+          nowMs: nowMs + onboardingGoalBaseDelayMs,
+        }),
+      ).resolves.toMatchObject({ status: "created" });
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            crosspost: false,
+            postHeight,
+            afterSubscribePreset: preset,
+            afterSubscribeAction: expect.objectContaining({ type: preset }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it("rejects a restricted NSFW subreddit", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -1109,10 +1150,9 @@ describe("onboarding subscriber goal", () => {
       id: "t5_example",
       name: "ExampleSub",
       numberOfSubscribers: 1_001,
-      type: "public",
+      type: "restricted",
       nsfw: true,
     });
-
     await expect(
       processDueOnboardingSubscriberGoal({
         reddit: reddit as never,
@@ -1121,12 +1161,10 @@ describe("onboarding subscriber goal", () => {
         nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
     ).resolves.toMatchObject({ status: "ineligible" });
-
-    expect(reddit.getAppUser).not.toHaveBeenCalled();
     expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
   });
 
-  it("rechecks SFW eligibility immediately before creating", async () => {
+  it("uses the latest NSFW status for the action and crosspost flag", async () => {
     await initializeOnboardingSubscriberGoal(redis as never, {
       lifecycleSource: "install",
       nowMs,
@@ -1164,9 +1202,16 @@ describe("onboarding subscriber goal", () => {
         appSettings: settings,
         nowMs: nowMs + onboardingGoalBaseDelayMs,
       }),
-    ).resolves.toMatchObject({ status: "ineligible" });
+    ).resolves.toMatchObject({ status: "created" });
 
-    expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+    expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          crosspost: false,
+          afterSubscribePreset: "newest-post",
+        }),
+      }),
+    );
   });
 
   it.each([999_999, onboardingTinySubscriberThreshold])(
@@ -1662,7 +1707,7 @@ describe("onboarding subscriber goal", () => {
     },
   );
 
-  it.each(["unknown safety", "unknown type", "unhealthy"])(
+  it.each(["unknown type", "unhealthy"])(
     "defers %s and resumes on verified eligibility and permissions",
     async (reason) => {
       const { automaticGoalPrerequisiteRetriesKey } =
@@ -1676,9 +1721,8 @@ describe("onboarding subscriber goal", () => {
       if (reason !== "unhealthy")
         reddit.getCurrentSubreddit.mockResolvedValueOnce({
           ...subreddit,
-          ...(reason === "unknown safety"
-            ? { nsfw: undefined }
-            : { type: undefined }),
+          type: undefined,
+          nsfw: true,
         });
       else
         hoisted.checkAppAccountHealth.mockResolvedValueOnce({

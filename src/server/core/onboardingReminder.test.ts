@@ -15,37 +15,13 @@ const hoisted = vi.hoisted(() => ({
   findLiveHighlightedSubscriberGoalCandidates: vi.fn(),
 }));
 
-vi.mock("./onboardingSubscriberGoal", () => ({
+vi.mock("./onboardingSubscriberGoal", async (importOriginal) => ({
   AUTOMATIC_ONBOARDING_ENABLED: true,
   ensureExistingSubscriberGoalHighlighted:
     hoisted.ensureExistingSubscriberGoalHighlighted,
-  getOnboardingEligibility: (subreddit: {
-    numberOfSubscribers: number;
-    type?: unknown;
-    nsfw?: unknown;
-  }) => ({
-    eligible:
-      subreddit.numberOfSubscribers >= 1_000 &&
-      subreddit.type === "public" &&
-      subreddit.nsfw === false,
-    subscriberCount: subreddit.numberOfSubscribers,
-    subredditType:
-      typeof subreddit.type === "string" ? subreddit.type : "unknown",
-    isSfw: subreddit.nsfw === false,
-    safetyStatus:
-      subreddit.nsfw === false
-        ? "sfw"
-        : subreddit.nsfw === true
-          ? "nsfw"
-          : "unknown",
-    ...(subreddit.numberOfSubscribers < 1_000
-      ? { reason: "subscriber_count" }
-      : subreddit.type !== "public"
-        ? { reason: "subreddit_not_public" }
-        : subreddit.nsfw !== false
-          ? { reason: "subreddit_not_sfw" }
-          : {}),
-  }),
+  getOnboardingEligibility: (
+    await importOriginal<typeof import("./onboardingSubscriberGoal")>()
+  ).getOnboardingEligibility,
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   getDetectionDiagnosticsFromError: () => undefined,
   initializeOnboardingSubscriberGoal:
@@ -417,7 +393,7 @@ describe("onboarding reminder", () => {
     },
   );
 
-  it("sends no warning for an NSFW subreddit", async () => {
+  it("sends a warning for an eligible public NSFW subreddit with no goal", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -436,12 +412,10 @@ describe("onboarding reminder", () => {
         redis: redis as never,
         nowMs: nowMs + onboardingReminderDelayMs,
       }),
-    ).resolves.toMatchObject({ status: "ineligible" });
+    ).resolves.toMatchObject({ status: "sent" });
 
-    expect(
-      hoisted.ensureExistingSubscriberGoalHighlighted,
-    ).not.toHaveBeenCalled();
-    expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
+    expect(hoisted.ensureExistingSubscriberGoalHighlighted).toHaveBeenCalled();
+    expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 
   it("builds the requested moderator-facing introduction", () => {

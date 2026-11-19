@@ -1,37 +1,39 @@
 import { describe, expect, it } from "vitest";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
-import { getAutomaticGoalEligibility } from "./automaticGoalEligibility";
+import {
+  getAutomaticGoalEligibility,
+  isAutomaticGoalEligibilityUncertain,
+} from "./automaticGoalEligibility";
 
 describe("automatic goal eligibility", () => {
-  it("accepts only an explicitly SFW public subreddit", () => {
-    expect(
-      getAutomaticGoalEligibility({ type: "public", nsfw: false }),
-    ).toEqual({
-      eligible: true,
-      subredditType: "public",
-      isSfw: true,
-      safetyStatus: "sfw",
-    });
-  });
+  it.each([
+    [false, "sfw"],
+    [true, "nsfw"],
+    [undefined, "unknown"],
+  ] as const)(
+    "accepts public subreddits and reports %s as %s",
+    (nsfw, safetyStatus) => {
+      const result = getAutomaticGoalEligibility({ type: "public", nsfw });
+      expect(result).toEqual({
+        eligible: true,
+        subredditType: "public",
+        isSfw: nsfw === false,
+        safetyStatus,
+      });
+      expect(isAutomaticGoalEligibilityUncertain(result)).toBe(false);
+    },
+  );
 
-  it("rejects NSFW, unknown-safety, and non-public subreddits", () => {
-    expect(
-      getAutomaticGoalEligibility({ type: "public", nsfw: true }),
-    ).toMatchObject({
-      eligible: false,
-      safetyStatus: "nsfw",
-      reason: "subreddit_not_sfw",
-    });
-    expect(getAutomaticGoalEligibility({ type: "public" })).toMatchObject({
-      eligible: false,
-      safetyStatus: "unknown",
-      reason: "subreddit_not_sfw",
-    });
+  it("rejects non-public subreddits and retries only an unknown type", () => {
     for (const type of ["private", "restricted", undefined]) {
-      expect(getAutomaticGoalEligibility({ type, nsfw: false })).toMatchObject({
+      const result = getAutomaticGoalEligibility({ type, nsfw: true });
+      expect(result).toMatchObject({
         eligible: false,
         reason: "subreddit_not_public",
       });
+      expect(isAutomaticGoalEligibilityUncertain(result)).toBe(
+        type === undefined,
+      );
     }
   });
 

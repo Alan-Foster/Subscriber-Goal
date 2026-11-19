@@ -6,9 +6,11 @@ import {
 } from "./automaticGoalRetry";
 import {
   createDefaultAfterSubscribeAction,
+  defaultAfterSubscribeColorTheme,
   getDefaultAfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import {
+  getAfterSubscribePresetMessages,
   getSubGoalPostMessages,
   resolveSubGoalLanguage,
 } from "../../shared/subGoalPostI18n";
@@ -26,6 +28,10 @@ import {
   type RedisClient,
 } from "../types";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
+import {
+  getCurrentSubredditNsfw,
+  isCrosspostEligible,
+} from "../utils/subredditSafety";
 import {
   clearActiveHighlightFailureIncident,
   clearHighlightFailureIncident,
@@ -162,7 +168,7 @@ type ExtendedOnboardingResultStatus =
 export type OnboardingLifecycleSource =
   "install" | "upgrade" | "recovery" | "unknown";
 export type OnboardingIneligibilityReason =
-  "subscriber_count" | AutomaticGoalIneligibilityReason;
+  "subscriber_count" | "subreddit_not_sfw" | AutomaticGoalIneligibilityReason;
 export type OnboardingEligibility = {
   eligible: boolean;
   subscriberCount: number;
@@ -1207,13 +1213,15 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       };
     }
 
-    const crosspost =
-      subreddit.name.toLowerCase() !== appSettings.promoSubreddit.toLowerCase();
+    const crosspost = isCrosspostEligible(subreddit, appSettings.promoSubreddit);
     const useTinyPost =
       subreddit.numberOfSubscribers > onboardingTinySubscriberThreshold;
     const language = resolveSubGoalLanguage(subreddit.language);
     const messages = getSubGoalPostMessages(language);
-    const afterSubscribePreset = getDefaultAfterSubscribePreset(subreddit.type);
+    const afterSubscribePreset = getDefaultAfterSubscribePreset(
+      subreddit.type,
+      getCurrentSubredditNsfw(subreddit) === true,
+    );
     logDiagnostic("info", "onboarding_goal_creation_started", {
       workflow: "onboarding_subscriber_goal",
       phase: "post_creation",
@@ -1239,11 +1247,19 @@ async function processDueOnboardingSubscriberGoalUnderLease({
         postHeight: useTinyPost ? "tiny" : "regular",
         autoCreateNextGoal: !useTinyPost,
         language,
-        afterSubscribeAction: createDefaultAfterSubscribeAction({
-          language,
-          subredditName: subreddit.name,
-          subredditType: subreddit.type,
-        }),
+        afterSubscribeAction:
+          afterSubscribePreset === "newest-post"
+            ? {
+                type: "newest-post",
+                buttonText: getAfterSubscribePresetMessages(language)
+                  .viewMostRecentPostToday,
+                colorTheme: defaultAfterSubscribeColorTheme,
+              }
+            : createDefaultAfterSubscribeAction({
+                language,
+                subredditName: subreddit.name,
+                subredditType: subreddit.type,
+              }),
         afterSubscribePreset,
         operationId: reloaded.operationId,
         automaticPermissionCheck: true,
