@@ -56,6 +56,21 @@ function sameModerator(left: ModAction, right: ModAction): boolean {
   );
 }
 
+function logPlaytestAction(subreddit: Subreddit, entry: ModAction): void {
+  logDiagnostic("info", "scheduled_sticky_playtest_action", {
+    workflow,
+    subredditName: subreddit.name,
+    action: entry.type,
+    actionId: entry.id,
+    actionAt: entry.createdAt.getTime(),
+    moderatorId: entry.moderatorId,
+    targetId: entry.target?.id,
+    description: entry.description,
+    details: entry.details,
+    category: toPostAction(entry) ? undefined : "no_post_target",
+  });
+}
+
 async function getRecentActions(
   reddit: RedditClient,
   subreddit: Subreddit,
@@ -194,12 +209,14 @@ export async function processScheduledStickyHighlightRepair({
   redis,
   subreddit,
   repairEnabled,
+  capturePlaytestEvidence = false,
   nowMs = Date.now(),
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   subreddit: Subreddit;
   repairEnabled: boolean;
+  capturePlaytestEvidence?: boolean;
   nowMs?: number;
 }): Promise<void> {
   const token = `${nowMs}:${Math.random().toString(36).slice(2)}`;
@@ -209,51 +226,76 @@ export async function processScheduledStickyHighlightRepair({
   });
   if ((await redis.get(scanKey)) !== token) return;
 
-  const unpinActions = (
-    await getRecentActions(reddit, subreddit, "unsticky", nowMs)
-  )
+  const unpinEntries = await getRecentActions(
+    reddit,
+    subreddit,
+    "unsticky",
+    nowMs,
+  );
+  const unpinActions = unpinEntries
     .filter((entry) => !repairEnabled || isReplacement(entry))
     .map(toPostAction)
     .filter((action) => action !== undefined);
-  if (unpinActions.length === 0) return;
+  if (!capturePlaytestEvidence && unpinActions.length === 0) return;
 
   const appUser = await reddit.getAppUser();
-  if (!appUser?.id) return;
   const unpins = unpinActions.filter(
     ({ entry }) =>
       !entry.target?.author ||
-      entry.target.author.toLowerCase() === appUser.username.toLowerCase(),
+      entry.target.author.toLowerCase() === appUser?.username.toLowerCase(),
   );
-  if (unpins.length === 0) return;
+  if (!capturePlaytestEvidence && (!appUser?.id || unpins.length === 0)) return;
 
   const [stickyEntries, submissionEntries] = await Promise.all([
     getRecentActions(reddit, subreddit, "sticky", nowMs),
     getRecentActions(reddit, subreddit, "submit_scheduled_post", nowMs),
   ]);
+  if (capturePlaytestEvidence) {
+    for (const entry of [
+      ...unpinEntries,
+      ...stickyEntries,
+      ...submissionEntries,
+    ]) {
+      logPlaytestAction(subreddit, entry);
+    }
+  }
+  if (!appUser?.id) return;
   const stickies = stickyEntries
     .map(toPostAction)
     .filter((action) => action !== undefined);
   const publications = new Map<LinkId, PostAction>();
   for (const entry of submissionEntries) {
-    if (/^automoderator$/i.test(entry.moderatorName)) continue;
     const submission = toPostAction(entry);
     if (submission && publications.has(submission.postId)) continue;
-    const matchingStickies =
-      submission &&
-      stickies.filter(
-        ({ entry: action, postId, at }) =>
-          postId === submission.postId &&
-          sameModerator(entry, action) &&
-          Math.abs(at - submission.at) <= publicationMatchMs,
-      );
-    if (!submission || !matchingStickies?.length) {
+    const targetStickies = stickies.filter(
+      ({ postId }) => postId === submission?.postId,
+    );
+    const moderatorStickies = targetStickies.filter(({ entry: action }) =>
+      sameModerator(entry, action),
+    );
+    const matchingStickies = moderatorStickies.filter(
+      ({ at }) =>
+        submission && Math.abs(at - submission.at) <= publicationMatchMs,
+    );
+    const failure = /^automoderator$/i.test(entry.moderatorName)
+      ? "automoderator"
+      : !submission
+        ? "no_post_target"
+        : targetStickies.length === 0
+          ? "sticky_target_mismatch"
+          : moderatorStickies.length === 0
+            ? "sticky_actor_mismatch"
+            : matchingStickies.length === 0
+              ? "sticky_timestamp_mismatch"
+              : undefined;
+    if (failure || !submission) {
       logDiagnostic("info", "scheduled_sticky_publication_unverified", {
         workflow,
         subredditName: subreddit.name,
         publicationLogId: entry.id,
         publicationLoggedAt: entry.createdAt.getTime(),
         publicationTargetId: entry.target?.id,
-        category: submission ? "no_matching_sticky" : "no_post_target",
+        category: failure,
       });
       continue;
     }
@@ -280,7 +322,12 @@ export async function processScheduledStickyHighlightRepair({
         publishedPostId: submission.postId,
         publishedAt: at,
         stickyAt: matchingStickies[0]?.at,
-        category: "post_creation_not_confirmed",
+        category: !publishedPost
+          ? "published_post_missing"
+          : publishedPost.id !== submission.postId ||
+              publishedPost.subredditId !== subreddit.id
+            ? "published_post_identity_mismatch"
+            : "post_creation_timestamp_mismatch",
       });
     }
   }
@@ -301,14 +348,35 @@ export async function processScheduledStickyHighlightRepair({
   for (const publication of publications.values()) {
     const unpinsByGoal = new Map<LinkId, PostAction>();
     for (const unpin of unpins) {
-      if (
-        unpin.postId !== publication.postId &&
-        isReplacement(unpin.entry) &&
-        sameModerator(unpin.entry, publication.entry) &&
-        Math.abs(unpin.at - publication.at) <= publicationMatchMs &&
-        unpin.at < (unpinsByGoal.get(unpin.postId)?.at ?? Infinity)
-      )
+      const failure =
+        unpin.postId === publication.postId
+          ? "unpin_targets_publication"
+          : !isReplacement(unpin.entry)
+            ? "missing_replacement_detail"
+            : !sameModerator(unpin.entry, publication.entry)
+              ? "unpin_actor_mismatch"
+              : Math.abs(unpin.at - publication.at) > publicationMatchMs
+                ? "unpin_timestamp_mismatch"
+                : undefined;
+      if (failure) {
+        if (capturePlaytestEvidence) {
+          logDiagnostic("info", "scheduled_sticky_unpin_unverified", {
+            workflow,
+            subredditName: subreddit.name,
+            postId: unpin.postId,
+            unpinLogId: unpin.entry.id,
+            unpinAt: unpin.at,
+            publicationLogId: publication.entry.id,
+            publishedPostId: publication.postId,
+            publishedAt: publication.at,
+            category: failure,
+          });
+        }
+        continue;
+      }
+      if (unpin.at < (unpinsByGoal.get(unpin.postId)?.at ?? Infinity)) {
         unpinsByGoal.set(unpin.postId, unpin);
+      }
     }
     for (const unpin of unpinsByGoal.values()) {
       if (repairEnabled && nowMs - unpin.at < unpinWaitMs) continue;

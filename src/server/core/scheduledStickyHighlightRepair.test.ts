@@ -94,7 +94,11 @@ function fixture(entries: ModAction[] = []) {
     ),
     sendModMail: vi.fn(),
   };
-  const scan = (minute: number, repairEnabled = true) => {
+  const scan = (
+    minute: number,
+    repairEnabled = true,
+    capturePlaytestEvidence = false,
+  ) => {
     nowMs = time(minute);
     return processScheduledStickyHighlightRepair({
       reddit: reddit as unknown as RedditClient,
@@ -103,6 +107,7 @@ function fixture(entries: ModAction[] = []) {
         typeof processScheduledStickyHighlightRepair
       >[0]["subreddit"],
       repairEnabled,
+      capturePlaytestEvidence,
       nowMs,
     });
   };
@@ -174,7 +179,7 @@ describe("scheduled Sticky highlight repair", () => {
   );
 
   it("deduplicates Sticky and Highlight rows, repeat scans, and a subsequent unpin for the same publication", async () => {
-    const { scan, goalPost, entries } = fixture([
+    const { scan, goalPost, entries, subreddit } = fixture([
       ...qualifyingEntries(),
       entry("unsticky", 0, goalId, {
         id: "traditional_unpin",
@@ -185,12 +190,22 @@ describe("scheduled Sticky highlight repair", () => {
         details: "[highlight]",
       }),
     ]);
+    const otherHighlights = [{ postId: publishedId }, { postId: "t3_other" }];
+    let highlights = [...otherHighlights];
+    subreddit.getHighlightedPosts.mockImplementation(async () => highlights);
+    goalPost.highlight.mockImplementation(async () => {
+      highlights = [...highlights, { postId: goalId }];
+    });
     await scan(15);
+    expect(highlights).toEqual([...otherHighlights, { postId: goalId }]);
+    highlights = [...otherHighlights];
     entries.unshift(entry("unsticky", 15, goalId));
     await scan(20);
     await scan(30);
     await scan(35);
     expect(goalPost.highlight).toHaveBeenCalledOnce();
+    expect(highlights).toEqual(otherHighlights);
+    expect(subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -199,12 +214,13 @@ describe("scheduled Sticky highlight repair", () => {
       [entry("unsticky", 0, goalId), entry("sticky", 10, publishedId)],
     ],
     [
-      "schedule creation or edit",
+      "schedule creation, editing, or deletion",
       [
         entry("unsticky", 0, goalId),
         entry("sticky", 10, publishedId),
         entry("edit_scheduled_post", 10, publishedId),
         entry("create_scheduled_post", 10, publishedId),
+        entry("delete_scheduled_post", 10, publishedId),
       ],
     ],
     [
@@ -344,6 +360,79 @@ describe("scheduled Sticky highlight repair", () => {
         publishedAt: time(10),
       }),
     );
+  });
+
+  it("captures scheduled submission metadata even when there is no unpin in playtest", async () => {
+    const { scan, goalPost } = fixture([
+      entry("submit_scheduled_post", 10, publishedId, {
+        target: undefined,
+        description: "Submit scheduled post",
+        details: "Next weekly occurrence",
+      }),
+    ]);
+    await scan(15, false, true);
+    expect(goalPost.highlight).not.toHaveBeenCalled();
+    expect(logDiagnostic).toHaveBeenCalledWith(
+      "info",
+      "scheduled_sticky_playtest_action",
+      expect.objectContaining({
+        action: "submit_scheduled_post",
+        actionAt: time(10),
+        moderatorId: "t2_mod",
+        targetId: undefined,
+        description: "Submit scheduled post",
+        details: "Next weekly occurrence",
+        category: "no_post_target",
+      }),
+    );
+  });
+
+  it("reports individual mismatches in the playtest without writing a highlight", async () => {
+    const { scan, goalPost } = fixture([
+      ...qualifyingEntries().slice(1),
+      entry("unsticky", 0, goalId, { details: "[highlight]" }),
+      entry("unsticky", 1, goalId, { moderatorId: "t2_other" }),
+      entry("unsticky", -6, goalId),
+      entry("submit_scheduled_post", 11, "t3_automod", {
+        moderatorName: "AutoModerator",
+      }),
+      entry("sticky", 11, "t3_automod", { moderatorName: "AutoModerator" }),
+      entry("submit_scheduled_post", 11, "t3_missing"),
+      entry("submit_scheduled_post", 11, "t3_actor"),
+      entry("sticky", 11, "t3_actor", { moderatorId: "t2_other" }),
+      entry("submit_scheduled_post", 11, "t3_time"),
+      entry("sticky", -5, "t3_time"),
+    ]);
+    await scan(20, false, true);
+    expect(goalPost.highlight).not.toHaveBeenCalled();
+    expect(logDiagnostic).not.toHaveBeenCalledWith(
+      "info",
+      "scheduled_sticky_repair_candidate",
+      expect.anything(),
+    );
+    for (const category of [
+      "missing_replacement_detail",
+      "unpin_actor_mismatch",
+      "unpin_timestamp_mismatch",
+    ]) {
+      expect(logDiagnostic).toHaveBeenCalledWith(
+        "info",
+        "scheduled_sticky_unpin_unverified",
+        expect.objectContaining({ category }),
+      );
+    }
+    for (const category of [
+      "automoderator",
+      "sticky_target_mismatch",
+      "sticky_actor_mismatch",
+      "sticky_timestamp_mismatch",
+    ]) {
+      expect(logDiagnostic).toHaveBeenCalledWith(
+        "info",
+        "scheduled_sticky_publication_unverified",
+        expect.objectContaining({ category }),
+      );
+    }
   });
 
   it("retries once the next scan is due after a log read failure", async () => {

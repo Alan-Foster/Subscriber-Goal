@@ -295,6 +295,8 @@ export async function onPostsUpdaterJob(): Promise<void> {
         subreddit,
         // Observe live log evidence before turning on automatic highlight writes.
         repairEnabled: false,
+        capturePlaytestEvidence:
+          toNormalizedSubredditName(currentSubredditName) === "subscriber_goal_dev",
       });
     }
   } catch (error) {
