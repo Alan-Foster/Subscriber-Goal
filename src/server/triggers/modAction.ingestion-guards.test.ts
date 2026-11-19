@@ -7,6 +7,7 @@ import {
   getCrosspostPendingByRevisionKey,
 } from '../data/crosspostData';
 import { postsKey } from '../data/updaterData';
+import { scheduledPostDisplacementKey } from '../core/scheduledPostDisplacement';
 import type { ServerAppSettings } from '../settings';
 
 const hoisted = vi.hoisted(() => ({
@@ -15,6 +16,8 @@ const hoisted = vi.hoisted(() => ({
     subredditId?: string;
   },
   mockReddit: {
+    getAppUser: vi.fn(),
+    updateWikiPage: vi.fn(),
     getCurrentSubreddit: vi.fn(),
     getPostById: vi.fn(),
     getSubredditInfoById: vi.fn(),
@@ -246,6 +249,8 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     hoisted.redisState.redisMock = redisMock;
     mockContext.subredditName = undefined;
     mockContext.subredditId = undefined;
+    mockReddit.getAppUser.mockReset().mockResolvedValue({ id: 't2_app', username: 'subscriber-goal' });
+    mockReddit.updateWikiPage.mockReset();
     mockReddit.getCurrentSubreddit.mockReset();
     mockReddit.getPostById.mockReset();
     mockReddit.getSubredditInfoById.mockReset();
@@ -259,6 +264,54 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     hoisted.handleAppAccountModeratorAction.mockReset();
     hoisted.handleAppAccountModeratorAction.mockResolvedValue(undefined);
   });
+
+  it('records one check when a moderator unstickies an app-authored goal twice', async () => {
+    mockContext.subredditName = 'ExampleSub';
+    const event = {
+      action: 'unsticky',
+      moderator: { name: 'ExampleMod' },
+      targetPost: { id: 't3_goal', authorId: 't2_app' },
+    };
+    await onModAction({ ...event, actionedAt: '2026-11-18T12:00:00.000Z' });
+    await onModAction({ ...event, actionedAt: '2026-11-18T12:00:01.000Z' });
+
+    expect(await redisMock.hGetAll(scheduledPostDisplacementKey)).toEqual({
+      t3_goal: String(Date.parse('2026-11-18T12:00:01.000Z')),
+    });
+    expect(mockReddit.updateWikiPage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['subscriber-goal', 't2_app', 'ExampleSub'],
+    ['Subscriber-Goal', 't2_app', 'ExampleSub'],
+    ['ExampleMod', 't2_other', 'ExampleSub'],
+    ['ExampleMod', 't2_app', 'SubGoal'],
+  ])('ignores unsticky by %s on a post by %s in %s', async (moderator, authorId, subredditName) => {
+    mockContext.subredditName = subredditName;
+    await onModAction({
+      action: 'unsticky',
+      actionedAt: '2026-11-18T12:00:00.000Z',
+      moderator: { name: moderator },
+      targetPost: { id: 't3_goal', authorId },
+    });
+    expect(await redisMock.hGetAll(scheduledPostDisplacementKey)).toEqual({});
+  });
+
+  it.each([['removelink', 'remove'], ['approvelink', 'approve'], ['spamlink', 'remove']])(
+    'preserves the crosspost dispatch for %s',
+    async (action, page) => {
+      mockContext.subredditName = 'ExampleSub';
+      await onModAction({
+        action,
+        moderator: { name: 'ExampleMod' },
+        targetPost: { id: 't3_goal', authorId: 't2_app' },
+      });
+      expect(mockReddit.updateWikiPage).toHaveBeenCalledWith({
+        subredditName: 'SubGoal', page, content: 't3_goal', reason: `Dispatch ${page} for t3_goal`,
+      });
+      expect(await redisMock.hGetAll(scheduledPostDisplacementKey)).toEqual({});
+    },
+  );
 
   it.each([
     'removemoderator',
