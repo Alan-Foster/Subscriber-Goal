@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SubGoalState, SubscribeOnlyState } from "../../shared/types/api";
+import { tinySubscriptionConfirmationPhaseDurationMs } from "./components/TinySubscriptionConfirmation";
 
 const hoisted = vi.hoisted(() => ({
   createState: () => ({
@@ -554,6 +555,7 @@ describe("App", () => {
       container.querySelectorAll("button"),
     ).find((button) => button.textContent === "Join r/ExampleSub");
     await act(async () => subscribeButton?.click());
+    setTimeoutSpy.mockClear();
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>(
@@ -562,13 +564,22 @@ describe("App", () => {
         ?.click();
       await Promise.resolve();
     });
-    const confirmationTimerId = setTimeoutSpy.mock.results.at(-1)?.value;
+    const confirmationTimerIndex = setTimeoutSpy.mock.calls.findLastIndex(
+      ([, delay]) => delay === tinySubscriptionConfirmationPhaseDurationMs,
+    );
+    const confirmationTimerId =
+      setTimeoutSpy.mock.results[confirmationTimerIndex]?.value;
     clearTimeoutSpy.mockClear();
 
     await act(async () => root.unmount());
-
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(confirmationTimerId);
     container.remove();
+
+    expect(confirmationTimerId).toBeDefined();
+    expect(
+      clearTimeoutSpy.mock.calls.some(
+        ([timerId]) => timerId === confirmationTimerId,
+      ),
+    ).toBe(true);
   });
 
   it.each([true, false])(
