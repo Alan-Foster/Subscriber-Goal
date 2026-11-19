@@ -374,6 +374,15 @@ describe("scheduled Sticky highlight repair", () => {
     expect(goalPost.highlight).not.toHaveBeenCalled();
     expect(logDiagnostic).toHaveBeenCalledWith(
       "info",
+      "scheduled_sticky_playtest_scan",
+      expect.objectContaining({
+        unpinEntries: 0,
+        stickyEntries: 0,
+        submissionEntries: 1,
+      }),
+    );
+    expect(logDiagnostic).toHaveBeenCalledWith(
+      "info",
       "scheduled_sticky_playtest_action",
       expect.objectContaining({
         action: "submit_scheduled_post",

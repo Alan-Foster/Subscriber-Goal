@@ -251,6 +251,13 @@ export async function processScheduledStickyHighlightRepair({
     getRecentActions(reddit, subreddit, "submit_scheduled_post", nowMs),
   ]);
   if (capturePlaytestEvidence) {
+    logDiagnostic("info", "scheduled_sticky_playtest_scan", {
+      workflow,
+      subredditName: subreddit.name,
+      unpinEntries: unpinEntries.length,
+      stickyEntries: stickyEntries.length,
+      submissionEntries: submissionEntries.length,
+    });
     for (const entry of [
       ...unpinEntries,
       ...stickyEntries,
