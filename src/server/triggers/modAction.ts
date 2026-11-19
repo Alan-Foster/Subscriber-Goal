@@ -1308,6 +1308,11 @@ async function updateFromWikis(
         }
       }
 
+      if (post.nsfw === true) {
+        await markTerminalFailure(pending, 'source_post_nsfw');
+        continue;
+      }
+
       sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
       if (!sourceCreateLock.acquired) {
         summary.crosspostsSkippedByInFlight += 1;

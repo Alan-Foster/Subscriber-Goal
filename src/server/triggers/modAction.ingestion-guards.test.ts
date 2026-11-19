@@ -447,6 +447,39 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
     ).toBe(true);
   });
 
+  it('terminally skips an NSFW-tagged source in a SFW community', async () => {
+    mockContext.subredditName = 'SubGoal';
+    const now = Date.now();
+    safeGetWikiPageRevisionsMock.mockImplementation(
+      async (_reddit: unknown, _subreddit: string, page: string) => ({
+        ok: true,
+        revisions: page === crosspostWikiPages.newPost
+          ? [{ id: 'rev_nsfw', reason: 'Post t3_nsfw with goal 100', dateMs: now }]
+          : [],
+        durationMs: 1,
+      })
+    );
+    mockReddit.getPostById.mockResolvedValue({
+      id: 't3_nsfw',
+      subredditId: 't5_source',
+      subredditName: 'CorporateGifts',
+      createdAt: new Date(now),
+      nsfw: true,
+    });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+
+    const summary = await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
+
+    expect(summary.crosspostsSkipped).toBe(1);
+    expect(mockReddit.crosspost).not.toHaveBeenCalled();
+    expect(await redisMock.hGet(getCrosspostPendingByRevisionKey('SubGoal'), 'rev_nsfw')).toBeUndefined();
+    expect(loggedEvents).toContainEqual(expect.objectContaining({
+      event: 'crosspost_attempt_skipped',
+      reason: 'source_post_nsfw',
+      revisionId: 'rev_nsfw',
+    }));
+  });
+
   it('terminally skips stale source posts older than freshness window', async () => {
     mockContext.subredditName = 'SubGoal';
     safeGetWikiPageRevisionsMock.mockImplementation(
