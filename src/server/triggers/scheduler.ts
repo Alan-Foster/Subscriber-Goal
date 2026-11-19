@@ -20,6 +20,7 @@ import { getAppSettings } from "../settings";
 import {
   isCrosspostAuthorityInstall,
   processCrosspostDispatchQueue,
+  toNormalizedSubredditName,
 } from "./modAction";
 import { countPendingCrossposts } from "../data/crosspostData";
 import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
@@ -43,6 +44,7 @@ import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
+import { processScheduledStickyHighlightRepair } from "../core/scheduledStickyHighlightRepair";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
@@ -278,6 +280,31 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   const currentSubredditName = context.subredditName ?? subreddit?.name;
+  try {
+    if (
+      permissionWorkAllowed &&
+      subreddit &&
+      currentSubredditName &&
+      toNormalizedSubredditName(currentSubredditName) !==
+        toNormalizedSubredditName(appSettings.promoSubreddit) &&
+      !isCrosspostAuthorityInstall(appSettings, currentSubredditName)
+    ) {
+      await processScheduledStickyHighlightRepair({
+        reddit,
+        redis,
+        subreddit,
+        // Observe live log evidence before turning on automatic highlight writes.
+        repairEnabled: false,
+      });
+    }
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "scheduler_task_failed",
+      { workflow: "scheduled_sticky_highlight_repair", phase: "log_scan" },
+      error,
+    );
+  }
   try {
     if (
       permissionWorkAllowed &&

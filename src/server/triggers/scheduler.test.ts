@@ -80,6 +80,7 @@ const hoisted = vi.hoisted(() => ({
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppAccountRecovery: vi.fn(),
   processDueAppRepair: vi.fn(),
+  processScheduledStickyHighlightRepair: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getPostOperationalState: vi.fn(),
   savePostOperationalState: vi.fn(),
@@ -101,6 +102,8 @@ vi.mock("../settings", () => ({
 }));
 
 vi.mock("./modAction", () => ({
+  toNormalizedSubredditName: (name: string) =>
+    name.trim().replace(/^r\//i, "").toLowerCase(),
   isCrosspostAuthorityInstall: (
     appSettings: ServerAppSettings,
     subredditName: string,
@@ -211,6 +214,10 @@ vi.mock("../core/appAccountRecovery", () => ({
 vi.mock("../core/appRepair", () => ({
   processDueAppRepair: hoisted.processDueAppRepair,
 }));
+
+vi.mock("../core/scheduledStickyHighlightRepair", () => ({
+  processScheduledStickyHighlightRepair: hoisted.processScheduledStickyHighlightRepair,
+}));
 vi.mock("../core/sourcePostDeletion", () => ({
   processDueSourcePostDeletions: hoisted.processDueSourcePostDeletions,
   queueConfirmedSourceDeletionCleanup:
@@ -264,6 +271,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppAccountRecovery.mockReset();
     hoisted.processDueAppRepair.mockReset();
+    hoisted.processScheduledStickyHighlightRepair.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
     hoisted.getPostOperationalState.mockReset();
     hoisted.savePostOperationalState.mockReset();
@@ -424,6 +432,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
     expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+    expect(hoisted.processScheduledStickyHighlightRepair).not.toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
     expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
@@ -436,9 +445,25 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
     await onPostsUpdaterJob();
     expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.processScheduledStickyHighlightRepair).toHaveBeenCalledWith(
+      expect.objectContaining({ repairEnabled: false }),
+    );
     expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
     expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
     expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
+  });
+
+  it("continues the updater when the scheduled Sticky log scan fails", async () => {
+    hoisted.processScheduledStickyHighlightRepair.mockRejectedValueOnce(
+      new Error("moderation log unavailable"),
+    );
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.processScheduledStickyHighlightRepair).toHaveBeenCalledOnce();
+    expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalled();
   });
 
   it.each([
@@ -671,6 +696,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     await onPostsUpdaterJob();
 
+    expect(hoisted.processScheduledStickyHighlightRepair).not.toHaveBeenCalled();
     expect(hoisted.processCrosspostDispatchQueue).toHaveBeenCalledWith(
       baseSettings,
       "scheduler_posts_updater",
