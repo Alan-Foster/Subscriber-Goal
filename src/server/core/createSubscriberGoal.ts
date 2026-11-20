@@ -110,7 +110,7 @@ export type CreateSubscriberGoalResult = {
   post: Awaited<ReturnType<typeof createGoalPost>>;
   crosspostDispatchResult: CrosspostDispatchResult;
   highlightResult: HighlightResult;
-  flairResult: SubscriberGoalFlairResult;
+  flairResult: SubscriberGoalFlairResult | { status: "unknown" };
   supersedingPostId?: `t3_${string}`;
 };
 
@@ -205,47 +205,84 @@ async function writeCreationOperation(
   }
 }
 
+type CompletedCreationRecovery =
+  | { status: "complete"; result: CreateSubscriberGoalResult }
+  | { status: "retired"; postId: `t3_${string}`; reason?: string }
+  | { status: "missing" };
+
 async function recoverCompletedCreation(
   reddit: RedditClient,
+  redis: RedisClient,
   raw: StoredCreationOperation,
   expectedSubreddit?: {
     id?: string | undefined;
     name?: string | undefined;
   },
-): Promise<CreateSubscriberGoalResult | undefined> {
+): Promise<CompletedCreationRecovery> {
   const postId = raw.postId ?? "";
-  if (
-    raw.status !== "complete" ||
-    !isLinkId(postId) ||
-    !raw.crosspostDispatchResult ||
-    !(raw.highlightResult || raw.stickyResult) ||
-    !raw.flairResult
-  ) {
-    return undefined;
-  }
   try {
-    const storedHighlightResult = raw.highlightResult || raw.stickyResult;
-    const post = (await reddit.getPostById(postId)) as unknown as Awaited<
-      ReturnType<typeof createGoalPost>
-    >;
+    if (!isLinkId(postId)) {
+      throw new Error(
+        "Completed Subscriber Goal operation has no valid post ID.",
+      );
+    }
+    if (await isSubscriberGoalPostRetired(redis, postId)) {
+      return { status: "retired", postId };
+    }
+    let post: Awaited<ReturnType<typeof reddit.getPostById>>;
+    try {
+      post = await reddit.getPostById(postId);
+    } catch (error) {
+      if (!isMissingPostError(error, postId)) throw error;
+      return {
+        status: "retired",
+        postId,
+        reason: "creation_retry_post_missing",
+      };
+    }
+    if (!post) throw new PostTemporarilyUnavailableError(postId);
+    const scope =
+      expectedSubreddit ??
+      (raw.subredditId && raw.subredditName
+        ? { id: raw.subredditId, name: raw.subredditName }
+        : undefined);
     if (
-      expectedSubreddit &&
-      (post.subredditId !== expectedSubreddit.id ||
+      scope &&
+      (post.subredditId !== scope.id ||
         normalizeSubredditName(post.subredditName) !==
-          normalizeSubredditName(expectedSubreddit.name))
+          normalizeSubredditName(scope.name))
     ) {
-      return undefined;
+      return { status: "missing" };
+    }
+    const availability = getPostAvailability(post);
+    if (availability.status === "terminal") {
+      return {
+        status: "retired",
+        postId,
+        reason: `creation_retry_removed:${availability.category}`,
+      };
+    }
+    const storedHighlightResult = raw.highlightResult || raw.stickyResult;
+    if (!raw.crosspostDispatchResult || !storedHighlightResult) {
+      throw new Error(
+        "Completed Subscriber Goal operation has missing result metadata.",
+      );
     }
     return {
-      outcome: "created",
-      post,
-      crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
-      highlightResult: normalizeStoredHighlightResult(
-        JSON.parse(storedHighlightResult!),
-        postId,
-      ),
-      flairResult: JSON.parse(raw.flairResult),
-    } as CreateSubscriberGoalResult;
+      status: "complete",
+      result: {
+        outcome: "created",
+        post,
+        crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
+        highlightResult: normalizeStoredHighlightResult(
+          JSON.parse(storedHighlightResult),
+          postId,
+        ),
+        flairResult: raw.flairResult
+          ? JSON.parse(raw.flairResult)
+          : { status: "unknown" },
+      },
+    };
   } catch (error) {
     logDiagnostic(
       "warn",
@@ -257,7 +294,7 @@ async function recoverCompletedCreation(
       },
       error,
     );
-    return undefined;
+    throw error;
   }
 }
 
@@ -353,12 +390,17 @@ export async function recoverSubscriberGoalCreation({
         : {}),
     };
   }
-  const completed = await recoverCompletedCreation(
-    reddit,
-    raw,
-    actorUserId ? { id: subredditId, name: subredditName } : undefined,
-  );
-  if (completed) return { status: "complete", result: completed };
+  if (raw.status === "complete") {
+    const completed = await recoverCompletedCreation(
+      reddit,
+      redis,
+      raw,
+      actorUserId ? { id: subredditId, name: subredditName } : undefined,
+    );
+    return completed.status === "retired"
+      ? { status: "retired", postId: completed.postId }
+      : completed;
+  }
   if (
     raw.status === "submitting" ||
     raw.status === "submission_unknown" ||
@@ -479,16 +521,6 @@ async function createSubscriberGoalUnderCommunityLease({
       options.language,
     );
   }
-  const completed = operationScopeMatches(existing, expectedScope)
-    ? await recoverCompletedCreation(
-        reddit,
-        existing,
-        currentSubreddit
-          ? { id: currentSubreddit.id, name: currentSubreddit.name }
-          : undefined,
-      )
-    : undefined;
-  if (completed) return completed;
   const nowMs = Date.now();
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(lockKey, lockToken, {
@@ -511,16 +543,38 @@ async function createSubscriberGoalUnderCommunityLease({
         options.language,
       );
     }
-    const recoveredComplete = operationScopeMatches(reloaded, expectedScope)
-      ? await recoverCompletedCreation(
+    if (reloaded.status === "complete") {
+      if (operationScopeMatches(reloaded, expectedScope)) {
+        const completed = await recoverCompletedCreation(
           reddit,
+          redis,
           reloaded,
           currentSubreddit
             ? { id: currentSubreddit.id, name: currentSubreddit.name }
             : undefined,
-        )
-      : undefined;
-    if (recoveredComplete) return recoveredComplete;
+        );
+        if (completed.status === "complete") return completed.result;
+        if (completed.status === "retired") {
+          if (completed.reason) {
+            await retireSubscriberGoalPost(
+              redis,
+              completed.postId,
+              completed.reason,
+            );
+          }
+          const retired = createTerminalCreationResult(
+            "retired",
+            completed.postId,
+          );
+          await persistTerminalCreationOutcome(redis, operationKey, retired);
+          return retired;
+        }
+      }
+      throw new SubscriberGoalActorAuthorizationError(
+        "inconclusive",
+        options.language,
+      );
+    }
     if (options.manualActorUserId) {
       if (!currentSubreddit) {
         throw new SubscriberGoalActorAuthorizationError(
