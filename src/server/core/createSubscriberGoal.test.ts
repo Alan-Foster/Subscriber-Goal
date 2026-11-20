@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  highlightManagementStateKey,
+  highlightManagementVersion,
+} from "../data/highlightManagement";
 
 const hoisted = vi.hoisted(() => ({
   reddit: {
@@ -755,6 +759,92 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.setSavedSubredditDisplayName).toHaveBeenCalledOnce();
     expect(postA.approve).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    {
+      height: "tiny",
+      removal: "moderator",
+      canonical: false,
+      outcome: "created",
+    },
+    { height: "cta", removal: undefined, canonical: false, outcome: "created" },
+    {
+      height: "regular",
+      removal: "moderator",
+      canonical: false,
+      outcome: "created",
+    },
+    {
+      height: "short",
+      removal: undefined,
+      canonical: false,
+      outcome: "superseded",
+    },
+    {
+      height: "short",
+      removal: undefined,
+      canonical: true,
+      outcome: "superseded",
+    },
+  ])(
+    "returns $outcome recovering an automatic successor with a newer $height candidate (removal $removal, canonical only $canonical)",
+    async ({ height, removal, canonical, outcome }) => {
+      const post = createPost();
+      const newer = {
+        ...createPost(),
+        id: "t3_newer",
+        createdAt: new Date("2026-01-02T00:00:00.000Z"),
+        removedByCategory: removal,
+      };
+      const operationId = "auto-next:t3_source";
+      const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+      await hoisted.redis.hSet(operationKey, {
+        status: "submission_unknown",
+        subredditName: post.subredditName,
+        subredditId: post.subredditId,
+        submissionMarker: "marker",
+        reconciliationNextAt: "1000",
+      });
+      await hoisted.redis.hSet("subscriber_goals", {
+        [`${newer.id}_post_kind`]: "subscriber-goal-v1",
+        [`${newer.id}_post_height`]: height,
+      });
+      if (canonical) {
+        await hoisted.redis.hSet(highlightManagementStateKey, {
+          version: highlightManagementVersion,
+          canonicalPostId: newer.id,
+          reconciledAt: "1",
+        });
+      } else {
+        hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([newer.id]);
+      }
+      hoisted.reddit.getPostById.mockImplementation(async (postId: string) =>
+        postId === newer.id ? newer : post,
+      );
+      hoisted.reddit.getNewPosts.mockReturnValue({ all: async () => [post] });
+      hoisted.reddit.getPostData.mockResolvedValue({
+        submissionMarker: "marker",
+      });
+
+      await expect(
+        createGoal({
+          operationId,
+          reconciliationNowMs: 1_000,
+          reconciliationContext: "automatic_successor",
+          cancelPendingAutoCreateGoals: false,
+        }),
+      ).resolves.toMatchObject({
+        outcome,
+        post: { id: post.id },
+        ...(outcome === "superseded" ? { supersedingPostId: newer.id } : {}),
+      });
+
+      expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      expect(hoisted.redisHashes.get(operationKey)?.get("status")).toBe(
+        outcome === "created" ? "complete" : "superseded",
+      );
+    },
+  );
 
   it("recovers the same Reddit post when the final operation write fails", async () => {
     const post = createPost();

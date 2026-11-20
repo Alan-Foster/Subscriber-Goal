@@ -68,6 +68,9 @@ const hoisted = vi.hoisted(() => ({
     hGet: vi.fn(async (key: string, field: string) =>
       hoisted.redisHashes.get(key)?.get(field),
     ),
+    hGetAll: vi.fn(async (key: string) =>
+      Object.fromEntries(hoisted.redisHashes.get(key) ?? []),
+    ),
     hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
       const hash = hoisted.redisHashes.get(key) ?? new Map<string, string>();
       Object.entries(fields).forEach(([field, value]) =>
@@ -112,7 +115,8 @@ vi.mock("./postRetirement", async (importOriginal) => ({
   retireSubscriberGoalPost: hoisted.retireSubscriberGoalPost,
 }));
 
-vi.mock("./createSubscriberGoal", () => ({
+vi.mock("./createSubscriberGoal", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./createSubscriberGoal")>()),
   createSubscriberGoal: hoisted.createSubscriberGoal,
   SubscriberGoalCreationOutcomeUnknownError: class extends Error {
     reconciliationStatus: "pending" | "exhausted";
@@ -578,7 +582,68 @@ describe("processDueAutoCreateNextGoals", () => {
     ).toEqual(new Map([["t3_unrelated", "t3_newer"]]));
     expect(hoisted.cancelAllAutoCreateNextGoals).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", 86_461_000);
   });
+
+  it.each(["retired", "superseded"] as const)(
+    "cancels a %s recovery after inventory has another chance to map it",
+    async (outcome) => {
+      let runAt: number | undefined = 86_401_000;
+      hoisted.getDueAutoCreateNextGoalPostIds.mockImplementation(
+        async (_redis, nowMs: number) =>
+          runAt !== undefined && nowMs >= runAt ? ["t3_source"] : [],
+      );
+      hoisted.getAutoCreateNextGoalRunAt.mockImplementation(async () => runAt);
+      hoisted.scheduleAutoCreateNextGoalReconciliation.mockImplementation(
+        async (_redis, _postId, nextRunAt: number) => {
+          runAt = nextRunAt;
+        },
+      );
+      hoisted.cancelAutoCreateNextGoal.mockImplementation(async () => {
+        runAt = undefined;
+      });
+      hoisted.createSubscriberGoal.mockImplementation(async () => {
+        await hoisted.redis.hSet(
+          "subscriber_goal_creation_v1:auto-next:t3_source",
+          { status: outcome, postId: "t3_stale" },
+        );
+        return { outcome, post: { id: "t3_stale" } };
+      });
+
+      const run = (nowMs: number) =>
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+          nowMs,
+        });
+
+      await expect(run(86_401_000)).resolves.toMatchObject({
+        created: 0,
+        skipped: 1,
+        rescheduled: 1,
+      });
+      expect(runAt).toBe(86_461_000);
+      expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+      await expect(run(86_461_000)).resolves.toMatchObject({
+        created: 0,
+        skipped: 1,
+        rescheduled: 0,
+      });
+      await expect(run(86_521_000)).resolves.toMatchObject({ due: 0 });
+
+      expect(
+        hoisted.ensureExistingSubscriberGoalHighlighted,
+      ).toHaveBeenCalledTimes(2);
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+      expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledExactlyOnceWith(
+        hoisted.redis,
+        "t3_source",
+      );
+    },
+  );
 
   it("reports an unresolved submission without spending the ordinary retry budget", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
@@ -679,6 +744,10 @@ describe("processDueAutoCreateNextGoals", () => {
 
   it("adopts an untracked incomplete highlighted classic as the live successor", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    await hoisted.redis.hSet(
+      "subscriber_goal_creation_v1:auto-next:t3_source",
+      { status: "retired", postId: "t3_stale" },
+    );
     hoisted.ensureExistingSubscriberGoalHighlighted.mockImplementation(
       async () => {
         await hoisted.redis.hSet("auto_create_next_goal_v1_successors", {

@@ -20,6 +20,7 @@ import {
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
   createSubscriberGoal,
+  getStoredTerminalSubscriberGoalCreation,
   SubscriberGoalCreationOutcomeUnknownError,
 } from "./createSubscriberGoal";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
@@ -64,6 +65,7 @@ export type AutoCreateNextGoalSummary = {
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
 export { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
+const terminalRecoveryInventoryDelayMs = 60 * 1000;
 const protectedSurfaceRecheckDelayMs = 60 * 60 * 1000;
 const onboardingSubscriberGoalStateKey = "onboarding_subscriber_goal_v4_state";
 
@@ -351,6 +353,25 @@ export async function processDueAutoCreateNextGoals({
         });
         continue;
       }
+      const storedTerminal = await getStoredTerminalSubscriberGoalCreation(
+        redis,
+        operationId,
+      );
+      if (storedTerminal) {
+        await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
+        await cancelAutoCreateNextGoal(redis, sourcePostId);
+        summary.skipped += 1;
+        logDiagnostic("info", "auto_create_goal_recovery_stopped", {
+          workflow: "auto_create_next_goal",
+          phase: "creation_recovery",
+          postId: storedTerminal.post.id,
+          sourcePostId,
+          outcome: storedTerminal.outcome,
+          supersedingPostId: storedTerminal.supersedingPostId ?? "none",
+          disposition: "source_cancelled",
+        });
+        continue;
+      }
       const unresolvedAmbiguousSurface =
         (activeInventory.status === "existing" ||
           activeInventory.status === "existing_not_highlighted") &&
@@ -413,7 +434,7 @@ export async function processDueAutoCreateNextGoals({
             : {}),
           cancelPendingAutoCreateGoals: false,
           automaticPermissionCheck: true,
-          operationId: `auto-next:${sourcePostId}`,
+          operationId,
           reconciliationContext: "automatic_successor",
           mutationLease,
           reconciliationNowMs: nowMs,
@@ -422,7 +443,14 @@ export async function processDueAutoCreateNextGoals({
       creationFinished = true;
       await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
       if (creation.outcome === "superseded" || creation.outcome === "retired") {
+        // Give inventory one more chance to adopt an active successor.
+        await scheduleAutoCreateNextGoalReconciliation(
+          redis,
+          sourcePostId,
+          nowMs + terminalRecoveryInventoryDelayMs,
+        );
         summary.skipped += 1;
+        summary.rescheduled += 1;
         logDiagnostic("info", "auto_create_goal_recovery_stopped", {
           workflow: "auto_create_next_goal",
           phase: "creation_recovery",
@@ -430,6 +458,7 @@ export async function processDueAutoCreateNextGoals({
           sourcePostId,
           outcome: creation.outcome,
           supersedingPostId: creation.supersedingPostId ?? "none",
+          disposition: "inventory_recheck_scheduled",
         });
         break;
       }
