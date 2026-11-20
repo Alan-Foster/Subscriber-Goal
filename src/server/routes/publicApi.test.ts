@@ -665,24 +665,31 @@ describe("publicApi routes", () => {
     });
   });
 
-  it("maps the Devvit nsfw flag to the client-facing isNsfw field", async () => {
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      nsfw: true,
-    });
-    const routes = createRouteHarness();
-    const json = vi.fn();
+  it.each([
+    [true, true],
+    [undefined, true],
+    [false, false],
+  ] as const)(
+    "maps the Devvit nsfw flag %s to client isNsfw %s",
+    async (nsfw, expected) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        nsfw,
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
 
-    await routes.get(apiRoutes.init)?.(
-      {} as Request,
-      { json } as unknown as Response,
-    );
+      await routes.get(apiRoutes.init)?.(
+        {} as Request,
+        { json } as unknown as Response,
+      );
 
-    const response = json.mock.calls[0]?.[0] as InitResponse;
-    expect(response.state.subreddit.isNsfw).toBe(true);
-  });
+      const response = json.mock.calls[0]?.[0] as InitResponse;
+      expect(response.state.subreddit.isNsfw).toBe(expected);
+    },
+  );
 
   it("initializes tiny posts from persistent anonymous subscriber status", async () => {
     hoisted.context.userId = "t2_user";
@@ -2517,8 +2524,8 @@ describe("publicApi routes", () => {
     { nsfw: false, requested: "top-post-day", fallbackAction: "newest-post" },
     {
       nsfw: undefined,
-      requested: "top-post-day",
-      fallbackAction: "newest-post",
+      requested: "newest-post",
+      fallbackAction: undefined,
     },
   ])(
     "uses the activity index for $requested when NSFW is $nsfw",
@@ -2532,7 +2539,10 @@ describe("publicApi routes", () => {
       hoisted.getSubGoalData.mockResolvedValue({
         postKind: "subscriber-goal-v1",
         postHeight: "regular",
-        afterSubscribeAction: { type: requested, colorTheme: "blue" },
+        afterSubscribeAction: {
+          type: nsfw === undefined ? "top-post-day" : requested,
+          colorTheme: "blue",
+        },
       });
       const listing = { all: vi.fn().mockResolvedValue([]) };
       hoisted.reddit.getNewPosts.mockReturnValue(listing);
@@ -2567,7 +2577,9 @@ describe("publicApi routes", () => {
 
       const json = vi.fn();
       await createRouteHarness().get(apiRoutes.afterSubscribeTarget)!(
-        {} as Request,
+        {
+          query: nsfw === undefined ? { automaticAction: "newest-post" } : {},
+        } as Request,
         { json } as unknown as Response,
       );
       expect(json).toHaveBeenCalledExactlyOnceWith({
@@ -2578,6 +2590,8 @@ describe("publicApi routes", () => {
         ...(fallbackAction ? { fallbackAction } : {}),
       });
       expect(hoisted.reddit.getPostById.mock.calls.flat()).toEqual(indexed);
+      if (nsfw !== false)
+        expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
     },
   );
 
@@ -2621,104 +2635,110 @@ describe("publicApi routes", () => {
     );
   });
 
-  it("publishes the same NSFW replacement pair that its dynamic selector accepts, and restores the saved pair in SFW", async () => {
-    seedAutomaticCard("top-post-day");
-    const subreddit = {
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      nsfw: true,
-    };
-    hoisted.reddit.getCurrentSubreddit.mockImplementation(
-      async () => subreddit,
-    );
-    const routes = createRouteHarness();
-    const json = vi.fn();
-    const init = () =>
-      routes.get(apiRoutes.init)!(
+  it.each([true, undefined])(
+    "publishes the NSFW pair when nsfw=%s and restores the saved pair in SFW",
+    async (nsfw) => {
+      seedAutomaticCard("top-post-day");
+      const subreddit = {
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        nsfw,
+      };
+      hoisted.reddit.getCurrentSubreddit.mockImplementation(
+        async () => subreddit,
+      );
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const init = () =>
+        routes.get(apiRoutes.init)!(
+          {} as Request,
+          { json } as unknown as Response,
+        );
+      await init();
+      expect(json).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            afterSubscribeAction: expect.objectContaining({
+              type: "link",
+              url: "https://www.reddit.com/r/ExampleSub/submit/",
+            }),
+            automaticAfterSubscribeAction: expect.objectContaining({
+              type: "newest-post",
+            }),
+          }),
+        }),
+      );
+
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi.fn().mockResolvedValue([]),
+      });
+      const targetResult = await requestAction({
+        automaticAction: "newest-post",
+      });
+      expect(targetResult.json).toHaveBeenCalledWith(
+        expect.objectContaining({ fallbackAction: "create-post" }),
+      );
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+
+      subreddit.nsfw = false;
+      await init();
+      expect(json).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({
+            afterSubscribeAction: expect.objectContaining({
+              type: "top-post-day",
+            }),
+            automaticAfterSubscribeAction: expect.objectContaining({
+              type: "newest-post",
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([true, undefined])(
+    "opens Most Recent before Join when nsfw=%s",
+    async (nsfw) => {
+      hoisted.context.userId = "t2_user";
+      hoisted.isTrackedSubscriber.mockResolvedValue(false);
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        nsfw,
+      });
+      hoisted.getSubGoalData.mockResolvedValue({
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        afterSubscribeAction: {
+          type: "newest-post",
+          buttonText: "View the Most Recent Post",
+          colorTheme: "blue",
+        },
+      });
+      const topUrl = "https://www.reddit.com/r/ExampleSub/comments/top";
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi
+          .fn()
+          .mockResolvedValue([{ id: "t3_top", url: topUrl, nsfw: true }]),
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
+
+      await routes.get(apiRoutes.afterSubscribeTarget)?.(
         {} as Request,
         { json } as unknown as Response,
       );
-    await init();
-    expect(json).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        state: expect.objectContaining({
-          afterSubscribeAction: expect.objectContaining({
-            type: "link",
-            url: "https://www.reddit.com/r/ExampleSub/submit/",
-          }),
-          automaticAfterSubscribeAction: expect.objectContaining({
-            type: "newest-post",
-          }),
-        }),
-      }),
-    );
 
-    hoisted.reddit.getNewPosts.mockReturnValue({
-      all: vi.fn().mockResolvedValue([]),
-    });
-    const targetResult = await requestAction({
-      automaticAction: "newest-post",
-    });
-    expect(targetResult.json).toHaveBeenCalledWith(
-      expect.objectContaining({ fallbackAction: "create-post" }),
-    );
-    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
-
-    subreddit.nsfw = false;
-    await init();
-    expect(json).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        state: expect.objectContaining({
-          afterSubscribeAction: expect.objectContaining({
-            type: "top-post-day",
-          }),
-          automaticAfterSubscribeAction: expect.objectContaining({
-            type: "newest-post",
-          }),
-        }),
-      }),
-    );
-  });
-
-  it("opens the NSFW-tagged newest post before Join in an NSFW community", async () => {
-    hoisted.context.userId = "t2_user";
-    hoisted.isTrackedSubscriber.mockResolvedValue(false);
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      nsfw: true,
-    });
-    hoisted.getSubGoalData.mockResolvedValue({
-      postKind: "subscriber-goal-v1",
-      postHeight: "regular",
-      afterSubscribeAction: {
-        type: "newest-post",
-        buttonText: "View the Most Recent Post",
-        colorTheme: "blue",
-      },
-    });
-    const topUrl = "https://www.reddit.com/r/ExampleSub/comments/top";
-    hoisted.reddit.getNewPosts.mockReturnValue({
-      all: vi
-        .fn()
-        .mockResolvedValue([{ id: "t3_top", url: topUrl, nsfw: true }]),
-    });
-    const routes = createRouteHarness();
-    const json = vi.fn();
-
-    await routes.get(apiRoutes.afterSubscribeTarget)?.(
-      {} as Request,
-      { json } as unknown as Response,
-    );
-
-    expect(json).toHaveBeenCalledWith({
-      target: { url: topUrl },
-    });
-    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
-    expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
-  });
+      expect(json).toHaveBeenCalledWith({
+        target: { url: topUrl },
+      });
+      expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
+      expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["subscriber-goal-v1", "subscribe-only-v1"])(
     "requires a tracked subscriber for %s public activity",
