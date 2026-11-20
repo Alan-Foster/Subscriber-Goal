@@ -3,6 +3,7 @@ import {
   highlightManagementStateKey,
   highlightManagementVersion,
 } from "../data/highlightManagement";
+import { watchTestHash } from "../utils/testHashWatch";
 
 const hoisted = vi.hoisted(() => ({
   reddit: {
@@ -27,6 +28,7 @@ const hoisted = vi.hoisted(() => ({
   },
   highlightedIds: new Set<string>(),
   redis: {
+    watch: async (key: string) => watchTestHash(hoisted.redis, key),
     set: vi.fn(
       async (key: string, value: string, options?: { nx?: boolean }) => {
         if (options?.nx && hoisted.redisValues.has(key)) return;

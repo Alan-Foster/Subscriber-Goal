@@ -408,6 +408,7 @@ describe("internalUi color theme create goal routes", () => {
     hoisted.redis.expire.mockResolvedValue(undefined);
     hoisted.redis.watch.mockImplementation(async () => {
       let queuedDelete: string | undefined;
+      let queuedHashWrite: (() => Promise<unknown>) | undefined;
       let queuedCommand = false;
       const transaction = {
         multi: vi.fn(async () => undefined),
@@ -419,13 +420,18 @@ describe("internalUi color theme create goal routes", () => {
           queuedCommand = true;
           return transaction;
         }),
+        hSet: vi.fn(async (key: string, fields: Record<string, string>) => {
+          queuedHashWrite = () => hoisted.redis.hSet(key, fields);
+          return transaction;
+        }),
         zRem: vi.fn(async () => {
           queuedCommand = true;
           return transaction;
         }),
         exec: vi.fn(async () => {
           if (queuedDelete) hoisted.redisValues.delete(queuedDelete);
-          return queuedDelete || queuedCommand ? [1] : [];
+          await queuedHashWrite?.();
+          return queuedDelete || queuedCommand || queuedHashWrite ? [1] : [];
         }),
         discard: vi.fn(async () => undefined),
         unwatch: vi.fn(async () => transaction),
