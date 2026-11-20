@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type {
   StatisticsComparableValue,
   StatisticsCoverage,
@@ -9,10 +10,9 @@ import type { RedisClient } from "../types";
 const hourMs = 3_600_000;
 const retentionHours = 720;
 const retentionSeconds = 2_592_000;
-const dedupeRetentionSeconds = 172_800;
+const dedupeWindowHours = 48;
 const bitmapBits = 16_384;
 const bitmapBytes = bitmapBits / 8;
-const dedupeBits = 1_048_576;
 type EventType = "load" | "join_click" | "join_confirmed" | "cta";
 type SessionKind =
   | "all"
@@ -28,16 +28,12 @@ type SessionKind =
 export type StatisticsExposure = "join" | "secondary_cta" | "cta_only" | "none";
 
 const hourStart = (time: number) => Math.floor(time / hourMs) * hourMs;
-const dayStart = (time: number) =>
-  Math.floor(time / (24 * hourMs)) * 24 * hourMs;
 const countsKey = (hour: number) => `statistics:v1:counts:${hour}`;
 const visitorKey = (hour: number) => `statistics:v1:visitors:${hour}`;
 const sessionKey = (kind: SessionKind, hour: number) =>
   `statistics:v2:sessions:${kind}:${hour}`;
 const ctaSessionKey = (id: string, hour: number) =>
   `statistics:v2:cta-sessions:${id}:${hour}`;
-const dedupeKey = (type: EventType, day: number) =>
-  `statistics:v1:dedupe:${type}:${day}`;
 type CoverageFamily = "traffic" | "sessions" | "ctr-invariants";
 const coverageKey = (family: CoverageFamily) =>
   family === "ctr-invariants"
@@ -62,17 +58,15 @@ async function mark(
   redis: RedisClient,
   key: string,
   identity: string,
-  size = bitmapBits,
-  ttlSeconds = retentionSeconds,
 ): Promise<boolean> {
   const [previous = 0] = await redis.bitfield(
     key,
     "set",
     "u1",
-    hash32(identity) % size,
+    hash32(identity) % bitmapBits,
     1,
   );
-  await redis.expire(key, ttlSeconds);
+  await redis.expire(key, retentionSeconds);
   return previous === 0;
 }
 async function ensureCoverage(
@@ -90,26 +84,49 @@ async function claim(
   eventId: string,
   now: number,
 ): Promise<boolean> {
-  const offset = hash32(`${type}:${eventId}`) % dedupeBits;
-  const wasRecentlyClaimed = await Promise.all(
-    [0, 1, 2].map(async (daysAgo) => {
-      const [value = 0] = await redis.bitfield(
-        dedupeKey(type, dayStart(now) - daysAgo * 24 * hourMs),
-        "get",
-        "u1",
-        offset,
-      );
-      return value === 1;
-    }),
-  );
-  if (wasRecentlyClaimed.some(Boolean)) return false;
-  return await mark(
-    redis,
-    dedupeKey(type, dayStart(now)),
-    `${type}:${eventId}`,
-    dedupeBits,
-    dedupeRetentionSeconds,
-  );
+  const digest = createHash("sha256").update(eventId).digest("base64url");
+  const key = `statistics:v2:dedupe:${type}:${digest}`;
+  const expiresAt = now + dedupeWindowHours * hourMs;
+  const token = `${expiresAt}:${randomUUID()}`;
+  // Devvit rounds SET expiry down to whole seconds. Keep the stored claim
+  // briefly past its logical deadline so it cannot disappear early.
+  const expiration = new Date(expiresAt + 1000);
+  // Old bitmaps expire on their original schedule. Their bits cannot identify
+  // individual events, so pre-upgrade retries may count again during rollout.
+  await redis.set(key, token, {
+    nx: true,
+    expiration,
+  });
+  const owner = await redis.get(key);
+  if (owner === token) return true;
+  const isLive = (value: string | undefined) =>
+    !!value && Number(value.split(":", 1)[0]) > now;
+  if (isLive(owner)) return false;
+
+  // Replace a logically expired claim atomically if Redis still holds it,
+  // or if it expired between the failed NX write and the ownership read.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const transaction = await redis.watch(key);
+    let multiStarted = false;
+    try {
+      if (isLive(await redis.get(key))) {
+        await transaction.unwatch();
+        return false;
+      }
+      await transaction.multi();
+      multiStarted = true;
+      await transaction.set(key, token, { expiration });
+      if ((await transaction.exec()).length > 0) return true;
+    } catch (error) {
+      try {
+        await (multiStarted ? transaction.discard() : transaction.unwatch());
+      } catch {
+        // diagnostic-allow-silent: preserve the original claim error.
+      }
+      throw error;
+    }
+  }
+  throw new Error("Statistics claim changed during every update attempt.");
 }
 async function increment(
   redis: RedisClient,
@@ -740,7 +757,7 @@ export async function getStatisticsReport(
     methodology: {
       formulas: {
         appImpressions:
-          "Successful initializations, deduplicated by client-mount event ID.",
+          "Successful initializations, deduplicated by client-mount event ID for 48 hours.",
         viewingSessions:
           "Unique anonymous visitor and post combinations within each UTC hour.",
         joinClickSuccessRate: "Confirmed joins / raw Join clicks.",
@@ -763,7 +780,7 @@ export async function getStatisticsReport(
       membership:
         "Membership means app-tracked subscription state, not verified complete Reddit community membership.",
       retentionDays: 30,
-      dedupeWindowHours: 48,
+      dedupeWindowHours,
       approximationLimits:
         "Unique counts use one-hash linear counting. Accuracy degrades as a 16,384-bit hourly bucket fills, bitmap intersections remain collision-biased, and fully saturated buckets are unavailable.",
       sessionDefinition:
