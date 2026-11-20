@@ -24,7 +24,9 @@ export const postKindMigrationVersion = "post_kind_v1";
 export const postKindMigrationTerminalKey = "post_kind_migration_v1_terminal";
 const postKindMigrationAttemptsKey = "post_kind_migration_v1_attempts";
 const postKindMigrationLockKey = "post_kind_migration_v1_lock";
-const maxPostKindMigrationAttempts = 3;
+const retryBaseMs = 5 * 60 * 1000;
+const retryWindowMs = 24 * 60 * 60 * 1000;
+const firstFailureField = (postId: string) => `${postId}:first_failed_at`;
 
 export type PostKindMigrationSummary = {
   scanned: number;
@@ -111,7 +113,10 @@ export async function processPostKindMigrationBatch(
 }
 
 async function removePendingPost(redis: RedisClient, postId: string) {
-  await redis.hDel(postKindMigrationAttemptsKey, [postId]);
+  await redis.hDel(postKindMigrationAttemptsKey, [
+    postId,
+    firstFailureField(postId),
+  ]);
   await redis.zRem(postKindMigrationQueueKey, [postId]);
 }
 
@@ -132,19 +137,91 @@ async function markTerminalPost(
   );
 }
 
+async function schedulePostKindMigrationRetry(
+  redis: RedisClient,
+  postId: string,
+  error: unknown,
+): Promise<void> {
+  const failedAt = Date.now();
+  const firstFailure = firstFailureField(postId);
+  const [storedAttempts, storedFirstFailureAt] = await redis.hMGet(
+    postKindMigrationAttemptsKey,
+    [postId, firstFailure],
+  );
+  const firstFailedAt = Number(storedFirstFailureAt ?? failedAt);
+  const deadline = firstFailedAt + retryWindowMs;
+  if (failedAt >= deadline) {
+    await markTerminalPost(redis, postId, "retry_exhausted", "record", error);
+    return;
+  }
+
+  const attempts =
+    storedFirstFailureAt == null ? 1 : Number(storedAttempts ?? 0) + 1;
+  // Try at the end of the window if doubling would overshoot it, while
+  // retaining the minimum delay when a scheduler tick ran late.
+  const delay = Math.max(
+    retryBaseMs,
+    Math.min(retryBaseMs * 2 ** (attempts - 1), deadline - failedAt),
+  );
+  const retryAt = failedAt + delay;
+  const transaction = await redis.watch(postKindMigrationQueueKey);
+  let multiStarted = false;
+  try {
+    await transaction.multi();
+    multiStarted = true;
+    await transaction.hSet(postKindMigrationAttemptsKey, {
+      [postId]: String(attempts),
+      [firstFailure]: String(firstFailedAt),
+    });
+    await transaction.zAdd(postKindMigrationQueueKey, {
+      member: postId,
+      score: retryAt,
+    });
+    const result = await transaction.exec();
+    if (result.length === 0) {
+      throw new Error(
+        "Post-kind migration queue changed while scheduling a retry.",
+      );
+    }
+  } catch (error) {
+    try {
+      await (multiStarted ? transaction.discard() : transaction.unwatch());
+    } catch {
+      // diagnostic-allow-silent: preserve the original transaction error.
+    }
+    throw error;
+  }
+  logDiagnostic(
+    "error",
+    "migration_record_failed",
+    {
+      workflow: "post_kind_migration",
+      phase: "record",
+      postId,
+      attempts,
+      retryAt,
+    },
+    error,
+  );
+}
+
 async function migratePendingPostKinds(
   reddit: RedditClient,
   redis: RedisClient,
   batchSize: number,
 ): Promise<PostKindMigrationSummary> {
   const summary = emptySummary();
+  const now = Date.now();
   const pending = await redis.zRange(
     postKindMigrationQueueKey,
     0,
     Math.max(0, Math.floor(batchSize) - 1),
   );
 
-  for (const { member: postId } of pending) {
+  // Original queue scores are small ordinal values. Retry scores are epoch
+  // milliseconds, so untried records stay ahead of delayed retries.
+  for (const { member: postId, score } of pending) {
+    if (score > now) break;
     summary.scanned += 1;
     if (await redis.hGet(postKindMigrationTerminalKey, postId)) {
       await removePendingPost(redis, postId);
@@ -237,34 +314,7 @@ async function migratePendingPostKinds(
       // A terminal write can succeed even when queue cleanup fails.
       if (await redis.hGet(postKindMigrationTerminalKey, postId)) throw error;
       summary.failed += 1;
-      const attempts = await redis.hIncrBy(
-        postKindMigrationAttemptsKey,
-        postId,
-        1,
-      );
-      if (attempts >= maxPostKindMigrationAttempts) {
-        await markTerminalPost(
-          redis,
-          postId,
-          "retry_exhausted",
-          "record",
-          error,
-        );
-        continue;
-      }
-      const [tail] = await redis.zRange(postKindMigrationQueueKey, -1, -1);
-      if (tail && tail.member !== postId) {
-        await redis.zAdd(postKindMigrationQueueKey, {
-          member: postId,
-          score: tail.score + 1,
-        });
-      }
-      logDiagnostic(
-        "error",
-        "migration_record_failed",
-        { workflow: "post_kind_migration", phase: "record", postId, attempts },
-        error,
-      );
+      await schedulePostKindMigrationRetry(redis, postId, error);
     }
   }
 

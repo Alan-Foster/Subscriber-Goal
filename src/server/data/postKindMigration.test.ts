@@ -14,6 +14,8 @@ import {
 } from "./postKindMigration";
 
 type ZEntry = { member: string; score: number };
+const minuteMs = 60 * 1000;
+const startTime = Date.UTC(2026, 10, 20);
 
 class TestRedis {
   values = new Map<string, string>();
@@ -28,18 +30,24 @@ class TestRedis {
   }
   async watch(key: string) {
     const watchedValue = this.values.get(key);
-    let remove = false;
+    const commands: Array<() => unknown> = [];
     return {
       multi: async () => undefined,
       unwatch: async () => undefined,
       discard: async () => undefined,
       del: async () => {
-        remove = true;
+        commands.push(() => this.values.delete(key));
       },
-      exec: async () =>
-        remove && this.values.get(key) === watchedValue
-          ? [Number(this.values.delete(key))]
-          : [],
+      hSet: async (hash: string, fields: Record<string, string>) => {
+        commands.push(() => this.hSet(hash, fields));
+      },
+      zAdd: async (set: string, entry: ZEntry) => {
+        commands.push(() => this.zAdd(set, entry));
+      },
+      exec: async () => {
+        if (this.values.get(key) !== watchedValue) return [];
+        return Promise.all(commands.map((command) => command()));
+      },
     };
   }
 
@@ -59,11 +67,6 @@ class TestRedis {
   }
   async hDel(key: string, fields: string[]): Promise<void> {
     for (const field of fields) this.hashes.get(key)?.delete(field);
-  }
-  async hIncrBy(key: string, field: string, value: number): Promise<number> {
-    const next = Number(this.hashes.get(key)?.get(field) ?? 0) + value;
-    await this.hSet(key, { [field]: String(next) });
-    return next;
   }
   async zAdd(key: string, ...entries: ZEntry[]): Promise<void> {
     const set = this.sortedSets.get(key) ?? new Map<string, number>();
@@ -194,6 +197,7 @@ describe("post kind compatibility migration", () => {
 
   it("keeps failed posts queued for a later retry", async () => {
     const redis = new TestRedis();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startTime);
     await redis.hSet(subscriberGoalsKey, { t3_retry_goal: "100" });
     const reddit = {
       getPostById: vi.fn().mockRejectedValue(new Error("temporary")),
@@ -209,19 +213,61 @@ describe("post kind compatibility migration", () => {
     expect(summary.failed).toBe(1);
     await expect(
       redis.zRange(postKindMigrationQueueKey, 0, -1),
-    ).resolves.toEqual([{ member: "t3_retry", score: 0 }]);
+    ).resolves.toEqual([
+      { member: "t3_retry", score: startTime + 5 * minuteMs },
+    ]);
     expect(
       await redis.hGet(postKindMigrationTerminalKey, "t3_retry"),
     ).toBeUndefined();
 
     const post = { mergePostData: vi.fn() };
     reddit.getPostById.mockResolvedValue(post);
+    clock.mockReturnValue(startTime + 5 * minuteMs);
     await expect(
       processPostKindMigrationBatch(reddit as never, asRedis(redis)),
     ).resolves.toMatchObject({ scanned: 1, failed: 0 });
     expect(post.mergePostData).toHaveBeenCalledWith({
       postKind: subscriberGoalPostKind,
     });
+    expect(await redis.hGet(postKindMigrationStateKey, "status")).toBe(
+      "complete",
+    );
+  });
+
+  it("doubles the retry delay and requires a failed attempt at the 24-hour deadline", async () => {
+    const redis = new TestRedis();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startTime);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const reddit = {
+      getPostById: vi.fn().mockRejectedValue(new Error("temporary")),
+    };
+    await initializePostKindMigration(asRedis(redis), ["t3_retry"]);
+    const migrate = () =>
+      processPostKindMigrationBatch(reddit as never, asRedis(redis));
+
+    await expect(migrate()).resolves.toMatchObject({ scanned: 1, failed: 1 });
+    const retryMinutes = [5, 15, 35, 75, 155, 315, 635, 1275, 1440];
+    for (const [index, minutes] of retryMinutes.entries()) {
+      const retryAt = startTime + minutes * minuteMs;
+      expect(await redis.zRange(postKindMigrationQueueKey, 0, -1)).toEqual([
+        { member: "t3_retry", score: retryAt },
+      ]);
+      clock.mockReturnValue(retryAt - minuteMs);
+      await expect(migrate()).resolves.toMatchObject({ scanned: 0, failed: 0 });
+      expect(reddit.getPostById).toHaveBeenCalledTimes(index + 1);
+      expect(await redis.hGet(postKindMigrationStateKey, "status")).toBe(
+        "running",
+      );
+      expect(
+        await redis.hGet(postKindMigrationTerminalKey, "t3_retry"),
+      ).toBeUndefined();
+      clock.mockReturnValue(retryAt);
+      await expect(migrate()).resolves.toMatchObject({ scanned: 1, failed: 1 });
+    }
+    expect(reddit.getPostById).toHaveBeenCalledTimes(10);
+    expect(await redis.hGet(postKindMigrationTerminalKey, "t3_retry")).toBe(
+      "retry_exhausted",
+    );
     expect(await redis.hGet(postKindMigrationStateKey, "status")).toBe(
       "complete",
     );
@@ -317,6 +363,7 @@ describe("post kind compatibility migration", () => {
     "migrates a healthy post behind ten %s mutation failures",
     async (scenario) => {
       const redis = new TestRedis();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(startTime);
       const failing = Array.from(
         { length: 10 },
         (_, index) => `t3_failing${index}`,
@@ -353,9 +400,10 @@ describe("post kind compatibility migration", () => {
         expect(await redis.hGet(postKindMigrationStateKey, "status")).toBe(
           "running",
         );
+        expect(failed.mergePostData).toHaveBeenCalledTimes(10);
+        clock.mockReturnValue(startTime + 24 * 60 * minuteMs);
         await migrate();
-        await migrate();
-        expect(failed.mergePostData).toHaveBeenCalledTimes(30);
+        expect(failed.mergePostData).toHaveBeenCalledTimes(20);
         expect(await redis.hGetAll(postKindMigrationTerminalKey)).toEqual(
           Object.fromEntries(
             failing.map((postId) => [postId, "retry_exhausted"]),
@@ -374,7 +422,7 @@ describe("post kind compatibility migration", () => {
         "complete",
       );
       expect(await redis.hGet(postKindMigrationStateKey, "failed")).toBe(
-        scenario === "archived" ? "0" : "30",
+        scenario === "archived" ? "0" : "20",
       );
       await expect(migrate()).resolves.toMatchObject({ scanned: 0 });
     },
