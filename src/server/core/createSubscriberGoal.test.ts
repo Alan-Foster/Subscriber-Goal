@@ -481,9 +481,16 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 
-  it.each(["deleted", "author", "404", "410"])(
-    "still retires %s on recovered creation without submitting a replacement",
-    async (category) => {
+  it.each(
+    ["post_submitted", "complete"].flatMap((status) =>
+      ["deleted", "author", "404", "410"].map((category) => ({
+        status,
+        category,
+      })),
+    ),
+  )(
+    "still retires a $status operation on $category without submitting a replacement",
+    async ({ status, category }) => {
       const retirement = await import("./postRetirement");
       const retire = vi
         .spyOn(retirement, "retireSubscriberGoalPost")
@@ -495,7 +502,7 @@ describe("createSubscriberGoal highlight handling", () => {
         hoisted.redisHashes.set(
           operationKey,
           new Map([
-            ["status", "post_submitted"],
+            ["status", status],
             ["postId", post.id],
             ["submissionMarker", "marker"],
           ]),
@@ -521,6 +528,8 @@ describe("createSubscriberGoal highlight handling", () => {
           "retired",
         );
         expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+        expect(post.approve).not.toHaveBeenCalled();
+        expect(post.highlight).not.toHaveBeenCalled();
       } finally {
         retire.mockRestore();
       }
@@ -640,7 +649,113 @@ describe("createSubscriberGoal highlight handling", () => {
         subredditName: "OtherSub",
       }),
     ).resolves.toEqual({ status: "missing" });
+    hoisted.reddit.getPostById.mockResolvedValue({
+      ...post,
+      subredditId: "t5_other",
+      subredditName: "OtherSub",
+    });
+    await expect(
+      recoverSubscriberGoalCreation({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        operationId,
+        actorUserId: "t2_mod",
+        subredditId: "t5_example",
+        subredditName: "ExampleSub",
+      }),
+    ).resolves.toEqual({ status: "missing" });
+    await expect(
+      createGoal({ operationId, manualActorUserId: "t2_mod" }),
+    ).rejects.toMatchObject({ name: "SubscriberGoalActorAuthorizationError" });
     expect(hoisted.redis.hSet).toHaveBeenCalledTimes(writesBefore);
+  });
+
+  it("keeps a completed operation intact through two transient lookup failures", async () => {
+    const operationId = "auto-next:t3_source";
+    const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+    const post = createPost();
+    hoisted.createGoalPost.mockResolvedValue(post);
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    const replay = () => createGoal({ operationId });
+    const result = await replay();
+    const stored = Object.fromEntries(hoisted.redisHashes.get(operationKey)!);
+    expect(stored.status).toBe("complete");
+    const writesBefore = hoisted.redis.hSet.mock.calls.length;
+    const lookupsBefore = hoisted.reddit.getPostById.mock.calls.length;
+    const approvalsBefore = post.approve.mock.calls.length;
+    const highlightsBefore = post.highlight.mock.calls.length;
+    const lookupError = Object.assign(
+      new Error("Reddit temporarily unavailable"),
+      {
+        status: 503,
+      },
+    );
+    hoisted.reddit.getPostById
+      .mockRejectedValueOnce(lookupError)
+      .mockRejectedValueOnce(lookupError);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(replay()).rejects.toBe(lookupError);
+      expect(
+        Object.fromEntries(hoisted.redisHashes.get(operationKey)!),
+      ).toEqual(stored);
+    }
+    await expect(replay()).resolves.toMatchObject({
+      outcome: "created",
+      post: { id: post.id },
+      crosspostDispatchResult: result.crosspostDispatchResult,
+      flairResult: result.flairResult,
+    });
+    expect(hoisted.reddit.getPostById).toHaveBeenCalledTimes(lookupsBefore + 3);
+    expect(hoisted.redis.hSet).toHaveBeenCalledTimes(writesBefore);
+    expect(post.approve).toHaveBeenCalledTimes(approvalsBefore);
+    expect(post.highlight).toHaveBeenCalledTimes(highlightsBefore);
+    expect(hoisted.createGoalPost).toHaveBeenCalledOnce();
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+  });
+
+  it("recovers a complete record that stored a legacy sticky result without flair metadata", async () => {
+    const operationId = "onboarding:t5_example";
+    const operationKey = `subscriber_goal_creation_v1:${operationId}`;
+    const post = createPost();
+    hoisted.reddit.getPostById.mockResolvedValue(post);
+    hoisted.redisHashes.set(
+      operationKey,
+      new Map([
+        ["status", "complete"],
+        ["postId", post.id],
+        ["crosspostDispatchResult", JSON.stringify({ status: "skipped" })],
+        [
+          "stickyResult",
+          JSON.stringify({ status: "pinned", verifiedStickied: true }),
+        ],
+      ]),
+    );
+    const expectedResult = {
+      outcome: "created",
+      post: { id: post.id },
+      highlightResult: { status: "highlighted", verifiedHighlighted: true },
+      flairResult: { status: "unknown" },
+    };
+
+    await expect(createGoal({ operationId })).resolves.toMatchObject(
+      expectedResult,
+    );
+    await expect(
+      recoverSubscriberGoalCreation({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        operationId,
+      }),
+    ).resolves.toMatchObject({ status: "complete", result: expectedResult });
+    expect(hoisted.redisHashes.get(operationKey)?.get("status")).toBe(
+      "complete",
+    );
+    expect(hoisted.redis.hSet).not.toHaveBeenCalled();
+    expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+    expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+    expect(post.approve).not.toHaveBeenCalled();
+    expect(post.highlight).not.toHaveBeenCalled();
   });
 
   it("creates and highlights without flair when the app has Posts but not Flair permission", async () => {
