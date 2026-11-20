@@ -9,11 +9,29 @@ import {
   recordStatisticsLoad,
 } from "./statisticsAnalytics";
 
-const createRedis = () => {
+const createRedis = (clock = () => Date.UTC(2026, 10, 2, 12, 30)) => {
   const hashes = new Map<string, Record<string, string>>(),
     buffers = new Map<string, Buffer>(),
     strings = new Map<string, string>(),
-    expirations = new Map<string, number>();
+    expirations = new Map<string, number>(),
+    stringExpiryTimes = new Map<string, number>();
+  const getString = (key: string) => {
+    if ((stringExpiryTimes.get(key) ?? Infinity) <= clock()) {
+      strings.delete(key);
+      stringExpiryTimes.delete(key);
+    }
+    return strings.get(key);
+  };
+  const writeString = (key: string, value: string, expiration?: Date) => {
+    strings.set(key, value);
+    if (expiration) {
+      const timestamp = expiration.getTime();
+      stringExpiryTimes.set(key, timestamp);
+      expirations.set(key, (timestamp - clock()) / 1000);
+    } else {
+      stringExpiryTimes.delete(key);
+    }
+  };
   const redis = {
     bitfield: async (
       key: string,
@@ -45,12 +63,38 @@ const createRedis = () => {
     expire: async (key: string, seconds: number) => {
       expirations.set(key, seconds);
     },
-    set: async (key: string, value: string, options?: { nx?: boolean }) => {
-      if (options?.nx && strings.has(key)) return undefined;
-      strings.set(key, value);
+    set: async (
+      key: string,
+      value: string,
+      options?: { nx?: boolean; expiration?: Date },
+    ) => {
+      if (!options?.nx || getString(key) === undefined) {
+        writeString(key, value, options?.expiration);
+      }
       return "OK";
     },
-    get: async (key: string) => strings.get(key),
+    get: async (key: string) => getString(key),
+    watch: async (key: string) => {
+      const owner = getString(key);
+      let write: (() => void) | undefined;
+      return {
+        multi: async () => undefined,
+        discard: async () => undefined,
+        unwatch: async () => undefined,
+        set: async (
+          name: string,
+          value: string,
+          options?: { expiration?: Date },
+        ) => {
+          write = () => writeString(name, value, options?.expiration);
+        },
+        exec: async () => {
+          if (!write || getString(key) !== owner) return [];
+          write();
+          return ["OK"];
+        },
+      };
+    },
     hIncrBy: async (key: string, field: string, amount: number) => {
       const hash = hashes.get(key) ?? {};
       const value = Number(hash[field] ?? 0) + amount;
@@ -107,6 +151,7 @@ describe("statistics analytics", () => {
         ...store.strings.entries(),
       ]),
     ).not.toContain("private-user");
+    expect([...store.strings.keys()].join()).not.toContain(id(1));
     expect(
       [...store.expirations.entries()]
         .filter(([key]) => !key.includes(":dedupe:"))
@@ -115,8 +160,8 @@ describe("statistics analytics", () => {
     expect(
       [...store.expirations.entries()]
         .filter(([key]) => key.includes(":dedupe:"))
-        .every(([, ttl]) => ttl === 172_800),
-    ).toBe(true);
+        .map(([, ttl]) => ttl),
+    ).toEqual([172_801, 172_801, 172_801]);
   });
 
   it("counts the same visitor and post once per UTC hour", async () => {
@@ -180,6 +225,90 @@ describe("statistics analytics", () => {
         nowMs: afterMidnight,
       }),
     ).resolves.toBe(false);
+  });
+
+  it("expires at 48 hours from the accepted event without extending on retries", async () => {
+    const firstEventAt = Date.UTC(2026, 10, 2);
+    const windowMs = 48 * 3_600_000;
+    let clock = firstEventAt;
+    const store = createRedis(() => clock);
+    const load = () =>
+      recordStatisticsLoad(store.redis, {
+        eventId: id(8),
+        postId: "t3_one",
+        appTrackedSubscribed: false,
+        exposure: "none",
+        nowMs: clock,
+      });
+
+    await expect(load()).resolves.toBe(true);
+    clock += windowMs - 1;
+    await expect(load()).resolves.toBe(false);
+    clock += 1;
+    const deliveries = await Promise.all(Array.from({ length: 20 }, load));
+    expect(deliveries.filter(Boolean)).toEqual([true]);
+    await expect(load()).resolves.toBe(false);
+  });
+
+  it("counts concurrent deliveries once per event type", async () => {
+    const store = createRedis();
+    const event = { eventId: id(9), postId: "t3_one", nowMs: now };
+    const loads = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        recordStatisticsLoad(store.redis, {
+          ...event,
+          appTrackedSubscribed: false,
+          exposure: "none",
+        }),
+      ),
+    );
+    expect(loads.filter(Boolean)).toEqual([true]);
+    await expect(recordStatisticsJoinClick(store.redis, event)).resolves.toBe(
+      true,
+    );
+    await expect(recordStatisticsJoinClick(store.redis, event)).resolves.toBe(
+      false,
+    );
+    await expect(
+      recordStatisticsCtaClick(store.redis, {
+        ...event,
+        label: "Continue",
+        kind: "secondary",
+      }),
+    ).resolves.toBe(true);
+    expect([...store.hashes.values()]).toMatchObject([
+      {
+        loads_total: "1",
+        join_clicks: "1",
+        cta_clicks: "1",
+      },
+    ]);
+  });
+
+  it("counts every distinct load over three days at 10,000 events per day", async () => {
+    let clock = Date.UTC(2026, 10, 2);
+    const store = createRedis(() => clock);
+    const eventsPerDay = 10_000;
+    for (let day = 0; day < 3; day += 1) {
+      let accepted = 0;
+      for (let index = 0; index < eventsPerDay; index += 1) {
+        if (
+          await recordStatisticsLoad(store.redis, {
+            eventId: id(100 + day * eventsPerDay + index),
+            postId: "t3_one",
+            appTrackedSubscribed: false,
+            exposure: "none",
+            nowMs: clock,
+          })
+        )
+          accepted += 1;
+      }
+      expect(accepted).toBe(eventsPerDay);
+      expect(
+        store.hashes.get(`statistics:v1:counts:${clock}`)?.loads_total,
+      ).toBe(String(eventsPerDay));
+      clock += 24 * 3_600_000;
+    }
   });
 
   it("tracks returning visitors, action families, unique sessions, and nullable rates", async () => {
