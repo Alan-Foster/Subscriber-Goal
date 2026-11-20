@@ -1432,11 +1432,13 @@ async function resolveDynamicPostDestination(
     limit: dynamicPostCandidateLimit,
     pageSize: dynamicPostCandidateLimit,
   };
+  const newestFallback =
+    type === "top-post-day" ? { fallbackAction: "newest-post" as const } : {};
   let uncertainty: { error: unknown } | undefined;
   try {
     const timeframes =
       type === "top-post-day"
-        ? (["day", "week", "month", "all"] as const)
+        ? (["day", "week", undefined] as const)
         : ([undefined] as const);
     for (const timeframe of timeframes) {
       const posts = await (
@@ -1450,7 +1452,8 @@ async function resolveDynamicPostDestination(
           goalPostId,
           allowAppAccountPosts,
         );
-        if (target) return { target };
+        if (target)
+          return timeframe ? { target } : { target, ...newestFallback };
       }
     }
   } catch (error) {
@@ -1483,11 +1486,7 @@ async function resolveDynamicPostDestination(
         allowAppAccountPosts,
         true,
       );
-      if (target)
-        return {
-          target,
-          ...(type === "top-post-day" ? { fallbackAction: "newest-post" } : {}),
-        };
+      if (target) return { target, ...newestFallback };
     } catch (error) {
       if (
         isMissingPostError(error, candidateId) ||
