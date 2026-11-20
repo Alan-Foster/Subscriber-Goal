@@ -17,6 +17,7 @@ import {
   appRepairVersion,
   scheduleHighlightRepair,
   recurringHighlightRepairIntervalMs,
+  updateAppRepairState,
 } from "../data/highlightRepair";
 import {
   CommunityGoalMutationInProgressError,
@@ -63,8 +64,9 @@ export async function processDueAppRepair({
   redis: RedisClient;
   nowMs?: number;
 }): Promise<"not_due" | "complete" | "retry"> {
-  let state = await redis.hGetAll(appRepairStateKey);
-  if (!isAppRepairDue(state, nowMs)) return "not_due";
+  if (!isAppRepairDue(await redis.hGetAll(appRepairStateKey), nowMs)) {
+    return "not_due";
+  }
 
   const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await redis.set(appRepairLockKey, lockToken, {
@@ -76,6 +78,34 @@ export async function processDueAppRepair({
   const failures: string[] = [];
   let highlightDeferred = false;
   let recurringHighlightCheck = false;
+  let claimedState: Record<string, string> | undefined;
+  const startedAt = String(nowMs);
+  const isCurrentRun = (current: Record<string, string>) =>
+    current.version === appRepairVersion && current.startedAt === startedAt;
+  const retryAfterFailure = async (message: string) => {
+    const state = claimedState;
+    if (!state) return;
+    const attempts = (parseInt(state.attempts ?? "0", 10) || 0) + 1;
+    const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempts - 1));
+    await updateAppRepairState(redis, (current) => {
+      if (!isCurrentRun(current)) return;
+      if (current.status !== "processing" && current.status !== "pending") {
+        return;
+      }
+      const requestedRunAt = Number(current.nextRunAt);
+      const nextRunAt =
+        current.status === "pending" && Number.isFinite(requestedRunAt)
+          ? Math.min(nowMs + delay, requestedRunAt)
+          : nowMs + delay;
+      return {
+        ...(current.status === "processing" ? state : {}),
+        status: "pending",
+        attempts: String(attempts),
+        nextRunAt: String(nextRunAt),
+        lastError: message,
+      };
+    });
+  };
   const runPhase = async (phase: string, operation: () => Promise<unknown>) => {
     try {
       await operation();
@@ -105,13 +135,13 @@ export async function processDueAppRepair({
   };
 
   try {
-    state = await redis.hGetAll(appRepairStateKey);
-    if (!isAppRepairDue(state, nowMs)) return "not_due";
-    await redis.hSet(appRepairStateKey, {
-      ...state,
-      status: "processing",
-      startedAt: String(nowMs),
-    });
+    const state = await updateAppRepairState(redis, (current) =>
+      isAppRepairDue(current, nowMs)
+        ? { status: "processing", startedAt }
+        : undefined,
+    );
+    if (!state) return "not_due";
+    claimedState = state;
     const subreddit = await reddit.getCurrentSubreddit();
 
     await runPhase("activity_backfill", () =>
@@ -217,16 +247,23 @@ export async function processDueAppRepair({
       }),
     );
 
-    if (failures.length === 0) {
+    if (failures.length > 0) {
+      await retryAfterFailure(failures.join(" | "));
+      return "retry";
+    }
+
+    const finished = await updateAppRepairState(redis, (current) => {
+      // Scheduling a request changes processing to pending, including requests
+      // made by this run and requests with the same timestamp.
+      if (!isCurrentRun(current) || current.status !== "processing") return;
       if (highlightDeferred) {
-        await redis.hSet(appRepairStateKey, {
+        return {
           ...state,
           status: "pending",
           nextRunAt: String(nowMs + retryBaseMs),
-        });
-        return "retry";
+        };
       }
-      await redis.hSet(appRepairStateKey, {
+      return {
         ...state,
         status: "complete",
         completedAt: String(nowMs),
@@ -236,30 +273,13 @@ export async function processDueAppRepair({
           : "",
         targetPostId: "",
         lastError: "",
-      });
-      return "complete";
-    }
-
-    const attempts = (parseInt(state.attempts ?? "0", 10) || 0) + 1;
-    const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempts - 1));
-    await redis.hSet(appRepairStateKey, {
-      ...state,
-      status: "pending",
-      attempts: String(attempts),
-      nextRunAt: String(nowMs + delay),
-      lastError: failures.join(" | "),
+      };
     });
-    return "retry";
+    return finished && !highlightDeferred ? "complete" : "retry";
   } catch (error) {
-    const attempts = (parseInt(state.attempts ?? "0", 10) || 0) + 1;
-    const delay = Math.min(retryMaxMs, retryBaseMs * 2 ** (attempts - 1));
-    await redis.hSet(appRepairStateKey, {
-      ...state,
-      status: "pending",
-      attempts: String(attempts),
-      nextRunAt: String(nowMs + delay),
-      lastError: error instanceof Error ? error.message : String(error),
-    });
+    await retryAfterFailure(
+      error instanceof Error ? error.message : String(error),
+    );
     logDiagnostic(
       "error",
       "app_repair_failed",

@@ -56,6 +56,8 @@ import {
   scheduleAppRepair,
 } from "./appRepair";
 import { communityGoalMutationLockKey } from "./communityGoalMutation";
+import { scheduleHighlightRepair } from "../data/highlightRepair";
+import { watchTestHash } from "../utils/testHashWatch";
 
 class TestRedis {
   values = new Map<string, string>();
@@ -90,6 +92,9 @@ class TestRedis {
   async hMGet(key: string, fields: string[]): Promise<(string | undefined)[]> {
     const hash = this.hashes.get(key);
     return fields.map((field) => hash?.get(field));
+  }
+  watch(key: string) {
+    return watchTestHash(this, key);
   }
 }
 
@@ -252,6 +257,129 @@ describe("scheduled app repair", () => {
     ).resolves.toBe("not_due");
     expect(hoisted.ensureCommunityPostActivityBackfill).not.toHaveBeenCalled();
     expect(await redis.get(appRepairLockKey)).toBeUndefined();
+  });
+
+  it.each(["success", "phase failure", "execution failure"] as const)(
+    "keeps a forced target scheduled during %s",
+    async (outcome) => {
+      const nowMs = 100;
+      const run = (at: number) =>
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: at,
+        });
+      await scheduleAppRepair(redis as never, nowMs, 0);
+      await redis.hSet(appRepairStateKey, { attempts: "2" });
+      const scheduleDuringRun = async () => {
+        expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+          status: "processing",
+        });
+        await scheduleHighlightRepair(redis as never, {
+          nowMs,
+          delayMs: (outcome === "execution failure" ? 60 : 5) * 60 * 1000,
+          force: true,
+          reason: "manual_creation_highlight_degraded",
+          targetPostId: "t3_expected",
+        });
+        if (outcome !== "success") throw new Error("repair failure");
+      };
+      if (outcome === "execution failure") {
+        reddit.getCurrentSubreddit.mockImplementationOnce(scheduleDuringRun);
+      } else {
+        hoisted.checkAppAccountHealth.mockImplementationOnce(scheduleDuringRun);
+      }
+
+      await expect(run(nowMs)).resolves.toBe("retry");
+      const nextRunAt =
+        nowMs + (outcome === "execution failure" ? 20 : 5) * 60 * 1000;
+      expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+        status: "pending",
+        nextRunAt: String(nextRunAt),
+        scheduledAt: String(nowMs),
+        targetPostId: "t3_expected",
+        reason: "manual_creation_highlight_degraded",
+        attempts: outcome === "success" ? "2" : "3",
+      });
+      await expect(run(nextRunAt - 1)).resolves.toBe("not_due");
+      await expect(run(nextRunAt)).resolves.toBe("complete");
+      expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+        status: "complete",
+        targetPostId: "",
+      });
+    },
+  );
+
+  it("retries the completion write if a forced request lands after its read", async () => {
+    await scheduleAppRepair(redis as never, 100, 0);
+    hoisted.checkAppAccountHealth.mockImplementationOnce(async () => {
+      const watch = redis.watch.bind(redis);
+      vi.spyOn(redis, "watch").mockImplementationOnce(async (key) => {
+        const transaction = await watch(key);
+        return {
+          ...transaction,
+          exec: async () => {
+            await scheduleHighlightRepair(redis as never, {
+              nowMs: 101,
+              delayMs: 300_000,
+              force: true,
+              reason: "manual_creation_highlight_degraded",
+              targetPostId: "t3_expected",
+            });
+            return transaction.exec();
+          },
+        };
+      });
+    });
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: 100,
+      }),
+    ).resolves.toBe("retry");
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      nextRunAt: "300101",
+      scheduledAt: "101",
+      targetPostId: "t3_expected",
+    });
+  });
+
+  it("keeps a forced follow-up scheduled by highlight reconciliation", async () => {
+    const nowMs = 100;
+    const delayMs = 60 * 60 * 1000;
+    await scheduleAppRepair(redis as never, nowMs, 0);
+    await redis.hSet(appRepairStateKey, { attempts: "5" });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockImplementationOnce(
+      async () => {
+        await scheduleHighlightRepair(redis as never, {
+          nowMs,
+          delayMs,
+          force: true,
+          reason: "contradictory_highlight_state",
+        });
+        return {
+          status: "existing_not_highlighted",
+          reconciliationOutcome: "degraded",
+        };
+      },
+    );
+
+    await expect(
+      processDueAppRepair({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs,
+      }),
+    ).resolves.toBe("retry");
+    expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+      status: "pending",
+      nextRunAt: String(nowMs + delayMs),
+      reason: "contradictory_highlight_state",
+      attempts: "6",
+    });
   });
 
   it("runs reconciliation again when the recurring active-surface check is due", async () => {

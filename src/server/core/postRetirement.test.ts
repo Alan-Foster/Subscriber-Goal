@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { watchTestHash } from "../utils/testHashWatch";
 import {
   autoCreateNextGoalExhaustedKey,
   autoCreateNextGoalQueueKey,
@@ -22,6 +23,10 @@ import {
 } from "./postRetirement";
 
 class TestRedis {
+  watch(key: string) {
+    return watchTestHash(this, key);
+  }
+
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
   sortedSets = new Map<string, Set<string>>();

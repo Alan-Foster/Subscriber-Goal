@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { watchTestHash } from "../utils/testHashWatch";
 import {
   autoCreateNextGoalExhaustedKey,
   autoCreateNextGoalQueueKey,
@@ -47,6 +48,10 @@ vi.mock("./createSubscriberGoal", async (importOriginal) => ({
 }));
 
 class InMemoryRedis {
+  watch(key: string) {
+    return watchTestHash(this, key);
+  }
+
   hashes = new Map<string, Map<string, string>>();
   values = new Map<string, string>();
   sortedSets = new Map<string, Map<string, number>>();

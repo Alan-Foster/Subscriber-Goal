@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { watchTestHash } from "../utils/testHashWatch";
 import type { ServerAppSettings } from "../settings";
 import {
   autoCreateNextGoalQueueKey,
@@ -112,6 +113,10 @@ import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
 
 class InMemoryRedis {
+  watch(key: string) {
+    return watchTestHash(this, key);
+  }
+
   hashes = new Map<string, Map<string, string>>();
   sortedSets = new Map<string, Map<string, number>>();
   values = new Map<string, string>();
