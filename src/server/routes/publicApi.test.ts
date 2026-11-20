@@ -1982,69 +1982,83 @@ describe("publicApi routes", () => {
     });
   });
 
-  it("falls back through broader timeframes until it finds an eligible top post", async () => {
-    hoisted.context.userId = "t2_user";
-    hoisted.context.postId = "t3_current";
-    hoisted.isTrackedSubscriber.mockResolvedValue(true);
-    hoisted.getSubGoalData.mockResolvedValue({
-      afterSubscribeAction: {
-        type: "top-post-day",
-        buttonText: "View the Top Post Today",
-        colorTheme: "red",
-      },
-    });
-    hoisted.reddit.getTopPosts
-      .mockReturnValueOnce({
-        all: vi.fn().mockResolvedValue([
-          {
-            id: "t3_current",
-            authorName: "CommunityMember",
-            url: "https://www.reddit.com/r/ExampleSub/comments/current",
-          },
-          {
-            id: "t3_app",
-            authorName: "subscriber-goal",
-            url: "https://www.reddit.com/r/ExampleSub/comments/app",
-          },
-          {
-            id: "t3_invalid",
-            authorName: "CommunityMember",
-            url: "not a URL",
-          },
-        ]),
-      })
-      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ all: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({
-        all: vi.fn().mockResolvedValue([
-          {
-            id: "t3_all_time",
-            authorName: "CommunityMember",
-            url: "https://www.reddit.com/r/ExampleSub/comments/all_time",
-            permalink: "/r/ExampleSub/comments/all_time",
-          },
-        ]),
+  it.each([true, false])(
+    "checks day and week before Most Recent (eligible weekly post=%s)",
+    async (hasWeeklyPost) => {
+      hoisted.context.userId = "t2_user";
+      hoisted.context.postId = "t3_current";
+      hoisted.isTrackedSubscriber.mockResolvedValue(true);
+      hoisted.getSubGoalData.mockResolvedValue({
+        afterSubscribeAction: {
+          type: "top-post-day",
+          buttonText: "View the Top Post Today",
+          colorTheme: "red",
+        },
       });
-    const routes = createRouteHarness();
-    const json = vi.fn();
+      const weekly = {
+        id: "t3_weekly",
+        authorName: "CommunityMember",
+        url: "https://www.reddit.com/r/ExampleSub/comments/weekly",
+        permalink: "/r/ExampleSub/comments/weekly",
+      };
+      const latest = {
+        id: "t3_latest",
+        authorName: "CommunityMember",
+        url: "https://www.reddit.com/r/ExampleSub/comments/latest",
+        permalink: "/r/ExampleSub/comments/latest",
+      };
+      hoisted.reddit.getTopPosts
+        .mockReturnValueOnce({
+          all: vi.fn().mockResolvedValue([
+            {
+              id: "t3_current",
+              authorName: "CommunityMember",
+              url: "https://www.reddit.com/r/ExampleSub/comments/current",
+            },
+            {
+              id: "t3_app",
+              authorName: "subscriber-goal",
+              url: "https://www.reddit.com/r/ExampleSub/comments/app",
+            },
+            {
+              id: "t3_invalid",
+              authorName: "CommunityMember",
+              url: "not a URL",
+            },
+          ]),
+        })
+        .mockReturnValueOnce({
+          all: vi.fn().mockResolvedValue(hasWeeklyPost ? [weekly] : []),
+        });
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi
+          .fn()
+          .mockResolvedValue([{ ...latest, id: "t3_current" }, latest]),
+      });
+      const routes = createRouteHarness();
+      const json = vi.fn();
 
-    await routes.get(apiRoutes.afterSubscribeTarget)?.(
-      {} as Request,
-      { json } as unknown as Response,
-    );
+      await routes.get(apiRoutes.afterSubscribeTarget)?.(
+        {} as Request,
+        { json } as unknown as Response,
+      );
 
-    expect(
-      hoisted.reddit.getTopPosts.mock.calls.map(
-        ([options]) => options.timeframe,
-      ),
-    ).toEqual(["day", "week", "month", "all"]);
-    expect(json).toHaveBeenCalledWith({
-      target: {
-        url: "https://www.reddit.com/r/ExampleSub/comments/all_time",
-        permalink: "/r/ExampleSub/comments/all_time",
-      },
-    });
-  });
+      expect(
+        hoisted.reddit.getTopPosts.mock.calls.map(
+          ([options]) => options.timeframe,
+        ),
+      ).toEqual(["day", "week"]);
+      expect(hoisted.reddit.getNewPosts).toHaveBeenCalledTimes(
+        hasWeeklyPost ? 0 : 1,
+      );
+      expect(hoisted.getRecentCommunityPostIds).not.toHaveBeenCalled();
+      const { url, permalink } = hasWeeklyPost ? weekly : latest;
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        target: { url, permalink },
+        ...(hasWeeklyPost ? {} : { fallbackAction: "newest-post" }),
+      });
+    },
+  );
 
   it("allows app-authored crossposts in the promo subreddit and skips the current post", async () => {
     hoisted.context.userId = "t2_user";
@@ -2254,6 +2268,11 @@ describe("publicApi routes", () => {
         type === "top-post-day"
           ? hoisted.reddit.getTopPosts
           : hoisted.reddit.getNewPosts;
+      if (type === "top-post-day") {
+        hoisted.reddit.getNewPosts.mockReturnValue({
+          all: vi.fn().mockResolvedValue([]),
+        });
+      }
       fetchListing.mockReturnValue(listing);
       const json = vi.fn();
       const status = vi.fn(() => ({ json }));
@@ -2276,7 +2295,7 @@ describe("publicApi routes", () => {
         if (type === "top-post-day") {
           expect(
             fetchListing.mock.calls.map(([request]) => request.timeframe),
-          ).toEqual(["day", "week", "month", "all"]);
+          ).toEqual(["day", "week"]);
         }
       }
     },
@@ -2435,6 +2454,9 @@ describe("publicApi routes", () => {
         })),
       ),
     });
+    hoisted.reddit.getNewPosts.mockReturnValue({
+      all: vi.fn().mockResolvedValue([]),
+    });
     const routes = createRouteHarness();
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
@@ -2448,12 +2470,12 @@ describe("publicApi routes", () => {
       target: { url: "https://www.reddit.com/r/ExampleSub/submit/" },
       fallbackAction: "create-post",
     });
-    expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(4);
+    expect(hoisted.reddit.getNewPosts).toHaveBeenCalledOnce();
     expect(
       hoisted.reddit.getTopPosts.mock.calls.map(
         ([options]) => options.timeframe,
       ),
-    ).toEqual(["day", "week", "month", "all"]);
+    ).toEqual(["day", "week"]);
   });
 
   it("does not hide a top-post API failure behind a broader fallback", async () => {
@@ -2480,6 +2502,7 @@ describe("publicApi routes", () => {
 
     expect(status).toHaveBeenCalledWith(503);
     expect(hoisted.reddit.getTopPosts).toHaveBeenCalledTimes(1);
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
     expect(hoisted.reddit.getTopPosts).toHaveBeenCalledWith({
       subredditName: "ExampleSub",
       timeframe: "day",
