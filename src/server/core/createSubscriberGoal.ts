@@ -280,6 +280,15 @@ function recoverTerminalCreation(
   );
 }
 
+export async function getStoredTerminalSubscriberGoalCreation(
+  redis: RedisClient,
+  operationId: string,
+): Promise<CreateSubscriberGoalResult | undefined> {
+  return recoverTerminalCreation(
+    await redis.hGetAll(`subscriber_goal_creation_v1:${operationId}`),
+  );
+}
+
 export type SubscriberGoalCreationRecovery =
   | { status: "complete"; result: CreateSubscriberGoalResult }
   | {
@@ -747,11 +756,16 @@ async function createSubscriberGoalInternal(
   if (recovery?.recoveredPost) {
     [existingGoalPostIds, existingClassicGoalPostIds] =
       await getExistingGoalPostIds(redis);
+    const automaticSuccessor =
+      options.reconciliationContext === "automatic_successor";
     const terminal = await revalidateRecoveredCreation({
       reddit,
       redis,
       post: recovery.recoveredPost,
-      candidatePostIds: existingGoalPostIds,
+      candidatePostIds: automaticSuccessor
+        ? existingClassicGoalPostIds
+        : existingGoalPostIds,
+      automaticSuccessor,
     });
     if (terminal) return terminal;
   }
@@ -1310,19 +1324,25 @@ async function getExistingGoalPostIds(
   const postIds = await getSubscriberGoalCandidatePostIds(redis);
   const classicPostIds: Array<`t3_${string}`> = [];
   for (const postId of postIds) {
-    const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
-      `${postId}${postKindSuffix}`,
-      `${postId}${postHeightSuffix}`,
-    ]);
-    if (
-      postKind === "subscriber-goal-v1" &&
-      (postHeight === "regular" || postHeight === "short") &&
-      isLinkId(postId)
-    ) {
+    if (isLinkId(postId) && (await hasClassicGoalData(redis, postId))) {
       classicPostIds.push(postId);
     }
   }
   return [postIds, classicPostIds];
+}
+
+async function hasClassicGoalData(
+  redis: RedisClient,
+  postId: `t3_${string}`,
+): Promise<boolean> {
+  const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
+    `${postId}${postKindSuffix}`,
+    `${postId}${postHeightSuffix}`,
+  ]);
+  return (
+    postKind === "subscriber-goal-v1" &&
+    (postHeight === "regular" || postHeight === "short")
+  );
 }
 
 async function revalidateRecoveredCreation({
@@ -1330,11 +1350,13 @@ async function revalidateRecoveredCreation({
   redis,
   post,
   candidatePostIds,
+  automaticSuccessor,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   post: Awaited<ReturnType<typeof createGoalPost>>;
   candidatePostIds: string[];
+  automaticSuccessor: boolean;
 }): Promise<CreateSubscriberGoalResult | undefined> {
   if (await isSubscriberGoalPostRetired(redis, post.id)) {
     return createTerminalCreationResult("retired", post.id);
@@ -1370,11 +1392,31 @@ async function revalidateRecoveredCreation({
 
   const recoveredCreatedAt = new Date(post.createdAt).getTime();
   const possibleNewerIds = new Set(candidatePostIds);
-  if (baseline?.canonicalPostId) possibleNewerIds.add(baseline.canonicalPostId);
+  const canonicalPostId = baseline?.canonicalPostId;
+  if (
+    canonicalPostId &&
+    isLinkId(canonicalPostId) &&
+    !possibleNewerIds.has(canonicalPostId) &&
+    (!automaticSuccessor || (await hasClassicGoalData(redis, canonicalPostId)))
+  ) {
+    possibleNewerIds.add(canonicalPostId);
+  }
   for (const candidateId of possibleNewerIds) {
     if (candidateId === post.id || !isLinkId(candidateId)) continue;
+    if (
+      automaticSuccessor &&
+      (await isSubscriberGoalPostRetired(redis, candidateId))
+    ) {
+      continue;
+    }
     try {
       const candidate = await reddit.getPostById(candidateId);
+      if (
+        automaticSuccessor &&
+        getPostAvailability(candidate).status !== "active"
+      ) {
+        continue;
+      }
       const candidateCreatedAt = new Date(candidate.createdAt).getTime();
       if (
         Number.isFinite(candidateCreatedAt) &&
