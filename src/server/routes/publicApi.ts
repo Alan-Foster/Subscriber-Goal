@@ -64,7 +64,10 @@ import {
 } from "../data/subscriberTracking";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
-import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
+import {
+  getCurrentSubredditNsfw,
+  isNsfwOrUnknown,
+} from "../utils/subredditSafety";
 import { translate, type MessageKey } from "../../shared/i18n/catalog";
 import { isPrivateSubredditAccessError } from "../utils/redditPermissionErrors";
 import { canViewCurrentSubredditStatistics } from "../utils/statisticsAuthorization";
@@ -331,7 +334,7 @@ const buildState = async (
       name: subGoalData.subredditDisplayName ?? subreddit.name,
       icon: subredditIcon,
       subscribers,
-      isNsfw: subredditNsfw === true,
+      isNsfw: isNsfwOrUnknown(subredditNsfw),
     },
   };
 };
@@ -772,7 +775,7 @@ export function registerPublicApiRoutes(router: Router): void {
         const actions = effectiveGoalActions(subGoalData, subreddit);
         const canOpenBeforeJoin =
           !hasAutomaticSelector &&
-          getCurrentSubredditNsfw(subreddit) === true &&
+          isNsfwOrUnknown(subreddit.nsfw) &&
           subGoalData.postKind === subscriberGoalPostKind &&
           (subGoalData.postHeight === "regular" ||
             subGoalData.postHeight === "short") &&
@@ -1410,7 +1413,7 @@ function effectiveGoalActions(
     {
       language: data.language ?? "en",
       subredditName: subreddit.name,
-      isNsfw: getCurrentSubredditNsfw(subreddit) === true,
+      isNsfw: isNsfwOrUnknown(subreddit.nsfw),
     },
   );
 }

@@ -29,8 +29,8 @@ import {
 } from "../types";
 import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
-  getCurrentSubredditNsfw,
   isCrosspostEligible,
+  isNsfwOrUnknown,
 } from "../utils/subredditSafety";
 import {
   clearActiveHighlightFailureIncident,
@@ -1220,7 +1220,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     const messages = getSubGoalPostMessages(language);
     const afterSubscribePreset = getDefaultAfterSubscribePreset(
       subreddit.type,
-      getCurrentSubredditNsfw(subreddit) === true,
+      isNsfwOrUnknown(subreddit.nsfw),
     );
     logDiagnostic("info", "onboarding_goal_creation_started", {
       workflow: "onboarding_subscriber_goal",

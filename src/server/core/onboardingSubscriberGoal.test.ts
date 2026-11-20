@@ -1102,7 +1102,8 @@ describe("onboarding subscriber goal", () => {
   it.each([
     [true, 1_001, "regular", "newest-post"],
     [true, onboardingTinySubscriberThreshold + 1, "tiny", "newest-post"],
-    [undefined, 1_001, "regular", "top-post-day"],
+    [undefined, 1_001, "regular", "newest-post"],
+    [undefined, onboardingTinySubscriberThreshold + 1, "tiny", "newest-post"],
   ] as const)(
     "creates public onboarding with nsfw=%s at %i subscribers",
     async (nsfw, numberOfSubscribers, postHeight, preset) => {

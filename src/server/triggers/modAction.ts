@@ -45,6 +45,7 @@ import {
 import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
 import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
 import { getPostAvailability, getPostUpdateRecheckKey } from '../utils/postStatus';
+import { isNsfwOrUnknown } from '../utils/subredditSafety';
 
 export type ModActionEvent = {
   action?: string;
@@ -1105,7 +1106,7 @@ async function updateFromWikis(
 
   let appUserLookup: ReturnType<typeof reddit.getAppUser> | undefined;
   for (const pending of [...reconciliationFirstPending, ...normalPending]) {
-    let sourceSubredditIsNsfw = false;
+    let sourceSubredditIsNsfwOrUnknown = false;
     let sourceCreateLock:
       | Awaited<ReturnType<typeof acquireSourceCreateInFlightLock>>
       | undefined;
@@ -1187,8 +1188,8 @@ async function updateFromWikis(
       }
 
       const sourceSubredditInfo = await reddit.getSubredditInfoById(post.subredditId);
-      sourceSubredditIsNsfw = sourceSubredditInfo.isNsfw === true;
-      if (sourceSubredditIsNsfw) {
+      sourceSubredditIsNsfwOrUnknown = isNsfwOrUnknown(sourceSubredditInfo.isNsfw);
+      if (sourceSubredditIsNsfwOrUnknown) {
         await markTerminalFailure(pending, 'source_subreddit_nsfw');
         continue;
       }
@@ -1494,8 +1495,8 @@ async function updateFromWikis(
       );
       const permanentFailure = isPermanentCrosspostError(errorMessage);
       const missingSourcePost = isMissingSourcePostError(errorMessage);
-      if (permanentFailure || sourceSubredditIsNsfw || missingSourcePost) {
-        const terminalReason = sourceSubredditIsNsfw
+      if (permanentFailure || sourceSubredditIsNsfwOrUnknown || missingSourcePost) {
+        const terminalReason = sourceSubredditIsNsfwOrUnknown
           ? 'source_subreddit_nsfw'
           : missingSourcePost
             ? 'source_post_missing'

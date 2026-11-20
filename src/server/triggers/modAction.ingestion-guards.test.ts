@@ -527,11 +527,12 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
   });
 
   it.each([
-    ['an NSFW-tagged source in a SFW community', { nsfw: true }, 'source_post_nsfw'],
-    ['a source removed before processing', { removed: true, removedByCategory: 'moderator' }, 'source_post_unavailable'],
-    ['a source marked as spam', { spam: true }, 'source_post_unavailable'],
-    ['a source authored by another account', { authorId: 't2_mod' }, 'source_post_non_app_author'],
-  ] as const)('terminally skips %s', async (_label, sourceChanges, reason) => {
+    ['an NSFW-tagged source in a SFW community', { nsfw: true }, false, 'source_post_nsfw'],
+    ['a source with unknown community safety', {}, undefined, 'source_subreddit_nsfw'],
+    ['a source removed before processing', { removed: true, removedByCategory: 'moderator' }, false, 'source_post_unavailable'],
+    ['a source marked as spam', { spam: true }, false, 'source_post_unavailable'],
+    ['a source authored by another account', { authorId: 't2_mod' }, false, 'source_post_non_app_author'],
+  ] as const)('terminally skips %s', async (_label, sourceChanges, communityNsfw, reason) => {
     mockContext.subredditName = 'SubGoal';
     const now = Date.now();
     safeGetWikiPageRevisionsMock.mockImplementation(
@@ -551,7 +552,7 @@ describe('processCrosspostDispatchQueue ingestion guards', () => {
       createdAt: new Date(now),
       ...sourceChanges,
     });
-    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
+    mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: communityNsfw });
 
     const summary = await processCrosspostDispatchQueue(baseSettings, 'scheduler_posts_updater');
 

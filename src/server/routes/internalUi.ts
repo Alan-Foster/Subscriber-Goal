@@ -62,10 +62,7 @@ import { validateSubredditDisplayName } from "../utils/subredditDisplayName";
 import { parseDeveloperCommands } from "../utils/developerCommands";
 import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
-import {
-  getCurrentSubredditNsfw,
-  isCrosspostEligible,
-} from "../utils/subredditSafety";
+import { isCrosspostEligible, isNsfwOrUnknown } from "../utils/subredditSafety";
 import { translate } from "../../shared/i18n/catalog";
 import {
   defaultAfterSubscribeColorTheme,
@@ -703,7 +700,7 @@ function getAfterSubscribeActionField(
   context: "after-subscribe" | "cta" = "after-subscribe",
   language: SubGoalLanguage = defaultSubGoalLanguage,
 ) {
-  const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
+  const isNsfw = isNsfwOrUnknown(subreddit.nsfw);
   const options = [
     {
       label: translate(language, "moderator.followUp.topPost"),
@@ -885,7 +882,7 @@ async function submitCreateGoalStepTwo(
           "colorTheme" in values ? values.colorTheme?.[0] : undefined,
         );
         const requestedPreset = values.afterSubscribePreset?.[0];
-        const isNsfw = getCurrentSubredditNsfw(subreddit) === true;
+        const isNsfw = isNsfwOrUnknown(subreddit.nsfw);
         const afterSubscribePreset =
           isAfterSubscribePreset(requestedPreset) &&
           !(isNsfw && requestedPreset === "top-post-day")
@@ -1136,7 +1133,7 @@ async function submitCreateGoalFollowUp(
 
         const presetChanged =
           draft.details.afterSubscribePreset === "top-post-day" &&
-          getCurrentSubredditNsfw(subreddit) === true;
+          isNsfwOrUnknown(subreddit.nsfw);
         const persistedAfterSubscribePreset = presetChanged
           ? "newest-post"
           : draft.details.afterSubscribePreset;

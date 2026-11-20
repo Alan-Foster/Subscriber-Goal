@@ -4,6 +4,10 @@ export function getCurrentSubredditNsfw(subreddit: {
   return typeof subreddit.nsfw === "boolean" ? subreddit.nsfw : undefined;
 }
 
+export function isNsfwOrUnknown(nsfw: unknown): boolean {
+  return nsfw !== false;
+}
+
 export function isCrosspostEligible(
   subreddit: { name: string; type?: unknown; nsfw?: unknown },
   promoSubreddit: string,

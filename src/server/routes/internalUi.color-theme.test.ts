@@ -1092,45 +1092,48 @@ describe("internalUi color theme create goal routes", () => {
     }
   });
 
-  it("defaults NSFW goal forms to Most Recent and omits Top Post", async () => {
-    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
-      id: "t5_example",
-      name: "ExampleSub",
-      numberOfSubscribers: 100,
-      type: "public",
-      nsfw: true,
-    });
+  it.each([true, undefined])(
+    "defaults goal forms to Most Recent and omits Top Post when nsfw=%s",
+    async (nsfw) => {
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_example",
+        name: "ExampleSub",
+        numberOfSubscribers: 100,
+        type: "public",
+        nsfw,
+      });
 
-    for (const postHeight of ["regular", "short", "tiny", "cta"] as const) {
-      const routes = createRouteHarness();
-      const json = vi.fn();
-      await routes.get(internalRoutes.forms.createGoalSetup)?.(
-        {
-          body: {
-            language: ["en"],
-            subredditDisplayName: "ExampleSub",
-            postHeight: [postHeight],
-          },
-        } as Request,
-        { json } as unknown as Response,
-      );
-      const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
-        name: string;
-        defaultValue?: unknown;
-        options?: Array<{ value: string }>;
-      }>;
-      const actionField = fields.find(
-        (field) => field.name === "afterSubscribePreset",
-      );
-      expect(actionField?.defaultValue).toEqual(["newest-post"]);
-      expect(actionField?.options?.map(({ value }) => value)).not.toContain(
-        "top-post-day",
-      );
-      expect(actionField?.options?.map(({ value }) => value)).toContain(
-        "newest-post",
-      );
-    }
-  });
+      for (const postHeight of ["regular", "short", "tiny", "cta"] as const) {
+        const routes = createRouteHarness();
+        const json = vi.fn();
+        await routes.get(internalRoutes.forms.createGoalSetup)?.(
+          {
+            body: {
+              language: ["en"],
+              subredditDisplayName: "ExampleSub",
+              postHeight: [postHeight],
+            },
+          } as Request,
+          { json } as unknown as Response,
+        );
+        const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
+          name: string;
+          defaultValue?: unknown;
+          options?: Array<{ value: string }>;
+        }>;
+        const actionField = fields.find(
+          (field) => field.name === "afterSubscribePreset",
+        );
+        expect(actionField?.defaultValue).toEqual(["newest-post"]);
+        expect(actionField?.options?.map(({ value }) => value)).not.toContain(
+          "top-post-day",
+        );
+        expect(actionField?.options?.map(({ value }) => value)).toContain(
+          "newest-post",
+        );
+      }
+    },
+  );
 
   it.each([
     ["regular", 9_999, "top-post-day"],
@@ -1177,6 +1180,40 @@ describe("internalUi color theme create goal routes", () => {
       ).toMatchObject({ defaultValue: [expectedPreset] });
     },
   );
+
+  it("normalizes a Top Post selection on submit when community safety is unknown", async () => {
+    seedCreateGoalDraft("regular", "en", { stage: "details" });
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      id: "t5_example",
+      name: "ExampleSub",
+      numberOfSubscribers: 100,
+      type: "public",
+    });
+    const json = vi.fn();
+
+    await createRouteHarness().get(internalRoutes.forms.createSubscriberGoal)?.(
+      {
+        body: {
+          postTitle: "Welcome!",
+          subscriberGoal: 200,
+          afterSubscribePreset: ["top-post-day"],
+        },
+      } as Request,
+      { json } as unknown as Response,
+    );
+
+    expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
+      stage: "follow-up",
+      details: { afterSubscribePreset: "newest-post" },
+    });
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        showForm: expect.objectContaining({
+          name: formNames.createSubscriberGoalFollowUp,
+        }),
+      }),
+    );
+  });
 
   it("stores goal Step 2 and opens the numbered goal follow-up form", async () => {
     seedCreateGoalDraft("regular", "en", { stage: "details" });
@@ -2451,15 +2488,19 @@ describe("internalUi color theme create goal routes", () => {
     },
   );
 
-  it.each(["top-post-day", "newest-post"] as const)(
-    "normalizes a stale %s draft when creating an NSFW goal",
-    async (preset) => {
+  it.each([
+    ["top-post-day", true],
+    ["newest-post", true],
+    ["top-post-day", undefined],
+  ] as const)(
+    "normalizes a stale %s draft when creating a goal with nsfw=%s",
+    async (preset, nsfw) => {
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
         id: "t5_example",
         name: "ExampleSub",
         numberOfSubscribers: 100,
         type: "public",
-        nsfw: true,
+        nsfw,
       });
       seedCreateGoalDraft("regular", "es", {
         colorTheme: "green",
