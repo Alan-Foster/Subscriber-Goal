@@ -6,7 +6,6 @@ const hoisted = vi.hoisted(() => ({
   backfillSubscriberGoalPostFlair: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   initializeLegacyAfterSubscribeActionMigration: vi.fn(),
-  initializeNsfwAfterSubscribeActionMigration: vi.fn(),
   initializePostKindMigration: vi.fn(),
   getSubscriberGoalCandidatePostIds: vi.fn(),
   getTrackedPosts: vi.fn(),
@@ -28,10 +27,6 @@ vi.mock("../data/ctaActivity", () => ({
 vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   initializeLegacyAfterSubscribeActionMigration:
     hoisted.initializeLegacyAfterSubscribeActionMigration,
-}));
-vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
-  initializeNsfwAfterSubscribeActionMigration:
-    hoisted.initializeNsfwAfterSubscribeActionMigration,
 }));
 vi.mock("../data/postKindMigration", () => ({
   initializePostKindMigration: hoisted.initializePostKindMigration,
@@ -126,7 +121,7 @@ describe("scheduled app repair", () => {
     });
   });
 
-  it("discovers candidates and skips dynamic preset migration in NSFW communities", async () => {
+  it("discovers candidates and initializes the legacy after-subscribe migration in NSFW communities", async () => {
     reddit.getCurrentSubreddit.mockResolvedValue({
       id: "t5_example",
       name: "ExampleSub",
@@ -153,9 +148,6 @@ describe("scheduled app repair", () => {
       name: "ExampleSub",
       type: "public",
     });
-    expect(
-      hoisted.initializeNsfwAfterSubscribeActionMigration,
-    ).not.toHaveBeenCalled();
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
       status: "complete",
       recurring: "true",

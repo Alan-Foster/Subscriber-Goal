@@ -1,10 +1,5 @@
 import { context, reddit, redis, scheduler } from "@devvit/web/server";
 import { ensureSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
-import { initializeRecentSubscriberIndexMigration } from "../data/subGoalData";
-import {
-  clearLegacySubscriberErasureTombstones,
-  initializeSubscriberStatsMigration,
-} from "../data/subscriberStats";
 import {
   getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
@@ -90,12 +85,6 @@ export async function onAppChanged({
 
   await runPhase("subreddit_display_name", () =>
     ensureSavedSubredditDisplayName(redis, subredditName),
-  );
-  await runPhase("subscriber_erasure_cleanup", () =>
-    clearLegacySubscriberErasureTombstones(redis),
-  );
-  await runPhase("subscriber_stats_migration", () =>
-    initializeSubscriberStatsMigration(redis),
   );
   if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
     const automaticOnboardingEnabled =
@@ -189,9 +178,6 @@ export async function onAppChanged({
       `[appChanged] onboarding setup: reconciliation=${reconciliationStatus} nextAction=${nextAction} timerArmed=${reminderState?.status === "pending" || goalState?.status === "pending"} goal=${goalState?.status ?? "missing_or_unparseable"}/${goalState?.resultStatus ?? "none"} reminder=${reminderState?.status ?? "missing_or_unparseable"}/${reminderState?.result ?? "none"} reminderNextRunAt=${formatOptionalTimestamp(reminderState?.nextRunAt)} goalNextRunAt=${formatOptionalTimestamp(goalState?.nextRunAt)} operationId=${goalState?.operationId ?? "none"}`,
     );
   }
-  await runPhase("recent_subscriber_index_migration", () =>
-    initializeRecentSubscriberIndexMigration(redis),
-  );
 }
 
 function describeOnboardingNextAction(

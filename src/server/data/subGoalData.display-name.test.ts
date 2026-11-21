@@ -12,10 +12,8 @@ import {
   getAutoCreateNextGoalRunAt,
   getDueAutoCreateNextGoalPostIds,
   getSubGoalData,
-  processRecentSubscriberIndexMigrationBatch,
   recordAutoCreateNextGoalFailure,
   repairAutoCreateNextGoal,
-  recentSubscriberIndexMigrationStateKey,
   recentSubscriberPostsByUsernameKey,
   registerNewSubGoalPost,
   registerNewCtaOnlyPost,
@@ -1537,51 +1535,5 @@ describe("subGoalData subreddit display name", () => {
       await redis.hGet(recentSubscriberPostsByUsernameKey, "testuser"),
     ).toBeUndefined();
     expect(redis.hGetAllCalls).toBe(0);
-  });
-
-  it("indexes recent subscribers from tracked posts in bounded migration batches", async () => {
-    const redis = new InMemoryRedis();
-    await redis.zAdd(
-      postsKey,
-      { member: "t3_a", score: 100 },
-      { member: "t3_b", score: 200 },
-    );
-    await redis.hSet(subscriberGoalsKey, {
-      t3_a_recent_subscriber: "Alice",
-      t3_b_recent_subscriber: "",
-    });
-    await redis.hSet(recentSubscriberIndexMigrationStateKey, {
-      version: "recent_subscriber_index_v1",
-      status: "pending",
-      cursor: "0",
-      nextRunAt: "0",
-      scannedTotal: "0",
-      indexedTotal: "0",
-      lastRunAt: "0",
-    });
-
-    await processRecentSubscriberIndexMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processRecentSubscriberIndexMigrationBatch
-      >[0],
-      {
-        nowMs: 1_000,
-        batchSize: 2,
-        cooldownMinMs: 5,
-        cooldownMaxMs: 5,
-      },
-    );
-
-    expect(await redis.hGet(recentSubscriberPostsByUsernameKey, "alice")).toBe(
-      JSON.stringify(["t3_a"]),
-    );
-    expect(
-      await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
-    ).toMatchObject({
-      status: "complete",
-      cursor: "0",
-      scannedTotal: "2",
-      indexedTotal: "1",
-    });
   });
 });

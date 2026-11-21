@@ -5,11 +5,8 @@ import {
 } from "./subGoalData";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 import {
-  clearLegacySubscriberErasureTombstones,
   getSubscriberStats,
   isTrackedSubscriber,
-  initializeSubscriberStatsMigration,
-  processSubscriberStatsMigrationBatch,
   markSubscriber,
   setNewSubscriber,
   subscriberStatsErasedUserIdsKey,
@@ -17,7 +14,6 @@ import {
   subscriberStatusByUserIdKey,
   subscriberStatsLegacyMembersByUserIdKey,
   subscriberStatsKey,
-  subscriberStatsMigrationStateKey,
   subscriberStatsUsernameToUserIdKey,
   untrackSubscriberById,
   untrackSubscriberByUsername,
@@ -434,6 +430,25 @@ describe("subscriberStats direct lookup", () => {
     ).toBeUndefined();
   });
 
+  it("erases an old-format subscriber with only a legacy member entry", async () => {
+    await redis.zAdd(
+      subscriberStatsKey,
+      { member: "t2_legacy:TestUser:100", score: 900 },
+      { member: "t2_other:TestUser:101", score: 950 },
+    );
+
+    await expect(
+      untrackSubscriberById(
+        redis as unknown as Parameters<typeof untrackSubscriberById>[0],
+        "t2_legacy",
+      ),
+    ).resolves.toEqual({ status: "complete", userIds: ["t2_legacy"] });
+
+    expect(await redis.zRange(subscriberStatsKey, 0, -1)).toEqual([
+      { member: "t2_other:TestUser:101", score: 950 },
+    ]);
+  });
+
   it("erases by username through the username index and returns partial when missing", async () => {
     await redis.hSet(subscriberStatsByUserIdKey, {
       t2_user: "t2_user:TestUser:124:1000",
@@ -519,244 +534,5 @@ describe("subscriberStats direct lookup", () => {
     expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_user")).toBe(
       "t2_user:TestUser:124:1000",
     );
-  });
-
-  it("clears all legacy erasure tombstones", async () => {
-    await redis.hSet(subscriberStatsErasedUserIdsKey, {
-      t2_a: "1000",
-      t2_b: "2000",
-    });
-
-    await expect(
-      clearLegacySubscriberErasureTombstones(
-        redis as unknown as Parameters<
-          typeof clearLegacySubscriberErasureTombstones
-        >[0],
-      ),
-    ).resolves.toBe(2);
-
-    expect(await redis.hGetAll(subscriberStatsErasedUserIdsKey)).toEqual({});
-  });
-});
-
-describe("subscriberStats migration", () => {
-  let redis: InMemoryRedis;
-
-  beforeEach(() => {
-    redis = new InMemoryRedis();
-    vi.restoreAllMocks();
-    vi.spyOn(console, "info").mockImplementation(() => undefined);
-  });
-
-  it("initializes migration state once with a delayed next run", async () => {
-    await initializeSubscriberStatsMigration(
-      redis as unknown as Parameters<
-        typeof initializeSubscriberStatsMigration
-      >[0],
-      {
-        nowMs: 1_000,
-        cooldownMinMs: 5,
-        cooldownMaxMs: 5,
-      },
-    );
-
-    expect(await redis.hGetAll(subscriberStatsMigrationStateKey)).toMatchObject(
-      {
-        version: "user_id_hash_v1",
-        status: "pending",
-        cursor: "0",
-        nextRunAt: "1005",
-      },
-    );
-
-    await initializeSubscriberStatsMigration(
-      redis as unknown as Parameters<
-        typeof initializeSubscriberStatsMigration
-      >[0],
-      {
-        nowMs: 2_000,
-        cooldownMinMs: 5,
-        cooldownMaxMs: 5,
-      },
-    );
-    expect(
-      await redis.hGet(subscriberStatsMigrationStateKey, "nextRunAt"),
-    ).toBe("1005");
-  });
-
-  it("backfills one bounded zScan batch and resumes from stored cursor", async () => {
-    await redis.zAdd(
-      subscriberStatsKey,
-      { member: "t2_a:Alice:10", score: 100 },
-      { member: "malformed", score: 200 },
-      { member: "t2_b:Bob:20:250", score: 300 },
-    );
-    await redis.hSet(subscriberStatsByUserIdKey, {
-      t2_b: "t2_b:Bob:99:999",
-    });
-    await redis.hSet(subscriberStatsMigrationStateKey, {
-      version: "user_id_hash_v1",
-      status: "pending",
-      cursor: "0",
-      nextRunAt: "0",
-      scannedTotal: "0",
-      migratedTotal: "0",
-      skippedMalformedTotal: "0",
-      skippedExistingTotal: "0",
-      lastRunAt: "0",
-    });
-
-    await processSubscriberStatsMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processSubscriberStatsMigrationBatch
-      >[0],
-      {
-        nowMs: 1_000,
-        batchSize: 2,
-        cooldownMinMs: 5,
-        cooldownMaxMs: 5,
-      },
-    );
-
-    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_a")).toBe(
-      "t2_a:Alice:10:100",
-    );
-    expect(await redis.hGet(subscriberStatsUsernameToUserIdKey, "alice")).toBe(
-      "t2_a",
-    );
-    expect(
-      await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, "t2_a"),
-    ).toBe(JSON.stringify(["t2_a:Alice:10"]));
-    expect(await redis.hGetAll(subscriberStatsMigrationStateKey)).toMatchObject(
-      {
-        status: "running",
-        cursor: "2",
-        nextRunAt: "1005",
-        scannedTotal: "2",
-        migratedTotal: "1",
-        skippedMalformedTotal: "1",
-        skippedExistingTotal: "0",
-      },
-    );
-    expect(console.info).toHaveBeenCalledWith(
-      expect.stringContaining("[subscriberStatsMigration] batch complete:"),
-    );
-
-    await processSubscriberStatsMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processSubscriberStatsMigrationBatch
-      >[0],
-      {
-        nowMs: 1_005,
-        batchSize: 2,
-        cooldownMinMs: 5,
-        cooldownMaxMs: 5,
-      },
-    );
-
-    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_b")).toBe(
-      "t2_b:Bob:99:999",
-    );
-    expect(await redis.hGet(subscriberStatsUsernameToUserIdKey, "bob")).toBe(
-      "t2_b",
-    );
-    expect(
-      await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, "t2_b"),
-    ).toBe(JSON.stringify(["t2_b:Bob:20:250"]));
-    expect(await redis.hGetAll(subscriberStatsMigrationStateKey)).toMatchObject(
-      {
-        status: "complete",
-        cursor: "0",
-        scannedTotal: "3",
-        migratedTotal: "1",
-        skippedMalformedTotal: "1",
-        skippedExistingTotal: "1",
-      },
-    );
-    expect(console.info).toHaveBeenCalledWith(
-      expect.stringContaining("[subscriberStatsMigration] complete:"),
-    );
-  });
-
-  it("does not run before nextRunAt and does not scan after completion", async () => {
-    await redis.zAdd(subscriberStatsKey, {
-      member: "t2_a:Alice:10",
-      score: 100,
-    });
-    await redis.hSet(subscriberStatsMigrationStateKey, {
-      version: "user_id_hash_v1",
-      status: "pending",
-      cursor: "0",
-      nextRunAt: "2000",
-      scannedTotal: "0",
-      migratedTotal: "0",
-      skippedMalformedTotal: "0",
-      skippedExistingTotal: "0",
-      lastRunAt: "0",
-    });
-
-    await processSubscriberStatsMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processSubscriberStatsMigrationBatch
-      >[0],
-      {
-        nowMs: 1_000,
-        batchSize: 2,
-      },
-    );
-
-    expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
-
-    await redis.hSet(subscriberStatsMigrationStateKey, {
-      status: "complete",
-      nextRunAt: "0",
-    });
-    await processSubscriberStatsMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processSubscriberStatsMigrationBatch
-      >[0],
-      {
-        nowMs: 3_000,
-        batchSize: 2,
-      },
-    );
-
-    expect(await redis.hLen(subscriberStatsByUserIdKey)).toBe(0);
-  });
-
-  it("migrates legacy subscriber records without consulting tombstones", async () => {
-    await redis.zAdd(subscriberStatsKey, {
-      member: "t2_erased:ErasedUser:10",
-      score: 100,
-    });
-    await redis.hSet(subscriberStatsErasedUserIdsKey, {
-      t2_erased: "500",
-    });
-    await redis.hSet(subscriberStatsMigrationStateKey, {
-      version: "user_id_hash_v1",
-      status: "pending",
-      cursor: "0",
-      nextRunAt: "0",
-      scannedTotal: "0",
-      migratedTotal: "0",
-      skippedMalformedTotal: "0",
-      skippedExistingTotal: "0",
-      lastRunAt: "0",
-    });
-
-    await processSubscriberStatsMigrationBatch(
-      redis as unknown as Parameters<
-        typeof processSubscriberStatsMigrationBatch
-      >[0],
-      {
-        nowMs: 1_000,
-        batchSize: 2,
-      },
-    );
-
-    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_erased")).toBe(
-      "t2_erased:ErasedUser:10:100",
-    );
-    expect(await redis.zCard(subscriberStatsKey)).toBe(1);
   });
 });

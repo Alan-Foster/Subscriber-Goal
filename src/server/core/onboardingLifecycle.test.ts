@@ -730,11 +730,6 @@ describe("onboarding lifecycle reconciliation", () => {
       legacy,
       "initializeLegacyAfterSubscribeActionMigration",
     ).mockResolvedValue(undefined as never);
-    const nsfw = await import("../data/nsfwAfterSubscribeActionMigration");
-    vi.spyOn(
-      nsfw,
-      "initializeNsfwAfterSubscribeActionMigration",
-    ).mockResolvedValue(undefined as never);
     const flair = await import("./subscriberGoalPostFlair");
     vi.spyOn(flair, "ensureSubscriberGoalPostFlair").mockResolvedValue({
       id: "flair_1",
