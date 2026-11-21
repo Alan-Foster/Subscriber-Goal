@@ -13,10 +13,8 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import {
   AUTOMATIC_ONBOARDING_ENABLED,
-  ensureExistingSubscriberGoalHighlighted,
   getOnboardingEligibility,
   getOnboardingSubscriberGoalState,
-  getDetectionDiagnosticsFromError,
   initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting,
   markOnboardingSubscriberGoalExistingNotHighlighted,
@@ -29,11 +27,15 @@ import {
   saveOnboardingState,
   selectOnboardingGoalStaggerMinutes,
   selectOnboardingRetryDelayMs,
+  type OnboardingIneligibilityReason,
+} from "./onboardingSubscriberGoal";
+import { ensureExistingSubscriberGoalHighlighted } from "./highlightReconciliation";
+import {
+  getDetectionDiagnosticsFromError,
   type OnboardingDetectionDiagnostics,
   type OnboardingExistingSource,
-  type OnboardingIneligibilityReason,
   type OnboardingLifecycleSource,
-} from "./onboardingSubscriberGoal";
+} from "./goalDiscovery";
 import { reconcileCompletedGoal } from "./completedGoalReconciliation";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {

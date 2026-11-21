@@ -16,15 +16,21 @@ const hoisted = vi.hoisted(() => ({
   findLiveHighlightedSubscriberGoalCandidates: vi.fn(),
 }));
 
-vi.mock("./onboardingSubscriberGoal", async (importOriginal) => ({
-  AUTOMATIC_ONBOARDING_ENABLED: true,
+vi.mock("./highlightReconciliation", () => ({
   ensureExistingSubscriberGoalHighlighted:
     hoisted.ensureExistingSubscriberGoalHighlighted,
+}));
+vi.mock("./goalDiscovery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./goalDiscovery")>()),
+  getDetectionDiagnosticsFromError: () => undefined,
+}));
+
+vi.mock("./onboardingSubscriberGoal", async (importOriginal) => ({
+  AUTOMATIC_ONBOARDING_ENABLED: true,
   getOnboardingEligibility: (
     await importOriginal<typeof import("./onboardingSubscriberGoal")>()
   ).getOnboardingEligibility,
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
-  getDetectionDiagnosticsFromError: () => undefined,
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting:

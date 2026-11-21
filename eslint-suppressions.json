@@ -104,6 +104,22 @@
       "count": 3
     }
   },
+  "src/server/core/goalDiscovery.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/highlightReconciliation.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
   "src/server/core/milestoneNotifications.ts": {
     "complexity": {
       "count": 1
@@ -130,10 +146,10 @@
   },
   "src/server/core/onboardingSubscriberGoal.ts": {
     "complexity": {
-      "count": 5
+      "count": 3
     },
     "max-lines-per-function": {
-      "count": 3
+      "count": 1
     }
   },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {

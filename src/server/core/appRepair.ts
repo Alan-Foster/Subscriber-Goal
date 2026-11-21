@@ -10,7 +10,7 @@ import { initializeLegacyAfterSubscribeActionMigration } from "../data/legacyAft
 import { initializePostKindMigration } from "../data/postKindMigration";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { getTrackedPosts, queueUpdates } from "../data/updaterData";
-import { ensureExistingSubscriberGoalHighlighted } from "./onboardingSubscriberGoal";
+import { ensureExistingSubscriberGoalHighlighted } from "./highlightReconciliation";
 import {
   appRepairLockKey,
   appRepairStateKey,

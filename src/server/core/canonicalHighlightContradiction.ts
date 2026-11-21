@@ -14,7 +14,7 @@ import {
   notifyHighlightFailureIncident,
   type HighlightNotificationOutcome,
 } from "../utils/highlightFailureNotifications";
-import type { OnboardingGoalCandidate } from "./onboardingSubscriberGoal";
+import type { OnboardingGoalCandidate } from "./goalDiscovery";
 
 export async function checkCanonicalHighlightContradiction({
   reddit,

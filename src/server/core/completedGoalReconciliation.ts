@@ -10,7 +10,7 @@ import {
   autoCreateNextGoalSuccessorsKey,
   processDueAutoCreateNextGoals,
 } from "./autoCreateNextGoal";
-import type { OnboardingLifecycleSource } from "./onboardingSubscriberGoal";
+import type { OnboardingLifecycleSource } from "./goalDiscovery";
 import {
   withCommunityGoalMutationLease,
   type CommunityGoalMutationLease,
