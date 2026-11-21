@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { watchTestString } from "../utils/testHashWatch";
+import { watchTestString } from "../testing/testHashWatch";
 import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,

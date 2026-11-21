@@ -1,4 +1,4 @@
-import { watchTestString } from "../utils/testHashWatch";
+import { watchTestString } from "../testing/testHashWatch";
 import type { ModAction } from "@devvit/reddit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {

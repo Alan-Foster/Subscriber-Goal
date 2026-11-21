@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { watchTestHash } from "../utils/testHashWatch";
+import { watchTestHash } from "../testing/testHashWatch";
 import {
   autoCreateNextGoalExhaustedKey,
   autoCreateNextGoalQueueKey,

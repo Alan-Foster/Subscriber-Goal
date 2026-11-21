@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../types";
 import { releaseOwnedRedisLock, withRedisLock } from "./redisOwnedLock";
-import { watchTestString } from "./testHashWatch";
+import { watchTestString } from "../testing/testHashWatch";
 
 function lockFixture() {
   const values = new Map<string, string>();

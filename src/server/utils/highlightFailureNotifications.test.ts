@@ -1,4 +1,4 @@
-import { watchTestString } from "./testHashWatch";
+import { watchTestString } from "../testing/testHashWatch";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkId } from "../types";
 import type { HighlightResult } from "./communityHighlights";

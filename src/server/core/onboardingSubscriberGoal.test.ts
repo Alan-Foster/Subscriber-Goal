@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { watchTestHash, watchTestString } from "../utils/testHashWatch";
+import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 import type { ServerAppSettings } from "../settings";
 import {
   autoCreateNextGoalQueueKey,

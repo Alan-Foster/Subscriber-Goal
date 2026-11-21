@@ -1,4 +1,4 @@
-import { watchTestString } from "../utils/testHashWatch";
+import { watchTestString } from "../testing/testHashWatch";
 import { appAccountRecoveryStateKey } from "./appAccountRecoveryState";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {

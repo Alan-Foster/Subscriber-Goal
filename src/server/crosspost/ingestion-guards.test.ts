@@ -1,4 +1,4 @@
-import { watchTestString } from '../utils/testHashWatch';
+import { watchTestString } from '../testing/testHashWatch';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   crosspostDeletionDueKey,
