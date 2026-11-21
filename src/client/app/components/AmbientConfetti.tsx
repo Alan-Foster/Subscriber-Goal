@@ -1,21 +1,10 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
+import { confettiColors } from "../confettiPresets";
+import { ConfettiPiece } from "./ConfettiPiece";
 
 type AmbientConfettiProps = {
   reducedMotion?: boolean;
 };
-
-type AmbientConfettiStyle = CSSProperties & {
-  "--ambient-confetti-drift"?: string;
-};
-
-const colors = [
-  "#ff4500",
-  "#f59e0b",
-  "#10b981",
-  "#3b82f6",
-  "#a855f7",
-  "#f472b6",
-];
 
 export const ambientConfettiPieceCount = 30;
 
@@ -34,7 +23,8 @@ export const AmbientConfetti = ({
           duration,
           size: 6 + Math.random() * 6,
           rotate: Math.random() * 360,
-          color: colors[Math.floor(Math.random() * colors.length)],
+          color:
+            confettiColors[Math.floor(Math.random() * confettiColors.length)],
         };
       }),
     [],
@@ -51,27 +41,9 @@ export const AmbientConfetti = ({
       data-celebration-effect="ambient-confetti"
       data-confetti-piece-count={ambientConfettiPieceCount}
     >
-      {pieces.map((piece, index) => {
-        const style: AmbientConfettiStyle = {
-          left: `${piece.left}%`,
-          animationDelay: `${piece.delay}s`,
-          animationDuration: `${piece.duration}s`,
-          "--ambient-confetti-drift": `${piece.drift}px`,
-        };
-        return (
-          <span key={index} className="ambient-confetti-piece" style={style}>
-            <span
-              className="block rounded-sm"
-              style={{
-                width: piece.size,
-                height: piece.size * 1.4,
-                backgroundColor: piece.color,
-                transform: `rotate(${piece.rotate}deg)`,
-              }}
-            />
-          </span>
-        );
-      })}
+      {pieces.map((piece, index) => (
+        <ConfettiPiece key={index} piece={piece} variant="ambient-confetti" />
+      ))}
     </div>
   );
 };

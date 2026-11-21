@@ -5,6 +5,7 @@ import { getNotificationMessages } from "../../../shared/notificationI18n";
 import { NotificationBellIcon } from "../components/NotificationBellIcon";
 import { NotificationSwitch } from "../components/NotificationSwitch";
 import { TopButtons } from "../components/TopButtons";
+import type { useNotificationSettings } from "../hooks/useNotificationSettings";
 
 type NotificationSettingsPageProps = {
   state: SubGoalState;
@@ -17,6 +18,32 @@ type NotificationSettingsPageProps = {
   onReturn: () => void;
   onVisitPromoSub: () => void;
 };
+
+type LoadedNotificationSettingsPageProps = Pick<
+  NotificationSettingsPageProps,
+  "state" | "onToggle" | "onReturn" | "onVisitPromoSub"
+> & {
+  notificationSettings: Pick<
+    ReturnType<typeof useNotificationSettings>,
+    "settings" | "loading" | "submitting" | "error"
+  >;
+};
+
+export function LoadedNotificationSettingsPage({
+  notificationSettings,
+  ...props
+}: LoadedNotificationSettingsPageProps) {
+  return (
+    <NotificationSettingsPage
+      {...props}
+      authenticated={notificationSettings.settings?.authenticated ?? false}
+      enabled={notificationSettings.settings?.enabled ?? false}
+      loading={notificationSettings.loading}
+      submitting={notificationSettings.submitting}
+      error={notificationSettings.error}
+    />
+  );
+}
 
 type StableLocalizedSlotProps = {
   current: string;

@@ -1,5 +1,5 @@
 import { navigateTo, showLoginPrompt, showToast } from "@devvit/web/client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
 import type { NavigationTarget } from "../../shared/types/api";
 import { SkeletonPage } from "../app/components/SkeletonPage";
@@ -24,7 +24,7 @@ import {
   goalJourneyAnalytics,
 } from "../analytics/goalJourneyAnalytics";
 import { logDiagnostic } from "../../shared/diagnostics";
-import { NotificationSettingsPage } from "../app/pages/NotificationSettingsPage";
+import { LoadedNotificationSettingsPage } from "../app/pages/NotificationSettingsPage";
 import { useNotificationSettings } from "../app/hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NOTIFICATION_SETTINGS_ENTRY_ENABLED } from "../app/notificationFeatureFlags";
@@ -131,77 +131,87 @@ export const SubscribeOnlyApp = () => {
     });
   };
 
-  if (state.postHeight === "cta") {
-    return (
-      <div
-        className="sg-goal-frame relative h-[100px] w-full cursor-pointer overflow-hidden"
-        data-app-interaction-shell="true"
-        data-sg-theme={
-          viewPhase === "notifications" ||
-          state.afterSubscribeAction.type === "disabled"
-            ? state.colorTheme
-            : state.afterSubscribeAction.colorTheme
+  const notificationsPage = (
+    <LoadedNotificationSettingsPage
+      state={state}
+      notificationSettings={notificationSettings}
+      onToggle={toggleNotifications}
+      onReturn={returnFromNotifications}
+      onVisitPromoSub={() => undefined}
+    />
+  );
+  const analyticsContext = getGoalJourneyContext(state);
+  const renderFrame = (
+    colorTheme: typeof state.colorTheme,
+    content: ReactNode,
+  ) => (
+    <div
+      className="sg-goal-frame relative h-[100px] w-full cursor-pointer overflow-hidden"
+      data-app-interaction-shell="true"
+      data-sg-theme={colorTheme}
+      {...interactionHandlers}
+      onClickCapture={(event) => {
+        interactionHandlers.onClickCapture(event);
+        goalJourneyAnalytics.committedInteraction();
+        if (!isCelebrationInteractiveTarget(event.target)) {
+          goalJourneyAnalytics.celebrationTriggered(analyticsContext);
         }
-        {...interactionHandlers}
-        onClickCapture={(event) => {
-          interactionHandlers.onClickCapture(event);
-          goalJourneyAnalytics.committedInteraction();
-          if (!isCelebrationInteractiveTarget(event.target)) {
-            goalJourneyAnalytics.celebrationTriggered(
-              getGoalJourneyContext(state),
-            );
-          }
-        }}
+      }}
+    >
+      <div
+        className={
+          state.postHeight === "cta"
+            ? "sg-goal-ui flex h-full w-full items-center justify-center text-center"
+            : "sg-goal-ui h-full w-full"
+        }
       >
-        <div className="sg-goal-ui flex h-full w-full items-center justify-center text-center">
-          {viewPhase === "notifications" ? (
-            <NotificationSettingsPage
-              state={state}
-              authenticated={
-                notificationSettings.settings?.authenticated ?? false
-              }
-              enabled={notificationSettings.settings?.enabled ?? false}
-              loading={notificationSettings.loading}
-              submitting={notificationSettings.submitting}
-              error={notificationSettings.error}
-              onToggle={toggleNotifications}
-              onReturn={returnFromNotifications}
-              onVisitPromoSub={() => undefined}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center px-4 py-3">
-              <TinyActionLayout state={state} showCtaActivity>
-                {state.afterSubscribeAction.type === "disabled" ? null : (
-                  <AfterSubscribeButton
-                    action={state.afterSubscribeAction}
-                    analyticsContext={getGoalJourneyContext(state)}
-                    language={state.language}
-                    onNavigate={(target: string | NavigationTarget) =>
-                      navigateTo(target)
-                    }
-                    trackClicks={state.trackCtaClicks === true}
-                  />
-                )}
-              </TinyActionLayout>
-            </div>
-          )}
-          <TinyPromoLink
-            promoSubreddit={state.promoSubreddit}
-            language={state.language}
-            analyticsContext={getGoalJourneyContext(state)}
-            onNotificationsPressed={
-              viewPhase === "notifications" ? undefined : openNotifications
-            }
-          />
-        </div>
-        {celebrationBursts.map((burst) => (
-          <ConfettiBurst
-            key={burst.id}
-            pieceCount={burst.pieceCount}
-            reducedMotion={prefersReducedMotion}
-          />
-        ))}
+        {content}
+        <TinyPromoLink
+          promoSubreddit={state.promoSubreddit}
+          language={state.language}
+          analyticsContext={analyticsContext}
+          onNotificationsPressed={
+            viewPhase === "notifications" ? undefined : openNotifications
+          }
+        />
       </div>
+      {celebrationBursts.map((burst) => (
+        <ConfettiBurst
+          key={burst.id}
+          pieceCount={burst.pieceCount}
+          reducedMotion={prefersReducedMotion}
+        />
+      ))}
+    </div>
+  );
+
+  if (state.postHeight === "cta") {
+    const colorTheme =
+      viewPhase === "notifications" ||
+      state.afterSubscribeAction.type === "disabled"
+        ? state.colorTheme
+        : state.afterSubscribeAction.colorTheme;
+    return renderFrame(
+      colorTheme,
+      viewPhase === "notifications" ? (
+        notificationsPage
+      ) : (
+        <div className="flex h-full w-full items-center justify-center px-4 py-3">
+          <TinyActionLayout state={state} showCtaActivity>
+            {state.afterSubscribeAction.type === "disabled" ? null : (
+              <AfterSubscribeButton
+                action={state.afterSubscribeAction}
+                analyticsContext={analyticsContext}
+                language={state.language}
+                onNavigate={(target: string | NavigationTarget) =>
+                  navigateTo(target)
+                }
+                trackClicks={state.trackCtaClicks === true}
+              />
+            )}
+          </TinyActionLayout>
+        </div>
+      ),
     );
   }
 
@@ -209,7 +219,6 @@ export const SubscribeOnlyApp = () => {
     if (subscribeAttemptRef.current) return;
     subscribeAttemptRef.current = true;
     const activationId = recordStatisticsEvent("join_click");
-    const analyticsContext = getGoalJourneyContext(state);
     goalJourneyAnalytics.subscribeActivated(analyticsContext);
     if (!state.authenticated) {
       goalJourneyAnalytics.subscribeFailed(analyticsContext, "login_required");
@@ -270,87 +279,41 @@ export const SubscribeOnlyApp = () => {
       ? state.afterSubscribeAction.colorTheme
       : state.colorTheme;
 
-  return (
-    <div
-      className="sg-goal-frame relative h-[100px] w-full cursor-pointer overflow-hidden"
-      data-app-interaction-shell="true"
-      data-sg-theme={frameColorTheme}
-      {...interactionHandlers}
-      onClickCapture={(event) => {
-        interactionHandlers.onClickCapture(event);
-        goalJourneyAnalytics.committedInteraction();
-        if (!isCelebrationInteractiveTarget(event.target)) {
-          goalJourneyAnalytics.celebrationTriggered(
-            getGoalJourneyContext(state),
-          );
-        }
-      }}
-    >
-      <div className="sg-goal-ui h-full w-full">
-        <TinyViewTransition transitionKey={effectiveViewPhase}>
-          {effectiveViewPhase === "notifications" ? (
-            <NotificationSettingsPage
-              state={state}
-              authenticated={
-                notificationSettings.settings?.authenticated ?? false
-              }
-              enabled={notificationSettings.settings?.enabled ?? false}
-              loading={notificationSettings.loading}
-              submitting={notificationSettings.submitting}
-              error={notificationSettings.error}
-              onToggle={toggleNotifications}
-              onReturn={returnFromNotifications}
-              onVisitPromoSub={() => undefined}
-            />
-          ) : effectiveViewPhase === "confirmation" ? (
-            <TinySubscriptionConfirmation
-              language={state.language}
-              subredditName={state.subreddit.name}
-            />
-          ) : effectiveViewPhase === "subscribed" ? (
-            <ThanksPage
-              state={state}
-              onReturn={() => undefined}
-              onVisitPromoSub={() => undefined}
-              onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-                navigateTo(target)
-              }
-              notificationOptInEnabled={NOTIFICATION_SETTINGS_ENTRY_ENABLED}
-            />
-          ) : (
-            <SubGoalPage
-              state={state}
-              onVisitPromoSub={() => undefined}
-              shareUsername={false}
-              onShareUsernameChange={() => undefined}
-              onSubscribe={handleSubscribe}
-              isSubmitting={submitting}
-              notice={null}
-              onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
-                navigateTo(target)
-              }
-              onNotifications={openNotifications}
-            />
-          )}
-        </TinyViewTransition>
-        <TinyPromoLink
-          promoSubreddit={state.promoSubreddit}
+  return renderFrame(
+    frameColorTheme,
+    <TinyViewTransition transitionKey={effectiveViewPhase}>
+      {effectiveViewPhase === "notifications" ? (
+        notificationsPage
+      ) : effectiveViewPhase === "confirmation" ? (
+        <TinySubscriptionConfirmation
           language={state.language}
-          analyticsContext={getGoalJourneyContext(state)}
-          onNotificationsPressed={
-            effectiveViewPhase === "notifications"
-              ? undefined
-              : openNotifications
+          subredditName={state.subreddit.name}
+        />
+      ) : effectiveViewPhase === "subscribed" ? (
+        <ThanksPage
+          state={state}
+          onReturn={() => undefined}
+          onVisitPromoSub={() => undefined}
+          onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+            navigateTo(target)
           }
+          notificationOptInEnabled={NOTIFICATION_SETTINGS_ENTRY_ENABLED}
         />
-      </div>
-      {celebrationBursts.map((burst) => (
-        <ConfettiBurst
-          key={burst.id}
-          pieceCount={burst.pieceCount}
-          reducedMotion={prefersReducedMotion}
+      ) : (
+        <SubGoalPage
+          state={state}
+          onVisitPromoSub={() => undefined}
+          shareUsername={false}
+          onShareUsernameChange={() => undefined}
+          onSubscribe={handleSubscribe}
+          isSubmitting={submitting}
+          notice={null}
+          onAfterSubscribeNavigate={(target: string | NavigationTarget) =>
+            navigateTo(target)
+          }
+          onNotifications={openNotifications}
         />
-      ))}
-    </div>
+      )}
+    </TinyViewTransition>,
   );
 };

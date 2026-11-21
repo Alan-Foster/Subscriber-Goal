@@ -203,6 +203,31 @@ export async function requestJsonWithRetry<T>(
   let attempt = 0;
   let lastErrorResponse: ErrorResponse | undefined;
 
+  const waitThenRetry = async (
+    remainingMs: number,
+    details: Pick<
+      Extract<RetryEvent, { event: "retry_wait" }>,
+      "reason" | "status" | "error"
+    >,
+    waitMs = Math.min(withJitter(nextDelay), remainingMs),
+  ): Promise<"continue" | JsonRequestResult<never>> => {
+    emit({ event: "retry_wait", attempt, waitMs, remainingMs, ...details });
+    try {
+      await sleep(waitMs, abortSignal);
+    } catch {
+      // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
+      emit({
+        event: "terminal",
+        attempt,
+        remainingMs: timeLeft(),
+        reason: "aborted",
+      });
+      return { data: null, error: null, aborted: true };
+    }
+    nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+    return "continue";
+  };
+
   while (true) {
     attempt += 1;
     emit({ event: "attempt", attempt, remainingMs: timeLeft() });
@@ -287,29 +312,12 @@ export async function requestJsonWithRetry<T>(
           });
           return { data: null, error: invalidResponseMessage, aborted: false };
         }
-        const wait = Math.min(withJitter(nextDelay), remaining);
-        emit({
-          event: "retry_wait",
-          attempt,
-          waitMs: wait,
-          remainingMs: remaining,
+        const retry = await waitThenRetry(remaining, {
           reason: "protocol_error",
           status: res.status,
           error: invalidResponseMessage,
         });
-        try {
-          await sleep(wait, abortSignal);
-        } catch {
-          // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
-          emit({
-            event: "terminal",
-            attempt,
-            remainingMs: timeLeft(),
-            reason: "aborted",
-          });
-          return { data: null, error: null, aborted: true };
-        }
-        nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+        if (retry !== "continue") return retry;
         continue;
       }
 
@@ -332,31 +340,14 @@ export async function requestJsonWithRetry<T>(
       const errMsg = errorMessageFromPayload(payload, res.status);
       lastErrorResponse = errorResponseFromPayload(payload);
 
-      if (!isRetryableHttpStatus(res.status)) {
-        emit({
-          event: "terminal",
-          attempt,
-          remainingMs: timeLeft(),
-          reason: "non_retryable_status",
-          status: res.status,
-          error: errMsg,
-        });
-        return {
-          data: null,
-          error: errMsg,
-          ...(lastErrorResponse ? { errorResponse: lastErrorResponse } : {}),
-          aborted: false,
-          status: res.status,
-        };
-      }
-
+      const retryable = isRetryableHttpStatus(res.status);
       const remaining = timeLeft();
-      if (remaining <= 0) {
+      if (!retryable || remaining <= 0) {
         emit({
           event: "terminal",
           attempt,
-          remainingMs: 0,
-          reason: "exhausted_budget",
+          remainingMs: remaining,
+          reason: retryable ? "exhausted_budget" : "non_retryable_status",
           status: res.status,
           error: errMsg,
         });
@@ -369,30 +360,12 @@ export async function requestJsonWithRetry<T>(
         };
       }
 
-      const wait = Math.min(withJitter(nextDelay), remaining);
-      emit({
-        event: "retry_wait",
-        attempt,
-        waitMs: wait,
-        remainingMs: remaining,
+      const retry = await waitThenRetry(remaining, {
         reason: "http_retryable",
         status: res.status,
         error: errMsg,
       });
-      try {
-        await sleep(wait, abortSignal);
-      } catch {
-        // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
-        emit({
-          event: "terminal",
-          attempt,
-          remainingMs: timeLeft(),
-          reason: "aborted",
-        });
-        return { data: null, error: null, aborted: true };
-      }
-
-      nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+      if (retry !== "continue") return retry;
     } catch (error) {
       if (didAttemptTimeout) {
         logDiagnostic(
@@ -413,28 +386,11 @@ export async function requestJsonWithRetry<T>(
           return { data: null, error: requestTimeoutMessage, aborted: false };
         }
 
-        const wait = Math.min(withJitter(nextDelay), remaining);
-        emit({
-          event: "retry_wait",
-          attempt,
-          waitMs: wait,
-          remainingMs: remaining,
+        const retry = await waitThenRetry(remaining, {
           reason: "timeout",
           error: requestTimeoutMessage,
         });
-        try {
-          await sleep(wait, abortSignal);
-        } catch {
-          // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
-          emit({
-            event: "terminal",
-            attempt,
-            remainingMs: timeLeft(),
-            reason: "aborted",
-          });
-          return { data: null, error: null, aborted: true };
-        }
-        nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+        if (retry !== "continue") return retry;
         continue;
       }
 
@@ -485,28 +441,15 @@ export async function requestJsonWithRetry<T>(
         return { data: null, error: message, aborted: false };
       }
 
-      emit({
-        event: "retry_wait",
-        attempt,
-        waitMs: wait,
-        remainingMs: remaining,
-        reason: "network_error",
-        error: message,
-      });
-      try {
-        await sleep(wait, abortSignal);
-      } catch {
-        // diagnostic-allow-silent: an abort during retry sleep is expected cancellation.
-        emit({
-          event: "terminal",
-          attempt,
-          remainingMs: timeLeft(),
-          reason: "aborted",
-        });
-        return { data: null, error: null, aborted: true };
-      }
-
-      nextDelay = Math.min(nextDelay * delayMultiplier, maxDelayMs);
+      const retry = await waitThenRetry(
+        remaining,
+        {
+          reason: "network_error",
+          error: message,
+        },
+        wait,
+      );
+      if (retry !== "continue") return retry;
     } finally {
       window.clearTimeout(timeoutId);
       abortSignal?.removeEventListener("abort", onExternalAbort);

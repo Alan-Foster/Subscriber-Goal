@@ -1,3 +1,12 @@
+export const confettiColors = [
+  "#ff4500",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#a855f7",
+  "#f472b6",
+];
+
 export const confettiPresets = {
   default: {
     pieceCount: 70,
