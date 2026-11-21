@@ -52,7 +52,7 @@ import {
 } from "./appRepair";
 import { communityGoalMutationLockKey } from "./communityGoalMutation";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
-import { watchTestHash } from "../utils/testHashWatch";
+import { watchTestHash, watchTestString } from "../utils/testHashWatch";
 
 class TestRedis {
   values = new Map<string, string>();
@@ -88,8 +88,10 @@ class TestRedis {
     const hash = this.hashes.get(key);
     return fields.map((field) => hash?.get(field));
   }
-  watch(key: string) {
-    return watchTestHash(this, key);
+  async watch(key: string) {
+    return (await this.get(key)) === undefined
+      ? watchTestHash(this, key)
+      : watchTestString(this, key);
   }
 }
 

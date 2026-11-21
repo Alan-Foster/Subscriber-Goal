@@ -1,3 +1,4 @@
+import { watchTestString } from '../utils/testHashWatch';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   crosspostDeletionDueKey,
@@ -128,15 +129,18 @@ class InMemoryRedis {
     }
   }
 
-  async watch(..._keys: string[]): Promise<{
-    multi(): Promise<void>;
-    set(key: string, value: string, options?: SetOptions): Promise<string>;
-    hSet(key: string, fields: Record<string, string>): Promise<void>;
-    hDel(key: string, fields: string[]): Promise<void>;
-    zRem(key: string, members: string[]): Promise<void>;
-    exec(): Promise<string>;
-  }> {
-    return {
+  async watch(...keys: string[]) {
+    if (keys.length === 1 && (await this.get(keys[0])) !== undefined) {
+      return watchTestString(this, keys[0]);
+    }
+    const transaction: {
+      multi(): Promise<void>;
+      set(key: string, value: string, options?: SetOptions): Promise<string>;
+      hSet(key: string, fields: Record<string, string>): Promise<void>;
+      hDel(key: string, fields: string[]): Promise<void>;
+      zRem(key: string, members: string[]): Promise<void>;
+      exec(): Promise<string>;
+    } = {
       multi: async (): Promise<void> => {
         return;
       },
@@ -156,6 +160,7 @@ class InMemoryRedis {
         return 'OK';
       },
     };
+    return transaction;
   }
 }
 

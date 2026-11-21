@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { describe, expect, it, vi } from "vitest";
 import {
   postAfterSubscribeActionSuffix,
@@ -20,6 +21,10 @@ import {
 type ZEntry = { member: string; score: number };
 
 class TestRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   hashes = new Map<string, Map<string, string>>();
   sortedSets = new Map<string, Map<string, number>>();
   strings = new Map<string, string>();

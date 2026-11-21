@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { describe, expect, it, vi } from "vitest";
 import {
   dispatchConfirmedSourceDeletion,
@@ -13,6 +14,10 @@ import {
 } from "../data/sourcePostDeletion";
 
 class TestRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
   sorted = new Map<string, Map<string, number>>();

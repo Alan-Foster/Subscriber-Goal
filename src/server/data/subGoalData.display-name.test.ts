@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { watchTestString } from "../utils/testHashWatch";
 import {
   addRecentSubscriberPostIndex,
   autoCreateNextGoalQueueKey,
@@ -48,6 +49,32 @@ import { subscriberGoalPostRegistryKey } from "./subscriberGoalPostRegistry";
 type ZEntry = { member: string; score: number };
 
 class InMemoryRedis {
+  async watch(...keys: string[]) {
+    if (keys.length === 1) return watchTestString(this, keys[0]);
+
+    const snapshot = () =>
+      JSON.stringify(keys.map((key) => [...(this.hashes.get(key) ?? [])]));
+    const before = snapshot();
+    const commands: Array<() => Promise<unknown>> = [];
+    return {
+      multi: async () => undefined,
+      discard: async () => undefined,
+      unwatch: async () => undefined,
+      hSet: async (key: string, fields: Record<string, string>) => {
+        commands.push(() => this.hSet(key, fields));
+      },
+      hDel: async (key: string, fields: string[]) => {
+        commands.push(() => this.hDel(key, fields));
+      },
+      exec: async () => {
+        if (snapshot() !== before) return [];
+        const results = [];
+        for (const command of commands) results.push(await command());
+        return results;
+      },
+    };
+  }
+
   private hashes = new Map<string, Map<string, string>>();
   private sortedSets = new Map<string, Map<string, number>>();
   private strings = new Map<string, string>();

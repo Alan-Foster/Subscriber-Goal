@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { watchTestString } from "../utils/testHashWatch";
 import {
   backfillSubscriberGoalPostFlair,
   ensureSubscriberGoalPostFlair,
@@ -6,13 +7,14 @@ import {
 
 function flairRedis() {
   const values = new Map<string, string>();
-  return {
+  const redis = {
     set: async (key: string, value: string) => {
       if (!values.has(key)) values.set(key, value);
     },
     get: async (key: string) => values.get(key),
     del: async (key: string) => values.delete(key),
   };
+  return { ...redis, watch: (key: string) => watchTestString(redis, key) };
 }
 
 describe("Subscriber Goal post flair", () => {

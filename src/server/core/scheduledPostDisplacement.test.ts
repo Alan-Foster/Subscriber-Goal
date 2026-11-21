@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import type { ModAction } from "@devvit/reddit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -34,6 +35,15 @@ function logEntry(
 function fixture(entries = [logEntry(0)]) {
   const checks = new Map<string, string>([[postId, String(unpinnedAt)]]);
   const values = new Map<string, string>();
+  const watchDisplacement = vi.fn(async (_key: string) => ({
+    unwatch: vi.fn(),
+    multi: vi.fn(),
+    discard: vi.fn(),
+    hDel: vi.fn(async (_key: string, fields: string[]) => {
+      for (const field of fields) checks.delete(field);
+    }),
+    exec: vi.fn().mockResolvedValue([1]),
+  }));
   const redis = {
     get: vi.fn(async (key: string) => values.get(key)),
     set: vi.fn(async (key: string, value: string) => {
@@ -44,15 +54,8 @@ function fixture(entries = [logEntry(0)]) {
     }),
     hGetAll: vi.fn(async () => Object.fromEntries(checks)),
     hGet: vi.fn(async (_key: string, id: string) => checks.get(id)),
-    watch: vi.fn(async () => ({
-      unwatch: vi.fn(),
-      multi: vi.fn(),
-      discard: vi.fn(),
-      hDel: vi.fn(async (_key: string, fields: string[]) => {
-        for (const field of fields) checks.delete(field);
-      }),
-      exec: vi.fn().mockResolvedValue([1]),
-    })),
+    watch: async (key: string) =>
+      values.has(key) ? watchTestString(redis, key) : watchDisplacement(key),
   };
   const keep = [{ postId: "t3_sticky" }, { postId: "t3_announcement" }];
   const highlights = [...keep];
@@ -93,6 +96,7 @@ function fixture(entries = [logEntry(0)]) {
     checks,
     values,
     redis,
+    watchDisplacement,
     reddit,
     getLog,
     post,
@@ -207,14 +211,14 @@ describe("scheduled post displacement", () => {
   });
 
   it("keeps a check on log read failure and drops it an hour after it was due", async () => {
-    const { run, getLog, post, checks, redis } = fixture();
+    const { run, getLog, post, checks, watchDisplacement } = fixture();
     getLog.mockRejectedValue(new Error("moderation log unavailable"));
     await run(15);
     await run(74);
     expect(checks.has(postId)).toBe(true);
     await run(75);
     expect(checks.has(postId)).toBe(false);
-    expect(redis.watch).toHaveBeenCalledExactlyOnceWith(
+    expect(watchDisplacement).toHaveBeenCalledExactlyOnceWith(
       scheduledPostDisplacementKey,
     );
     expect(getLog).toHaveBeenCalledTimes(2);
