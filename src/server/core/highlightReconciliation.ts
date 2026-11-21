@@ -187,6 +187,13 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   return result;
 }
 
+type HighlightInventory = Omit<
+  OnboardingHighlightEnsuranceResult,
+  "status" | "protectedHighlightsPreserved"
+> & {
+  protectedHighlightsPreserved: LinkId[];
+};
+
 async function reconcileLiveSubscriberGoalHighlights({
   reddit,
   redis,
@@ -210,75 +217,17 @@ async function reconcileLiveSubscriberGoalHighlights({
   diagnostics: OnboardingDetectionDiagnostics;
   pauseSuccessorMapping: boolean;
 }): Promise<OnboardingHighlightEnsuranceResult> {
-  {
-    let subscriberCount: number | undefined;
-    for (const candidate of candidates) {
-      if (
-        candidate.classification === "tiny" ||
-        candidate.classification === "cta"
-      ) {
-        continue;
-      }
-      const goalData = await getSubGoalData(
-        redis,
-        candidate.postId,
-        candidate.post.postData ?? candidate.post.customPostData,
-      );
-      if (goalData.goal <= 0) continue;
-      candidate.goal = goalData.goal;
-      candidate.completedTime = goalData.completedTime;
-      candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
-      candidate.autoCreateNextGoalConfigured =
-        goalData.autoCreateNextGoalConfigured;
-      if (!candidate.completedTime && subscriberCount === undefined) {
-        subscriberCount = (await reddit.getCurrentSubreddit())
-          .numberOfSubscribers;
-      }
-      if (
-        !candidate.completedTime &&
-        subscriberCount !== undefined &&
-        subscriberCount >= candidate.goal
-      ) {
-        candidate.completedTime = await checkCompletionStatus(
-          reddit,
-          redis,
-          candidate.postId,
-          {
-            now: () => nowMs,
-            scheduleAutomaticSuccessor: false,
-            automaticSuccessorSuppression: "onboarding_reconciliation",
-            mutationLease,
-          },
-        );
-      }
-    }
-  }
-  const highlighted = candidates.filter((candidate) => candidate.isHighlighted);
-  const highlightedClassic = highlighted.filter(
-    (candidate) =>
-      candidate.classification === "classic" &&
-      candidate.classificationConfidence !== "ambiguous",
+  await refreshCandidateCompletion(
+    reddit,
+    redis,
+    candidates,
+    nowMs,
+    mutationLease,
   );
-  const protectedHighlighted = highlighted.filter(
-    (candidate) =>
-      candidate.classification === "tiny" || candidate.classification === "cta",
+  const { base, highlighted, highlightedClassic } = buildHighlightInventory(
+    candidates,
+    diagnostics,
   );
-  const ambiguousHighlighted = highlighted.filter(
-    (candidate) => candidate.classification === "ambiguous",
-  );
-  const base = {
-    ...diagnostics,
-    candidateCount: candidates.length,
-    highlightedClassicCount: highlightedClassic.length,
-    highlightedProtectedCount: protectedHighlighted.length,
-    highlightedAmbiguousCount: ambiguousHighlighted.length,
-    classicPostsUnhighlighted: [] as string[],
-    protectedHighlightsPreserved: protectedHighlighted.map(
-      (candidate) => candidate.postId,
-    ),
-    eligiblePostIds: [] as string[],
-    unhighlightedEligiblePostIds: [] as string[],
-  };
   if (candidates.length === 0) {
     await clearActiveHighlightFailureIncident(redis);
     logHighlightEnsurance("missing", base, reconciliationContext);
@@ -303,49 +252,13 @@ async function reconcileLiveSubscriberGoalHighlights({
       removableManagedPostIds: selection.removableManagedPostIds,
       celebrationEndsAt: selection.celebrationEndsAt,
     });
-    const removed =
-      highlighted.highlightResult.removedManagedHighlightIds.filter(
-        (postId) =>
-          !highlighted.highlightResult.preservedHighlightIds.includes(postId),
-      );
-    base.classicPostsUnhighlighted.push(
-      ...highlightedClassic
-        .filter(({ postId }) => removed.includes(postId))
-        .map(({ postId }) => postId),
+    result = summarizeSelectedHighlight(
+      base,
+      selection,
+      selection.selected,
+      highlightedClassic,
+      highlighted,
     );
-    base.protectedHighlightsPreserved =
-      base.protectedHighlightsPreserved.filter(
-        (postId) => !removed.includes(postId),
-      );
-    if (!highlighted.highlightResult.verifiedHighlighted) {
-      base.unhighlightedEligiblePostIds.push(selection.selected.postId);
-    }
-    const details = {
-      ...reconciliationDetails(highlighted.highlightResult),
-      notificationOutcome: highlighted.notificationOutcome,
-      highlightSelectedPostId: selection.selected.postId,
-      managedHighlightsRemoved: removed,
-    };
-    result =
-      selection.latestCompleted && selection.eligiblePostIds.length === 0
-        ? {
-            ...completedHighlightInventory(
-              base,
-              selection.latestCompleted,
-              selection.completedGoals,
-            ),
-            ...details,
-          }
-        : {
-            ...base,
-            ...highlightCandidateDetails(selection.selected),
-            status:
-              highlighted.highlightResult.status === "highlighted"
-                ? "existing"
-                : "existing_not_highlighted",
-            ...deferredCompletedHighlightInventory(selection),
-            ...details,
-          };
   } else if (selection.latestCompleted) {
     result = completedHighlightInventory(
       base,
@@ -353,29 +266,177 @@ async function reconcileLiveSubscriberGoalHighlights({
       selection.completedGoals,
     );
   } else {
-    const repairState =
-      reconciliationContext === "repair"
-        ? await redis.hGetAll(appRepairStateKey)
-        : {};
-    const selected =
-      candidates.find(({ postId }) => postId === repairState.targetPostId) ??
-      newestGoalCandidate(highlighted.length ? highlighted : candidates);
-    await clearActiveHighlightFailureIncident(redis);
-    result = {
-      ...base,
-      ...highlightCandidateDetails(selected),
-      status: selected.isHighlighted ? "existing" : "existing_not_highlighted",
-      ...(selected.isHighlighted
-        ? {
-            verificationResult: "highlighted",
-            reconciliationOutcome: "complete",
-          }
-        : {}),
-      notificationOutcome: "not_requested",
-    };
+    result = await summarizeUnselectedHighlight(
+      redis,
+      reconciliationContext,
+      candidates,
+      highlighted,
+      base,
+    );
   }
   logHighlightEnsurance(result.status, result, reconciliationContext);
   return result;
+}
+
+function buildHighlightInventory(
+  candidates: OnboardingGoalCandidate[],
+  diagnostics: OnboardingDetectionDiagnostics,
+) {
+  const highlighted = candidates.filter((candidate) => candidate.isHighlighted);
+  const highlightedClassic = highlighted.filter(
+    (candidate) =>
+      candidate.classification === "classic" &&
+      candidate.classificationConfidence !== "ambiguous",
+  );
+  const protectedHighlighted = highlighted.filter(
+    (candidate) =>
+      candidate.classification === "tiny" || candidate.classification === "cta",
+  );
+  const ambiguousHighlighted = highlighted.filter(
+    (candidate) => candidate.classification === "ambiguous",
+  );
+  const base: HighlightInventory = {
+    ...diagnostics,
+    candidateCount: candidates.length,
+    highlightedClassicCount: highlightedClassic.length,
+    highlightedProtectedCount: protectedHighlighted.length,
+    highlightedAmbiguousCount: ambiguousHighlighted.length,
+    classicPostsUnhighlighted: [] as string[],
+    protectedHighlightsPreserved: protectedHighlighted.map(
+      (candidate) => candidate.postId,
+    ),
+    eligiblePostIds: [] as string[],
+    unhighlightedEligiblePostIds: [] as string[],
+  };
+  return { base, highlighted, highlightedClassic };
+}
+
+async function summarizeUnselectedHighlight(
+  redis: RedisClient,
+  reconciliationContext: HighlightReconciliationContext,
+  candidates: OnboardingGoalCandidate[],
+  highlighted: OnboardingGoalCandidate[],
+  base: HighlightInventory,
+): Promise<OnboardingHighlightEnsuranceResult> {
+  const repairState =
+    reconciliationContext === "repair"
+      ? await redis.hGetAll(appRepairStateKey)
+      : {};
+  const selected =
+    candidates.find(({ postId }) => postId === repairState.targetPostId) ??
+    newestGoalCandidate(highlighted.length ? highlighted : candidates);
+  await clearActiveHighlightFailureIncident(redis);
+  return {
+    ...base,
+    ...highlightCandidateDetails(selected),
+    status: selected.isHighlighted ? "existing" : "existing_not_highlighted",
+    ...(selected.isHighlighted
+      ? {
+          verificationResult: "highlighted",
+          reconciliationOutcome: "complete",
+        }
+      : {}),
+    notificationOutcome: "not_requested",
+  };
+}
+
+async function refreshCandidateCompletion(
+  reddit: RedditClient,
+  redis: RedisClient,
+  candidates: OnboardingGoalCandidate[],
+  nowMs: number,
+  mutationLease: CommunityGoalMutationLease,
+): Promise<void> {
+  let subscriberCount: number | undefined;
+  for (const candidate of candidates) {
+    if (
+      candidate.classification === "tiny" ||
+      candidate.classification === "cta"
+    ) {
+      continue;
+    }
+    const goalData = await getSubGoalData(
+      redis,
+      candidate.postId,
+      candidate.post.postData ?? candidate.post.customPostData,
+    );
+    if (goalData.goal <= 0) continue;
+    candidate.goal = goalData.goal;
+    candidate.completedTime = goalData.completedTime;
+    candidate.autoCreateNextGoal = goalData.autoCreateNextGoal;
+    candidate.autoCreateNextGoalConfigured =
+      goalData.autoCreateNextGoalConfigured;
+    if (!candidate.completedTime && subscriberCount === undefined) {
+      subscriberCount = (await reddit.getCurrentSubreddit())
+        .numberOfSubscribers;
+    }
+    if (
+      !candidate.completedTime &&
+      subscriberCount !== undefined &&
+      subscriberCount >= candidate.goal
+    ) {
+      candidate.completedTime = await checkCompletionStatus(
+        reddit,
+        redis,
+        candidate.postId,
+        {
+          now: () => nowMs,
+          scheduleAutomaticSuccessor: false,
+          automaticSuccessorSuppression: "onboarding_reconciliation",
+          mutationLease,
+        },
+      );
+    }
+  }
+}
+
+function summarizeSelectedHighlight(
+  base: HighlightInventory,
+  selection: Awaited<ReturnType<typeof selectManagedGoalHighlight>>,
+  selected: OnboardingGoalCandidate,
+  highlightedClassic: OnboardingGoalCandidate[],
+  highlighted: Awaited<ReturnType<typeof reconcileSelectedManagedGoal>>,
+): OnboardingHighlightEnsuranceResult {
+  const removed = highlighted.highlightResult.removedManagedHighlightIds.filter(
+    (postId) =>
+      !highlighted.highlightResult.preservedHighlightIds.includes(postId),
+  );
+  base.classicPostsUnhighlighted.push(
+    ...highlightedClassic
+      .filter(({ postId }) => removed.includes(postId))
+      .map(({ postId }) => postId),
+  );
+  base.protectedHighlightsPreserved = base.protectedHighlightsPreserved.filter(
+    (postId) => !removed.includes(postId),
+  );
+  if (!highlighted.highlightResult.verifiedHighlighted) {
+    base.unhighlightedEligiblePostIds.push(selected.postId);
+  }
+  const details = {
+    ...reconciliationDetails(highlighted.highlightResult),
+    notificationOutcome: highlighted.notificationOutcome,
+    highlightSelectedPostId: selected.postId,
+    managedHighlightsRemoved: removed,
+  };
+  return selection.latestCompleted && selection.eligiblePostIds.length === 0
+    ? {
+        ...completedHighlightInventory(
+          base,
+          selection.latestCompleted,
+          selection.completedGoals,
+        ),
+        ...details,
+      }
+    : {
+        ...base,
+        ...highlightCandidateDetails(selected),
+        status:
+          highlighted.highlightResult.status === "highlighted"
+            ? "existing"
+            : "existing_not_highlighted",
+        ...deferredCompletedHighlightInventory(selection),
+        ...details,
+      };
 }
 
 async function mapCompletedGoalsToActiveClassic(

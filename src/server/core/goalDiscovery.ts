@@ -210,8 +210,68 @@ export async function findValidSubscriberGoals(
   const candidates: OnboardingGoalCandidate[] = [];
   const removedActiveGoals: OnboardingGoalCandidate[] = [];
   const seen = new Set<string>();
+  const inspect = createGoalInspector({
+    redis,
+    subreddit,
+    username: appUser.username,
+    highlightedPostIds,
+    candidates,
+    removedActiveGoals,
+    seen,
+    diagnostics,
+    nowMs,
+  });
+
+  const knownSources: [OnboardingExistingSource, string[]][] = [
+    ["registered", registered],
+    ["tracked", tracked],
+    ["queued", queued],
+    ["persisted", persisted],
+  ];
+  const discovery = { reddit, redis, nowMs, diagnostics, seen, inspect };
+  await inspectKnownGoalPosts(discovery, knownSources);
+  await inspectHighlightedGoalPosts(discovery, highlightedPosts);
+  if (includeRecovery)
+    await searchForGoalPosts(discovery, subreddit.name, appUser.username);
+  return { ...diagnostics, candidates, removedActiveGoals };
+}
+
+type DiscoveryPass = {
+  reddit: RedditClient;
+  redis: RedisClient;
+  nowMs: number;
+  diagnostics: OnboardingDetectionDiagnostics;
+  seen: Set<string>;
+  inspect: (
+    post: CandidatePost,
+    source: OnboardingExistingSource,
+    pruneInvalid: boolean,
+  ) => Promise<void>;
+};
+
+function createGoalInspector({
+  redis,
+  subreddit,
+  username,
+  highlightedPostIds,
+  candidates,
+  removedActiveGoals,
+  seen,
+  diagnostics,
+  nowMs,
+}: {
+  redis: RedisClient;
+  subreddit: Awaited<ReturnType<RedditClient["getCurrentSubreddit"]>>;
+  username: string;
+  highlightedPostIds: ReadonlySet<string>;
+  candidates: OnboardingGoalCandidate[];
+  removedActiveGoals: OnboardingGoalCandidate[];
+  seen: Set<string>;
+  diagnostics: OnboardingDetectionDiagnostics;
+  nowMs: number;
+}): DiscoveryPass["inspect"] {
   let discoveryOrder = 0;
-  const inspect = async (
+  return async (
     post: CandidatePost,
     source: OnboardingExistingSource,
     pruneInvalid: boolean,
@@ -225,7 +285,7 @@ export async function findValidSubscriberGoals(
       redis,
       post,
       subreddit,
-      appUser.username,
+      username,
     );
     if (availability.status === "temporarily_removed") {
       // Historical removals must not block unrelated work. Only an unfinished
@@ -282,13 +342,12 @@ export async function findValidSubscriberGoals(
       discoveryOrder: discoveryOrder++,
     });
   };
+}
 
-  const knownSources: [OnboardingExistingSource, string[]][] = [
-    ["registered", registered],
-    ["tracked", tracked],
-    ["queued", queued],
-    ["persisted", persisted],
-  ];
+async function inspectKnownGoalPosts(
+  { reddit, redis, nowMs, diagnostics, seen, inspect }: DiscoveryPass,
+  knownSources: [OnboardingExistingSource, string[]][],
+): Promise<void> {
   for (const [source, postIds] of knownSources) {
     for (const postId of postIds) {
       if (seen.has(postId) || !isLinkId(postId)) continue;
@@ -320,7 +379,18 @@ export async function findValidSubscriberGoals(
       }
     }
   }
+}
 
+async function inspectHighlightedGoalPosts(
+  { reddit, redis, nowMs, diagnostics, seen, inspect }: DiscoveryPass,
+  highlightedPosts: Awaited<
+    ReturnType<
+      Awaited<
+        ReturnType<RedditClient["getCurrentSubreddit"]>
+      >["getHighlightedPosts"]
+    >
+  >,
+): Promise<void> {
   for (const { postId } of highlightedPosts) {
     if (seen.has(postId)) continue;
     try {
@@ -345,23 +415,25 @@ export async function findValidSubscriberGoals(
       }
     }
   }
+}
 
-  if (includeRecovery) {
-    const searchedPosts = (await reddit
-      .searchPosts({
-        query: `author:${appUser.username}`,
-        subredditName: subreddit.name,
-        sort: "new",
-        timeframe: "all",
-        limit: onboardingAuthorSearchLimit,
-        pageSize: onboardingAuthorSearchLimit,
-      })
-      .all()) as CandidatePost[];
-    diagnostics.searchInspected = searchedPosts.length;
-    for (const post of searchedPosts) await inspect(post, "search", false);
-  }
-
-  return { ...diagnostics, candidates, removedActiveGoals };
+async function searchForGoalPosts(
+  { reddit, diagnostics, inspect }: DiscoveryPass,
+  subredditName: string,
+  username: string,
+): Promise<void> {
+  const searchedPosts = (await reddit
+    .searchPosts({
+      query: `author:${username}`,
+      subredditName,
+      sort: "new",
+      timeframe: "all",
+      limit: onboardingAuthorSearchLimit,
+      pageSize: onboardingAuthorSearchLimit,
+    })
+    .all()) as CandidatePost[];
+  diagnostics.searchInspected = searchedPosts.length;
+  for (const post of searchedPosts) await inspect(post, "search", false);
 }
 
 async function getGoalCandidateMetadata(
@@ -384,10 +456,26 @@ async function getGoalCandidateMetadata(
   );
   const inlineKind =
     typeof inline?.postKind === "string" ? inline.postKind : undefined;
-  const postKind = inlineKind ?? persistedKind;
   const inlineHeight = inline?.postHeight ?? post.postHeight;
   const explicitHeight =
     typeof inlineHeight === "string" ? inlineHeight : undefined;
+  return classifyGoalCandidate(
+    post.id,
+    inlineKind,
+    persistedKind,
+    explicitHeight,
+    persistedHeight,
+  );
+}
+
+function classifyGoalCandidate(
+  postId: CandidatePost["id"],
+  inlineKind: string | undefined,
+  persistedKind: string | null | undefined,
+  explicitHeight: string | undefined,
+  persistedHeight: string | null | undefined,
+) {
+  const postKind = inlineKind ?? persistedKind;
   const postHeight = explicitHeight ?? persistedHeight;
   let classification: OnboardingGoalClassification = "ambiguous";
   let classificationConfidence: GoalClassificationConfidence = "ambiguous";
@@ -421,7 +509,7 @@ async function getGoalCandidateMetadata(
     logDiagnostic("warn", "subscriber_goal_metadata_conflict_preserved", {
       workflow: "onboarding_highlight_ensurance",
       phase: "classification",
-      postId: post.id ?? "unknown",
+      postId: postId ?? "unknown",
       inlineKind: inlineKind ?? "none",
       persistedKind: persistedKind ?? "none",
       inlineHeight: explicitHeight ?? "none",
