@@ -1,75 +1,18 @@
 import { AutomaticGoalPrerequisiteError } from "./automaticGoalRetry";
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
-import type { SubGoalColorTheme } from "../../shared/subGoalColorTheme";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
-import type { SubGoalPostHeight } from "../../shared/subGoalPostHeight";
-import { applyGoalPostFrameStyle, createGoalPost } from "./post";
-import {
-  cancelAllAutoCreateNextGoals,
-  cancelAutoCreateNextGoal,
-  autoCreateNextGoalSuccessorsKey,
-  postHeightSuffix,
-  postKindSuffix,
-  postCompletedTimeSuffix,
-  registerNewCtaOnlyPost,
-  registerNewSubGoalPost,
-  registerNewSubscribeOnlyPost,
-  setSubredditDisplayNameForPost,
-  subscriberGoalsKey,
-  type CrosspostDispatchResult,
-} from "../data/subGoalData";
-import { setSavedSubredditDisplayName } from "../data/subredditDisplayNameData";
-import {
-  getQueuedUpdates,
-  getTrackedPosts,
-  queueUpdate,
-} from "../data/updaterData";
+import type { CrosspostDispatchResult } from "../data/subGoalData";
 import { isLinkId } from "../types";
-import {
-  createFailedHighlightResult,
-  isCapacityOnlyHighlightFailure,
-  highlightAndVerifyPost,
-  highlightVerificationIntervalMs,
-  highlightVerificationMaxWaitMs,
-  type HighlightResult,
-  type HighlightVerificationOptions,
-} from "../utils/communityHighlights";
-import {
-  ctaOnlyTextFallbackMaker,
-  subscribeOnlyTextFallbackMaker,
-  textFallbackMaker,
-} from "../utils/textFallback";
-import { toErrorMessage } from "../utils/crosspostLogs";
+import type { HighlightResult } from "../utils/communityHighlights";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
-import {
-  defaultAfterSubscribeAction,
-  type AfterSubscribeAction,
-  type AfterSubscribePreset,
-} from "../../shared/afterSubscribeAction";
-import {
-  isSubredditBlacklisted,
-  ProhibitedSubredditError,
-} from "../utils/subredditBlacklist";
-import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
-import { ensureSubscriberGoalPostFlair } from "./subscriberGoalPostFlair";
-import { checkAppAccountHealth } from "./appAccountHealth";
+import { ProhibitedSubredditError } from "../utils/subredditBlacklist";
 import {
   CommunityGoalMutationInProgressError,
   withCommunityGoalMutationLease,
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
-import {
-  getCanonicalGoalPointer,
-  saveCanonicalGoalPointer,
-  type HighlightReconciliationContext,
-} from "../data/highlightManagement";
-import {
-  recurringHighlightRepairIntervalMs,
-  scheduleHighlightRepair,
-} from "../data/highlightRepair";
-import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
 import {
   isSubscriberGoalPostRetired,
   retireSubscriberGoalPost,
@@ -81,65 +24,29 @@ import {
 } from "../utils/postStatus";
 import { getCurrentActorAuthority } from "../utils/actorAuthorization";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
-
-type CreateSubscriberGoalOptions = {
-  title: string;
-  goal?: number;
-  subredditDisplayName: string;
-  crosspost: boolean;
-  colorTheme: SubGoalColorTheme;
-  postHeight: SubGoalPostHeight;
-  autoCreateNextGoal: boolean;
-  language: SubGoalLanguage;
-  cancelPendingAutoCreateGoals?: boolean;
-  submitAsUser?: boolean;
-  headerText?: string;
-  afterSubscribeAction?: AfterSubscribeAction;
-  afterSubscribePreset?: AfterSubscribePreset;
-  operationId?: string;
-  automaticPermissionCheck?: boolean;
-  highlightVerification?: Partial<HighlightVerificationOptions>;
-  reconciliationContext?: HighlightReconciliationContext;
-  mutationLease?: CommunityGoalMutationLease;
-  reconciliationNowMs?: number;
-  /** Trusted server-only identity for an interactive/manual invocation. */
-  manualActorUserId?: string;
-};
-
-export type CreateSubscriberGoalResult = {
-  outcome: "created" | "superseded" | "retired";
-  post: Awaited<ReturnType<typeof createGoalPost>>;
-  crosspostDispatchResult: CrosspostDispatchResult;
-  highlightResult: HighlightResult;
-  flairResult: SubscriberGoalFlairResult | { status: "unknown" };
-  supersedingPostId?: `t3_${string}`;
-};
-
-export type SubscriberGoalFlairResult =
-  | { status: "applied"; flairId: string }
-  | {
-      status: "omitted";
-      reason: "missing_permission" | "preparation_failed";
-    };
-
-export class SubscriberGoalModeratorPermissionError extends Error {
-  constructor(
-    appUsername: string | undefined,
-    subredditName: string,
-    language?: SubGoalLanguage,
-  ) {
-    const appAccount = appUsername
-      ? `u/${appUsername}`
-      : "the Subscriber Goal app account";
-    super(
-      translate(language, "errors.create.moderatorPermission", {
-        appAccount,
-        subredditName,
-      }),
-    );
-    this.name = "SubscriberGoalModeratorPermissionError";
-  }
-}
+import {
+  type CreateSubscriberGoalOptions,
+  type CreateSubscriberGoalResult,
+  SubscriberGoalModeratorPermissionError,
+  SubscriberGoalCreationOutcomeUnknownError,
+  submissionReconciliationDelayMs,
+  type GoalPost,
+  type CreationSubreddit,
+  type GoalCreationInput,
+  type GoalCreationRecoveryHooks,
+  createTerminalCreationResult,
+} from "./subscriberGoalCreationModel";
+import { createSubscriberGoalInternal } from "./subscriberGoalCreationSteps";
+export {
+  SubscriberGoalModeratorPermissionError,
+  SubscriberGoalCreationOutcomeUnknownError,
+  submissionReconciliationDelayMs,
+  SubscriberGoalPermissionVerificationError,
+} from "./subscriberGoalCreationModel";
+export type {
+  CreateSubscriberGoalResult,
+  SubscriberGoalFlairResult,
+} from "./subscriberGoalCreationModel";
 
 export class SubscriberGoalCreationInProgressError extends Error {
   constructor(language?: SubGoalLanguage) {
@@ -148,39 +55,9 @@ export class SubscriberGoalCreationInProgressError extends Error {
   }
 }
 
-export class SubscriberGoalCreationOutcomeUnknownError extends Error {
-  readonly reconciliationStatus: "pending" | "exhausted";
-  readonly reconciliationAttempts: number;
-  readonly reconciliationNextAt?: number;
-
-  constructor(
-    language?: SubGoalLanguage,
-    reconciliation: {
-      status: "pending" | "exhausted";
-      attempts: number;
-      nextAt?: number;
-    } = { status: "pending", attempts: 0 },
-  ) {
-    super(translate(language, "errors.create.outcomeUnknown"));
-    this.name = "SubscriberGoalCreationOutcomeUnknownError";
-    this.reconciliationStatus = reconciliation.status;
-    this.reconciliationAttempts = reconciliation.attempts;
-    if (reconciliation.nextAt !== undefined) {
-      this.reconciliationNextAt = reconciliation.nextAt;
-    }
-  }
-}
-
 export const subscriberGoalCreationOperationRetentionSeconds = 24 * 60 * 60;
+
 const submissionReconciliationListingLimit = 100;
-export const submissionReconciliationDelayMs = [
-  1 * 60 * 1000,
-  5 * 60 * 1000,
-  15 * 60 * 1000,
-  30 * 60 * 1000,
-  60 * 60 * 1000,
-  120 * 60 * 1000,
-] as const;
 
 type StoredCreationOperation = Record<string, string>;
 
@@ -412,17 +289,6 @@ export async function recoverSubscriberGoalCreation({
   return { status: "missing" };
 }
 
-export class SubscriberGoalPermissionVerificationError extends Error {
-  constructor(subredditName: string, language?: SubGoalLanguage) {
-    super(
-      translate(language, "errors.create.permissionVerification", {
-        subredditName,
-      }),
-    );
-    this.name = "SubscriberGoalPermissionVerificationError";
-  }
-}
-
 export class SubscriberGoalActorAuthorizationError extends Error {
   constructor(status: "denied" | "inconclusive", language?: SubGoalLanguage) {
     super(
@@ -531,630 +397,326 @@ async function createSubscriberGoalUnderCommunityLease({
   }
 
   try {
-    const reloaded = await redis.hGetAll(operationKey);
-    const reloadedTerminal = recoverTerminalCreation(reloaded);
-    if (reloadedTerminal) {
-      if (operationScopeMatches(reloaded, expectedScope)) {
-        return reloadedTerminal;
-      }
-      throw new SubscriberGoalActorAuthorizationError(
-        "inconclusive",
-        options.language,
-      );
-    }
-    if (reloaded.status === "complete") {
-      if (operationScopeMatches(reloaded, expectedScope)) {
-        const completed = await recoverCompletedCreation(
-          reddit,
-          redis,
-          reloaded,
-          currentSubreddit
-            ? { id: currentSubreddit.id, name: currentSubreddit.name }
-            : undefined,
-        );
-        if (completed.status === "complete") return completed.result;
-        if (completed.status === "retired") {
-          if (completed.reason) {
-            await retireSubscriberGoalPost(
-              redis,
-              completed.postId,
-              completed.reason,
-            );
-          }
-          const retired = createTerminalCreationResult(
-            "retired",
-            completed.postId,
-          );
-          await persistTerminalCreationOutcome(redis, operationKey, retired);
-          return retired;
-        }
-      }
-      throw new SubscriberGoalActorAuthorizationError(
-        "inconclusive",
-        options.language,
-      );
-    }
-    if (options.manualActorUserId) {
-      if (!currentSubreddit) {
-        throw new SubscriberGoalActorAuthorizationError(
-          "inconclusive",
-          options.language,
-        );
-      }
-      const authority = await getCurrentActorAuthority({
-        reddit,
-        actorUserId: options.manualActorUserId,
-        subredditName: currentSubreddit.name,
-        requirement: "manage-posts",
-      });
-      if (authority.status !== "authorized") {
-        throw new SubscriberGoalActorAuthorizationError(
-          authority.status,
-          options.language,
-        );
-      }
-    }
-    let recoveredPost: Awaited<ReturnType<typeof createGoalPost>> | undefined;
-    if (
-      reloaded.status === "submitting" ||
-      reloaded.status === "submission_unknown"
-    ) {
-      const reconciliation = await reconcileAmbiguousSubmissionUnderLock({
-        reddit,
-        redis,
-        operationKey,
-        raw: reloaded,
-        language: options.language,
-        nowMs: options.reconciliationNowMs ?? Date.now(),
-      });
-      recoveredPost = reconciliation.post;
-      try {
-        await writeCreationOperation(redis, operationKey, {
-          status: "post_submitted",
-          postId: recoveredPost.id,
-          updatedAt: String(Date.now()),
-        });
-      } catch (error) {
-        logDiagnostic(
-          "warn",
-          "goal_creation_recovered_post_id_persistence_failed",
-          {
-            workflow: "create_subscriber_goal",
-            phase: "recovered_post_id_persistence",
-            postId: recoveredPost.id,
-          },
-          error,
-        );
-        const safeNextAt =
-          reconciliation.reservation.nextAt ??
-          (options.reconciliationNowMs ?? Date.now()) +
-            submissionReconciliationDelayMs[0];
-        throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
-          status: "pending",
-          attempts: reconciliation.reservation.attempts,
-          nextAt: safeNextAt,
-        });
-      }
-    }
-    const submissionMarker = reloaded.submissionMarker || crypto.randomUUID();
-    await writeCreationOperation(redis, operationKey, {
-      status: "claimed",
-      startedAt: reloaded.startedAt || String(nowMs),
-      updatedAt: String(nowMs),
-      submissionMarker,
-      ...(options.manualActorUserId && currentSubreddit
-        ? {
-            actorUserId: options.manualActorUserId,
-            subredditId: currentSubreddit.id,
-            subredditName: currentSubreddit.name,
-          }
-        : {}),
-    });
-    const submittedPostId = recoveredPost?.id ?? reloaded.postId ?? "";
-    if (isLinkId(submittedPostId) && !recoveredPost) {
-      if (await isSubscriberGoalPostRetired(redis, submittedPostId)) {
-        const retired = createTerminalCreationResult(
-          "retired",
-          submittedPostId,
-        );
-        await persistTerminalCreationOutcome(redis, operationKey, retired);
-        return retired;
-      }
-      try {
-        recoveredPost = (await reddit.getPostById(
-          submittedPostId,
-        )) as unknown as Awaited<ReturnType<typeof createGoalPost>>;
-        if (!recoveredPost) {
-          throw new PostTemporarilyUnavailableError(submittedPostId);
-        }
-      } catch (error) {
-        if (isMissingPostError(error, submittedPostId)) {
-          await retireSubscriberGoalPost(
-            redis,
-            submittedPostId,
-            "creation_retry_post_missing",
-          );
-          const retired = createTerminalCreationResult(
-            "retired",
-            submittedPostId,
-          );
-          await persistTerminalCreationOutcome(redis, operationKey, retired);
-          return retired;
-        }
-        throw error;
-      }
-    }
-    const result = await createSubscriberGoalInternal(
+    return await runCreationUnderOperationLock(
       { reddit, redis, appSettings, options },
-      {
-        ...(recoveredPost ? { recoveredPost } : {}),
-        ...(reloaded.crosspostDispatchResult
-          ? {
-              recoveredCrosspostDispatchResult: JSON.parse(
-                reloaded.crosspostDispatchResult,
-              ) as CrosspostDispatchResult,
-            }
-          : {}),
-        submissionMarker,
-        onSubmissionStarted: async (subredditName, subredditId) => {
-          const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
-          await writeCreationOperation(redis, operationKey, {
-            status: "submitting",
-            subredditName,
-            subredditId,
-            updatedAt: String(reconciliationNowMs),
-          });
-        },
-        onPostSubmitted: async (postId) => {
-          await writeCreationOperation(redis, operationKey, {
-            status: "post_submitted",
-            postId,
-            updatedAt: String(Date.now()),
-          });
-        },
-        onSubmissionUnknown: async () => {
-          const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
-          await writeCreationOperation(redis, operationKey, {
-            status: "submission_unknown",
-            reconciliationStatus: "pending",
-            reconciliationAttempts: "0",
-            reconciliationStartedAt: String(reconciliationNowMs),
-            reconciliationNextAt: String(
-              reconciliationNowMs + submissionReconciliationDelayMs[0],
-            ),
-            updatedAt: String(Date.now()),
-          });
-        },
-        onRegistrationCompleted: async (postId, crosspostDispatchResult) => {
-          await writeCreationOperation(redis, operationKey, {
-            status: "registered",
-            postId,
-            crosspostDispatchResult: JSON.stringify(crosspostDispatchResult),
-            updatedAt: String(Date.now()),
-          });
-        },
-      },
+      { operationKey, nowMs, currentSubreddit, expectedScope },
     );
-    if (result.outcome !== "created") {
-      await persistTerminalCreationOutcome(redis, operationKey, result);
-      return result;
-    }
-    await writeCreationOperation(redis, operationKey, {
-      status: "complete",
-      postId: result.post.id,
-      completedAt: String(Date.now()),
-      updatedAt: String(Date.now()),
-      crosspostDispatchResult: JSON.stringify(result.crosspostDispatchResult),
-      highlightResult: JSON.stringify(result.highlightResult),
-      flairResult: JSON.stringify(result.flairResult),
-    });
-    return result;
   } finally {
     await releaseRedisLock(redis, lockKey, lockToken);
   }
 }
 
-async function createSubscriberGoalInternal(
+async function runCreationUnderOperationLock(
+  input: GoalCreationInput,
   {
-    reddit,
-    redis,
-    appSettings,
-    options,
+    operationKey,
+    nowMs,
+    currentSubreddit,
+    expectedScope,
   }: {
-    reddit: RedditClient;
-    redis: RedisClient;
-    appSettings: ServerAppSettings;
-    options: CreateSubscriberGoalOptions;
-  },
-  recovery?: {
-    recoveredPost?: Awaited<ReturnType<typeof createGoalPost>>;
-    recoveredCrosspostDispatchResult?: CrosspostDispatchResult;
-    submissionMarker: string;
-    onSubmissionStarted: (
-      subredditName: string,
-      subredditId: string,
-    ) => Promise<void>;
-    onPostSubmitted: (postId: string) => Promise<void>;
-    onSubmissionUnknown: () => Promise<void>;
-    onRegistrationCompleted: (
-      postId: `t3_${string}`,
-      result: CrosspostDispatchResult,
-    ) => Promise<void>;
+    operationKey: string;
+    nowMs: number;
+    currentSubreddit: CreationSubreddit | undefined;
+    expectedScope: Parameters<typeof operationScopeMatches>[1];
   },
 ): Promise<CreateSubscriberGoalResult> {
-  const subreddit = await reddit.getCurrentSubreddit();
-  if (await isSubredditBlacklisted(reddit, subreddit.name)) {
-    throw new ProhibitedSubredditError();
-  }
-  const isTinyPost = options.postHeight === "tiny";
-  const isCtaOnlyPost = options.postHeight === "cta";
-  const isCompactActionPost = isTinyPost || isCtaOnlyPost;
-  const afterSubscribePresetArgs = options.afterSubscribePreset
-    ? ([options.afterSubscribePreset] as const)
-    : ([] as const);
-  if (!isCompactActionPost && options.goal === undefined) {
-    throw new Error("Subscriber goal is required for goal posts.");
-  }
-  if (
-    isCtaOnlyPost &&
-    (!options.afterSubscribeAction ||
-      options.afterSubscribeAction.type === "disabled")
-  ) {
-    throw new Error("CTA-only posts require an actionable CTA.");
-  }
-
-  let existingGoalPostIds: string[] = [];
-  let existingClassicGoalPostIds: Array<`t3_${string}`> = [];
-
-  if (recovery?.recoveredPost) {
-    [existingGoalPostIds, existingClassicGoalPostIds] =
-      await getExistingGoalPostIds(redis);
-    const automaticSuccessor =
-      options.reconciliationContext === "automatic_successor";
-    const terminal = await revalidateRecoveredCreation({
-      reddit,
-      redis,
-      post: recovery.recoveredPost,
-      candidatePostIds: automaticSuccessor
-        ? existingClassicGoalPostIds
-        : existingGoalPostIds,
-      automaticSuccessor,
-    });
-    if (terminal) return terminal;
-  }
-
-  const health = await checkAppAccountHealth({
-    reddit,
-    redis,
-    subredditName: subreddit.name,
-    subredditId: subreddit.id,
-    language: options.language,
-    ...(options.automaticPermissionCheck
-      ? { notify: false, scheduleUnknownRetry: false }
+  const { reddit, redis, options } = input;
+  const reloaded = await redis.hGetAll(operationKey);
+  const completed = await readFinishedOperation(
+    input,
+    operationKey,
+    reloaded,
+    expectedScope,
+    currentSubreddit,
+  );
+  if (completed) return completed;
+  await verifyManualCreationActor(reddit, options, currentSubreddit);
+  let recoveredPost = await recoverUncertainSubmission(
+    input,
+    operationKey,
+    reloaded,
+  );
+  const submissionMarker = reloaded.submissionMarker || crypto.randomUUID();
+  await writeCreationOperation(redis, operationKey, {
+    status: "claimed",
+    startedAt: reloaded.startedAt || String(nowMs),
+    updatedAt: String(nowMs),
+    submissionMarker,
+    ...(options.manualActorUserId && currentSubreddit
+      ? {
+          actorUserId: options.manualActorUserId,
+          subredditId: currentSubreddit.id,
+          subredditName: currentSubreddit.name,
+        }
       : {}),
   });
-  const { appUsername, permissions } = health;
-  const hasAllPermissions = permissions.includes("all");
-  if (health.status === "unknown") {
-    if (options.automaticPermissionCheck) {
-      throw new SubscriberGoalPermissionVerificationError(
-        subreddit.name,
-        options.language,
-      );
-    }
-    throw new Error(
-      translate(options.language, "errors.create.permissionVerificationRetry", {
-        subredditName: subreddit.name,
-      }),
+  const submittedPostId = recoveredPost?.id ?? reloaded.postId ?? "";
+  if (isLinkId(submittedPostId) && !recoveredPost) {
+    const recovered = await recoverSubmittedPost(
+      reddit,
+      redis,
+      operationKey,
+      submittedPostId,
     );
+    if (recovered.terminal) return recovered.terminal;
+    recoveredPost = recovered.post;
   }
-  if (!health.healthy) {
-    logDiagnostic("warn", "subscriber_goal_permission_preflight_failed", {
-      workflow: "create_subscriber_goal",
-      phase: "permission_preflight",
-      category: "missing_posts_permission",
-      subredditName: subreddit.name,
-      username: appUsername,
-    });
-    throw new SubscriberGoalModeratorPermissionError(
-      appUsername,
-      subreddit.name,
+  const result = await createSubscriberGoalInternal(
+    input,
+    creationRecoveryCallbacks(
+      redis,
+      operationKey,
+      options,
+      reloaded,
+      submissionMarker,
+      recoveredPost,
+    ),
+  );
+  return persistCreationResult(redis, operationKey, result);
+}
+
+async function readFinishedOperation(
+  { reddit, redis, options }: GoalCreationInput,
+  operationKey: string,
+  reloaded: StoredCreationOperation,
+  expectedScope: Parameters<typeof operationScopeMatches>[1],
+  currentSubreddit: CreationSubreddit | undefined,
+): Promise<CreateSubscriberGoalResult | undefined> {
+  const reloadedTerminal = recoverTerminalCreation(reloaded);
+  if (reloadedTerminal) {
+    if (operationScopeMatches(reloaded, expectedScope)) {
+      return reloadedTerminal;
+    }
+    throw new SubscriberGoalActorAuthorizationError(
+      "inconclusive",
       options.language,
     );
   }
-
-  const flairResult = await prepareSubscriberGoalFlair({
-    reddit,
-    redis,
-    subredditName: subreddit.name,
-    appUsername,
-    canManageFlair: hasAllPermissions || permissions.includes("flair"),
-  });
-  if (!recovery?.recoveredPost) {
-    [existingGoalPostIds, existingClassicGoalPostIds] =
-      await getExistingGoalPostIds(redis);
-  }
-  const textFallback = isCtaOnlyPost
-    ? ctaOnlyTextFallbackMaker(
-        (
-          options.afterSubscribeAction as Exclude<
-            AfterSubscribeAction,
-            { type: "disabled" }
-          >
-        ).buttonText,
-      )
-    : isTinyPost
-      ? subscribeOnlyTextFallbackMaker({
-          subredditName: options.subredditDisplayName,
-          language: options.language,
-        })
-      : textFallbackMaker({
-          goal: options.goal as number,
-          subscribers: subreddit.numberOfSubscribers,
-          subredditName: options.subredditDisplayName,
-          completedTime: null,
-          language: options.language,
-        });
-
-  let post = recovery?.recoveredPost;
-  if (!post) {
-    await recovery?.onSubmissionStarted(subreddit.name, subreddit.id);
-    try {
-      post = await createGoalPost({
-        title: options.title,
-        subredditName: subreddit.name,
-        textFallback,
-        postHeight: options.postHeight,
-        language: options.language,
-        ...(recovery?.submissionMarker
-          ? { submissionMarker: recovery.submissionMarker }
-          : {}),
-        ...(flairResult.status === "applied"
-          ? { flairId: flairResult.flairId }
-          : {}),
-        ...(options.submitAsUser === true ? { submitAsUser: true } : {}),
-      });
-    } catch (error) {
-      if (recovery) {
-        const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
-        try {
-          await recovery.onSubmissionUnknown();
-        } catch (bookkeepingError) {
-          logDiagnostic(
-            "warn",
-            "goal_creation_submission_unknown_persistence_failed",
-            {
-              workflow: "create_subscriber_goal",
-              phase: "submission_unknown_persistence",
-            },
-            bookkeepingError,
+  if (reloaded.status === "complete") {
+    if (operationScopeMatches(reloaded, expectedScope)) {
+      const completed = await recoverCompletedCreation(
+        reddit,
+        redis,
+        reloaded,
+        currentSubreddit
+          ? { id: currentSubreddit.id, name: currentSubreddit.name }
+          : undefined,
+      );
+      if (completed.status === "complete") return completed.result;
+      if (completed.status === "retired") {
+        if (completed.reason) {
+          await retireSubscriberGoalPost(
+            redis,
+            completed.postId,
+            completed.reason,
           );
         }
-        throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
-          status: "pending",
-          attempts: 0,
-          nextAt: reconciliationNowMs + submissionReconciliationDelayMs[0],
-        });
+        const retired = createTerminalCreationResult(
+          "retired",
+          completed.postId,
+        );
+        await persistTerminalCreationOutcome(redis, operationKey, retired);
+        return retired;
       }
-      throw error;
+    }
+    throw new SubscriberGoalActorAuthorizationError(
+      "inconclusive",
+      options.language,
+    );
+  }
+}
+
+async function verifyManualCreationActor(
+  reddit: RedditClient,
+  options: CreateSubscriberGoalOptions,
+  currentSubreddit: CreationSubreddit | undefined,
+): Promise<void> {
+  if (options.manualActorUserId) {
+    if (!currentSubreddit) {
+      throw new SubscriberGoalActorAuthorizationError(
+        "inconclusive",
+        options.language,
+      );
+    }
+    const authority = await getCurrentActorAuthority({
+      reddit,
+      actorUserId: options.manualActorUserId,
+      subredditName: currentSubreddit.name,
+      requirement: "manage-posts",
+    });
+    if (authority.status !== "authorized") {
+      throw new SubscriberGoalActorAuthorizationError(
+        authority.status,
+        options.language,
+      );
     }
   }
-  if (!recovery?.recoveredPost && recovery) {
+}
+
+async function recoverUncertainSubmission(
+  { reddit, redis, options }: GoalCreationInput,
+  operationKey: string,
+  reloaded: StoredCreationOperation,
+): Promise<GoalPost | undefined> {
+  if (
+    reloaded.status === "submitting" ||
+    reloaded.status === "submission_unknown"
+  ) {
+    const reconciliation = await reconcileAmbiguousSubmissionUnderLock({
+      reddit,
+      redis,
+      operationKey,
+      raw: reloaded,
+      language: options.language,
+      nowMs: options.reconciliationNowMs ?? Date.now(),
+    });
+    const recoveredPost = reconciliation.post;
     try {
-      await recovery.onPostSubmitted(post.id);
+      await writeCreationOperation(redis, operationKey, {
+        status: "post_submitted",
+        postId: recoveredPost.id,
+        updatedAt: String(Date.now()),
+      });
     } catch (error) {
       logDiagnostic(
         "warn",
-        "goal_creation_post_id_persistence_failed",
+        "goal_creation_recovered_post_id_persistence_failed",
         {
           workflow: "create_subscriber_goal",
-          phase: "post_id_persistence",
-          postId: post.id,
+          phase: "recovered_post_id_persistence",
+          postId: recoveredPost.id,
         },
         error,
       );
-      try {
-        await recovery.onSubmissionUnknown();
-      } catch (bookkeepingError) {
-        logDiagnostic(
-          "warn",
-          "goal_creation_submission_unknown_persistence_failed",
-          {
-            workflow: "create_subscriber_goal",
-            phase: "post_id_fallback_persistence",
-            postId: post.id,
-          },
-          bookkeepingError,
-        );
-      }
+      const safeNextAt =
+        reconciliation.reservation.nextAt ??
+        (options.reconciliationNowMs ?? Date.now()) +
+          submissionReconciliationDelayMs[0];
       throw new SubscriberGoalCreationOutcomeUnknownError(options.language, {
         status: "pending",
-        attempts: 0,
-        nextAt:
-          (options.reconciliationNowMs ?? Date.now()) +
-          submissionReconciliationDelayMs[0],
+        attempts: reconciliation.reservation.attempts,
+        nextAt: safeNextAt,
       });
     }
+    return recoveredPost;
   }
-  await applyGoalPostFrameStyle(post, options.postHeight);
+}
 
-  if (!recovery?.recoveredPost) {
-    await setSavedSubredditDisplayName(redis, options.subredditDisplayName);
+async function recoverSubmittedPost(
+  reddit: RedditClient,
+  redis: RedisClient,
+  operationKey: string,
+  submittedPostId: GoalPost["id"],
+): Promise<
+  | { post: GoalPost; terminal?: never }
+  | { terminal: CreateSubscriberGoalResult; post?: never }
+> {
+  let recoveredPost: GoalPost;
+  if (await isSubscriberGoalPostRetired(redis, submittedPostId)) {
+    const retired = createTerminalCreationResult("retired", submittedPostId);
+    await persistTerminalCreationOutcome(redis, operationKey, retired);
+    return { terminal: retired };
   }
-  const replayedRegistrationResult = isCtaOnlyPost
-    ? await registerNewCtaOnlyPost(
-        redis,
-        appSettings,
-        post,
-        options.subredditDisplayName,
-        options.colorTheme,
-        options.language,
-        options.afterSubscribeAction as Exclude<
-          AfterSubscribeAction,
-          { type: "disabled" }
-        >,
-        ...afterSubscribePresetArgs,
-      )
-    : isTinyPost
-      ? await registerNewSubscribeOnlyPost(
-          redis,
-          appSettings,
-          post,
-          options.subredditDisplayName,
-          options.colorTheme,
-          options.language,
-          options.afterSubscribeAction ?? defaultAfterSubscribeAction,
-          ...afterSubscribePresetArgs,
-        )
-      : await registerNewSubGoalPost(
-          reddit,
-          redis,
-          appSettings,
-          post,
-          options.goal as number,
-          recovery?.recoveredCrosspostDispatchResult
-            ? false
-            : options.crosspost,
-          options.subredditDisplayName,
-          options.colorTheme,
-          options.autoCreateNextGoal,
-          options.language,
-          options.headerText,
-          options.postHeight as Exclude<SubGoalPostHeight, "tiny" | "cta">,
-          options.afterSubscribeAction ?? defaultAfterSubscribeAction,
-          ...afterSubscribePresetArgs,
-        );
-  const crosspostDispatchResult =
-    recovery?.recoveredCrosspostDispatchResult ?? replayedRegistrationResult;
-  if (!recovery?.recoveredCrosspostDispatchResult) {
-    await recovery?.onRegistrationCompleted(post.id, crosspostDispatchResult);
-  }
-
-  if (!isCompactActionPost) {
-    for (const olderPostId of existingClassicGoalPostIds) {
-      if (olderPostId === post.id) continue;
-      await redis.hSet(autoCreateNextGoalSuccessorsKey, {
-        [olderPostId]: post.id,
-      });
-      await cancelAutoCreateNextGoal(redis, olderPostId);
-    }
-  }
-
-  const trackedPosts = recovery?.recoveredPost
-    ? []
-    : await getTrackedPosts(redis);
-  const queuedPosts = recovery?.recoveredPost
-    ? []
-    : await getQueuedUpdates(redis);
-  const activePostIds = [...new Set([...trackedPosts, ...queuedPosts])];
-  for (const activePostId of activePostIds) {
-    if (!isLinkId(activePostId)) {
-      continue;
-    }
-    try {
-      const activePost = await reddit.getPostById(activePostId);
-      if (activePost.subredditId !== subreddit.id) {
-        continue;
-      }
-      await setSubredditDisplayNameForPost(
-        redis,
-        activePostId,
-        options.subredditDisplayName,
-      );
-      await queueUpdate(redis, activePostId, new Date());
-    } catch (backfillError) {
-      logDiagnostic(
-        "warn",
-        "goal_backfill_failed",
-        {
-          workflow: "create_subscriber_goal",
-          phase: "display_name_backfill",
-          postId: activePostId,
-        },
-        backfillError,
-      );
-    }
-  }
-
-  await post.approve();
-  let highlightResult: HighlightResult;
   try {
-    const highlightHealth = await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: options.language,
-      notify: false,
-    });
-    highlightResult =
-      highlightHealth.healthy && highlightHealth.status === "healthy"
-        ? await highlightAndVerifyPost(reddit, subreddit, post, {
-            maxWaitMs:
-              options.highlightVerification?.maxWaitMs ??
-              highlightVerificationMaxWaitMs,
-            intervalMs:
-              options.highlightVerification?.intervalMs ??
-              highlightVerificationIntervalMs,
-            ...(!isCompactActionPost
-              ? { removableManagedPostIds: existingClassicGoalPostIds }
-              : {}),
-          })
-        : createFailedHighlightResult(
-            post.id,
-            "permission",
-            "Manage Posts permission could not be verified, so no Community Highlight changes were attempted.",
-          );
+    recoveredPost = (await reddit.getPostById(
+      submittedPostId,
+    )) as unknown as GoalPost;
+    if (!recoveredPost) {
+      throw new PostTemporarilyUnavailableError(submittedPostId);
+    }
   } catch (error) {
-    const errorMessage = toErrorMessage(error);
-    logDiagnostic(
-      "warn",
-      "highlight_operation_failed",
-      {
-        workflow: "create_subscriber_goal",
-        phase: "replacement",
-        postId: post.id,
-      },
-      error,
-    );
-    highlightResult = createFailedHighlightResult(
-      post.id,
-      "write",
-      errorMessage,
-    );
+    if (isMissingPostError(error, submittedPostId)) {
+      await retireSubscriberGoalPost(
+        redis,
+        submittedPostId,
+        "creation_retry_post_missing",
+      );
+      const retired = createTerminalCreationResult("retired", submittedPostId);
+      await persistTerminalCreationOutcome(redis, operationKey, retired);
+      return { terminal: retired };
+    }
+    throw error;
   }
+  return { post: recoveredPost };
+}
 
-  if (!isCompactActionPost && highlightResult.issues.length === 0) {
-    await saveCanonicalGoalPointer(redis, {
-      canonicalPostId: post.id,
-      reconciledAt: Date.now(),
-    });
-    await clearHighlightContradictionIncident(redis);
-  } else if (highlightResult.issues.length > 0) {
-    const capacityOnly =
-      options.automaticPermissionCheck &&
-      isCapacityOnlyHighlightFailure(highlightResult);
-    await scheduleHighlightRepair(redis, {
-      delayMs: capacityOnly
-        ? recurringHighlightRepairIntervalMs
-        : 5 * 60 * 1000,
-      force: !capacityOnly,
-      reason: `${options.reconciliationContext ?? "manual_creation"}_highlight_degraded`,
-      targetPostId: post.id,
-    });
-  }
-
-  if (options.cancelPendingAutoCreateGoals && !recovery?.recoveredPost) {
-    await cancelAllAutoCreateNextGoals(redis);
-  }
-
+function creationRecoveryCallbacks(
+  redis: RedisClient,
+  operationKey: string,
+  options: CreateSubscriberGoalOptions,
+  reloaded: StoredCreationOperation,
+  submissionMarker: string,
+  recoveredPost: GoalPost | undefined,
+): GoalCreationRecoveryHooks {
   return {
-    outcome: "created",
-    post,
-    crosspostDispatchResult,
-    highlightResult,
-    flairResult,
+    ...(recoveredPost ? { recoveredPost } : {}),
+    ...(reloaded.crosspostDispatchResult
+      ? {
+          recoveredCrosspostDispatchResult: JSON.parse(
+            reloaded.crosspostDispatchResult,
+          ) as CrosspostDispatchResult,
+        }
+      : {}),
+    submissionMarker,
+    onSubmissionStarted: async (subredditName, subredditId) => {
+      const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
+      await writeCreationOperation(redis, operationKey, {
+        status: "submitting",
+        subredditName,
+        subredditId,
+        updatedAt: String(reconciliationNowMs),
+      });
+    },
+    onPostSubmitted: async (postId) => {
+      await writeCreationOperation(redis, operationKey, {
+        status: "post_submitted",
+        postId,
+        updatedAt: String(Date.now()),
+      });
+    },
+    onSubmissionUnknown: async () => {
+      const reconciliationNowMs = options.reconciliationNowMs ?? Date.now();
+      await writeCreationOperation(redis, operationKey, {
+        status: "submission_unknown",
+        reconciliationStatus: "pending",
+        reconciliationAttempts: "0",
+        reconciliationStartedAt: String(reconciliationNowMs),
+        reconciliationNextAt: String(
+          reconciliationNowMs + submissionReconciliationDelayMs[0],
+        ),
+        updatedAt: String(Date.now()),
+      });
+    },
+    onRegistrationCompleted: async (postId, crosspostDispatchResult) => {
+      await writeCreationOperation(redis, operationKey, {
+        status: "registered",
+        postId,
+        crosspostDispatchResult: JSON.stringify(crosspostDispatchResult),
+        updatedAt: String(Date.now()),
+      });
+    },
   };
+}
+
+async function persistCreationResult(
+  redis: RedisClient,
+  operationKey: string,
+  result: CreateSubscriberGoalResult,
+): Promise<CreateSubscriberGoalResult> {
+  if (result.outcome !== "created") {
+    await persistTerminalCreationOutcome(redis, operationKey, result);
+    return result;
+  }
+  await writeCreationOperation(redis, operationKey, {
+    status: "complete",
+    postId: result.post.id,
+    completedAt: String(Date.now()),
+    updatedAt: String(Date.now()),
+    crosspostDispatchResult: JSON.stringify(result.crosspostDispatchResult),
+    highlightResult: JSON.stringify(result.highlightResult),
+    flairResult: JSON.stringify(result.flairResult),
+  });
+  return result;
 }
 
 async function reconcileAmbiguousSubmissionUnderLock({
@@ -1172,7 +734,7 @@ async function reconcileAmbiguousSubmissionUnderLock({
   language?: SubGoalLanguage;
   nowMs: number;
 }): Promise<{
-  post: Awaited<ReturnType<typeof createGoalPost>>;
+  post: GoalPost;
   reservation: SubmissionReconciliationReservation;
 }> {
   const marker = raw.submissionMarker;
@@ -1214,6 +776,58 @@ async function reconcileAmbiguousSubmissionUnderLock({
   if (raw.reconciliationStatus === "exhausted") {
     return throwUnknown("exhausted");
   }
+  await requireSubmissionReconciliationDue(
+    redis,
+    operationKey,
+    raw,
+    attempts,
+    nowMs,
+    throwUnknown,
+  );
+  const reservation = await reserveSubmissionReconciliation(
+    redis,
+    operationKey,
+    language,
+    attempts,
+    nowMs,
+  );
+  let match: GoalPost | undefined;
+  try {
+    match = await findSubmissionMarkerMatch({
+      reddit,
+      marker,
+      expectedSubredditName,
+      expectedSubredditId,
+    });
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "goal_creation_submission_reconciliation_failed",
+      {
+        workflow: "create_subscriber_goal",
+        phase: "submission_reconciliation",
+        subredditName: expectedSubredditName,
+      },
+      error,
+    );
+  }
+  if (match) return { post: match, reservation };
+
+  throw new SubscriberGoalCreationOutcomeUnknownError(language, {
+    status: reservation.status,
+    attempts: reservation.attempts,
+    ...(reservation.nextAt === undefined ? {} : { nextAt: reservation.nextAt }),
+  });
+}
+
+async function requireSubmissionReconciliationDue(
+  redis: RedisClient,
+  operationKey: string,
+  raw: StoredCreationOperation,
+  attempts: number,
+  nowMs: number,
+  throwUnknown: (status: "pending", nextAt: number) => never,
+): Promise<void> {
   const persistedNextAt = Number(raw.reconciliationNextAt);
   if (!Number.isFinite(persistedNextAt) || persistedNextAt <= 0) {
     const submissionStartedAt = Number(raw.updatedAt);
@@ -1252,7 +866,15 @@ async function reconcileAmbiguousSubmissionUnderLock({
   ) {
     return throwUnknown("pending", persistedNextAt);
   }
+}
 
+async function reserveSubmissionReconciliation(
+  redis: RedisClient,
+  operationKey: string,
+  language: SubGoalLanguage | undefined,
+  attempts: number,
+  nowMs: number,
+): Promise<SubmissionReconciliationReservation> {
   const reservation = createSubmissionReconciliationReservation(
     attempts + 1,
     nowMs,
@@ -1286,34 +908,7 @@ async function reconcileAmbiguousSubmissionUnderLock({
       nextAt: safeNextAt,
     });
   }
-
-  let match: Awaited<ReturnType<typeof createGoalPost>> | undefined;
-  try {
-    match = await findSubmissionMarkerMatch({
-      reddit,
-      marker,
-      expectedSubredditName,
-      expectedSubredditId,
-    });
-  } catch (error) {
-    logDiagnostic(
-      "warn",
-      "goal_creation_submission_reconciliation_failed",
-      {
-        workflow: "create_subscriber_goal",
-        phase: "submission_reconciliation",
-        subredditName: expectedSubredditName,
-      },
-      error,
-    );
-  }
-  if (match) return { post: match, reservation };
-
-  throw new SubscriberGoalCreationOutcomeUnknownError(language, {
-    status: reservation.status,
-    attempts: reservation.attempts,
-    ...(reservation.nextAt === undefined ? {} : { nextAt: reservation.nextAt }),
-  });
+  return reservation;
 }
 
 type SubmissionReconciliationReservation = {
@@ -1342,7 +937,7 @@ async function findSubmissionMarkerMatch({
   marker: string;
   expectedSubredditName: string;
   expectedSubredditId: string;
-}): Promise<Awaited<ReturnType<typeof createGoalPost>> | undefined> {
+}): Promise<GoalPost | undefined> {
   const posts = await reddit
     .getNewPosts({
       subredditName: expectedSubredditName,
@@ -1361,156 +956,7 @@ async function findSubmissionMarkerMatch({
     const postData = await reddit.getPostData(post.id);
     if (postData?.submissionMarker === marker) matches.push(post);
   }
-  return matches.length === 1
-    ? (matches[0] as Awaited<ReturnType<typeof createGoalPost>>)
-    : undefined;
-}
-
-async function getExistingGoalPostIds(
-  redis: RedisClient,
-): Promise<[string[], Array<`t3_${string}`>]> {
-  const postIds = await getSubscriberGoalCandidatePostIds(redis);
-  const classicPostIds: Array<`t3_${string}`> = [];
-  for (const postId of postIds) {
-    if (isLinkId(postId) && (await hasClassicGoalData(redis, postId))) {
-      classicPostIds.push(postId);
-    }
-  }
-  return [postIds, classicPostIds];
-}
-
-async function hasClassicGoalData(
-  redis: RedisClient,
-  postId: `t3_${string}`,
-): Promise<boolean> {
-  const [postKind, postHeight] = await redis.hMGet(subscriberGoalsKey, [
-    `${postId}${postKindSuffix}`,
-    `${postId}${postHeightSuffix}`,
-  ]);
-  return (
-    postKind === "subscriber-goal-v1" &&
-    (postHeight === "regular" || postHeight === "short")
-  );
-}
-
-async function revalidateRecoveredCreation({
-  reddit,
-  redis,
-  post,
-  candidatePostIds,
-  automaticSuccessor,
-}: {
-  reddit: RedditClient;
-  redis: RedisClient;
-  post: Awaited<ReturnType<typeof createGoalPost>>;
-  candidatePostIds: string[];
-  automaticSuccessor: boolean;
-}): Promise<CreateSubscriberGoalResult | undefined> {
-  if (await isSubscriberGoalPostRetired(redis, post.id)) {
-    return createTerminalCreationResult("retired", post.id);
-  }
-  const availability = getPostAvailability(post);
-  if (availability.status === "temporarily_removed") {
-    throw new PostTemporarilyUnavailableError(post.id, availability.category);
-  }
-  if (availability.status === "terminal") {
-    const removedByCategory = availability.category;
-    await retireSubscriberGoalPost(
-      redis,
-      post.id,
-      `creation_retry_removed:${removedByCategory}`,
-    );
-    return createTerminalCreationResult("retired", post.id);
-  }
-  const [successor, completedTime, pointer] = await Promise.all([
-    redis.hGet(autoCreateNextGoalSuccessorsKey, post.id),
-    redis.hGet(subscriberGoalsKey, `${post.id}${postCompletedTimeSuffix}`),
-    getCanonicalGoalPointer(redis),
-  ]);
-  if (isLinkId(successor ?? "")) {
-    return createTerminalCreationResult(
-      "superseded",
-      post.id,
-      successor as `t3_${string}`,
-    );
-  }
-  if (Number(completedTime) > 0) {
-    return createTerminalCreationResult("superseded", post.id);
-  }
-
-  const recoveredCreatedAt = new Date(post.createdAt).getTime();
-  const possibleNewerIds = new Set(candidatePostIds);
-  const canonicalPostId = pointer?.canonicalPostId;
-  if (
-    canonicalPostId &&
-    isLinkId(canonicalPostId) &&
-    !possibleNewerIds.has(canonicalPostId) &&
-    (!automaticSuccessor || (await hasClassicGoalData(redis, canonicalPostId)))
-  ) {
-    possibleNewerIds.add(canonicalPostId);
-  }
-  for (const candidateId of possibleNewerIds) {
-    if (candidateId === post.id || !isLinkId(candidateId)) continue;
-    if (
-      automaticSuccessor &&
-      (await isSubscriberGoalPostRetired(redis, candidateId))
-    ) {
-      continue;
-    }
-    try {
-      const candidate = await reddit.getPostById(candidateId);
-      if (
-        automaticSuccessor &&
-        getPostAvailability(candidate).status !== "active"
-      ) {
-        continue;
-      }
-      const candidateCreatedAt = new Date(candidate.createdAt).getTime();
-      if (
-        Number.isFinite(candidateCreatedAt) &&
-        (!Number.isFinite(recoveredCreatedAt) ||
-          candidateCreatedAt > recoveredCreatedAt)
-      ) {
-        return createTerminalCreationResult("superseded", post.id, candidateId);
-      }
-    } catch (error) {
-      // Candidate cleanup is owned by normal reconciliation; an unavailable
-      // candidate must not make a valid recovery destructive.
-      logDiagnostic(
-        "warn",
-        "goal_creation_revalidation_candidate_unavailable",
-        {
-          workflow: "create_subscriber_goal",
-          phase: "revalidation",
-          postId: post.id,
-          candidatePostId: candidateId,
-        },
-        error,
-      );
-    }
-  }
-  return undefined;
-}
-
-function createTerminalCreationResult(
-  outcome: "superseded" | "retired",
-  postId: `t3_${string}`,
-  supersedingPostId?: `t3_${string}`,
-): CreateSubscriberGoalResult {
-  return {
-    outcome,
-    post: { id: postId } as Awaited<ReturnType<typeof createGoalPost>>,
-    crosspostDispatchResult: { status: "skipped" },
-    highlightResult: createFailedHighlightResult(
-      postId,
-      "write",
-      outcome === "retired"
-        ? "The recovered post is retired."
-        : "The recovered post was superseded by newer community state.",
-    ),
-    flairResult: { status: "omitted", reason: "preparation_failed" },
-    ...(supersedingPostId ? { supersedingPostId } : {}),
-  };
+  return matches.length === 1 ? (matches[0] as GoalPost) : undefined;
 }
 
 async function persistTerminalCreationOutcome(
@@ -1527,67 +973,21 @@ async function persistTerminalCreationOutcome(
   });
 }
 
-async function prepareSubscriberGoalFlair({
-  reddit,
-  redis,
-  subredditName,
-  appUsername,
-  canManageFlair,
-}: {
-  reddit: RedditClient;
-  redis: RedisClient;
-  subredditName: string;
-  appUsername: string | undefined;
-  canManageFlair: boolean;
-}): Promise<SubscriberGoalFlairResult> {
-  if (!canManageFlair) {
-    logDiagnostic("warn", "subscriber_goal_flair_omitted", {
-      workflow: "create_subscriber_goal",
-      phase: "flair_preparation",
-      category: "missing_flair_permission",
-      subredditName,
-      username: appUsername,
-    });
-    return { status: "omitted", reason: "missing_permission" };
-  }
-
-  try {
-    const flair = await ensureSubscriberGoalPostFlair(
-      reddit,
-      redis,
-      subredditName,
-    );
-    return { status: "applied", flairId: flair.id };
-  } catch (error) {
-    logDiagnostic(
-      "warn",
-      "subscriber_goal_flair_omitted",
-      {
-        workflow: "create_subscriber_goal",
-        phase: "flair_preparation",
-        category: "flair_preparation_failed",
-        subredditName,
-        username: appUsername,
-      },
-      error,
-    );
-    return { status: "omitted", reason: "preparation_failed" };
-  }
-}
+type StoredHighlightResult = {
+  status?: unknown;
+  errorMessage?: unknown;
+  verifiedStickied?: unknown;
+  verifiedHighlighted?: unknown;
+  failureCategory?: unknown;
+  issues?: unknown;
+  selectedPostId?: unknown;
+};
 
 function normalizeStoredHighlightResult(
   value: unknown,
   postId: `t3_${string}`,
 ): HighlightResult {
-  const legacy = value as {
-    status?: unknown;
-    errorMessage?: unknown;
-    verifiedStickied?: unknown;
-    verifiedHighlighted?: unknown;
-    failureCategory?: unknown;
-    issues?: unknown;
-    selectedPostId?: unknown;
-  };
+  const legacy = value as StoredHighlightResult;
   const status =
     legacy?.status === "pinned"
       ? "highlighted"
@@ -1602,28 +1002,8 @@ function normalizeStoredHighlightResult(
       : typeof legacy.verifiedStickied === "boolean"
         ? legacy.verifiedStickied
         : status === "highlighted";
-  const storedFailureCategory =
-    typeof legacy.failureCategory === "string"
-      ? (legacy.failureCategory as HighlightResult["failureCategory"])
-      : undefined;
-  const storedErrorMessage =
-    typeof legacy.errorMessage === "string" ? legacy.errorMessage : undefined;
-  const storedIssues = Array.isArray(legacy.issues)
-    ? (legacy.issues as HighlightResult["issues"])
-    : storedFailureCategory && storedErrorMessage
-      ? [{ category: storedFailureCategory, message: storedErrorMessage, postId }]
-      : [];
-  const issues = storedIssues.filter(
-    ({ category }) => String(category) !== "reorder",
-  );
-  const hadReorderIssue =
-    legacy.failureCategory === "reorder" || issues.length !== storedIssues.length;
-  const failureCategory = hadReorderIssue
-    ? issues[0]?.category
-    : storedFailureCategory;
-  const errorMessage = hadReorderIssue
-    ? issues.map(({ message }) => message).join(" ")
-    : storedErrorMessage;
+  const { issues, failureCategory, errorMessage } =
+    normalizeStoredHighlightIssues(legacy, postId);
   const current = value as Partial<HighlightResult>;
   return {
     status,
@@ -1644,4 +1024,40 @@ function normalizeStoredHighlightResult(
     ...(failureCategory ? { failureCategory } : {}),
     ...(errorMessage ? { errorMessage } : {}),
   };
+}
+
+function normalizeStoredHighlightIssues(
+  legacy: StoredHighlightResult,
+  postId: GoalPost["id"],
+) {
+  const storedFailureCategory =
+    typeof legacy.failureCategory === "string"
+      ? (legacy.failureCategory as HighlightResult["failureCategory"])
+      : undefined;
+  const storedErrorMessage =
+    typeof legacy.errorMessage === "string" ? legacy.errorMessage : undefined;
+  const storedIssues = Array.isArray(legacy.issues)
+    ? (legacy.issues as HighlightResult["issues"])
+    : storedFailureCategory && storedErrorMessage
+      ? [
+          {
+            category: storedFailureCategory,
+            message: storedErrorMessage,
+            postId,
+          },
+        ]
+      : [];
+  const issues = storedIssues.filter(
+    ({ category }) => String(category) !== "reorder",
+  );
+  const hadReorderIssue =
+    legacy.failureCategory === "reorder" ||
+    issues.length !== storedIssues.length;
+  const failureCategory = hadReorderIssue
+    ? issues[0]?.category
+    : storedFailureCategory;
+  const errorMessage = hadReorderIssue
+    ? issues.map(({ message }) => message).join(" ")
+    : storedErrorMessage;
+  return { issues, failureCategory, errorMessage };
 }
