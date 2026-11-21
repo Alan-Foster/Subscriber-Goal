@@ -1,5 +1,13 @@
-import { autoCreateNextGoalDelayMs } from "../data/subGoalData";
+import {
+  autoCreateNextGoalDelayMs,
+  autoCreateNextGoalSuccessorsKey,
+  postAutoCreateNextGoalSuffix,
+  subscriberGoalsKey,
+} from "../data/subGoalData";
+import { isLinkId, type RedisClient } from "../types";
 import type { OnboardingGoalCandidate } from "./onboardingSubscriberGoal";
+
+const successorHighlightGraceMs = 30 * 60 * 1000;
 
 export function newestGoalCandidate(
   candidates: readonly OnboardingGoalCandidate[],
@@ -12,7 +20,41 @@ export function newestGoalCandidate(
   )[0]!;
 }
 
-export function selectManagedGoalHighlight(
+async function goalsWaitingForSuccessor(
+  redis: RedisClient,
+  classicGoals: readonly OnboardingGoalCandidate[],
+  nowMs: number,
+): Promise<Set<string>> {
+  const postIds = classicGoals
+    .filter(
+      ({ autoCreateNextGoal, completedTime }) =>
+        autoCreateNextGoal &&
+        completedTime &&
+        completedTime + autoCreateNextGoalDelayMs + successorHighlightGraceMs >
+          nowMs,
+    )
+    .map(({ postId }) => postId);
+  if (postIds.length === 0) return new Set();
+
+  // The effective AutoGoal flag is always on for numeric goals. The saved
+  // setting can still opt out of the extra highlight time.
+  const [settings, successors] = await Promise.all([
+    redis.hMGet(
+      subscriberGoalsKey,
+      postIds.map((postId) => `${postId}${postAutoCreateNextGoalSuffix}`),
+    ),
+    redis.hMGet(autoCreateNextGoalSuccessorsKey, postIds),
+  ]);
+  return new Set(
+    postIds.filter(
+      (_, index) =>
+        settings[index] !== "false" && !isLinkId(successors[index] ?? ""),
+    ),
+  );
+}
+
+export async function selectManagedGoalHighlight(
+  redis: RedisClient,
   candidates: readonly OnboardingGoalCandidate[],
   nowMs: number,
 ) {
@@ -34,9 +76,20 @@ export function selectManagedGoalHighlight(
       (candidate.classification === "tiny" ||
         candidate.classification === "cta"),
   );
+  const waitingForSuccessor = activeGoals.length
+    ? new Set<string>()
+    : await goalsWaitingForSuccessor(redis, classicGoals, nowMs);
+  const celebrationEnd = ({
+    postId,
+    completedTime,
+  }: OnboardingGoalCandidate) =>
+    completedTime
+      ? completedTime +
+        autoCreateNextGoalDelayMs +
+        (waitingForSuccessor.has(postId) ? successorHighlightGraceMs : 0)
+      : undefined;
   const recentCompletedGoals = classicGoals.filter(
-    ({ completedTime }) =>
-      completedTime && completedTime + autoCreateNextGoalDelayMs > nowMs,
+    (candidate) => (celebrationEnd(candidate) ?? 0) > nowMs,
   );
   const latestCompleted = completedGoals.length
     ? newestGoalCandidate(completedGoals)
@@ -50,9 +103,7 @@ export function selectManagedGoalHighlight(
     latestCompleted,
     completedGoals,
     activeGoals,
-    celebrationEndsAt: selected?.completedTime
-      ? selected.completedTime + autoCreateNextGoalDelayMs
-      : undefined,
+    celebrationEndsAt: selected ? celebrationEnd(selected) : undefined,
     removableManagedPostIds: [...classicCandidates, ...compactGoals]
       .filter((candidate) => candidate.postId !== selected?.postId)
       .map(({ postId }) => postId),

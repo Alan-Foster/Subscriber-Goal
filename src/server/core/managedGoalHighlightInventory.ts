@@ -53,7 +53,7 @@ export function deferredCompletedHighlightInventory({
   activeGoals,
   latestCompleted,
   completedGoals,
-}: ReturnType<typeof selectManagedGoalHighlight>) {
+}: Awaited<ReturnType<typeof selectManagedGoalHighlight>>) {
   if (activeGoals.length || !latestCompleted?.completedTime) return {};
   const superseded = supersededCompletedGoals(latestCompleted, completedGoals);
   return {

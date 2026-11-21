@@ -1935,7 +1935,7 @@ async function reconcileLiveSubscriberGoalHighlights({
     return { status: "missing", ...base };
   }
 
-  const selection = selectManagedGoalHighlight(candidates, nowMs);
+  const selection = await selectManagedGoalHighlight(redis, candidates, nowMs);
   base.eligiblePostIds.push(...selection.eligiblePostIds);
   if (selection.activeGoals.length > 0 && !pauseSuccessorMapping) {
     await mapCompletedGoalsToActiveClassic(redis, selection);
@@ -2033,7 +2033,7 @@ async function mapCompletedGoalsToActiveClassic(
   {
     activeGoals,
     completedGoals,
-  }: ReturnType<typeof selectManagedGoalHighlight>,
+  }: Awaited<ReturnType<typeof selectManagedGoalHighlight>>,
 ): Promise<void> {
   const newestActive = newestGoalCandidate(activeGoals);
   for (const completed of completedGoals) {
