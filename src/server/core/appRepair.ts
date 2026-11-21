@@ -25,6 +25,7 @@ import {
 } from "./communityGoalMutation";
 import { isSubscriberGoalPostRetired } from "./postRetirement";
 import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export { appRepairLockKey, appRepairStateKey, appRepairVersion };
 const retryBaseMs = 5 * 60 * 1000;
@@ -68,12 +69,13 @@ export async function processDueAppRepair({
     return "not_due";
   }
 
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(appRepairLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + 15 * 60 * 1000),
-  });
-  if ((await redis.get(appRepairLockKey)) !== lockToken) return "not_due";
+  const lockToken = await acquireRedisLock(
+    redis,
+    appRepairLockKey,
+    15 * 60 * 1000,
+    { nowMs },
+  );
+  if (!lockToken) return "not_due";
 
   const failures: string[] = [];
   let highlightDeferred = false;
@@ -288,8 +290,6 @@ export async function processDueAppRepair({
     );
     return "retry";
   } finally {
-    if ((await redis.get(appRepairLockKey)) === lockToken) {
-      await redis.del(appRepairLockKey);
-    }
+    await releaseRedisLock(redis, appRepairLockKey, lockToken);
   }
 }

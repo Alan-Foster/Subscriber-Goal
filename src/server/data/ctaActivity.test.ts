@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../types";
 import {
@@ -10,6 +11,10 @@ import {
 } from "./ctaActivity";
 
 class FakeRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   values = new Map<string, string>();
   sorted = new Map<string, Map<string, number>>();
   expirations = new Map<string, Date>();
@@ -349,6 +354,20 @@ describe("CTA activity storage", () => {
       recordCtaClick(asRedis(redis), "t3_a", "viewer", { nowMs: now }),
     ).rejects.toThrow("unavailable");
     expect(increment).not.toHaveBeenCalled();
+  });
+
+  it("skips a concurrent backfill even if SET NX returns a success-like response", async () => {
+    const redis = asRedis(new FakeRedis());
+    const reddit = {
+      getNewPosts: vi.fn(() => ({ all: async () => [] })),
+    };
+
+    await Promise.all([
+      ensureCommunityPostActivityBackfill(reddit as never, redis, "ExampleSub"),
+      ensureCommunityPostActivityBackfill(reddit as never, redis, "ExampleSub"),
+    ]);
+
+    expect(reddit.getNewPosts).toHaveBeenCalledOnce();
   });
 
   it("backfills recent posts once and shares trigger deduplication", async () => {

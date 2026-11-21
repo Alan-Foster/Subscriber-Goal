@@ -40,6 +40,7 @@ import {
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export type OnboardingLifecycleReconciliation =
   | { status: "unchanged"; reason: string }
@@ -115,19 +116,29 @@ async function reconcileOnboardingForLifecycleUnderLease(
     mutationLease: CommunityGoalMutationLease;
   },
 ): Promise<OnboardingLifecycleReconciliation> {
-  const goalLockToken = await acquireLock(
+  const goalLockToken = await acquireRedisLock(
     redis,
     onboardingSubscriberGoalLockKey,
     onboardingSubscriberGoalLockTtlMs,
-    nowMs,
+    { nowMs },
   );
+  if (!goalLockToken) {
+    throw new Error(
+      `Onboarding lifecycle state is currently locked: ${onboardingSubscriberGoalLockKey}`,
+    );
+  }
   try {
-    const reminderLockToken = await acquireLock(
+    const reminderLockToken = await acquireRedisLock(
       redis,
       onboardingReminderLockKey,
       onboardingReminderLockTtlMs,
-      nowMs,
+      { nowMs },
     );
+    if (!reminderLockToken) {
+      throw new Error(
+        `Onboarding lifecycle state is currently locked: ${onboardingReminderLockKey}`,
+      );
+    }
     try {
       const [rawGoal, rawReminder, previousGoal, previousReminder] =
         await Promise.all([
@@ -504,14 +515,14 @@ async function reconcileOnboardingForLifecycleUnderLease(
       );
       return { status: "rearmed", operationId };
     } finally {
-      await releaseOwnedLock(
+      await releaseRedisLock(
         redis,
         onboardingReminderLockKey,
         reminderLockToken,
       );
     }
   } finally {
-    await releaseOwnedLock(
+    await releaseRedisLock(
       redis,
       onboardingSubscriberGoalLockKey,
       goalLockToken,
@@ -570,29 +581,4 @@ function logReconciliationDecision(
     reminderResult: reminder?.result ?? "none",
     reminderNextRunAt: reminder?.nextRunAt ?? "none",
   });
-}
-
-async function acquireLock(
-  redis: RedisClient,
-  key: string,
-  ttlMs: number,
-  nowMs: number,
-): Promise<string> {
-  const token = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(key, token, {
-    nx: true,
-    expiration: new Date(nowMs + ttlMs),
-  });
-  if ((await redis.get(key)) !== token) {
-    throw new Error(`Onboarding lifecycle state is currently locked: ${key}`);
-  }
-  return token;
-}
-
-async function releaseOwnedLock(
-  redis: RedisClient,
-  key: string,
-  token: string,
-): Promise<void> {
-  if ((await redis.get(key)) === token) await redis.del(key);
 }

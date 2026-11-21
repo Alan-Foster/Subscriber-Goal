@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
 import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
@@ -61,6 +62,7 @@ const hoisted = vi.hoisted(() => ({
         hoisted.redisValues.set(key, value);
       },
     ),
+    watch: async (key: string) => watchTestString(hoisted.redis, key),
     get: vi.fn(async (key: string) => hoisted.redisValues.get(key)),
     del: vi.fn(async (key: string) => {
       hoisted.redisValues.delete(key);

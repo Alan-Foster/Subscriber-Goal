@@ -11,6 +11,7 @@ import {
   highlightPermissionIncidentKey,
   notifyHighlightPermissionIncident,
 } from "../utils/highlightFailureNotifications";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
@@ -228,19 +229,13 @@ export async function checkAppAccountHealth({
 
   let notificationLockToken: string | undefined;
   if (notify) {
-    notificationLockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-    await redis.set(
+    notificationLockToken = await acquireRedisLock(
+      redis,
       appAccountHealthNotificationLockKey,
-      notificationLockToken,
-      {
-        nx: true,
-        expiration: new Date(nowMs + 60_000),
-      },
+      60_000,
+      { nowMs },
     );
-    if (
-      (await redis.get(appAccountHealthNotificationLockKey)) !==
-      notificationLockToken
-    ) {
+    if (!notificationLockToken) {
       return {
         status: "unhealthy",
         healthy: false,
@@ -359,12 +354,12 @@ export async function checkAppAccountHealth({
       notification,
     };
   } finally {
-    if (
-      notificationLockToken &&
-      (await redis.get(appAccountHealthNotificationLockKey)) ===
-        notificationLockToken
-    ) {
-      await redis.del(appAccountHealthNotificationLockKey);
+    if (notificationLockToken) {
+      await releaseRedisLock(
+        redis,
+        appAccountHealthNotificationLockKey,
+        notificationLockToken,
+      );
     }
   }
 }

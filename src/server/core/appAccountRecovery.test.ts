@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -29,6 +30,7 @@ class TestRedis {
   hashes = new Map<string, Map<string, string>>();
 
   async watch(key: string) {
+    if (this.values.has(key)) return watchTestString(this, key);
     const before = JSON.stringify(await this.hGetAll(key));
     let fields: Record<string, string> = {};
     return {

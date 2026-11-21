@@ -1616,9 +1616,11 @@ describe("internalUi color theme create goal routes", () => {
       type: string;
       nsfw: boolean;
     }>();
-    hoisted.reddit.getCurrentSubreddit.mockImplementationOnce(
-      () => pausedSubreddit.promise,
-    );
+    const setupReachedSubreddit = deferred<void>();
+    hoisted.reddit.getCurrentSubreddit.mockImplementationOnce(() => {
+      setupReachedSubreddit.resolve();
+      return pausedSubreddit.promise;
+    });
 
     const submissionA = routes.get(internalRoutes.forms.createGoalSetup)?.(
       {
@@ -1630,8 +1632,7 @@ describe("internalUi color theme create goal routes", () => {
       } as Request,
       { json: vi.fn() } as unknown as Response,
     );
-    await Promise.resolve();
-    await Promise.resolve();
+    await setupReachedSubreddit.promise;
 
     const existingKeys = new Set(hoisted.redisValues.keys());
     await routes.get(internalRoutes.menu.createGoal)?.(

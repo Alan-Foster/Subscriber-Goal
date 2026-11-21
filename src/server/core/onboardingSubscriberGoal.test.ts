@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { watchTestHash } from "../utils/testHashWatch";
+import { watchTestHash, watchTestString } from "../utils/testHashWatch";
 import type { ServerAppSettings } from "../settings";
 import {
   autoCreateNextGoalQueueKey,
@@ -113,8 +113,10 @@ import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
 
 class InMemoryRedis {
-  watch(key: string) {
-    return watchTestHash(this, key);
+  async watch(key: string) {
+    return (await this.get(key)) === undefined
+      ? watchTestHash(this, key)
+      : watchTestString(this, key);
   }
 
   hashes = new Map<string, Map<string, string>>();

@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { appAccountRecoveryStateKey } from "./appAccountRecoveryState";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -15,6 +16,7 @@ class TestRedis {
 
   beforeExec?: () => Promise<void>;
   async watch(key: string) {
+    if (this.values.has(key)) return watchTestString(this, key);
     const before = JSON.stringify(await this.hGetAll(key));
     let fields: Record<string, string> = {};
     return {

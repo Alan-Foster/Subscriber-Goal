@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -76,6 +77,10 @@ import {
 import { CommunityGoalMutationInProgressError } from "./communityGoalMutation";
 
 class InMemoryRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   hashes = new Map<string, Map<string, string>>();
   values = new Map<string, string>();
 

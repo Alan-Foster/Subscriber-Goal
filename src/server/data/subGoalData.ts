@@ -49,6 +49,7 @@ import {
 } from "../core/communityGoalMutation";
 import { parseRecentSubscriberOrder } from "./recentSubscriberOrder";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -791,15 +792,15 @@ async function checkCompletionStatusUnderLease(
     ((delayMs: number) =>
       new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs)));
   const lockKey = `${completionTransitionLockKeyPrefix}:${postId}`;
-  const lockToken = `${now()}:${Math.random().toString(36).slice(2)}`;
-  let acquired = false;
+  let lockToken: string | undefined;
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    await redis.set(lockKey, lockToken, {
-      nx: true,
-      expiration: new Date(now() + completionTransitionLockTtlMs),
-    });
-    acquired = (await redis.get(lockKey)) === lockToken;
-    if (acquired) break;
+    lockToken = await acquireRedisLock(
+      redis,
+      lockKey,
+      completionTransitionLockTtlMs,
+      { nowMs: now() },
+    );
+    if (lockToken) break;
 
     const completedByAnotherRequest = await getSubGoalData(redis, postId);
     if (completedByAnotherRequest.completedTime) {
@@ -808,7 +809,7 @@ async function checkCompletionStatusUnderLease(
     await wait(25 * (attempt + 1));
   }
 
-  if (!acquired) {
+  if (!lockToken) {
     const latest = await getSubGoalData(redis, postId);
     logDiagnostic("warn", "completion_transition_lock_unavailable", {
       workflow: "sub_goal_completion",
@@ -883,9 +884,7 @@ async function checkCompletionStatusUnderLease(
     }
     return lockedSubGoalData.completedTime;
   } finally {
-    if ((await redis.get(lockKey)) === lockToken) {
-      await redis.del(lockKey);
-    }
+    await releaseRedisLock(redis, lockKey, lockToken);
   }
 }
 

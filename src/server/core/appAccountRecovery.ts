@@ -17,6 +17,7 @@ import {
   checkAppAccountHealth,
   subscriberGoalAppUsername,
 } from "./appAccountHealth";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const appAccountInstallationStateKey =
   "app_account_recovery_v1_installation";
@@ -591,12 +592,13 @@ export async function processAppAccountRecovery({
     return { status: "not_due", incidentToken };
   }
 
-  const lockToken = `${incidentToken}:${crypto.randomUUID()}`;
-  await redis.set(appAccountRecoveryLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + 2 * 60_000),
-  });
-  if ((await redis.get(appAccountRecoveryLockKey)) !== lockToken) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    appAccountRecoveryLockKey,
+    2 * 60_000,
+    { nowMs, token: `${incidentToken}:${crypto.randomUUID()}` },
+  );
+  if (!lockToken) {
     return { status: "locked", incidentToken };
   }
 
@@ -773,9 +775,7 @@ export async function processAppAccountRecovery({
       suppressHealthNotification: removalNotificationDelivered,
     });
   } finally {
-    if ((await redis.get(appAccountRecoveryLockKey)) === lockToken) {
-      await redis.del(appAccountRecoveryLockKey);
-    }
+    await releaseRedisLock(redis, appAccountRecoveryLockKey, lockToken);
   }
 }
 

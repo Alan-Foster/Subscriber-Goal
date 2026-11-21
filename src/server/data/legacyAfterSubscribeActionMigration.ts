@@ -13,6 +13,7 @@ import {
   setAfterSubscribeActionForPost,
   subscriberGoalsKey,
 } from "./subGoalData";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 // Keep the prior migration keys intact. A separate v3 marker deliberately
 // re-queues installations where the v2 migration has already completed.
@@ -142,12 +143,8 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
       }
 
       lockKey = `${legacyAfterSubscribeActionMigrationLockKeyPrefix}:${postId}`;
-      lockToken = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
-      await redis.set(lockKey, lockToken, {
-        nx: true,
-        expiration: new Date(Date.now() + lockTtlMs),
-      });
-      if ((await redis.get(lockKey)) !== lockToken) {
+      lockToken = await acquireRedisLock(redis, lockKey, lockTtlMs);
+      if (!lockToken) {
         summary.raced += 1;
         continue;
       }
@@ -248,11 +245,16 @@ export async function processLegacyAfterSubscribeActionMigrationBatch(
         error,
       );
     } finally {
-      if (removeFromQueue) {
-        await redis.zRem(legacyAfterSubscribeActionMigrationQueueKey, [postId]);
-      }
-      if (lockKey && lockToken && (await redis.get(lockKey)) === lockToken) {
-        await redis.del(lockKey);
+      try {
+        if (removeFromQueue) {
+          await redis.zRem(legacyAfterSubscribeActionMigrationQueueKey, [
+            postId,
+          ]);
+        }
+      } finally {
+        if (lockKey && lockToken) {
+          await releaseRedisLock(redis, lockKey, lockToken);
+        }
       }
     }
   }

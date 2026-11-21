@@ -1,6 +1,7 @@
 import { getPostAvailability } from "../utils/postStatus";
 import { isLinkId, type RedditClient, type RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const subscriberGoalPostFlairText = "Subscriber Goal";
 export const subscriberGoalPostFlairBackgroundColor = "#FF4500";
@@ -33,18 +34,13 @@ export async function ensureSubscriberGoalPostFlair(
   }
   let existing = matches[0];
   if (!existing) {
-    const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
-    await redis.set(flairCreationLockKey, token, {
-      nx: true,
-      expiration: new Date(Date.now() + 60_000),
-    });
-    const acquired = (await redis.get(flairCreationLockKey)) === token;
+    const token = await acquireRedisLock(redis, flairCreationLockKey, 60_000);
     try {
       existing = (await reddit.getPostFlairTemplates(subredditName)).find(
         (template) => template.text === subscriberGoalPostFlairText,
       );
       if (!existing) {
-        if (!acquired)
+        if (!token)
           throw new Error(
             "Subscriber Goal flair creation is already in progress.",
           );
@@ -58,9 +54,7 @@ export async function ensureSubscriberGoalPostFlair(
         return created;
       }
     } finally {
-      if (acquired && (await redis.get(flairCreationLockKey)) === token) {
-        await redis.del(flairCreationLockKey);
-      }
+      if (token) await releaseRedisLock(redis, flairCreationLockKey, token);
     }
   }
 

@@ -1,3 +1,4 @@
+import { watchTestString } from "../utils/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
 import {
@@ -40,6 +41,10 @@ vi.mock("./autoCreateNextGoal", () => ({
 import { reconcileCompletedGoal } from "./completedGoalReconciliation";
 
 class TestRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   values = new Map<string, string>();
   successors = new Map<string, string>();
   suppression = new Set<string>();

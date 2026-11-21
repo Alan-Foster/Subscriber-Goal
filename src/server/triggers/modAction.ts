@@ -46,6 +46,7 @@ import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
 import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
 import { getPostAvailability, getPostUpdateRecheckKey } from '../utils/postStatus';
 import { isNsfwOrUnknown } from '../utils/subredditSafety';
+import { acquireRedisLock, releaseRedisLock } from '../utils/redisOwnedLock';
 
 export type ModActionEvent = {
   action?: string;
@@ -127,8 +128,6 @@ type CrosspostBookkeepingCleanupOptions = {
   minIntervalMs?: number;
   nowMs?: number;
 };
-
-type RedisLockClient = Pick<RedisClient, 'get' | 'set' | 'del'>;
 
 type RedisFinalizeTransaction = {
   multi(): Promise<void>;
@@ -350,35 +349,6 @@ async function finalizeCrosspostPersistenceAtomic(params: {
   await tx.exec();
 }
 
-async function acquireCrosspostIngestionLock(
-  redisClient: RedisLockClient,
-  lockKey: string
-): Promise<{ acquired: boolean; lockToken: string; lockKey: string }> {
-  const lockToken = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
-  const expiration = new Date(Date.now() + crosspostIngestionLockTtlMs);
-  await redisClient.set(lockKey, lockToken, {
-    nx: true,
-    expiration,
-  });
-  const currentToken = await redisClient.get(lockKey);
-  return {
-    acquired: currentToken === lockToken,
-    lockToken,
-    lockKey,
-  };
-}
-
-async function releaseCrosspostIngestionLock(
-  redisClient: RedisLockClient,
-  lockKey: string,
-  lockToken: string
-): Promise<void> {
-  const currentToken = await redisClient.get(lockKey);
-  if (currentToken === lockToken) {
-    await redisClient.del(lockKey);
-  }
-}
-
 const getSourceCreateCooldownKey = (sourcePostId: LinkId): string =>
   `${crosspostSourceCreateCooldownKeyPrefix}:${sourcePostId}`;
 
@@ -440,35 +410,6 @@ async function isSourceCreateInFlight(
   sourcePostId: LinkId
 ): Promise<boolean> {
   return Boolean(await redisClient.get(getCrosspostCreateInFlightKey(sourcePostId)));
-}
-
-async function acquireSourceCreateInFlightLock(
-  redisClient: RedisLockClient,
-  sourcePostId: LinkId
-): Promise<{ acquired: boolean; lockToken: string; lockKey: string }> {
-  const lockKey = getCrosspostCreateInFlightKey(sourcePostId);
-  const lockToken = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
-  await redisClient.set(lockKey, lockToken, {
-    nx: true,
-    expiration: new Date(Date.now() + crosspostCreateInFlightTtlMs),
-  });
-  const currentToken = await redisClient.get(lockKey);
-  return {
-    acquired: currentToken === lockToken,
-    lockToken,
-    lockKey,
-  };
-}
-
-async function releaseSourceCreateInFlightLock(
-  redisClient: RedisLockClient,
-  lockKey: string,
-  lockToken: string
-): Promise<void> {
-  const currentToken = await redisClient.get(lockKey);
-  if (currentToken === lockToken) {
-    await redisClient.del(lockKey);
-  }
 }
 
 async function findExistingTargetCrosspost(
@@ -1107,9 +1048,8 @@ async function updateFromWikis(
   let appUserLookup: ReturnType<typeof reddit.getAppUser> | undefined;
   for (const pending of [...reconciliationFirstPending, ...normalPending]) {
     let sourceSubredditIsNsfwOrUnknown = false;
-    let sourceCreateLock:
-      | Awaited<ReturnType<typeof acquireSourceCreateInFlightLock>>
-      | undefined;
+    let sourceCreateLock: string | undefined;
+    const sourceCreateLockKey = getCrosspostCreateInFlightKey(pending.postId);
     try {
       if (await hasCrosspostDeletionMarker(redis, pending.postId)) {
         const knownMirrorId =
@@ -1339,8 +1279,12 @@ async function updateFromWikis(
         continue;
       }
 
-      sourceCreateLock = await acquireSourceCreateInFlightLock(redis, pending.postId);
-      if (!sourceCreateLock.acquired) {
+      sourceCreateLock = await acquireRedisLock(
+        redis,
+        sourceCreateLockKey,
+        crosspostCreateInFlightTtlMs
+      );
+      if (!sourceCreateLock) {
         summary.crosspostsSkippedByInFlight += 1;
         await scheduleRetry(pending, 'source_create_inflight');
         continue;
@@ -1510,25 +1454,15 @@ async function updateFromWikis(
       summary.crosspostsFailed += 1;
       await scheduleRetry(pending, 'crosspost_attempt_failed', errorMessage);
     } finally {
-      if (sourceCreateLock?.acquired) {
-        try {
-          await releaseSourceCreateInFlightLock(
-            redis,
-            sourceCreateLock.lockKey,
-            sourceCreateLock.lockToken
-          );
-        } catch (lockError) {
-          logDiagnostic(
-            'warn',
-            'crosspost_cleanup_failed',
-            {
-              workflow: 'crosspost',
-              phase: 'source_create_lock_release',
-              postId: pending.postId,
-            },
-            lockError
-          );
-        }
+      if (sourceCreateLock) {
+        await releaseRedisLock(redis, sourceCreateLockKey, sourceCreateLock, {
+          event: 'crosspost_cleanup_failed',
+          context: {
+            workflow: 'crosspost',
+            phase: 'source_create_lock_release',
+            postId: pending.postId,
+          },
+        });
       }
     }
   }
@@ -1833,8 +1767,12 @@ export async function processCrosspostDispatchQueue(
   const lockKey = `${crosspostIngestionLockKeyPrefix}:${toNormalizedSubredditName(
     appSettings.promoSubreddit
   )}`;
-  const lock = await acquireCrosspostIngestionLock(redis, lockKey);
-  if (!lock.acquired) {
+  const lock = await acquireRedisLock(
+    redis,
+    lockKey,
+    crosspostIngestionLockTtlMs
+  );
+  if (!lock) {
     logCrosspostEvent(
       {
         event: 'crosspost_retry_skipped',
@@ -2083,20 +2021,10 @@ export async function processCrosspostDispatchQueue(
       return summary;
     }
   } finally {
-    try {
-      await releaseCrosspostIngestionLock(
-        redis,
-        lock.lockKey,
-        lock.lockToken
-      );
-    } catch (lockError) {
-      logDiagnostic(
-        'warn',
-        'crosspost_cleanup_failed',
-        { workflow: 'crosspost', phase: 'ingestion_lock_release' },
-        lockError
-      );
-    }
+    await releaseRedisLock(redis, lockKey, lock, {
+      event: 'crosspost_cleanup_failed',
+      context: { workflow: 'crosspost', phase: 'ingestion_lock_release' },
+    });
   }
 }
 

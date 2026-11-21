@@ -1,3 +1,4 @@
+import { watchTestString } from "./testHashWatch";
 import { describe, expect, it, vi } from "vitest";
 import type { LinkId } from "../types";
 import type { HighlightResult } from "./communityHighlights";
@@ -9,6 +10,10 @@ import {
 } from "./highlightFailureNotifications";
 
 class IncidentRedis {
+  watch(key: string) {
+    return watchTestString(this, key);
+  }
+
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
   expirations = new Map<string, number>();

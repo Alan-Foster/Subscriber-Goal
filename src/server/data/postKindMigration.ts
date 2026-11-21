@@ -10,13 +10,13 @@ import type { RedditClient, RedisClient } from "../types";
 import { isLinkId } from "../types";
 import { isArchivedPostMutationError } from "../utils/communityHighlights";
 import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
-import { releaseOwnedRedisLock } from "../utils/redisOwnedLock";
 import {
   getSubGoalData,
   postHeightSuffix,
   postKindSuffix,
   subscriberGoalsKey,
 } from "./subGoalData";
+import { withRedisLock } from "../utils/redisOwnedLock";
 
 export const postKindMigrationStateKey = "post_kind_migration_v1_state";
 export const postKindMigrationQueueKey = "post_kind_migration_v1_queue";
@@ -87,29 +87,19 @@ export async function processPostKindMigrationBatch(
   if (version !== postKindMigrationVersion || status === "complete") {
     return emptySummary();
   }
-  const now = Date.now();
-  const lockToken = `${now}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(postKindMigrationLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(now + 5 * 60 * 1000),
-  });
-  if ((await redis.get(postKindMigrationLockKey)) !== lockToken) {
-    return emptySummary();
-  }
-  try {
-    return await migratePendingPostKinds(reddit, redis, batchSize);
-  } finally {
-    try {
-      await releaseOwnedRedisLock(redis, postKindMigrationLockKey, lockToken);
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "migration_lock_release_failed",
-        { workflow: "post_kind_migration", phase: "lock_release" },
-        error,
-      );
-    }
-  }
+  const lock = await withRedisLock(
+    redis,
+    postKindMigrationLockKey,
+    5 * 60 * 1000,
+    () => migratePendingPostKinds(reddit, redis, batchSize),
+    {
+      releaseDiagnostic: {
+        event: "migration_lock_release_failed",
+        context: { workflow: "post_kind_migration", phase: "lock_release" },
+      },
+    },
+  );
+  return lock.acquired ? lock.result : emptySummary();
 }
 
 async function removePendingPost(redis: RedisClient, postId: string) {

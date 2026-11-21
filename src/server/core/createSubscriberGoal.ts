@@ -80,6 +80,7 @@ import {
   isMissingPostError,
 } from "../utils/postStatus";
 import { getCurrentActorAuthority } from "../utils/actorAuthorization";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 type CreateSubscriberGoalOptions = {
   title: string;
@@ -522,12 +523,10 @@ async function createSubscriberGoalUnderCommunityLease({
     );
   }
   const nowMs = Date.now();
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(lockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + 15 * 60 * 1000),
+  const lockToken = await acquireRedisLock(redis, lockKey, 15 * 60 * 1000, {
+    nowMs,
   });
-  if ((await redis.get(lockKey)) !== lockToken) {
+  if (!lockToken) {
     throw new SubscriberGoalCreationInProgressError(options.language);
   }
 
@@ -751,7 +750,7 @@ async function createSubscriberGoalUnderCommunityLease({
     });
     return result;
   } finally {
-    if ((await redis.get(lockKey)) === lockToken) await redis.del(lockKey);
+    await releaseRedisLock(redis, lockKey, lockToken);
   }
 }
 
