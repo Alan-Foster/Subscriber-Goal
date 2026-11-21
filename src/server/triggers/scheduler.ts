@@ -16,10 +16,8 @@ import {
 import { isLinkId } from "../types";
 import { applyTextFallback } from "../utils/textFallback";
 import { getAppSettings } from "../settings";
-import {
-  isCrosspostAuthorityInstall,
-  processCrosspostDispatchQueue,
-} from "./modAction";
+import { isCrosspostAuthorityInstall } from "../crosspost/bookkeeping";
+import { processCrosspostDispatchQueue } from "../crosspost/dispatch";
 import { countPendingCrossposts } from "../data/crosspostData";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";

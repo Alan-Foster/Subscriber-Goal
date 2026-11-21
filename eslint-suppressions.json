@@ -219,10 +219,7 @@
   },
   "src/server/triggers/modAction.ts": {
     "complexity": {
-      "count": 5
-    },
-    "max-lines-per-function": {
-      "count": 2
+      "count": 1
     }
   },
   "src/server/triggers/scheduler.ts": {

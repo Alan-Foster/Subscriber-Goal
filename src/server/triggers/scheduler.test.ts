@@ -98,7 +98,7 @@ vi.mock("../settings", () => ({
   getAppSettings: hoisted.getAppSettings,
 }));
 
-vi.mock("./modAction", () => ({
+vi.mock("../crosspost/bookkeeping", () => ({
   isCrosspostAuthorityInstall: (
     appSettings: ServerAppSettings,
     subredditName: string,
@@ -108,6 +108,9 @@ vi.mock("./modAction", () => ({
       .trim()
       .replace(/^r\//i, "")
       .toLowerCase(),
+}));
+
+vi.mock("../crosspost/dispatch", () => ({
   processCrosspostDispatchQueue: hoisted.processCrosspostDispatchQueue,
 }));
 

@@ -9,7 +9,7 @@ vi.mock('@devvit/web/server', () => ({
 import {
   cleanupCrosspostBookkeeping,
   crosspostBookkeepingCleanupLastRunKey,
-} from './modAction';
+} from './bookkeeping';
 import {
   crosspostListKey,
   processedRevisionsByTimeKey,

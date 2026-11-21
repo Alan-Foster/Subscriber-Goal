@@ -6,7 +6,7 @@ vi.mock('@devvit/web/server', () => ({
   context: {},
 }));
 
-import { isMissingSourcePostError } from './modAction';
+import { isMissingSourcePostError } from './pending';
 
 describe('isMissingSourcePostError', () => {
   it('detects explicit no post t3_* error messages', () => {

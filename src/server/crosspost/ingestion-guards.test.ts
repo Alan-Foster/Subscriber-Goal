@@ -232,7 +232,8 @@ vi.mock('../core/appAccountRecovery', () => ({
   handleAppAccountModeratorAction: hoisted.handleAppAccountModeratorAction,
 }));
 
-import { onModAction, processCrosspostDispatchQueue } from './modAction';
+import { onModAction } from '../triggers/modAction';
+import { processCrosspostDispatchQueue } from './dispatch';
 
 const baseSettings: ServerAppSettings = {
   promoSubreddit: 'SubGoal',
