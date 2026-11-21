@@ -43,6 +43,7 @@ import {
   onboardingReminderStaggerMinMinutes,
 } from "./onboardingConfig";
 import { findLiveHighlightedSubscriberGoalCandidates } from "../data/liveSubscriberGoalHighlights";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 function isExpectedCompletedReplacement(
   state:
@@ -223,14 +224,13 @@ export async function scheduleOnboardingReminder(
     logReminderSchedulingSkipped("automation_disabled", lifecycleSource);
     return;
   }
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(onboardingReminderInitializationLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + 60 * 1000),
-  });
-  if (
-    (await redis.get(onboardingReminderInitializationLockKey)) !== lockToken
-  ) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    onboardingReminderInitializationLockKey,
+    60 * 1000,
+    { nowMs },
+  );
+  if (!lockToken) {
     logReminderSchedulingSkipped("initialization_lock_busy", lifecycleSource);
     return;
   }
@@ -295,10 +295,11 @@ export async function scheduleOnboardingReminder(
       migratedFromVersion: state.migratedFromVersion ?? "none",
     });
   } finally {
-    if (
-      (await redis.get(onboardingReminderInitializationLockKey)) === lockToken
-    )
-      await redis.del(onboardingReminderInitializationLockKey);
+    await releaseRedisLock(
+      redis,
+      onboardingReminderInitializationLockKey,
+      lockToken,
+    );
   }
 }
 
@@ -444,12 +445,13 @@ export async function processDueOnboardingReminder({
     };
   }
 
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(onboardingReminderLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + onboardingReminderLockTtlMs),
-  });
-  if ((await redis.get(onboardingReminderLockKey)) !== lockToken) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    onboardingReminderLockKey,
+    onboardingReminderLockTtlMs,
+    { nowMs },
+  );
+  if (!lockToken) {
     return { status: "not_due", ...base };
   }
 
@@ -983,18 +985,10 @@ export async function processDueOnboardingReminder({
     );
     return { status: "failed", errorMessage, ...inspected };
   } finally {
-    try {
-      if ((await redis.get(onboardingReminderLockKey)) === lockToken) {
-        await redis.del(onboardingReminderLockKey);
-      }
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "onboarding_reminder_cleanup_failed",
-        { workflow: "onboarding_reminder", phase: "lock_release" },
-        error,
-      );
-    }
+    await releaseRedisLock(redis, onboardingReminderLockKey, lockToken, {
+      event: "onboarding_reminder_cleanup_failed",
+      context: { workflow: "onboarding_reminder", phase: "lock_release" },
+    });
   }
 }
 
