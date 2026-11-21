@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AfterSubscribePreset } from "../../shared/afterSubscribeAction";
 import type { CompactCtaActivityMetric } from "../../shared/types/api";
-import { logDiagnostic } from "../../shared/diagnostics";
 import {
   isLinkId,
   type LinkId,
@@ -9,6 +8,7 @@ import {
   type RedisClient,
 } from "../types";
 import { getUtcDayStartMs } from "./subscriberDailyStats";
+import { withRedisLock } from "../utils/redisOwnedLock";
 
 const utcDayMs = 24 * 60 * 60 * 1000;
 const rollingWindowDays = 7;
@@ -89,41 +89,36 @@ export async function ensureCommunityPostActivityBackfill(
   options: { nowMs?: number } = {},
 ): Promise<void> {
   if (await redis.get(postBackfillCompleteKey)) return;
-  const lock = await redis.set(postBackfillLockKey, "1", {
-    nx: true,
-    expiration: new Date(Date.now() + 2 * 60 * 1000),
-  });
-  if (!lock) return;
-  try {
-    const nowMs = options.nowMs ?? Date.now();
-    const oldestDayStartMs =
-      getUtcDayStartMs(nowMs) - (rollingWindowDays - 1) * utcDayMs;
-    const posts = await reddit
-      .getNewPosts({
-        subredditName,
-        limit: postBackfillLimit,
-        pageSize: 100,
-      })
-      .all();
-    for (const post of posts) {
-      const createdAtMs = normalizeCreatedAtMs(post.createdAt);
-      if (createdAtMs !== null && createdAtMs >= oldestDayStartMs) {
-        await recordCommunityPostCreated(redis, post.id, createdAtMs);
+  await withRedisLock(
+    redis,
+    postBackfillLockKey,
+    2 * 60 * 1000,
+    async () => {
+      const nowMs = options.nowMs ?? Date.now();
+      const oldestDayStartMs =
+        getUtcDayStartMs(nowMs) - (rollingWindowDays - 1) * utcDayMs;
+      const posts = await reddit
+        .getNewPosts({
+          subredditName,
+          limit: postBackfillLimit,
+          pageSize: 100,
+        })
+        .all();
+      for (const post of posts) {
+        const createdAtMs = normalizeCreatedAtMs(post.createdAt);
+        if (createdAtMs !== null && createdAtMs >= oldestDayStartMs) {
+          await recordCommunityPostCreated(redis, post.id, createdAtMs);
+        }
       }
-    }
-    await redis.set(postBackfillCompleteKey, String(nowMs));
-  } finally {
-    try {
-      await redis.del(postBackfillLockKey);
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "cta_activity_cleanup_failed",
-        { workflow: "cta_activity", phase: "lock_release" },
-        error,
-      );
-    }
-  }
+      await redis.set(postBackfillCompleteKey, String(nowMs));
+    },
+    {
+      releaseDiagnostic: {
+        event: "cta_activity_cleanup_failed",
+        context: { workflow: "cta_activity", phase: "lock_release" },
+      },
+    },
+  );
 }
 
 export async function recordCtaClick(
