@@ -300,8 +300,8 @@ export async function processDueAutoCreateNextGoals({
       }
 
       // Reuse onboarding/highlight repair's complete, bounded inventory. It
-      // reconciles classic goals at/above target, restores every eligible pin
-      // that fits, and maps completed sources to an existing active classic.
+      // reconciles classic goals at/above target, chooses a single app pin,
+      // and maps completed sources to an existing active classic.
       // Unhighlighted posts still participate in this decision.
       // Load lazily because onboarding reconciliation itself depends on the
       // successor worker; eager imports would create an initialization cycle.

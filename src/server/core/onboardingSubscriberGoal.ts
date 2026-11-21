@@ -95,10 +95,12 @@ import {
   saveCanonicalGoalPointer,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
-import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
 import { checkCanonicalHighlightContradiction } from "./canonicalHighlightContradiction";
+import { newestGoalCandidate, selectManagedGoalHighlight } from "./managedGoalHighlightSelection";
+import { completedHighlightInventory, deferredCompletedHighlightInventory, highlightCandidateDetails } from "./managedGoalHighlightInventory";
 import {
   appRepairStateKey,
+  recurringHighlightRepairIntervalMs,
   scheduleHighlightRepair,
 } from "../data/highlightRepair";
 import {
@@ -322,6 +324,8 @@ export type OnboardingHighlightEnsuranceResult =
     highlightedProtectedCount: number;
     highlightedAmbiguousCount: number;
     classicPostsUnhighlighted: string[];
+    highlightSelectedPostId?: string;
+    managedHighlightsRemoved?: string[];
     protectedHighlightsPreserved: string[];
     eligiblePostIds: string[];
     unhighlightedEligiblePostIds: string[];
@@ -1909,10 +1913,6 @@ async function reconcileLiveSubscriberGoalHighlights({
     (candidate) =>
       candidate.classification === "tiny" || candidate.classification === "cta",
   );
-  const protectedCandidates = candidates.filter(
-    (candidate) =>
-      candidate.classification === "tiny" || candidate.classification === "cta",
-  );
   const ambiguousHighlighted = highlighted.filter(
     (candidate) => candidate.classification === "ambiguous",
   );
@@ -1935,333 +1935,86 @@ async function reconcileLiveSubscriberGoalHighlights({
     return { status: "missing", ...base };
   }
 
-  {
-    const targetGoals = candidates.filter(
-      (candidate) => candidate.goal !== undefined && candidate.goal > 0,
-    );
-    const activeGoals = candidates.filter(
-      (candidate) =>
-        candidate.classification === "classic" &&
-        candidate.classificationConfidence !== "ambiguous" &&
-        candidate.goal !== undefined &&
-        candidate.goal > 0 &&
-        !candidate.completedTime,
-    );
-    const completedGoals = targetGoals.filter((candidate) =>
-      Boolean(candidate.completedTime),
-    );
-    const activeSurfaces = [...activeGoals, ...protectedCandidates].sort(
-      (left, right) =>
-        (right.createdAtMs ?? 0) - (left.createdAtMs ?? 0) ||
-        left.postId.localeCompare(right.postId),
-    );
-    base.eligiblePostIds.push(
-      ...activeSurfaces.map((candidate) => candidate.postId),
-    );
-    if (activeSurfaces.length > 0) {
-      // Newest-first is the deterministic priority when there are fewer free
-      // slots than eligible surfaces. Existing highlights are never removed.
-      // Only completed classic goals are offered as capacity cleanup candidates.
-      const newestActiveClassic = activeGoals.length
-        ? newestGoalCandidate(activeGoals)
-        : undefined;
-      // A removed newer goal may already be the intended successor. Repair
-      // older live highlights without mapping sources to those older goals.
-      if (newestActiveClassic && !pauseSuccessorMapping) {
-        for (const completedClassic of completedGoals) {
-          const existingSuccessor = await redis.hGet(
-            autoCreateNextGoalSuccessorsKey,
-            completedClassic.postId,
-          );
-          if (existingSuccessor) continue;
-          await redis.hSet(autoCreateNextGoalSuccessorsKey, {
-            [completedClassic.postId]: newestActiveClassic.postId,
-          });
-          await cancelAutoCreateNextGoal(redis, completedClassic.postId);
-        }
-      }
-      const removableCompletedIds = highlightedClassic
-        .filter((candidate) => Boolean(candidate.completedTime))
-        .map((candidate) => candidate.postId);
-      const reconciliations: {
-        candidate: OnboardingGoalCandidate;
-        highlightResult: HighlightResult;
-        notificationOutcome: HighlightNotificationOutcome;
-      }[] = [];
-      for (const candidate of activeSurfaces) {
-        let independentlyVerified = false;
-        let verifiedSnapshot: Awaited<
-          ReturnType<
-            Awaited<
-              ReturnType<RedditClient["getCurrentSubreddit"]>
-            >["getHighlightedPosts"]
-          >
-        > = [];
-        if (candidate.isHighlighted && candidate.post.isHighlighted) {
-          const subreddit = await reddit.getCurrentSubreddit();
-          verifiedSnapshot = await subreddit.getHighlightedPosts();
-          independentlyVerified =
-            verifiedSnapshot.some(
-              ({ postId }) => postId === candidate.postId,
-            ) && (await candidate.post.isHighlighted());
-        }
-        const candidatePointer =
-          independentlyVerified && candidate.classification === "classic"
-            ? await getCanonicalGoalPointer(redis)
-            : undefined;
-        if (independentlyVerified) {
-          await clearHighlightContradictionIncident(redis, candidate.postId);
-          if (candidate.classification === "classic" && !candidatePointer) {
-            await saveCanonicalGoalPointer(redis, {
-              canonicalPostId: candidate.postId,
-              reconciledAt: nowMs,
-            });
-          }
-        }
-        const reconcileClassicPointer =
-          candidatePointer?.canonicalPostId === candidate.postId;
-        const reconciliation =
-          independentlyVerified && !reconcileClassicPointer
-            ? {
-                highlightResult: {
-                  status: "highlighted" as const,
-                  selectedPostId: candidate.postId,
-                  verifiedHighlighted: true,
-                  issues: [],
-                  capacityOutcome: "not_needed" as const,
-                  cleanupOutcome: "not_needed" as const,
-                  removedManagedHighlightIds: [],
-                  preservedHighlightIds: verifiedSnapshot
-                    .map(({ postId }) => postId as LinkId)
-                    .filter((postId) => postId !== candidate.postId),
-                  rollbackOutcome: "not_needed" as const,
-                },
-                notificationOutcome: "not_requested" as const,
-              }
-            : candidate.classification === "classic"
-              ? await reconcileCanonicalClassicGoal({
-                  reddit,
-                  redis,
-                  selected: candidate,
-                  nowMs,
-                  notifyOnFailure,
-                  deferPermissionNotice: true,
-                  removableManagedPostIds: removableCompletedIds,
-                  ...(highlightVerification ? { highlightVerification } : {}),
-                })
-              : await highlightExistingGoal({
-                  reddit,
-                  redis,
-                  selected: candidate,
-                  notifyOnFailure,
-                  deferPermissionNotice: true,
-                  removableManagedPostIds: removableCompletedIds,
-                  nowMs,
-                  ...(highlightVerification ? { highlightVerification } : {}),
-                });
-        reconciliations.push({ candidate, ...reconciliation });
-        base.classicPostsUnhighlighted.push(
-          ...reconciliation.highlightResult.removedManagedHighlightIds,
-        );
-      }
-      const failed = reconciliations.filter(
-        ({ highlightResult }) => highlightResult.status !== "highlighted",
-      );
-      const degraded = reconciliations.filter(
-        ({ highlightResult }) => highlightResult.issues.length > 0,
-      );
-      base.unhighlightedEligiblePostIds.push(
-        ...failed.map(({ candidate }) => candidate.postId),
-      );
-      const permissionFailures = degraded.filter(({ highlightResult }) =>
-        highlightResult.issues.some(
-          ({ category }) => category === "permission",
-        ),
-      );
-      let permissionNotice: HighlightNotificationOutcome = "not_requested";
-      if (notifyOnFailure && permissionFailures.length > 0) {
-        const [first, ...others] = permissionFailures;
-        const { candidate, highlightResult } = first!;
-        permissionNotice = await notifyExistingHighlightFailure({
-          reddit,
-          redis,
-          selected: candidate,
-          highlightResult,
-          nowMs,
-          additionalPostUrls: others.map(
-            ({ candidate }) =>
-              getPostUrl(candidate.post) ??
-              "https://www.reddit.com/comments/" + candidate.postId.slice(3),
-          ),
-        });
-      }
-      if (
-        degraded.length === 0 &&
-        reconciliations.some(
-          ({ highlightResult }) =>
-            highlightResult.verifiedHighlighted &&
-            (highlightResult.capacityOutcome === "slot_available" ||
-              highlightResult.capacityOutcome === "managed_slot_freed"),
-        )
-      ) {
-        await redis.del(highlightPermissionIncidentKey);
-      }
-      const selectedReconciliation =
-        failed.find(
-          ({ highlightResult }) =>
-            !isCapacityOnlyHighlightFailure(highlightResult),
-        ) ??
-        degraded.find(
-          ({ highlightResult }) =>
-            !isCapacityOnlyHighlightFailure(highlightResult),
-        ) ??
-        failed[0] ??
-        degraded[0] ??
-        reconciliations[0]!;
-      const { candidate: selected, highlightResult } = selectedReconciliation;
-      const deferredCompletedGoal =
-        activeGoals.length === 0 && completedGoals.length > 0
-          ? newestGoalCandidate(completedGoals)
-          : undefined;
-      const supersededCompletedPostIds = deferredCompletedGoal
-        ? completedGoals
-            .filter(
-              (candidate) => candidate.postId !== deferredCompletedGoal.postId,
-            )
-            .map((candidate) => candidate.postId)
-        : [];
-      const result: OnboardingHighlightEnsuranceResult = {
-        status: failed.length > 0 ? "existing_not_highlighted" : "existing",
-        ...base,
-        postId: selected.postId,
-        source: selected.source,
-        classification: selected.classification,
-        classificationConfidence: selected.classificationConfidence,
-        selectedWasAlreadyHighlighted: selected.isHighlighted,
-        ...reconciliationDetails(highlightResult),
-        capacityOnly:
-          degraded.length > 0 &&
-          degraded.every(({ highlightResult }) =>
-            isCapacityOnlyHighlightFailure(highlightResult),
-          ),
-        notificationOutcome:
-          permissionNotice === "not_requested"
-            ? selectedReconciliation.notificationOutcome
-            : permissionNotice,
-        ...(deferredCompletedGoal?.completedTime === undefined
-          ? {}
-          : {
-              deferredCompletedGoal: {
-                postId: deferredCompletedGoal.postId,
-                completedTime: deferredCompletedGoal.completedTime,
-                autoCreateNextGoal:
-                  deferredCompletedGoal.autoCreateNextGoal ?? false,
-              },
-            }),
-        ...(supersededCompletedPostIds.length > 0
-          ? { supersededCompletedPostIds }
-          : {}),
-      };
-      logHighlightEnsurance(result.status, result, reconciliationContext);
-      return result;
-    }
-
-    if (completedGoals.length > 0) {
-      await clearActiveHighlightFailureIncident(redis);
-      const selected = newestGoalCandidate(completedGoals);
-      const supersededCompletedPostIds = completedGoals
-        .filter((candidate) => candidate.postId !== selected.postId)
-        .map((candidate) => candidate.postId);
-      const result: OnboardingHighlightEnsuranceResult = {
-        status: "completed",
-        ...base,
-        postId: selected.postId,
-        source: selected.source,
-        classification: selected.classification,
-        classificationConfidence: selected.classificationConfidence,
-        selectedWasAlreadyHighlighted: selected.isHighlighted,
-        ...(selected.isHighlighted
-          ? { verificationResult: "highlighted" as const }
-          : {}),
-        notificationOutcome: "not_requested",
-        ...(supersededCompletedPostIds.length > 0
-          ? { supersededCompletedPostIds }
-          : {}),
-        ...(selected.goal === undefined ? {} : { goal: selected.goal }),
-        ...(selected.completedTime === undefined
-          ? {}
-          : { completedTime: selected.completedTime }),
-        ...(selected.autoCreateNextGoal === undefined
-          ? {}
-          : { autoCreateNextGoal: selected.autoCreateNextGoal }),
-        ...(selected.autoCreateNextGoalConfigured === undefined
-          ? {}
-          : {
-              autoCreateNextGoalConfigured:
-                selected.autoCreateNextGoalConfigured,
-            }),
-      };
-      logHighlightEnsurance(result.status, result, reconciliationContext);
-      return result;
-    }
+  const selection = selectManagedGoalHighlight(candidates, nowMs);
+  base.eligiblePostIds.push(...selection.eligiblePostIds);
+  if (selection.activeGoals.length > 0 && !pauseSuccessorMapping) {
+    await mapCompletedGoalsToActiveClassic(redis, selection);
   }
 
-  // Protected and ambiguous posts are discoverable for duplicate prevention,
-  // but are never automatically highlighted, unhighlighted, or reordered.
-  const safelyManageable = candidates.filter(
-    (candidate) =>
-      candidate.classification === "classic" &&
-      candidate.classificationConfidence !== "ambiguous" &&
-      candidate.goal !== undefined &&
-      candidate.goal > 0,
-  );
-  if (safelyManageable.length === 0) {
-    const defaultSelected = newestGoalCandidate(
-      highlighted.length ? highlighted : candidates,
+  let result: OnboardingHighlightEnsuranceResult;
+  if (selection.selected) {
+    const highlighted = await reconcileSelectedManagedGoal({
+      reddit,
+      redis,
+      selected: selection.selected,
+      nowMs,
+      notifyOnFailure,
+      ...(highlightVerification ? { highlightVerification } : {}),
+      removableManagedPostIds: selection.removableManagedPostIds,
+      celebrationEndsAt: selection.celebrationEndsAt,
+    });
+    const removed =
+      highlighted.highlightResult.removedManagedHighlightIds.filter(
+        (postId) =>
+          !highlighted.highlightResult.preservedHighlightIds.includes(postId),
+      );
+    base.classicPostsUnhighlighted.push(
+      ...highlightedClassic
+        .filter(({ postId }) => removed.includes(postId))
+        .map(({ postId }) => postId),
     );
+    base.protectedHighlightsPreserved =
+      base.protectedHighlightsPreserved.filter(
+        (postId) => !removed.includes(postId),
+      );
+    if (!highlighted.highlightResult.verifiedHighlighted) {
+      base.unhighlightedEligiblePostIds.push(selection.selected.postId);
+    }
+    const details = {
+      ...reconciliationDetails(highlighted.highlightResult),
+      notificationOutcome: highlighted.notificationOutcome,
+      highlightSelectedPostId: selection.selected.postId,
+      managedHighlightsRemoved: removed,
+    };
+    result =
+      selection.latestCompleted && selection.eligiblePostIds.length === 0
+        ? {
+            ...completedHighlightInventory(
+              base,
+              selection.latestCompleted,
+              selection.completedGoals,
+            ),
+            ...details,
+          }
+        : {
+            ...base,
+            ...highlightCandidateDetails(selection.selected),
+            status:
+              highlighted.highlightResult.status === "highlighted"
+                ? "existing"
+                : "existing_not_highlighted",
+            ...deferredCompletedHighlightInventory(selection),
+            ...details,
+          };
+  } else if (selection.latestCompleted) {
+    result = completedHighlightInventory(
+      base,
+      selection.latestCompleted,
+      selection.completedGoals,
+    );
+  } else {
     const repairState =
       reconciliationContext === "repair"
         ? await redis.hGetAll(appRepairStateKey)
         : {};
-    const repairTarget = candidates.find(
-      (candidate) => candidate.postId === repairState.targetPostId,
-    );
-    if (repairTarget && !repairTarget.isHighlighted) {
-      const reconciliation = await highlightExistingGoal({
-        reddit,
-        redis,
-        selected: repairTarget,
-        notifyOnFailure,
-        nowMs,
-        ...(highlightVerification ? { highlightVerification } : {}),
-      });
-      const result: OnboardingHighlightEnsuranceResult = {
-        status:
-          reconciliation.highlightResult.status === "highlighted"
-            ? "existing"
-            : "existing_not_highlighted",
-        ...base,
-        postId: repairTarget.postId,
-        source: repairTarget.source,
-        classification: repairTarget.classification,
-        classificationConfidence: repairTarget.classificationConfidence,
-        selectedWasAlreadyHighlighted: false,
-        ...reconciliationDetails(reconciliation.highlightResult),
-        notificationOutcome: reconciliation.notificationOutcome,
-      };
-      logHighlightEnsurance(result.status, result, reconciliationContext);
-      return result;
-    }
+    const selected =
+      candidates.find(({ postId }) => postId === repairState.targetPostId) ??
+      newestGoalCandidate(highlighted.length ? highlighted : candidates);
     await clearActiveHighlightFailureIncident(redis);
-    const selected = repairTarget ?? defaultSelected;
-    const result: OnboardingHighlightEnsuranceResult = {
-      status: selected.isHighlighted ? "existing" : "existing_not_highlighted",
+    result = {
       ...base,
-      postId: selected.postId,
-      source: selected.source,
-      classification: selected.classification,
-      classificationConfidence: selected.classificationConfidence,
-      selectedWasAlreadyHighlighted: selected.isHighlighted,
+      ...highlightCandidateDetails(selected),
+      status: selected.isHighlighted ? "existing" : "existing_not_highlighted",
       ...(selected.isHighlighted
         ? {
             verificationResult: "highlighted",
@@ -2270,53 +2023,58 @@ async function reconcileLiveSubscriberGoalHighlights({
         : {}),
       notificationOutcome: "not_requested",
     };
-    logHighlightEnsurance(result.status, result, reconciliationContext);
-    return result;
   }
-
-  const selected = newestGoalCandidate(
-    highlightedClassic.length === 0 ? safelyManageable : highlightedClassic,
-  );
-  const selectedWasAlreadyHighlighted = selected.isHighlighted;
-  const keepClassic =
-    selected.classification === "classic"
-      ? selected
-      : highlightedClassic.length > 0
-        ? newestGoalCandidate(highlightedClassic)
-        : undefined;
-  const removableManagedPostIds = highlightedClassic
-    .filter(
-      (candidate) =>
-        highlightedClassic.length > 1 &&
-        candidate.postId !== keepClassic?.postId,
-    )
-    .map((candidate) => candidate.postId);
-  const reconciliation = await highlightExistingGoal({
-    reddit,
-    redis,
-    selected,
-    notifyOnFailure,
-    removableManagedPostIds,
-    ...(highlightVerification ? { highlightVerification } : {}),
-  });
-  base.classicPostsUnhighlighted.push(
-    ...reconciliation.highlightResult.removedManagedHighlightIds,
-  );
-  const result: OnboardingHighlightEnsuranceResult = {
-    status:
-      reconciliation.highlightResult.status === "highlighted"
-        ? "existing"
-        : "existing_not_highlighted",
-    ...base,
-    postId: selected.postId,
-    source: selected.source,
-    classification: selected.classification,
-    classificationConfidence: selected.classificationConfidence,
-    selectedWasAlreadyHighlighted,
-    ...reconciliationDetails(reconciliation.highlightResult),
-    notificationOutcome: reconciliation.notificationOutcome,
-  };
   logHighlightEnsurance(result.status, result, reconciliationContext);
+  return result;
+}
+
+async function mapCompletedGoalsToActiveClassic(
+  redis: RedisClient,
+  {
+    activeGoals,
+    completedGoals,
+  }: ReturnType<typeof selectManagedGoalHighlight>,
+): Promise<void> {
+  const newestActive = newestGoalCandidate(activeGoals);
+  for (const completed of completedGoals) {
+    if (await redis.hGet(autoCreateNextGoalSuccessorsKey, completed.postId))
+      continue;
+    await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+      [completed.postId]: newestActive.postId,
+    });
+    await cancelAutoCreateNextGoal(redis, completed.postId);
+  }
+}
+
+async function reconcileSelectedManagedGoal(
+  options: Parameters<typeof reconcileCanonicalClassicGoal>[0] & {
+    celebrationEndsAt: number | undefined;
+  },
+) {
+  const { redis, selected, nowMs, celebrationEndsAt } = options;
+  if (celebrationEndsAt !== undefined) {
+    await scheduleHighlightRepair(redis, {
+      nowMs,
+      delayMs: Math.min(
+        celebrationEndsAt - nowMs,
+        recurringHighlightRepairIntervalMs,
+      ),
+      force: true,
+      reason: "completed_goal_highlight_window_ends",
+    });
+  }
+  const result =
+    selected.classification === "classic"
+      ? await reconcileCanonicalClassicGoal(options)
+      : await highlightExistingGoal(options);
+  if (
+    result.highlightResult.verifiedHighlighted &&
+    result.highlightResult.issues.length === 0 &&
+    (result.highlightResult.capacityOutcome === "slot_available" ||
+      result.highlightResult.capacityOutcome === "managed_slot_freed")
+  ) {
+    await redis.del(highlightPermissionIncidentKey);
+  }
   return result;
 }
 
@@ -2326,7 +2084,6 @@ async function reconcileCanonicalClassicGoal({
   selected,
   nowMs,
   notifyOnFailure,
-  deferPermissionNotice = false,
   highlightVerification,
   removableManagedPostIds,
 }: {
@@ -2335,7 +2092,6 @@ async function reconcileCanonicalClassicGoal({
   selected: OnboardingGoalCandidate;
   nowMs: number;
   notifyOnFailure: boolean;
-  deferPermissionNotice?: boolean;
   highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
   removableManagedPostIds: LinkId[];
 }): Promise<{
@@ -2359,7 +2115,6 @@ async function reconcileCanonicalClassicGoal({
     redis,
     selected,
     notifyOnFailure,
-    deferPermissionNotice,
     removableManagedPostIds,
     nowMs,
     ...(highlightVerification ? { highlightVerification } : {}),
@@ -2373,17 +2128,6 @@ async function reconcileCanonicalClassicGoal({
       reconciledAt: nowMs,
     });
   }
-  if (sameCanonical) {
-    for (const obsoletePostId of reconciliation.highlightResult
-      .removedManagedHighlightIds) {
-      logDiagnostic("info", "obsolete_classic_rehighlight_removed", {
-        workflow: "onboarding_highlight_ensurance",
-        phase: "obsolete_cleanup",
-        canonicalPostId: selected.postId,
-        obsoletePostId,
-      });
-    }
-  }
   return reconciliation;
 }
 
@@ -2392,7 +2136,6 @@ async function highlightExistingGoal({
   redis,
   selected,
   notifyOnFailure,
-  deferPermissionNotice = false,
   highlightVerification,
   removableManagedPostIds,
   nowMs = Date.now(),
@@ -2401,7 +2144,6 @@ async function highlightExistingGoal({
   redis: RedisClient;
   selected: OnboardingGoalCandidate;
   notifyOnFailure: boolean;
-  deferPermissionNotice?: boolean;
   highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
   removableManagedPostIds?: LinkId[];
   nowMs?: number;
@@ -2474,6 +2216,7 @@ async function highlightExistingGoal({
                 highlightVerification?.intervalMs ??
                 highlightVerificationIntervalMs,
               ...(removableManagedPostIds ? { removableManagedPostIds } : {}),
+              rollbackUnverifiedReplacement: true,
             },
           );
   if (
@@ -2505,11 +2248,7 @@ async function highlightExistingGoal({
   });
 
   const notificationOutcome =
-    notifyOnFailure &&
-    !(
-      deferPermissionNotice &&
-      highlightResult.issues.some(({ category }) => category === "permission")
-    )
+    notifyOnFailure
       ? await notifyExistingHighlightFailure({
           reddit,
           redis,
@@ -2677,17 +2416,6 @@ async function getGoalCandidateMetadata(
   };
 }
 
-function newestGoalCandidate(
-  candidates: OnboardingGoalCandidate[],
-): OnboardingGoalCandidate {
-  return [...candidates].sort(
-    (a, b) =>
-      (b.createdAtMs ?? Number.NEGATIVE_INFINITY) -
-        (a.createdAtMs ?? Number.NEGATIVE_INFINITY) ||
-      a.discoveryOrder - b.discoveryOrder,
-  )[0]!;
-}
-
 function logHighlightEnsurance(
   status: OnboardingHighlightEnsuranceResult["status"],
   result:
@@ -2703,6 +2431,8 @@ function logHighlightEnsurance(
     candidateCount: result.candidateCount,
     selectedPostId: result.postId ?? "none",
     selectedType: result.classification ?? "none",
+    highlightSelectedPostId: result.highlightSelectedPostId ?? "none",
+    managedHighlightsRemoved: result.managedHighlightsRemoved?.join(",") || "none",
     highlightedClassicCount: result.highlightedClassicCount,
     highlightedProtectedCount: result.highlightedProtectedCount,
     highlightedAmbiguousCount: result.highlightedAmbiguousCount,
