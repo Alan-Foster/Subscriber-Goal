@@ -61,8 +61,8 @@ import {
   type CommunityGoalMutationLease,
 } from "./communityGoalMutation";
 import {
-  getHighlightManagementBaseline,
-  saveHighlightManagementBaseline,
+  getCanonicalGoalPointer,
+  saveCanonicalGoalPointer,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
 import {
@@ -1126,13 +1126,8 @@ async function createSubscriberGoalInternal(
   }
 
   if (!isCompactActionPost && highlightResult.issues.length === 0) {
-    await saveHighlightManagementBaseline(redis, {
+    await saveCanonicalGoalPointer(redis, {
       canonicalPostId: post.id,
-      highlighted: true,
-      position: highlightResult.selectedPosition ?? null,
-      highlightLabel: null,
-      highlightedUntil: null,
-      moderatorOverride: "none",
       reconciledAt: Date.now(),
     });
     await clearHighlightContradictionIncident(redis);
@@ -1428,10 +1423,10 @@ async function revalidateRecoveredCreation({
     );
     return createTerminalCreationResult("retired", post.id);
   }
-  const [successor, completedTime, baseline] = await Promise.all([
+  const [successor, completedTime, pointer] = await Promise.all([
     redis.hGet(autoCreateNextGoalSuccessorsKey, post.id),
     redis.hGet(subscriberGoalsKey, `${post.id}${postCompletedTimeSuffix}`),
-    getHighlightManagementBaseline(redis),
+    getCanonicalGoalPointer(redis),
   ]);
   if (isLinkId(successor ?? "")) {
     return createTerminalCreationResult(
@@ -1446,7 +1441,7 @@ async function revalidateRecoveredCreation({
 
   const recoveredCreatedAt = new Date(post.createdAt).getTime();
   const possibleNewerIds = new Set(candidatePostIds);
-  const canonicalPostId = baseline?.canonicalPostId;
+  const canonicalPostId = pointer?.canonicalPostId;
   if (
     canonicalPostId &&
     isLinkId(canonicalPostId) &&

@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  highlightManagementStateKey,
-  highlightManagementVersion,
-} from "../data/highlightManagement";
+import { highlightManagementStateKey } from "../data/highlightManagement";
 import { watchTestHash } from "../utils/testHashWatch";
 
 const hoisted = vi.hoisted(() => ({
@@ -928,7 +925,6 @@ describe("createSubscriberGoal highlight handling", () => {
       });
       if (canonical) {
         await hoisted.redis.hSet(highlightManagementStateKey, {
-          version: highlightManagementVersion,
           canonicalPostId: newer.id,
           reconciledAt: "1",
         });
