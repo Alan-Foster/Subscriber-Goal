@@ -117,6 +117,7 @@ import {
   getPostOperationalState,
   savePostOperationalState,
 } from "../data/postOperationalState";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export {
   onboardingGoalBaseDelayMs,
@@ -430,17 +431,13 @@ export async function initializeOnboardingSubscriberGoal(
     logGoalInitializationSkipped("automation_disabled", lifecycleSource);
     return;
   }
-  const lockToken = createLockToken(nowMs);
-  await redis.set(onboardingSubscriberGoalInitializationLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(
-      nowMs + onboardingSubscriberGoalInitializationLockTtlMs,
-    ),
-  });
-  if (
-    (await redis.get(onboardingSubscriberGoalInitializationLockKey)) !==
-    lockToken
-  ) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    onboardingSubscriberGoalInitializationLockKey,
+    onboardingSubscriberGoalInitializationLockTtlMs,
+    { nowMs },
+  );
+  if (!lockToken) {
     logGoalInitializationSkipped("initialization_lock_busy", lifecycleSource);
     return;
   }
@@ -523,7 +520,7 @@ export async function initializeOnboardingSubscriberGoal(
       version: state.version,
     });
   } finally {
-    await releaseOwnedLock(
+    await releaseRedisLock(
       redis,
       onboardingSubscriberGoalInitializationLockKey,
       lockToken,
@@ -802,12 +799,13 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     return { status: "not_due", ...base };
   }
 
-  const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(onboardingSubscriberGoalLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + onboardingSubscriberGoalLockTtlMs),
-  });
-  if ((await redis.get(onboardingSubscriberGoalLockKey)) !== lockToken) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    onboardingSubscriberGoalLockKey,
+    onboardingSubscriberGoalLockTtlMs,
+    { nowMs },
+  );
+  if (!lockToken) {
     return { status: "not_due", ...base };
   }
 
@@ -1513,9 +1511,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
       ...inspected,
     };
   } finally {
-    if ((await redis.get(onboardingSubscriberGoalLockKey)) === lockToken) {
-      await redis.del(onboardingSubscriberGoalLockKey);
-    }
+    await releaseRedisLock(redis, onboardingSubscriberGoalLockKey, lockToken);
   }
 }
 
@@ -2911,12 +2907,13 @@ async function mutateGoalTerminalOrSchedule(
     state: OnboardingSubscriberGoalState,
   ) => OnboardingSubscriberGoalState,
 ): Promise<void> {
-  const lockToken = createLockToken(nowMs);
-  await redis.set(onboardingSubscriberGoalLockKey, lockToken, {
-    nx: true,
-    expiration: new Date(nowMs + onboardingSubscriberGoalLockTtlMs),
-  });
-  if ((await redis.get(onboardingSubscriberGoalLockKey)) !== lockToken) {
+  const lockToken = await acquireRedisLock(
+    redis,
+    onboardingSubscriberGoalLockKey,
+    onboardingSubscriberGoalLockTtlMs,
+    { nowMs },
+  );
+  if (!lockToken) {
     throw new Error("Onboarding goal state is currently locked");
   }
   try {
@@ -2924,18 +2921,6 @@ async function mutateGoalTerminalOrSchedule(
     if (!state || state.status === "complete") return;
     await saveOnboardingState(redis, mutate(state));
   } finally {
-    await releaseOwnedLock(redis, onboardingSubscriberGoalLockKey, lockToken);
+    await releaseRedisLock(redis, onboardingSubscriberGoalLockKey, lockToken);
   }
-}
-
-function createLockToken(nowMs: number): string {
-  return `${nowMs}:${Math.random().toString(36).slice(2)}`;
-}
-
-async function releaseOwnedLock(
-  redis: RedisClient,
-  key: string,
-  token: string,
-): Promise<void> {
-  if ((await redis.get(key)) === token) await redis.del(key);
 }
