@@ -73,80 +73,8 @@ export async function findLiveHighlightedSubscriberGoalCandidates({
       continue;
     }
 
-    const data = post.postData ?? post.customPostData;
-    const inline =
-      data && typeof data === "object"
-        ? (data as { postKind?: unknown; postHeight?: unknown })
-        : undefined;
-    const [persistedKind, persistedGoal, persistedHeight] = await redis.hMGet(
-      subscriberGoalsKey,
-      [
-        `${post.id}${postKindSuffix}`,
-        `${post.id}${postGoalSuffix}`,
-        `${post.id}${postHeightSuffix}`,
-      ],
-    );
-    const inlineKind =
-      typeof inline?.postKind === "string" ? inline.postKind : undefined;
-    const inlineHeight = inline?.postHeight ?? post.postHeight;
-    const explicitHeight =
-      typeof inlineHeight === "string" ? inlineHeight : undefined;
-    const recognizedInlineKind =
-      inlineKind === subscriberGoalPostKind ||
-      inlineKind === subscribeOnlyPostKind ||
-      inlineKind === ctaOnlyPostKind;
-    const hasCompatiblePersistedData =
-      persistedKind === subscriberGoalPostKind ||
-      persistedKind === subscribeOnlyPostKind ||
-      persistedKind === ctaOnlyPostKind ||
-      (Number.isFinite(Number(persistedGoal)) && Number(persistedGoal) > 0) ||
-      persistedHeight === "tiny" ||
-      persistedHeight === "cta";
-    if (!recognizedInlineKind && !hasCompatiblePersistedData) continue;
-
-    const kinds = new Set([inlineKind, persistedKind].filter(Boolean));
-    const heights = new Set([explicitHeight, persistedHeight].filter(Boolean));
-    const hasClassic =
-      kinds.has(subscriberGoalPostKind) ||
-      heights.has("regular") ||
-      heights.has("short");
-    const hasTiny = kinds.has(subscribeOnlyPostKind) || heights.has("tiny");
-    const hasCta = kinds.has(ctaOnlyPostKind) || heights.has("cta");
-    const conflicting =
-      [hasClassic, hasTiny, hasCta].filter(Boolean).length > 1;
-    const postKind = inlineKind ?? persistedKind;
-    const postHeight = explicitHeight ?? persistedHeight;
-    let classification: LiveSubscriberGoalClassification = "ambiguous";
-    let classificationConfidence: LiveSubscriberGoalClassificationConfidence =
-      "ambiguous";
-    if (!conflicting) {
-      if (
-        postKind === subscriberGoalPostKind &&
-        (postHeight === "regular" || postHeight === "short")
-      ) {
-        classification = "classic";
-      } else if (postKind === subscribeOnlyPostKind && postHeight === "tiny") {
-        classification = "tiny";
-      } else if (postKind === ctaOnlyPostKind && postHeight === "cta") {
-        classification = "cta";
-      }
-      if (classification !== "ambiguous") {
-        classificationConfidence =
-          inlineKind !== undefined && explicitHeight !== undefined
-            ? "explicit"
-            : "migrated_consistent";
-      }
-    } else {
-      logDiagnostic("warn", "subscriber_goal_metadata_conflict_preserved", {
-        workflow: "auto_create_next_goal",
-        phase: "live_highlight_classification",
-        postId: post.id,
-        inlineKind: inlineKind ?? "none",
-        persistedKind: persistedKind ?? "none",
-        inlineHeight: explicitHeight ?? "none",
-        persistedHeight: persistedHeight ?? "none",
-      });
-    }
+    const metadata = await readLiveGoalMetadata(redis, post);
+    if (!metadata) continue;
 
     const createdAtMs = new Date(post.createdAt).getTime();
     await registerSubscriberGoalPost(
@@ -158,10 +86,104 @@ export async function findLiveHighlightedSubscriberGoalCandidates({
       postId: highlighted.postId,
       post,
       ...(Number.isFinite(createdAtMs) ? { createdAtMs } : {}),
-      classification,
-      classificationConfidence,
+      ...metadata,
       discoveryOrder: discoveryOrder++,
     });
   }
   return candidates;
+}
+
+async function readLiveGoalMetadata(
+  redis: RedisClient,
+  post: LiveCandidatePost,
+) {
+  const data = post.postData ?? post.customPostData;
+  const inline =
+    data && typeof data === "object"
+      ? (data as { postKind?: unknown; postHeight?: unknown })
+      : undefined;
+  const [persistedKind, persistedGoal, persistedHeight] = await redis.hMGet(
+    subscriberGoalsKey,
+    [
+      `${post.id}${postKindSuffix}`,
+      `${post.id}${postGoalSuffix}`,
+      `${post.id}${postHeightSuffix}`,
+    ],
+  );
+  const inlineKind =
+    typeof inline?.postKind === "string" ? inline.postKind : undefined;
+  const inlineHeight = inline?.postHeight ?? post.postHeight;
+  const explicitHeight =
+    typeof inlineHeight === "string" ? inlineHeight : undefined;
+  const recognizedInlineKind =
+    inlineKind === subscriberGoalPostKind ||
+    inlineKind === subscribeOnlyPostKind ||
+    inlineKind === ctaOnlyPostKind;
+  const hasCompatiblePersistedData =
+    persistedKind === subscriberGoalPostKind ||
+    persistedKind === subscribeOnlyPostKind ||
+    persistedKind === ctaOnlyPostKind ||
+    (Number.isFinite(Number(persistedGoal)) && Number(persistedGoal) > 0) ||
+    persistedHeight === "tiny" ||
+    persistedHeight === "cta";
+  if (!recognizedInlineKind && !hasCompatiblePersistedData) return undefined;
+  return classifyLiveGoalMetadata(
+    post.id,
+    inlineKind,
+    persistedKind,
+    explicitHeight,
+    persistedHeight,
+  );
+}
+
+function classifyLiveGoalMetadata(
+  postId: LinkId,
+  inlineKind: string | undefined,
+  persistedKind: string | null | undefined,
+  explicitHeight: string | undefined,
+  persistedHeight: string | null | undefined,
+) {
+  const kinds = new Set([inlineKind, persistedKind].filter(Boolean));
+  const heights = new Set([explicitHeight, persistedHeight].filter(Boolean));
+  const hasClassic =
+    kinds.has(subscriberGoalPostKind) ||
+    heights.has("regular") ||
+    heights.has("short");
+  const hasTiny = kinds.has(subscribeOnlyPostKind) || heights.has("tiny");
+  const hasCta = kinds.has(ctaOnlyPostKind) || heights.has("cta");
+  const conflicting = [hasClassic, hasTiny, hasCta].filter(Boolean).length > 1;
+  const postKind = inlineKind ?? persistedKind;
+  const postHeight = explicitHeight ?? persistedHeight;
+  let classification: LiveSubscriberGoalClassification = "ambiguous";
+  let classificationConfidence: LiveSubscriberGoalClassificationConfidence =
+    "ambiguous";
+  if (!conflicting) {
+    if (
+      postKind === subscriberGoalPostKind &&
+      (postHeight === "regular" || postHeight === "short")
+    ) {
+      classification = "classic";
+    } else if (postKind === subscribeOnlyPostKind && postHeight === "tiny") {
+      classification = "tiny";
+    } else if (postKind === ctaOnlyPostKind && postHeight === "cta") {
+      classification = "cta";
+    }
+    if (classification !== "ambiguous") {
+      classificationConfidence =
+        inlineKind !== undefined && explicitHeight !== undefined
+          ? "explicit"
+          : "migrated_consistent";
+    }
+  } else {
+    logDiagnostic("warn", "subscriber_goal_metadata_conflict_preserved", {
+      workflow: "auto_create_next_goal",
+      phase: "live_highlight_classification",
+      postId,
+      inlineKind: inlineKind ?? "none",
+      persistedKind: persistedKind ?? "none",
+      inlineHeight: explicitHeight ?? "none",
+      persistedHeight: persistedHeight ?? "none",
+    });
+  }
+  return { classification, classificationConfidence };
 }

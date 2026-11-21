@@ -88,22 +88,6 @@
       "count": 1
     }
   },
-  "src/server/core/goalDiscovery.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/core/highlightReconciliation.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/core/onboardingLifecycle.ts": {
     "complexity": {
       "count": 1
@@ -133,11 +117,6 @@
       "count": 1
     },
     "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/data/liveSubscriberGoalHighlights.ts": {
-    "complexity": {
       "count": 1
     }
   },
@@ -199,14 +178,6 @@
     }
   },
   "src/server/triggers/scheduler.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/utils/communityHighlights.ts": {
     "complexity": {
       "count": 1
     },
