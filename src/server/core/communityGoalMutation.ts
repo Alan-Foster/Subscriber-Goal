@@ -1,4 +1,5 @@
 import type { RedisClient } from "../types";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const communityGoalMutationLockKey =
   "subscriber_goal_community_mutation_v1_lock";
@@ -20,21 +21,20 @@ export async function acquireCommunityGoalMutationLease(
   redis: RedisClient,
   nowMs = Date.now(),
 ): Promise<CommunityGoalMutationLease | undefined> {
-  const token = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(communityGoalMutationLockKey, token, {
-    nx: true,
-    expiration: new Date(nowMs + communityGoalMutationLockTtlMs),
-  });
-  return (await redis.get(communityGoalMutationLockKey)) === token
-    ? { key: communityGoalMutationLockKey, token }
-    : undefined;
+  const token = await acquireRedisLock(
+    redis,
+    communityGoalMutationLockKey,
+    communityGoalMutationLockTtlMs,
+    { nowMs },
+  );
+  return token ? { key: communityGoalMutationLockKey, token } : undefined;
 }
 
 export async function releaseCommunityGoalMutationLease(
   redis: RedisClient,
   lease: CommunityGoalMutationLease,
 ): Promise<void> {
-  if ((await redis.get(lease.key)) === lease.token) await redis.del(lease.key);
+  await releaseRedisLock(redis, lease.key, lease.token);
 }
 
 export async function withCommunityGoalMutationLease<T>(
