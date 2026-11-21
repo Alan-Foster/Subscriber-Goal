@@ -68,4 +68,15 @@ export default defineConfig([
     plugins: { js },
     extends: ['js/recommended'],
   },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}', 'src/server/testing/**'],
+    rules: {
+      complexity: ['error', 25],
+      'max-lines-per-function': [
+        'error',
+        { max: 150, skipBlankLines: true, skipComments: true },
+      ],
+    },
+  },
 ]);

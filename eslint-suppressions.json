@@ -1,0 +1,244 @@
+{
+  "src/client/app/App.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/app/components/AfterSubscribeButton.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/app/components/SubscriptionButton.tsx": {
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/client/app/components/TinyActionLayout.tsx": {
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/client/app/pages/NotificationSettingsPage.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/app/pages/StatisticsPage.tsx": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/app/pages/SubGoalPage.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/hooks/useSubGoal.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/subscribe-only/SubscribeOnlyApp.tsx": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/client/utils/fetchWithRetry.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/appAccountHealth.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/appAccountRecovery.ts": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/server/core/appRepair.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/autoCreateNextGoal.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/createSubscriberGoal.ts": {
+    "complexity": {
+      "count": 3
+    },
+    "max-lines-per-function": {
+      "count": 3
+    }
+  },
+  "src/server/core/milestoneNotifications.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/onboardingLifecycle.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/onboardingReminder.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/core/onboardingSubscriberGoal.ts": {
+    "complexity": {
+      "count": 7
+    },
+    "max-lines-per-function": {
+      "count": 4
+    }
+  },
+  "src/server/data/legacyAfterSubscribeActionMigration.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/data/liveSubscriberGoalHighlights.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/server/data/postKindMigration.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/server/data/statisticsAnalytics.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/data/subGoalData.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/data/subscriberTracking.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/server/routes/internalSystem.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/routes/internalUi.deleteGoal.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/server/routes/internalUi.eraseData.ts": {
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/routes/internalUi.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 4
+    }
+  },
+  "src/server/routes/publicApi.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "max-lines-per-function": {
+      "count": 3
+    }
+  },
+  "src/server/triggers/appChanged.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/triggers/modAction.ts": {
+    "complexity": {
+      "count": 5
+    },
+    "max-lines-per-function": {
+      "count": 2
+    }
+  },
+  "src/server/triggers/scheduler.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  },
+  "src/server/utils/communityHighlights.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "max-lines-per-function": {
+      "count": 1
+    }
+  }
+}
