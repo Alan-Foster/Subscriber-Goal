@@ -41,7 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
-- 2.8.1 - Many changes and fixes which can be found in the 2.8.1 Stabilizing Update.
+- 2.8.1 - Double-button UI. Many changes and fixes which can be found in the [2.8.1 Stabilizing Update](https://www.reddit.com/r/SubGoal/comments/1y1n1qx/subscriber_goal_281_double_buttons_and/).
 - 2.7.3 - Fixed a bug where goals break if they are caught by AutoMod / removed then approved. Joins require valid states and fixed a crosspost queue error.
 - 2.7.2 - Finished 2 button implementation. Improved cron recovery and transient auto-goal failures.
 - 2.7.1 - Combined header and logo to one line. Goals now have 2 buttons when space permits. All goal completion now result in a new goal 24 hours later. Improvement to auto-pin system. Devvit 0.15.4
