@@ -614,14 +614,14 @@ describe("internalUi color theme create goal routes", () => {
       type: "select",
       defaultValue: ["regular"],
       options: [
-        { label: "Full subscriber goal", value: "regular" },
-        { label: "Short subscriber goal", value: "short" },
+        { label: "Full Subscriber Goal", value: "regular" },
+        { label: "Short Subscriber Goal", value: "short" },
         {
-          label: "Join button only",
+          label: "Join Button Only",
           value: "tiny",
         },
         {
-          label: "Action button only",
+          label: "Action Button Only",
           value: "cta",
         },
       ],
