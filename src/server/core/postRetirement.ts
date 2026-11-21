@@ -10,8 +10,8 @@ import {
 import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { cancelUpdates, untrackPost } from "../data/updaterData";
 import {
-  clearHighlightManagementBaselineForPost,
-  getHighlightManagementBaseline,
+  clearCanonicalGoalPointerForPost,
+  getCanonicalGoalPointer,
 } from "../data/highlightManagement";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
 import { clearHighlightFailureIncident } from "../utils/highlightFailureNotifications";
@@ -84,7 +84,7 @@ export async function retireSubscriberGoalPost(
   nowMs = Date.now(),
 ): Promise<void> {
   const wasCanonical =
-    (await getHighlightManagementBaseline(redis))?.canonicalPostId === postId;
+    (await getCanonicalGoalPointer(redis))?.canonicalPostId === postId;
   const failures: string[] = [];
   const attempt = async (phase: string, operation: () => Promise<unknown>) => {
     try {
@@ -153,8 +153,8 @@ export async function retireSubscriberGoalPost(
   await attempt("post_operational_state", () =>
     clearPostOperationalState(redis, postId),
   );
-  await attempt("highlight_baseline", () =>
-    clearHighlightManagementBaselineForPost(redis, postId),
+  await attempt("highlight_pointer", () =>
+    clearCanonicalGoalPointerForPost(redis, postId),
   );
   if (wasCanonical) {
     await attempt("highlight_reconciliation", () =>

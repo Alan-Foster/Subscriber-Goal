@@ -130,10 +130,10 @@
   },
   "src/server/core/onboardingSubscriberGoal.ts": {
     "complexity": {
-      "count": 7
+      "count": 6
     },
     "max-lines-per-function": {
-      "count": 4
+      "count": 3
     }
   },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {

@@ -91,15 +91,12 @@ import {
   onboardingMinimumSubscriberCount,
 } from "./onboardingConfig";
 import {
-  getHighlightManagementBaseline,
-  saveHighlightManagementBaseline,
-  type HighlightModeratorOverride,
+  getCanonicalGoalPointer,
+  saveCanonicalGoalPointer,
   type HighlightReconciliationContext,
 } from "../data/highlightManagement";
-import {
-  clearHighlightContradictionIncident,
-  recordHighlightContradiction,
-} from "../data/highlightContradiction";
+import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
+import { checkCanonicalHighlightContradiction } from "./canonicalHighlightContradiction";
 import {
   appRepairStateKey,
   scheduleHighlightRepair,
@@ -317,7 +314,6 @@ export type OnboardingHighlightEnsuranceResult =
     source?: OnboardingExistingSource;
     classification?: OnboardingGoalClassification;
     classificationConfidence?: GoalClassificationConfidence;
-    moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
     selectedWasAlreadyHighlighted?: boolean;
     pausedByRemovedGoal?: boolean;
     removedGoalBlockerPostIds?: string[];
@@ -2009,17 +2005,23 @@ async function reconcileLiveSubscriberGoalHighlights({
               ({ postId }) => postId === candidate.postId,
             ) && (await candidate.post.isHighlighted());
         }
-        const candidateBaseline =
+        const candidatePointer =
           independentlyVerified && candidate.classification === "classic"
-            ? await getHighlightManagementBaseline(redis)
+            ? await getCanonicalGoalPointer(redis)
             : undefined;
         if (independentlyVerified) {
           await clearHighlightContradictionIncident(redis, candidate.postId);
+          if (candidate.classification === "classic" && !candidatePointer) {
+            await saveCanonicalGoalPointer(redis, {
+              canonicalPostId: candidate.postId,
+              reconciledAt: nowMs,
+            });
+          }
         }
-        const reconcileClassicBaseline =
-          candidateBaseline?.canonicalPostId === candidate.postId;
+        const reconcileClassicPointer =
+          candidatePointer?.canonicalPostId === candidate.postId;
         const reconciliation =
-          independentlyVerified && !reconcileClassicBaseline
+          independentlyVerified && !reconcileClassicPointer
             ? {
                 highlightResult: {
                   status: "highlighted" as const,
@@ -2045,7 +2047,6 @@ async function reconcileLiveSubscriberGoalHighlights({
                   notifyOnFailure,
                   deferPermissionNotice: true,
                   removableManagedPostIds: removableCompletedIds,
-                  reconciliationContext,
                   ...(highlightVerification ? { highlightVerification } : {}),
                 })
               : await highlightExistingGoal({
@@ -2328,7 +2329,6 @@ async function reconcileCanonicalClassicGoal({
   deferPermissionNotice = false,
   highlightVerification,
   removableManagedPostIds,
-  reconciliationContext,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
@@ -2338,261 +2338,21 @@ async function reconcileCanonicalClassicGoal({
   deferPermissionNotice?: boolean;
   highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
   removableManagedPostIds: LinkId[];
-  reconciliationContext: HighlightReconciliationContext;
 }): Promise<{
   highlightResult: HighlightResult;
   notificationOutcome: HighlightNotificationOutcome;
-  moderatorOverride?: Exclude<HighlightModeratorOverride, "none">;
 }> {
-  const baseline = await getHighlightManagementBaseline(redis);
-  const sameCanonical = baseline?.canonicalPostId === selected.postId;
-  const subreddit = await reddit.getCurrentSubreddit();
-  let liveListed: boolean | undefined;
-  let livePostState: boolean | undefined;
-  try {
-    const snapshot = await subreddit.getHighlightedPosts();
-    liveListed = snapshot.some(
-      ({ postId }) => postId === selected.postId,
-    );
-    livePostState = selected.post.isHighlighted
-      ? await selected.post.isHighlighted()
-      : undefined;
-  } catch (error) {
-    logDiagnostic(
-      "warn",
-      "highlight_baseline_read_failed",
-      {
-        workflow: "onboarding_highlight_ensurance",
-        phase: "moderator_intent_detection",
-        postId: selected.postId,
-      },
-      error,
-    );
-  }
-
-  if (
-    liveListed !== undefined &&
-    livePostState !== undefined &&
-    liveListed !== livePostState
-  ) {
-    const contradiction = await recordHighlightContradiction(redis, {
-      postId: selected.postId,
-      listed: liveListed,
-      postState: livePostState,
-      nowMs,
-    });
-    const result = createFailedHighlightResult(
-      selected.postId,
-      "verification",
-      "Reddit reported contradictory Community Highlight state; moderator intent was not recorded.",
-    );
-    await scheduleHighlightRepair(redis, {
-      delayMs: Math.min(
-        60 * 60 * 1000,
-        5 * 60 * 1000 * 2 ** (contradiction.consecutiveCount - 1),
-      ),
-      force: true,
-      reason: "contradictory_highlight_state",
-      nowMs,
-    });
-    let notificationOutcome: HighlightNotificationOutcome = "not_requested";
-    if (notifyOnFailure && contradiction.consecutiveCount >= 3) {
-      notificationOutcome = await notifyHighlightFailureIncident({
-        reddit,
-        redis,
-        postId: selected.postId,
-        result,
-        subredditId: subreddit.id,
-        subredditName: subreddit.name,
-        postTitle: selected.post.title ?? "Subscriber Goal",
-        postUrl: getPostUrl(selected.post),
-        errorMessage: result.errorMessage,
-        postOrigin: "existing",
-        language: subreddit.language,
-        nowMs,
-      });
-    }
-    return { highlightResult: result, notificationOutcome };
-  }
-
-  if (
-    liveListed !== undefined &&
-    livePostState !== undefined &&
-    liveListed === livePostState
-  ) {
-    await clearHighlightContradictionIncident(
-      redis,
-      sameCanonical ? selected.postId : undefined,
-    );
-  }
-
-  if (
-    sameCanonical &&
-    baseline?.migratedFromVersion === "highlight_management_v1" &&
-    liveListed === true &&
-    livePostState === true
-  ) {
-    const health = await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: subreddit.language,
-      notify: false,
-      nowMs,
-    });
-    const highlightResult =
-      health.healthy && health.status === "healthy"
-        ? await highlightAndVerifyPost(
-            reddit,
-            subreddit,
-            {
-              id: selected.postId,
-              highlight: (options) => selected.post.highlight!(options),
-              ...(selected.post.isHighlighted
-                ? { isHighlighted: () => selected.post.isHighlighted!() }
-                : {}),
-            },
-            {
-              maxWaitMs:
-                highlightVerification?.maxWaitMs ??
-                highlightVerificationMaxWaitMs,
-              intervalMs:
-                highlightVerification?.intervalMs ??
-                highlightVerificationIntervalMs,
-              removableManagedPostIds,
-            },
-          )
-        : createFailedHighlightResult(
-            selected.postId,
-            "permission",
-            "Manage Posts permission could not be verified, so no Community Highlight changes were attempted.",
-          );
-    if (highlightResult.issues.length === 0) {
-      const finalSnapshot = await subreddit.getHighlightedPosts();
-      const position = finalSnapshot.findIndex(
-        ({ postId }) => postId === selected.postId,
-      );
-      const finalInfo = position >= 0 ? finalSnapshot[position] : undefined;
-      await saveHighlightManagementBaseline(redis, {
-        canonicalPostId: selected.postId,
-        highlighted: true,
-        position,
-        highlightLabel:
-          finalInfo?.highlightLabel ?? baseline?.highlightLabel ?? null,
-        highlightedUntil:
-          finalInfo?.highlightedUntil?.getTime() ??
-          baseline?.highlightedUntil ??
-          null,
-        moderatorOverride: baseline.moderatorOverride,
-        reconciledAt: nowMs,
-      });
-    }
-    return {
-      highlightResult,
-      notificationOutcome: "not_requested",
-      ...(baseline.moderatorOverride === "none"
-        ? {}
-        : { moderatorOverride: baseline.moderatorOverride }),
-    };
-  }
-
-  let moderatorOverride:
-    Exclude<HighlightModeratorOverride, "none"> | undefined;
-  if (sameCanonical && baseline) {
-    moderatorOverride =
-      baseline.moderatorOverride !== "none"
-        ? baseline.moderatorOverride
-        : liveListed === false && livePostState === false
-          ? baseline.highlightedUntil !== null &&
-            nowMs >= baseline.highlightedUntil
-            ? "expired"
-            : "unhighlighted"
-          : undefined;
-  }
-
-  if (moderatorOverride) {
-    const health = await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: subreddit.language,
-      notify: false,
-      nowMs,
-    });
-    const highlightResult =
-      health.healthy && health.status === "healthy"
-        ? await highlightAndVerifyPost(
-            reddit,
-            subreddit,
-            {
-              id: selected.postId,
-              ...(selected.post.archived === undefined
-                ? {}
-                : { archived: selected.post.archived }),
-              ...(selected.post.locked === undefined
-                ? {}
-                : { locked: selected.post.locked }),
-              highlight: (options) => selected.post.highlight!(options),
-              ...(selected.post.isHighlighted
-                ? { isHighlighted: () => selected.post.isHighlighted!() }
-                : {}),
-            },
-            {
-              maxWaitMs:
-                highlightVerification?.maxWaitMs ??
-                highlightVerificationMaxWaitMs,
-              intervalMs:
-                highlightVerification?.intervalMs ??
-                highlightVerificationIntervalMs,
-              removableManagedPostIds,
-            },
-          )
-        : createFailedHighlightResult(
-            selected.postId,
-            "permission",
-            "Manage Posts permission could not be verified, so no Community Highlight changes were attempted.",
-          );
-    if (highlightResult.issues.length === 0) {
-      const finalSnapshot = await subreddit.getHighlightedPosts();
-      const position = finalSnapshot.findIndex(
-        ({ postId }) => postId === selected.postId,
-      );
-      const finalInfo = position >= 0 ? finalSnapshot[position] : undefined;
-      await saveHighlightManagementBaseline(redis, {
-        canonicalPostId: selected.postId,
-        highlighted: position >= 0,
-        position: position >= 0 ? position : null,
-        highlightLabel: finalInfo?.highlightLabel ?? baseline!.highlightLabel,
-        highlightedUntil:
-          finalInfo?.highlightedUntil?.getTime() ?? baseline!.highlightedUntil,
-        moderatorOverride: "none",
-        reconciledAt: nowMs,
-      });
-      await clearHighlightFailureIncident(redis, selected.postId);
-    } else if (!isCapacityOnlyHighlightFailure(highlightResult)) {
-      await scheduleHighlightRepair(redis, {
-        delayMs: 5 * 60 * 1000,
-        force: true,
-        reason: "active_surface_rehighlight_degraded",
-        nowMs,
-      });
-    }
-    for (const obsoletePostId of highlightResult.removedManagedHighlightIds) {
-      logDiagnostic("info", "obsolete_classic_rehighlight_removed", {
-        workflow: "onboarding_highlight_ensurance",
-        phase: "obsolete_cleanup",
-        canonicalPostId: selected.postId,
-        obsoletePostId,
-      });
-    }
-    return {
-      highlightResult,
-      notificationOutcome: "not_requested",
-      moderatorOverride,
-    };
-  }
+  const pointer = await getCanonicalGoalPointer(redis);
+  const sameCanonical = pointer?.canonicalPostId === selected.postId;
+  const contradiction = await checkCanonicalHighlightContradiction({
+    reddit,
+    redis,
+    selected,
+    nowMs,
+    notifyOnFailure,
+    sameCanonical,
+  });
+  if (contradiction) return contradiction;
 
   const reconciliation = await highlightExistingGoal({
     reddit,
@@ -2608,18 +2368,8 @@ async function reconcileCanonicalClassicGoal({
     reconciliation.highlightResult.status === "highlighted" &&
     reconciliation.highlightResult.issues.length === 0
   ) {
-    const finalSnapshot = await subreddit.getHighlightedPosts();
-    const position = finalSnapshot.findIndex(
-      ({ postId }) => postId === selected.postId,
-    );
-    const finalInfo = finalSnapshot[position];
-    await saveHighlightManagementBaseline(redis, {
+    await saveCanonicalGoalPointer(redis, {
       canonicalPostId: selected.postId,
-      highlighted: true,
-      position: position >= 0 ? position : null,
-      highlightLabel: finalInfo?.highlightLabel ?? null,
-      highlightedUntil: finalInfo?.highlightedUntil?.getTime() ?? null,
-      moderatorOverride: "none",
       reconciledAt: nowMs,
     });
   }
@@ -2634,7 +2384,6 @@ async function reconcileCanonicalClassicGoal({
       });
     }
   }
-  void reconciliationContext;
   return reconciliation;
 }
 

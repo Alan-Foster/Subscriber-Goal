@@ -14,7 +14,7 @@ import { postsKey, updatesKey } from "../data/updaterData";
 import { appRepairStateKey } from "../data/highlightRepair";
 import {
   highlightManagementStateKey,
-  saveHighlightManagementBaseline,
+  saveCanonicalGoalPointer,
 } from "../data/highlightManagement";
 import {
   classifyPostLookupError,
@@ -43,6 +43,9 @@ class TestRedis {
   }
   async hGetAll(key: string): Promise<Record<string, string>> {
     return Object.fromEntries(this.hashes.get(key) ?? []);
+  }
+  async hMGet(key: string, fields: string[]): Promise<(string | null)[]> {
+    return fields.map((field) => this.hashes.get(key)?.get(field) ?? null);
   }
   async hSet(key: string, fields: Record<string, string>): Promise<void> {
     const hash = this.hashes.get(key) ?? new Map<string, string>();
@@ -116,13 +119,8 @@ describe("subscriber goal post retirement", () => {
       [postId]: "t3_next",
       t3_source: postId,
     });
-    await saveHighlightManagementBaseline(redis as never, {
+    await saveCanonicalGoalPointer(redis as never, {
       canonicalPostId: postId,
-      highlighted: true,
-      position: 0,
-      highlightLabel: null,
-      highlightedUntil: null,
-      moderatorOverride: "none",
       reconciledAt: 100,
     });
 

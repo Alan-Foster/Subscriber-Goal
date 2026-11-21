@@ -21,10 +21,10 @@ import {
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import {
   highlightManagementStateKey,
-  legacyHighlightManagementStateKey,
-  saveHighlightManagementBaseline,
+  saveCanonicalGoalPointer,
 } from "../data/highlightManagement";
 import { highlightContradictionKey } from "../data/highlightContradiction";
+import { appRepairStateKey } from "../data/highlightRepair";
 import { postOperationalStateKeyPrefix } from "../data/postOperationalState";
 
 const lifecycleHoisted = vi.hoisted(() => ({
@@ -743,7 +743,6 @@ describe("onboarding lifecycle reconciliation", () => {
       scheduleAppRepair,
       recurringHighlightRepairIntervalMs,
     } = await import("./appRepair");
-    const { appRepairStateKey } = await import("../data/highlightRepair");
     const removed = {
       ...makeLifecycleGoalPost({ id: "t3_removed", createdAt: nowMs - 1000 }),
       removedByCategory: "automod_filtered",
@@ -2148,9 +2147,13 @@ describe("existing goal highlight ensurance", () => {
     ).resolves.toBe(active.id);
   });
 
-  it.each(["none", "reordered"])("treats a slot change as informational with a stored %s override", async (moderatorOverride) => {
+  it("preserves a moderator highlight and the canonical goal's existing slot", async () => {
     const scheduled = {
-      ...makePost({ id: "t3_scheduled", createdAt: "2026-09-16T00:00:00Z", highlighted: true }),
+      ...makePost({
+        id: "t3_scheduled",
+        createdAt: "2026-09-16T00:00:00Z",
+        highlighted: true,
+      }),
       authorName: "ScheduleCreator",
     };
     const active = makePost({
@@ -2163,16 +2166,15 @@ describe("existing goal highlight ensurance", () => {
     const reddit = makeReddit([scheduled, active]);
     const redis = new InMemoryRedis();
     await redis.hSet("subscriber_goals", { t3_active_slot_goal: "3000" });
-    await saveHighlightManagementBaseline(redis as never, {
+    await saveCanonicalGoalPointer(redis as never, {
       canonicalPostId: active.id,
-      highlighted: true,
-      position: 0,
-      highlightLabel: null,
-      highlightedUntil: null,
-      moderatorOverride: "none",
       reconciledAt: nowMs,
     });
-    await redis.hSet(highlightManagementStateKey, { moderatorOverride });
+    await redis.hSet(highlightManagementStateKey, {
+      version: "highlight_management_v2",
+      highlighted: "true",
+      position: "0",
+    });
 
     const result = await ensureExistingSubscriberGoalHighlighted({
       reddit: reddit as never,
@@ -2182,12 +2184,13 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result.status).toBe("existing");
-    expect(result.moderatorOverride).toBeUndefined();
     expect(active.highlight).not.toHaveBeenCalled();
     expect(scheduled.unhighlight).not.toHaveBeenCalled();
-    await expect(redis.hGetAll(highlightManagementStateKey)).resolves.toMatchObject({
-      position: "1",
-      moderatorOverride: "none",
+    await expect(
+      redis.hGetAll(highlightManagementStateKey),
+    ).resolves.toMatchObject({
+      canonicalPostId: active.id,
+      reconciledAt: String(nowMs),
     });
   });
 
@@ -2210,15 +2213,6 @@ describe("existing goal highlight ensurance", () => {
       reconciliationContext: "legacy_upgrade",
     });
     expect(active.highlight).toHaveBeenCalledOnce();
-    await saveHighlightManagementBaseline(redis as never, {
-      canonicalPostId: active.id,
-      highlighted: true,
-      position: 0,
-      highlightLabel: "EVENT",
-      highlightedUntil: nowMs + 60 * 60 * 1000,
-      moderatorOverride: "none",
-      reconciledAt: nowMs,
-    });
     await active.unhighlight();
     active.highlight.mockClear();
 
@@ -2236,12 +2230,12 @@ describe("existing goal highlight ensurance", () => {
     await expect(
       redis.hGetAll(highlightManagementStateKey),
     ).resolves.toMatchObject({
-      moderatorOverride: "none",
-      highlightedUntil: String(nowMs + 60 * 60 * 1000),
+      canonicalPostId: active.id,
+      reconciledAt: String(nowMs + 60_000),
     });
   });
 
-  it("records an elapsed highlight expiration without making it permanent", async () => {
+  it("restores the canonical goal after its highlight expires", async () => {
     const active = makePost({
       id: "t3_expired",
       createdAt: "2026-09-15T00:00:00Z",
@@ -2252,13 +2246,8 @@ describe("existing goal highlight ensurance", () => {
     });
     const redis = new InMemoryRedis();
     await redis.hSet("subscriber_goals", { t3_expired_goal: "3000" });
-    await saveHighlightManagementBaseline(redis as never, {
+    await saveCanonicalGoalPointer(redis as never, {
       canonicalPostId: active.id,
-      highlighted: true,
-      position: 0,
-      highlightLabel: "ANNOUNCEMENT",
-      highlightedUntil: nowMs - 1_000,
-      moderatorOverride: "none",
       reconciledAt: nowMs - 60_000,
     });
 
@@ -2273,12 +2262,13 @@ describe("existing goal highlight ensurance", () => {
       status: "existing",
     });
     expect(active.highlight).toHaveBeenCalledOnce();
-    await expect(
-      redis.hGetAll(highlightManagementStateKey),
-    ).resolves.toMatchObject({ moderatorOverride: "none" });
+    await expect(redis.hGetAll(highlightManagementStateKey)).resolves.toEqual({
+      canonicalPostId: active.id,
+      reconciledAt: String(nowMs),
+    });
   });
 
-  it("adopts moderator-edited label and expiration metadata", async () => {
+  it("preserves a moderator-edited highlight label and expiration", async () => {
     const newExpiration = new Date(nowMs + 2 * 60 * 60 * 1000);
     const active = makePost({
       id: "t3_metadata",
@@ -2291,55 +2281,14 @@ describe("existing goal highlight ensurance", () => {
     });
     const redis = new InMemoryRedis();
     await redis.hSet("subscriber_goals", { t3_metadata_goal: "3000" });
-    await saveHighlightManagementBaseline(redis as never, {
+    await saveCanonicalGoalPointer(redis as never, {
       canonicalPostId: active.id,
-      highlighted: true,
-      position: 0,
-      highlightLabel: "ANNOUNCEMENT",
-      highlightedUntil: nowMs + 60 * 60 * 1000,
-      moderatorOverride: "none",
       reconciledAt: nowMs - 60_000,
     });
 
+    const reddit = makeReddit([active]);
     await ensureExistingSubscriberGoalHighlighted({
-      reddit: makeReddit([active]) as never,
-      redis: redis as never,
-      nowMs,
-      reconciliationContext: "repair",
-    });
-
-    await expect(
-      redis.hGetAll(highlightManagementStateKey),
-    ).resolves.toMatchObject({
-      highlightLabel: "EVENT",
-      highlightedUntil: String(newExpiration.getTime()),
-    });
-  });
-
-  it("migrates a v1 baseline from live metadata without rehighlighting", async () => {
-    const expiration = new Date(nowMs + 2 * 60 * 60 * 1000);
-    const active = makePost({
-      id: "t3_v1_baseline",
-      createdAt: "2026-09-15T00:00:00Z",
-      postKind: "subscriber-goal-v1",
-      postHeight: "regular",
-      highlighted: true,
-      highlightLabel: "EVENT",
-      highlightedUntil: expiration,
-    });
-    const redis = new InMemoryRedis();
-    await redis.hSet("subscriber_goals", { t3_v1_baseline_goal: "3000" });
-    await redis.hSet(legacyHighlightManagementStateKey, {
-      version: "highlight_management_v1",
-      canonicalPostId: active.id,
-      highlighted: "true",
-      position: "0",
-      moderatorOverride: "none",
-      reconciledAt: String(nowMs - 60_000),
-    });
-
-    await ensureExistingSubscriberGoalHighlighted({
-      reddit: makeReddit([active]) as never,
+      reddit: reddit as never,
       redis: redis as never,
       nowMs,
       reconciliationContext: "repair",
@@ -2347,13 +2296,64 @@ describe("existing goal highlight ensurance", () => {
 
     expect(active.highlight).not.toHaveBeenCalled();
     await expect(
+      (await reddit.getCurrentSubreddit()).getHighlightedPosts(),
+    ).resolves.toMatchObject([
+      {
+        postId: active.id,
+        highlightLabel: "EVENT",
+        highlightedUntil: newExpiration,
+      },
+    ]);
+    await expect(
       redis.hGetAll(highlightManagementStateKey),
     ).resolves.toMatchObject({
-      version: "highlight_management_v2",
-      highlightLabel: "EVENT",
-      highlightedUntil: String(expiration.getTime()),
+      canonicalPostId: active.id,
+      reconciledAt: String(nowMs),
     });
   });
+
+  it.each([true, false])(
+    "discovers the canonical goal from live state with only a v1 baseline (already highlighted: %s)",
+    async (alreadyHighlighted) => {
+      const expiration = new Date(nowMs + 2 * 60 * 60 * 1000);
+      const active = makePost({
+        id: "t3_v1_baseline",
+        createdAt: "2026-09-15T00:00:00Z",
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        highlighted: alreadyHighlighted,
+        highlightLabel: "EVENT",
+        highlightedUntil: expiration,
+      });
+      const redis = new InMemoryRedis();
+      await redis.hSet("subscriber_goals", { t3_v1_baseline_goal: "3000" });
+      await redis.hSet("subscriber_goal_highlight_management_v1_state", {
+        version: "highlight_management_v1",
+        canonicalPostId: "t3_stale_legacy",
+        highlighted: "true",
+        position: "0",
+        moderatorOverride: "none",
+        reconciledAt: String(nowMs - 60_000),
+      });
+
+      await ensureExistingSubscriberGoalHighlighted({
+        reddit: makeReddit([active]) as never,
+        redis: redis as never,
+        nowMs,
+        reconciliationContext: "repair",
+      });
+
+      expect(active.highlight).toHaveBeenCalledTimes(
+        alreadyHighlighted ? 0 : 1,
+      );
+      await expect(redis.hGetAll(highlightManagementStateKey)).resolves.toEqual(
+        {
+          canonicalPostId: active.id,
+          reconciledAt: String(nowMs),
+        },
+      );
+    },
+  );
 
   it("persists contradictory observations and notifies once after three", async () => {
     const active = makePost({
@@ -2386,6 +2386,14 @@ describe("existing goal highlight ensurance", () => {
     expect(active.highlight).not.toHaveBeenCalled();
     expect(active.unhighlight).not.toHaveBeenCalled();
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
+    await expect(redis.hGetAll(appRepairStateKey)).resolves.toMatchObject({
+      status: "pending",
+      reason: "contradictory_highlight_state",
+      nextRunAt: String(nowMs + 5 * 60 * 1000),
+    });
+    await expect(redis.hGetAll(highlightManagementStateKey)).resolves.toEqual(
+      {},
+    );
 
     active.isHighlighted.mockResolvedValue(true);
     await ensureExistingSubscriberGoalHighlighted({
