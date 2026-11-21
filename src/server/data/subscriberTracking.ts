@@ -11,7 +11,7 @@ import {
   subscriberStatsLegacyMembersByUserIdKey,
   subscriberStatsUsernameToUserIdKey,
   subscriberStatusByUserIdKey,
-} from "./subscriberStats";
+} from "./subscriberStatsKeys";
 import {
   serializeSubscriptionAcceptanceEvidence,
   subscriptionAcceptanceKey,

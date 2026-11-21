@@ -75,12 +75,17 @@ class TestRedis {
   }
 }
 
+type GetAppUser = () => Promise<{
+  username: string;
+  getModPermissionsForSubreddit: () => Promise<string[]>;
+}>;
+
 describe("app account recovery", () => {
   let redis: TestRedis;
   let permissions: string[];
   let moderatorResponses: Array<unknown[] | Error>;
   let reddit: {
-    getAppUser: ReturnType<typeof vi.fn>;
+    getAppUser: ReturnType<typeof vi.fn<GetAppUser>>;
     getModerators: ReturnType<typeof vi.fn>;
     sendPrivateMessage: ReturnType<typeof vi.fn>;
   };
@@ -92,7 +97,7 @@ describe("app account recovery", () => {
     permissions = ["posts"];
     moderatorResponses = [];
     reddit = {
-      getAppUser: vi.fn().mockImplementation(async () => ({
+      getAppUser: vi.fn<GetAppUser>().mockImplementation(async () => ({
         username: "subscriber-goal",
         getModPermissionsForSubreddit: vi.fn(async () => permissions),
       })),

@@ -174,7 +174,7 @@ function createReddit({
     subredditName: "ExampleSub",
     createdAt: new Date(nowMs - 60_000),
     postData: { postKind: "subscriber-goal-v1" },
-    isHighlighted: () => true,
+    isHighlighted: async () => true,
     highlight: vi.fn(async () => undefined),
     unhighlight: vi.fn(async () => undefined),
   };
@@ -183,7 +183,7 @@ function createReddit({
     if (highlighted) return [{ postId: "t3_highlighted" as const }];
     const result = [] as { postId: `t3_${string}` }[];
     for (const post of availablePosts) {
-      const verifier = (post as { isHighlighted?: () => boolean })
+      const verifier = (post as { isHighlighted?: () => Promise<boolean> })
         .isHighlighted;
       if (verifier && (await verifier())) {
         result.push({ postId: post.id as `t3_${string}` });
@@ -296,7 +296,7 @@ function makeLifecycleGoalPost({
       postKind: "subscriber-goal-v1",
       postHeight: "regular",
     },
-    isHighlighted: vi.fn(() => isHighlighted),
+    isHighlighted: vi.fn(async () => isHighlighted),
     highlight: vi.fn(async () => {
       isHighlighted = true;
     }),
@@ -1775,7 +1775,7 @@ describe("existing goal highlight ensurance", () => {
       highlightedUntil,
       archived,
       locked,
-      isHighlighted: vi.fn(() => isHighlighted),
+      isHighlighted: vi.fn(async () => isHighlighted),
       highlight: vi.fn(
         async (options?: {
           highlightUntil?: Date;
@@ -2392,7 +2392,7 @@ describe("existing goal highlight ensurance", () => {
     expect(active.unhighlight).not.toHaveBeenCalled();
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
 
-    active.isHighlighted.mockReturnValue(true);
+    active.isHighlighted.mockResolvedValue(true);
     await ensureExistingSubscriberGoalHighlighted({
       reddit: reddit as never,
       redis: redis as never,

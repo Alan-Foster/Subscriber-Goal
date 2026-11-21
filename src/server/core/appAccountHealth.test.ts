@@ -63,7 +63,9 @@ describe("app account health", () => {
   let permissions: string[];
   let reddit: {
     getAppUser: ReturnType<typeof vi.fn>;
-    modMail: { createModNotification: ReturnType<typeof vi.fn> };
+    modMail: {
+      createModNotification: ReturnType<typeof vi.fn<() => Promise<string>>>;
+    };
     sendPrivateMessage: ReturnType<typeof vi.fn>;
   };
 
@@ -75,7 +77,11 @@ describe("app account health", () => {
         username: "subscriber-goal",
         getModPermissionsForSubreddit: vi.fn(async () => permissions),
       }),
-      modMail: { createModNotification: vi.fn().mockResolvedValue("conv_1") },
+      modMail: {
+        createModNotification: vi
+          .fn<() => Promise<string>>()
+          .mockResolvedValue("conv_1"),
+      },
       sendPrivateMessage: vi.fn().mockResolvedValue(undefined),
     };
   });

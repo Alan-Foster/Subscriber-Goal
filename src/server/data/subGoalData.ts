@@ -307,31 +307,6 @@ export async function addRecentSubscriberPostIndex(
   });
 }
 
-export async function removeRecentSubscriberPostIndex(
-  redis: RedisClient,
-  username: string,
-  postId: string,
-): Promise<void> {
-  const normalized = normalizeUsername(username);
-  if (!normalized) {
-    return;
-  }
-  const existing = parsePostIdList(
-    await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
-  );
-  const next = existing.filter((existingPostId) => existingPostId !== postId);
-  if (next.length === existing.length) {
-    return;
-  }
-  if (next.length === 0) {
-    await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
-    return;
-  }
-  await redis.hSet(recentSubscriberPostsByUsernameKey, {
-    [normalized]: stringifyPostIdList(next),
-  });
-}
-
 export async function getSubGoalData(
   redis: RedisClient,
   postId: string,
@@ -577,104 +552,6 @@ export async function setAfterSubscribeActionForPost(
       action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
     [`${postId}${postAfterSubscribePresetSuffix}`]:
       preset ?? resolveAfterSubscribePreset(undefined, action) ?? "",
-  });
-}
-
-export async function setAfterSubscribeActionForPostIfMissing(
-  redis: RedisClient,
-  postId: string,
-  action: AfterSubscribeAction,
-  fallbackColorTheme: SubGoalColorTheme,
-  preset?: AfterSubscribePreset | null,
-): Promise<boolean> {
-  const created = await redis.hSetNX(
-    subscriberGoalsKey,
-    `${postId}${postAfterSubscribeActionSuffix}`,
-    action.type,
-  );
-  if (!created) {
-    return false;
-  }
-  await redis.hSet(subscriberGoalsKey, {
-    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
-      action.type !== "disabled" ? action.buttonText : "",
-    [`${postId}${postAfterSubscribeUrlSuffix}`]:
-      action.type === "link" ? action.url : "",
-    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
-      action.type !== "disabled" ? action.colorTheme : fallbackColorTheme,
-    [`${postId}${postAfterSubscribePresetSuffix}`]:
-      preset ?? resolveAfterSubscribePreset(undefined, action) ?? "",
-  });
-  return true;
-}
-
-export async function setSubscribeOnlyPostData(
-  redis: RedisClient,
-  postId: string,
-  data: {
-    subredditDisplayName: string;
-    colorTheme: SubGoalColorTheme;
-    language: SubGoalLanguage;
-    afterSubscribeAction?: AfterSubscribeAction;
-    afterSubscribePreset?: AfterSubscribePreset;
-  },
-): Promise<void> {
-  const afterSubscribeAction =
-    data.afterSubscribeAction ?? defaultAfterSubscribeAction;
-  await redis.hSet(subscriberGoalsKey, {
-    [`${postId}${postKindSuffix}`]: subscribeOnlyPostKind,
-    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName,
-    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
-      data.colorTheme,
-    ),
-    [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
-    [`${postId}${postHeightSuffix}`]: "tiny",
-    [`${postId}${postAfterSubscribeActionSuffix}`]: afterSubscribeAction.type,
-    [`${postId}${postAfterSubscribeButtonTextSuffix}`]:
-      afterSubscribeAction.type !== "disabled"
-        ? afterSubscribeAction.buttonText
-        : "",
-    [`${postId}${postAfterSubscribeUrlSuffix}`]:
-      afterSubscribeAction.type === "link" ? afterSubscribeAction.url : "",
-    [`${postId}${postAfterSubscribeColorThemeSuffix}`]:
-      afterSubscribeAction.type !== "disabled"
-        ? afterSubscribeAction.colorTheme
-        : data.colorTheme,
-    [`${postId}${postAfterSubscribePresetSuffix}`]:
-      data.afterSubscribePreset ??
-      resolveAfterSubscribePreset(undefined, afterSubscribeAction) ??
-      "",
-  });
-}
-
-export async function setCtaOnlyPostData(
-  redis: RedisClient,
-  postId: string,
-  data: {
-    subredditDisplayName: string;
-    colorTheme: SubGoalColorTheme;
-    language: SubGoalLanguage;
-    action: Exclude<AfterSubscribeAction, { type: "disabled" }>;
-    afterSubscribePreset?: AfterSubscribePreset;
-  },
-): Promise<void> {
-  await redis.hSet(subscriberGoalsKey, {
-    [`${postId}${postKindSuffix}`]: ctaOnlyPostKind,
-    [`${postId}${postSubredditDisplayNameSuffix}`]: data.subredditDisplayName,
-    [`${postId}${postColorThemeSuffix}`]: resolveSubGoalColorTheme(
-      data.colorTheme,
-    ),
-    [`${postId}${postLanguageSuffix}`]: resolveSubGoalLanguage(data.language),
-    [`${postId}${postHeightSuffix}`]: "cta",
-    [`${postId}${postAfterSubscribeActionSuffix}`]: data.action.type,
-    [`${postId}${postAfterSubscribeButtonTextSuffix}`]: data.action.buttonText,
-    [`${postId}${postAfterSubscribeUrlSuffix}`]:
-      data.action.type === "link" ? data.action.url : "",
-    [`${postId}${postAfterSubscribeColorThemeSuffix}`]: data.action.colorTheme,
-    [`${postId}${postAfterSubscribePresetSuffix}`]:
-      data.afterSubscribePreset ??
-      resolveAfterSubscribePreset(undefined, data.action) ??
-      "",
   });
 }
 

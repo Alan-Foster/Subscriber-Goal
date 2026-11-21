@@ -373,13 +373,6 @@ export async function isProcessedRevision(
   return !!revision;
 }
 
-export async function getAllProcessedRevisions(
-  redis: RedisClient
-): Promise<string[]> {
-  const revisions = await redis.hGetAll(processedRevisionsKey);
-  return Object.keys(revisions);
-}
-
 export async function removeProcessedRevisions(
   redis: RedisClient,
   revisionIds: string[]
