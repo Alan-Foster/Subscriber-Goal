@@ -333,6 +333,30 @@ export async function maybeScheduleMilestoneNotification(
   return "scheduled";
 }
 
+type OwnedMilestonePage = {
+  stateClient: StateRedis;
+  key: string;
+  owner: string;
+  clock: () => number;
+};
+
+type PreparedMilestonePage = {
+  state: MilestoneNotificationPageState;
+  eligible: Recipient[];
+  cursor: string;
+};
+
+type FundedMilestonePage = {
+  state: MilestoneNotificationPageState;
+  recipients: Recipient[];
+};
+
+type EnqueuedMilestonePage = {
+  state: MilestoneNotificationPageState;
+  successCount: number;
+  failureCount: number;
+};
+
 export async function processMilestoneNotificationBatch(
   job: MilestoneNotificationJob,
   campaign: MilestoneNotificationCampaignData,
@@ -369,20 +393,7 @@ export async function processMilestoneNotificationBatch(
   const stateClient = options.stateClient ?? redis;
   const claimed = await claimPage(stateClient, job, now);
   if (!claimed) {
-    const phase = parseState(
-      await stateClient.get(milestoneNotificationPageKey(job)),
-    )?.phase;
-    return {
-      status:
-        phase === "debit_started" ||
-        phase === "refund_started" ||
-        phase === "enqueue_started" ||
-        phase === "unresolved"
-          ? "unresolved"
-          : "duplicate",
-      done: true,
-      cursor: job.cursor,
-    };
+    return describeUnclaimedPage(stateClient, job);
   }
   const owner = claimed.state.owner!;
   const remaining = milestoneNotificationDailyLimit - job.attemptedRecipients;
@@ -398,188 +409,257 @@ export async function processMilestoneNotificationBatch(
   }
   const notificationClient = options.notificationClient ?? notifications;
   const copy = renderMilestoneNotificationCopy(campaign);
-  let state = claimed.state;
-  let eligible: Recipient[];
-  let cursor: string;
-  if (state.phase === "claimed") {
-    const page = await notificationClient.listOptedInUsers({
-      limit: Math.min(milestoneNotificationBatchSize, remaining),
-      ...(job.cursor ? { after: job.cursor } : {}),
-    });
-    eligible = page.userIds
-      .filter((id): id is `t2_${string}` => /^t2_[\w]+$/.test(id))
-      .map((userId) => ({ userId, link: campaign.postId, data: copy.data }));
-    cursor = page.next ?? "";
-    const transitionNow = clock();
-    state = (await ownedTransition(
-      stateClient,
-      claimed.key,
-      owner,
-      transitionNow,
-      (old) => ({
-        ...old,
-        phase: "prepared",
-        recipients: eligible,
-        pageNext: cursor,
-        updatedAt: transitionNow,
-      }),
-    ))!;
-    if (!state) return { status: "duplicate", done: true, cursor: job.cursor };
-  } else {
-    eligible = state.recipients ?? [];
-    cursor = state.pageNext ?? "";
-  }
+  const page = { stateClient, key: claimed.key, owner, clock };
+  const prepared = await prepareMilestonePage(
+    page,
+    notificationClient,
+    claimed.state,
+    job,
+    campaign,
+    copy,
+    remaining,
+  );
+  if (!prepared) return stoppedPage("duplicate", job.cursor);
 
-  let recipients = eligible;
   const budget = options.dailyBudgetClient ?? redis.global;
-  if (eligible.length && state.phase !== "funded") {
-    const debitNow = clock();
-    const budgetKey = `${milestoneNotificationDailyBudgetKeyPrefix}:${new Date(debitNow).toISOString().slice(0, 10)}`;
-    let nextState = await ownedTransition(
-      stateClient,
-      claimed.key,
-      owner,
-      debitNow,
-      (old) => ({
-        ...old,
-        phase: "debit_started",
-        budgetKey,
-        reserved: eligible.length,
-        outcome: "debit_outcome_unresolved",
-        updatedAt: debitNow,
-      }),
-    );
-    if (!nextState)
-      return { status: "duplicate", done: true, cursor: job.cursor };
-    state = nextState;
-    let total: number;
-    try {
-      total = await budget.incrBy(budgetKey, eligible.length);
-    } catch (error) {
-      const failedAt = clock();
-      await ownedTransition(
-        stateClient,
-        claimed.key,
-        owner,
-        failedAt,
-        (old) => ({
-          ...old,
-          phase: "unresolved",
-          outcome: "debit_uncertain",
-          updatedAt: failedAt,
-        }),
-      );
-      throw error;
-    }
-    recipients = eligible.slice(
-      0,
-      Math.max(0, milestoneNotificationDailyLimit - (total - eligible.length)),
-    );
-    const fundedAt = clock();
-    nextState = await ownedTransition(
-      stateClient,
-      claimed.key,
-      owner,
-      fundedAt,
-      (old) => ({
-        ...old,
-        phase: "funded",
-        recipients,
-        outcome: "debit_confirmed",
-        updatedAt: fundedAt,
-      }),
-    );
-    if (!nextState)
-      return { status: "unresolved", done: true, cursor: job.cursor };
-    state = nextState;
-    try {
-      await budget.expire(
-        budgetKey,
-        milestoneNotificationDailyBudgetExpirationSeconds,
-      );
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "milestone_notification_budget_ttl_failed",
-        { workflow: "milestone_notification", budgetKey },
-        error,
-      );
-    }
-  } else if (state.phase === "funded") {
-    recipients = state.recipients ?? [];
-  }
+  const funded = await fundMilestonePage(page, budget, prepared);
+  if (typeof funded === "string") return stoppedPage(funded, job.cursor);
+  const refunded = await refundUnusedMilestoneBudget(page, budget, funded);
+  if (!refunded) return stoppedPage("unresolved", job.cursor);
 
+  const enqueued = await enqueueMilestonePage(
+    page,
+    notificationClient,
+    refunded,
+    funded.recipients,
+    copy,
+  );
+  if (!enqueued) return stoppedPage("duplicate", job.cursor);
+  return saveMilestonePageDecision(
+    page,
+    job,
+    prepared,
+    funded.recipients,
+    enqueued,
+    options,
+  );
+}
+
+async function describeUnclaimedPage(
+  stateClient: StateRedis,
+  job: MilestoneNotificationJob,
+): Promise<MilestoneNotificationBatchResult> {
+  const phase = parseState(
+    await stateClient.get(milestoneNotificationPageKey(job)),
+  )?.phase;
+  return {
+    status:
+      phase === "debit_started" ||
+      phase === "refund_started" ||
+      phase === "enqueue_started" ||
+      phase === "unresolved"
+        ? "unresolved"
+        : "duplicate",
+    done: true,
+    cursor: job.cursor,
+  };
+}
+
+function stoppedPage(
+  status: "duplicate" | "unresolved",
+  cursor: string,
+): MilestoneNotificationBatchResult {
+  return { status, done: true, cursor };
+}
+
+async function prepareMilestonePage(
+  pageClaim: OwnedMilestonePage,
+  notificationClient: NotificationClient,
+  state: MilestoneNotificationPageState,
+  job: MilestoneNotificationJob,
+  campaign: MilestoneNotificationCampaignData,
+  copy: ReturnType<typeof renderMilestoneNotificationCopy>,
+  remaining: number,
+): Promise<PreparedMilestonePage | undefined> {
+  const { stateClient, key, owner, clock } = pageClaim;
+  if (state.phase !== "claimed") {
+    return {
+      state,
+      eligible: state.recipients ?? [],
+      cursor: state.pageNext ?? "",
+    };
+  }
+  const page = await notificationClient.listOptedInUsers({
+    limit: Math.min(milestoneNotificationBatchSize, remaining),
+    ...(job.cursor ? { after: job.cursor } : {}),
+  });
+  const eligible = page.userIds
+    .filter((id): id is `t2_${string}` => /^t2_[\w]+$/.test(id))
+    .map((userId) => ({ userId, link: campaign.postId, data: copy.data }));
+  const cursor = page.next ?? "";
+  const transitionNow = clock();
+  const prepared = await ownedTransition(
+    stateClient,
+    key,
+    owner,
+    transitionNow,
+    (old) => ({
+      ...old,
+      phase: "prepared",
+      recipients: eligible,
+      pageNext: cursor,
+      updatedAt: transitionNow,
+    }),
+  );
+  if (!prepared) return undefined;
+  return { state: prepared, eligible, cursor };
+}
+
+async function fundMilestonePage(
+  page: OwnedMilestonePage,
+  budget: DailyBudgetClient,
+  { state, eligible }: PreparedMilestonePage,
+): Promise<FundedMilestonePage | "duplicate" | "unresolved"> {
+  const { stateClient, key, owner, clock } = page;
+  if (state.phase === "funded")
+    return { state, recipients: state.recipients ?? [] };
+  if (!eligible.length) return { state, recipients: eligible };
+
+  const debitNow = clock();
+  const budgetKey = `${milestoneNotificationDailyBudgetKeyPrefix}:${new Date(debitNow).toISOString().slice(0, 10)}`;
+  const debitStarted = await ownedTransition(
+    stateClient,
+    key,
+    owner,
+    debitNow,
+    (old) => ({
+      ...old,
+      phase: "debit_started",
+      budgetKey,
+      reserved: eligible.length,
+      outcome: "debit_outcome_unresolved",
+      updatedAt: debitNow,
+    }),
+  );
+  if (!debitStarted) return "duplicate";
+  let total: number;
+  try {
+    total = await budget.incrBy(budgetKey, eligible.length);
+  } catch (error) {
+    const failedAt = clock();
+    await ownedTransition(stateClient, key, owner, failedAt, (old) => ({
+      ...old,
+      phase: "unresolved",
+      outcome: "debit_uncertain",
+      updatedAt: failedAt,
+    }));
+    throw error;
+  }
+  const recipients = eligible.slice(
+    0,
+    Math.max(0, milestoneNotificationDailyLimit - (total - eligible.length)),
+  );
+  const fundedAt = clock();
+  const funded = await ownedTransition(
+    stateClient,
+    key,
+    owner,
+    fundedAt,
+    (old) => ({
+      ...old,
+      phase: "funded",
+      recipients,
+      outcome: "debit_confirmed",
+      updatedAt: fundedAt,
+    }),
+  );
+  if (!funded) return "unresolved";
+  try {
+    await budget.expire(
+      budgetKey,
+      milestoneNotificationDailyBudgetExpirationSeconds,
+    );
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "milestone_notification_budget_ttl_failed",
+      { workflow: "milestone_notification", budgetKey },
+      error,
+    );
+  }
+  return { state: funded, recipients };
+}
+
+async function refundUnusedMilestoneBudget(
+  page: OwnedMilestonePage,
+  budget: DailyBudgetClient,
+  { state, recipients }: FundedMilestonePage,
+): Promise<MilestoneNotificationPageState | undefined> {
+  const { stateClient, key, owner, clock } = page;
   const refund = (state.reserved ?? recipients.length) - recipients.length;
   if (
-    state.phase === "funded" &&
-    state.outcome === "debit_confirmed" &&
-    refund > 0
+    state.phase !== "funded" ||
+    state.outcome !== "debit_confirmed" ||
+    !(refund > 0)
   ) {
-    const budgetKey = state.budgetKey;
-    if (!budgetKey) {
-      return { status: "unresolved", done: true, cursor: job.cursor };
-    }
-    const refundAt = clock();
-    let nextState = await ownedTransition(
-      stateClient,
-      claimed.key,
-      owner,
-      refundAt,
-      (old) => ({
-        ...old,
-        phase: "refund_started",
-        recipients,
-        outcome: "refund_outcome_unresolved",
-        updatedAt: refundAt,
-      }),
-    );
-    if (!nextState)
-      return { status: "unresolved", done: true, cursor: job.cursor };
-    state = nextState;
-    try {
-      await budget.incrBy(budgetKey, -refund);
-    } catch (error) {
-      const failedAt = clock();
-      await ownedTransition(
-        stateClient,
-        claimed.key,
-        owner,
-        failedAt,
-        (old) => ({
-          ...old,
-          phase: "unresolved",
-          outcome: "refund_uncertain",
-          updatedAt: failedAt,
-        }),
-      );
-      throw error;
-    }
-    const refundedAt = clock();
-    nextState = await ownedTransition(
-      stateClient,
-      claimed.key,
-      owner,
-      refundedAt,
-      (old) => ({
-        ...old,
-        phase: "funded",
-        recipients,
-        outcome: "refund_confirmed",
-        updatedAt: refundedAt,
-      }),
-    );
-    if (!nextState)
-      return { status: "unresolved", done: true, cursor: job.cursor };
-    state = nextState;
+    return state;
   }
+  const budgetKey = state.budgetKey;
+  if (!budgetKey) {
+    return undefined;
+  }
+  const refundAt = clock();
+  const refundStarted = await ownedTransition(
+    stateClient,
+    key,
+    owner,
+    refundAt,
+    (old) => ({
+      ...old,
+      phase: "refund_started",
+      recipients,
+      outcome: "refund_outcome_unresolved",
+      updatedAt: refundAt,
+    }),
+  );
+  if (!refundStarted) return undefined;
+  try {
+    await budget.incrBy(budgetKey, -refund);
+  } catch (error) {
+    const failedAt = clock();
+    await ownedTransition(stateClient, key, owner, failedAt, (old) => ({
+      ...old,
+      phase: "unresolved",
+      outcome: "refund_uncertain",
+      updatedAt: failedAt,
+    }));
+    throw error;
+  }
+  const refundedAt = clock();
+  return ownedTransition(stateClient, key, owner, refundedAt, (old) => ({
+    ...old,
+    phase: "funded",
+    recipients,
+    outcome: "refund_confirmed",
+    updatedAt: refundedAt,
+  }));
+}
 
+async function enqueueMilestonePage(
+  page: OwnedMilestonePage,
+  notificationClient: NotificationClient,
+  state: MilestoneNotificationPageState,
+  recipients: Recipient[],
+  copy: ReturnType<typeof renderMilestoneNotificationCopy>,
+): Promise<EnqueuedMilestonePage | undefined> {
+  const { stateClient, key, owner, clock } = page;
   let successCount = 0;
   let failureCount = 0;
   if (recipients.length) {
     const sendAt = clock();
     const nextState = await ownedTransition(
       stateClient,
-      claimed.key,
+      key,
       owner,
       sendAt,
       (old) => ({
@@ -590,8 +670,7 @@ export async function processMilestoneNotificationBatch(
         updatedAt: sendAt,
       }),
     );
-    if (!nextState)
-      return { status: "duplicate", done: true, cursor: job.cursor };
+    if (!nextState) return undefined;
     state = nextState;
     const result = await notificationClient.enqueue({
       title: copy.title,
@@ -601,6 +680,18 @@ export async function processMilestoneNotificationBatch(
     successCount = result.successCount;
     failureCount = result.failureCount;
   }
+  return { state, successCount, failureCount };
+}
+
+async function saveMilestonePageDecision(
+  page: OwnedMilestonePage,
+  job: MilestoneNotificationJob,
+  { cursor, eligible }: PreparedMilestonePage,
+  recipients: Recipient[],
+  { state, successCount, failureCount }: EnqueuedMilestonePage,
+  options: { schedulerClient?: SchedulerClient },
+): Promise<MilestoneNotificationBatchResult> {
+  const { stateClient, key, owner, clock } = page;
   const attemptedRecipients = job.attemptedRecipients + recipients.length;
   const done =
     !cursor ||
@@ -622,10 +713,8 @@ export async function processMilestoneNotificationBatch(
     outcome: child ? "page_confirmed_continuation_pending" : "complete",
     updatedAt: decisionAt,
   };
-  if (
-    !(await saveDecision(stateClient, claimed.key, owner, decisionAt, decision))
-  )
-    return { status: "unresolved", done: true, cursor: job.cursor };
+  if (!(await saveDecision(stateClient, key, owner, decisionAt, decision)))
+    return stoppedPage("unresolved", job.cursor);
   if (child) {
     try {
       await (options.schedulerClient ?? scheduler).runJob({
@@ -633,7 +722,7 @@ export async function processMilestoneNotificationBatch(
         data: child,
         runAt: new Date(decisionAt + milestoneNotificationBatchDelayMs),
       });
-      await markContinuationScheduled(stateClient, claimed.key, clock());
+      await markContinuationScheduled(stateClient, key, clock());
     } catch (error) {
       logDiagnostic(
         "warn",
