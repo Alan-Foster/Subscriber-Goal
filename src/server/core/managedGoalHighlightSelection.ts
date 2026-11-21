@@ -5,7 +5,7 @@ import {
   subscriberGoalsKey,
 } from "../data/subGoalData";
 import { isLinkId, type RedisClient } from "../types";
-import type { OnboardingGoalCandidate } from "./onboardingSubscriberGoal";
+import type { OnboardingGoalCandidate } from "./goalDiscovery";
 
 const successorHighlightGraceMs = 30 * 60 * 1000;
 

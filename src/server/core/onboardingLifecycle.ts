@@ -11,8 +11,8 @@ import {
   reconcileCompletedGoal,
   type CompletedGoalReconciliationOutcome,
 } from "./completedGoalReconciliation";
+import { ensureExistingSubscriberGoalHighlighted } from "./highlightReconciliation";
 import {
-  ensureExistingSubscriberGoalHighlighted,
   getOnboardingSubscriberGoalState,
   onboardingSubscriberGoalLockKey,
   onboardingSubscriberGoalLockTtlMs,
@@ -20,10 +20,12 @@ import {
   onboardingSubscriberGoalVersion,
   saveOnboardingState,
   selectOnboardingGoalStaggerMinutes,
-  type OnboardingExistingSource,
-  type OnboardingLifecycleSource,
   type OnboardingSubscriberGoalState,
 } from "./onboardingSubscriberGoal";
+import type {
+  OnboardingExistingSource,
+  OnboardingLifecycleSource,
+} from "./goalDiscovery";
 import {
   getOnboardingReminderState,
   onboardingReminderLockKey,

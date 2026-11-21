@@ -2,7 +2,7 @@ import type { selectManagedGoalHighlight } from "./managedGoalHighlightSelection
 import type {
   OnboardingGoalCandidate,
   OnboardingHighlightEnsuranceResult,
-} from "./onboardingSubscriberGoal";
+} from "./goalDiscovery";
 
 export function highlightCandidateDetails(candidate: OnboardingGoalCandidate) {
   return {

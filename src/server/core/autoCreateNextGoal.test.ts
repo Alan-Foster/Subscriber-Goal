@@ -150,7 +150,7 @@ vi.mock("../data/liveSubscriberGoalHighlights", () => ({
     hoisted.findLiveHighlightedSubscriberGoalCandidates,
 }));
 
-vi.mock("./onboardingSubscriberGoal", () => ({
+vi.mock("./highlightReconciliation", () => ({
   ensureExistingSubscriberGoalHighlighted:
     hoisted.ensureExistingSubscriberGoalHighlighted,
 }));

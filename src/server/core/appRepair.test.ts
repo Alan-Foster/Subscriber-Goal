@@ -38,7 +38,7 @@ vi.mock("../data/updaterData", () => ({
   getTrackedPosts: hoisted.getTrackedPosts,
   queueUpdates: hoisted.queueUpdates,
 }));
-vi.mock("./onboardingSubscriberGoal", () => ({
+vi.mock("./highlightReconciliation", () => ({
   ensureExistingSubscriberGoalHighlighted:
     hoisted.ensureExistingSubscriberGoalHighlighted,
 }));

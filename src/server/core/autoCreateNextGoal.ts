@@ -1,3 +1,4 @@
+import { ensureExistingSubscriberGoalHighlighted } from "./highlightReconciliation";
 import {
   nextAutomaticGoalPrerequisiteRetry,
   resetAutomaticGoalPrerequisiteRetry,
@@ -304,16 +305,10 @@ export async function processDueAutoCreateNextGoals({
       // reconciles classic goals at/above target, chooses a single app pin,
       // and maps completed sources to an existing active classic.
       // Unhighlighted posts still participate in this decision.
-      // Load lazily because onboarding reconciliation itself depends on the
-      // successor worker; eager imports would create an initialization cycle.
       let activeInventory: Awaited<
-        ReturnType<
-          (typeof import("./onboardingSubscriberGoal"))["ensureExistingSubscriberGoalHighlighted"]
-        >
+        ReturnType<typeof ensureExistingSubscriberGoalHighlighted>
       >;
       try {
-        const { ensureExistingSubscriberGoalHighlighted } =
-          await import("./onboardingSubscriberGoal");
         activeInventory = await ensureExistingSubscriberGoalHighlighted({
           reddit,
           redis,
