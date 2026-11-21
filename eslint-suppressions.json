@@ -193,22 +193,6 @@
       "count": 1
     }
   },
-  "src/server/routes/internalUi.ts": {
-    "complexity": {
-      "count": 2
-    },
-    "max-lines-per-function": {
-      "count": 4
-    }
-  },
-  "src/server/routes/publicApi.ts": {
-    "complexity": {
-      "count": 2
-    },
-    "max-lines-per-function": {
-      "count": 3
-    }
-  },
   "src/server/triggers/appChanged.ts": {
     "complexity": {
       "count": 1
