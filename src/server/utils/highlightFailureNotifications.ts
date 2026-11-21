@@ -1,8 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
 import type { HighlightResult } from "./communityHighlights";
+import {
+  acquireRedisLock,
+  releaseRedisLock,
+  withRedisLock,
+} from "./redisOwnedLock";
 
 const highlightIncidentKeyPrefix = "highlight_failure_incident_v1";
 const activeHighlightIncidentKey = "highlight_failure_incident_active_v1";
@@ -20,20 +24,19 @@ export async function notifyHighlightPermissionIncident(
   const key = highlightPermissionIncidentKey;
   if (await redis.get(key)) return "skipped_duplicate";
   const lockKey = `${key}:lock`;
-  const token = randomUUID();
-  await redis.set(lockKey, token, {
-    nx: true,
-    expiration: new Date(nowMs + highlightIncidentLockMs),
-  });
-  if ((await redis.get(lockKey)) !== token) return "skipped_duplicate";
-  try {
-    if (await redis.get(key)) return "skipped_duplicate";
-    const outcome = await send();
-    if (outcome === "sent") await redis.set(key, token);
-    return outcome;
-  } finally {
-    if ((await redis.get(lockKey)) === token) await redis.del(lockKey);
-  }
+  const lock = await withRedisLock(
+    redis,
+    lockKey,
+    highlightIncidentLockMs,
+    async (token) => {
+      if (await redis.get(key)) return "skipped_duplicate";
+      const outcome = await send();
+      if (outcome === "sent") await redis.set(key, token);
+      return outcome;
+    },
+    { nowMs },
+  );
+  return lock.acquired ? lock.result : "skipped_duplicate";
 }
 
 export type HighlightNotificationOutcome =
@@ -320,12 +323,13 @@ export async function notifyHighlightFailureIncident({
   }
 
   const lockKey = `${key}:lock`;
-  const token = `${nowMs}:${Math.random().toString(36).slice(2)}`;
-  await redis.set(lockKey, token, {
-    nx: true,
-    expiration: new Date(nowMs + highlightIncidentLockMs),
-  });
-  if ((await redis.get(lockKey)) !== token) return "skipped_duplicate";
+  const token = await acquireRedisLock(
+    redis,
+    lockKey,
+    highlightIncidentLockMs,
+    { nowMs },
+  );
+  if (!token) return "skipped_duplicate";
 
   try {
     const latest = await redis.hGetAll(key);
@@ -353,6 +357,6 @@ export async function notifyHighlightFailureIncident({
     await redis.expire(key, highlightIncidentRetentionSeconds);
     return outcome;
   } finally {
-    if ((await redis.get(lockKey)) === token) await redis.del(lockKey);
+    await releaseRedisLock(redis, lockKey, token);
   }
 }
