@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { highlightManagementStateKey } from "../data/highlightManagement";
-import { watchTestHash, watchTestString } from "../utils/testHashWatch";
+import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 
 const hoisted = vi.hoisted(() => ({
   reddit: {

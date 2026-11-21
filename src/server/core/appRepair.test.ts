@@ -52,7 +52,7 @@ import {
 } from "./appRepair";
 import { communityGoalMutationLockKey } from "./communityGoalMutation";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
-import { watchTestHash, watchTestString } from "../utils/testHashWatch";
+import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 
 class TestRedis {
   values = new Map<string, string>();

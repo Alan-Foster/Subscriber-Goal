@@ -69,6 +69,23 @@ export default defineConfig([
     extends: ['js/recommended'],
   },
   {
+    files: ['src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
+    ignores: ['**/*.test.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '(?:^|/)testing(?:/|$)',
+              message: 'Testing helpers may only be imported by tests.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}', 'src/server/testing/**'],
     rules: {
