@@ -53,11 +53,8 @@ const hoisted = vi.hoisted(() => ({
   getAppSettings: vi.fn(),
   processCrosspostDispatchQueue: vi.fn(),
   countPendingCrossposts: vi.fn(),
-  processSubscriberStatsMigrationBatch: vi.fn(),
   processPostKindMigrationBatch: vi.fn(),
   processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
-  processNsfwAfterSubscribeActionMigrationBatch: vi.fn(),
-  processRecentSubscriberIndexMigrationBatch: vi.fn(),
   processDueAutoCreateNextGoals: vi.fn(),
   processDueOnboardingSubscriberGoal: vi.fn(),
   processDueOnboardingReminder: vi.fn(),
@@ -118,11 +115,6 @@ vi.mock("../data/crosspostData", () => ({
   countPendingCrossposts: hoisted.countPendingCrossposts,
 }));
 
-vi.mock("../data/subscriberStats", () => ({
-  processSubscriberStatsMigrationBatch:
-    hoisted.processSubscriberStatsMigrationBatch,
-}));
-
 vi.mock("../data/subscriberDailyStats", () => ({
   observeDailySubscriberCount: hoisted.observeDailySubscriberCount,
   getLastKnownSubscriberCount: hoisted.getLastKnownSubscriberCount,
@@ -141,11 +133,6 @@ vi.mock("../data/legacyAfterSubscribeActionMigration", () => ({
   processLegacyAfterSubscribeActionMigrationBatch:
     hoisted.processLegacyAfterSubscribeActionMigrationBatch,
 }));
-vi.mock("../data/nsfwAfterSubscribeActionMigration", () => ({
-  processNsfwAfterSubscribeActionMigrationBatch:
-    hoisted.processNsfwAfterSubscribeActionMigrationBatch,
-}));
-
 vi.mock("../data/subGoalData", () => ({
   autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
   cancelAutoCreateNextGoal: hoisted.cancelAutoCreateNextGoal,
@@ -154,8 +141,6 @@ vi.mock("../data/subGoalData", () => ({
   checkCompletionStatus: hoisted.checkCompletionStatus,
   getSubGoalData: hoisted.getSubGoalData,
   repairAutoCreateNextGoal: hoisted.repairAutoCreateNextGoal,
-  processRecentSubscriberIndexMigrationBatch:
-    hoisted.processRecentSubscriberIndexMigrationBatch,
 }));
 
 vi.mock("../data/updaterData", () => ({
@@ -243,11 +228,8 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.getAppSettings.mockReset();
     hoisted.processCrosspostDispatchQueue.mockReset();
     hoisted.countPendingCrossposts.mockReset();
-    hoisted.processSubscriberStatsMigrationBatch.mockReset();
     hoisted.processPostKindMigrationBatch.mockReset();
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
-    hoisted.processNsfwAfterSubscribeActionMigrationBatch.mockReset();
-    hoisted.processRecentSubscriberIndexMigrationBatch.mockReset();
     hoisted.processDueAutoCreateNextGoals.mockReset();
     hoisted.processDueOnboardingSubscriberGoal.mockReset();
     hoisted.processDueOnboardingReminder.mockReset();
@@ -295,12 +277,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockResolvedValue(
       {},
     );
-    hoisted.processNsfwAfterSubscribeActionMigrationBatch.mockResolvedValue({});
     hoisted.countPendingCrossposts.mockResolvedValue(0);
-    hoisted.processSubscriberStatsMigrationBatch.mockResolvedValue(undefined);
-    hoisted.processRecentSubscriberIndexMigrationBatch.mockResolvedValue(
-      undefined,
-    );
     hoisted.processDueAutoCreateNextGoals.mockResolvedValue({
       due: 0,
       created: 0,
@@ -363,7 +340,6 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
     expect(hoisted.countPendingCrossposts).not.toHaveBeenCalled();
-    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledWith(
       expect.anything(),
       10,
@@ -374,9 +350,6 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       name: "CorporateGifts",
       type: "public",
     });
-    expect(
-      hoisted.processRecentSubscriberIndexMigrationBatch,
-    ).toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledWith({
       reddit: hoisted.reddit,
       redis: expect.anything(),
@@ -388,7 +361,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
   });
 
-  it("does not migrate dynamic presets during an NSFW scheduler tick", async () => {
+  it("runs the legacy after-subscribe migration during an NSFW scheduler tick", async () => {
     hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
       name: "CorporateGifts",
       type: "public",
@@ -396,9 +369,6 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       numberOfSubscribers: 10,
     });
     await onPostsUpdaterJob();
-    expect(
-      hoisted.processNsfwAfterSubscribeActionMigrationBatch,
-    ).not.toHaveBeenCalled();
     expect(
       hoisted.processLegacyAfterSubscribeActionMigrationBatch,
     ).toHaveBeenCalledOnce();
@@ -425,7 +395,6 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     expect(hoisted.processDueAppAccountRecovery).toHaveBeenCalledOnce();
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
-    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
     expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
@@ -582,7 +551,15 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
     await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
 
-    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
+    expect(hoisted.redis.hGetAll).not.toHaveBeenCalledWith(
+      "subscriber_stats_migration_state",
+    );
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringMatching(
+        /scheduler_task_failed.*(?:subscriber_stats_migration|recent_subscriber_migration)/,
+      ),
+    );
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringMatching(
         /scheduler_task_failed.*subscriber_daily_stats.*redis unavailable.*stack/,
@@ -602,7 +579,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
 
     expect(hoisted.observeDailySubscriberCount).not.toHaveBeenCalled();
-    expect(hoisted.processSubscriberStatsMigrationBatch).toHaveBeenCalled();
+    expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringMatching(
         /scheduler_task_failed.*subscriber_daily_stats.*reddit unavailable.*stack/,
@@ -643,9 +620,6 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         phase === "dispatch" ? 0 : 1,
       );
       expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
-      expect(
-        hoisted.processSubscriberStatsMigrationBatch,
-      ).toHaveBeenCalledOnce();
       expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
       expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
       expect(hoisted.applyTextFallback).toHaveBeenCalledOnce();

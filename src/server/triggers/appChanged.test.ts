@@ -6,10 +6,8 @@ const hoisted = vi.hoisted(() => ({
     subredditId: undefined as string | undefined,
   },
   getCurrentSubreddit: vi.fn(),
+  readRedisHash: vi.fn(),
   ensureSavedSubredditDisplayName: vi.fn(),
-  clearLegacySubscriberErasureTombstones: vi.fn(),
-  initializeRecentSubscriberIndexMigration: vi.fn(),
-  initializeSubscriberStatsMigration: vi.fn(),
   getOnboardingSubscriberGoalState: vi.fn(),
   getOnboardingReminderState: vi.fn(),
   initializeOnboardingSubscriberGoal: vi.fn(),
@@ -38,24 +36,12 @@ vi.mock("@devvit/web/server", () => ({
   reddit: {
     getCurrentSubreddit: hoisted.getCurrentSubreddit,
   },
-  redis: {},
+  redis: { hGetAll: hoisted.readRedisHash },
   scheduler: {},
 }));
 
 vi.mock("../data/subredditDisplayNameData", () => ({
   ensureSavedSubredditDisplayName: hoisted.ensureSavedSubredditDisplayName,
-}));
-
-vi.mock("../data/subscriberStats", () => ({
-  clearLegacySubscriberErasureTombstones:
-    hoisted.clearLegacySubscriberErasureTombstones,
-  initializeSubscriberStatsMigration:
-    hoisted.initializeSubscriberStatsMigration,
-}));
-
-vi.mock("../data/subGoalData", () => ({
-  initializeRecentSubscriberIndexMigration:
-    hoisted.initializeRecentSubscriberIndexMigration,
 }));
 
 vi.mock("../core/onboardingSubscriberGoal", async (importOriginal) => ({
@@ -141,6 +127,7 @@ describe("onAppChanged", () => {
     hoisted.context.subredditName = undefined;
     hoisted.context.subredditId = undefined;
     hoisted.getCurrentSubreddit.mockReset();
+    hoisted.readRedisHash.mockReset().mockResolvedValue({});
     hoisted.getCurrentSubreddit.mockResolvedValue({
       id: "t5_subgoal",
       name: "SubGoal",
@@ -149,9 +136,6 @@ describe("onAppChanged", () => {
       nsfw: false,
     });
     hoisted.ensureSavedSubredditDisplayName.mockReset();
-    hoisted.clearLegacySubscriberErasureTombstones.mockReset();
-    hoisted.initializeRecentSubscriberIndexMigration.mockReset();
-    hoisted.initializeSubscriberStatsMigration.mockReset();
     hoisted.getOnboardingSubscriberGoalState.mockReset();
     hoisted.getOnboardingReminderState.mockReset();
     hoisted.initializeOnboardingSubscriberGoal.mockReset();
@@ -179,8 +163,6 @@ describe("onAppChanged", () => {
     hoisted.checkAppAccountHealth.mockResolvedValue({ healthy: true });
     hoisted.scheduleAppRepair.mockResolvedValue(undefined);
     hoisted.getTrackedPosts.mockResolvedValue([]);
-    hoisted.clearLegacySubscriberErasureTombstones.mockResolvedValue(0);
-    hoisted.initializeSubscriberStatsMigration.mockResolvedValue(undefined);
     hoisted.getOnboardingSubscriberGoalState.mockResolvedValue(undefined);
     hoisted.getOnboardingReminderState.mockResolvedValue(undefined);
     hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
@@ -191,9 +173,6 @@ describe("onAppChanged", () => {
       status: "unchanged",
       reason: "active_workflow_preserved",
     });
-    hoisted.initializeRecentSubscriberIndexMigration.mockResolvedValue(
-      undefined,
-    );
     hoisted.initializePostKindMigration.mockResolvedValue(undefined);
     hoisted.initializeLegacyAfterSubscribeActionMigration.mockResolvedValue(
       undefined,
@@ -218,15 +197,8 @@ describe("onAppChanged", () => {
 
     expect(hoisted.getCurrentSubreddit).not.toHaveBeenCalled();
     expect(hoisted.ensureSavedSubredditDisplayName).not.toHaveBeenCalled();
-    expect(
-      hoisted.clearLegacySubscriberErasureTombstones,
-    ).not.toHaveBeenCalled();
-    expect(hoisted.initializeSubscriberStatsMigration).not.toHaveBeenCalled();
     expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
-    expect(
-      hoisted.initializeRecentSubscriberIndexMigration,
-    ).not.toHaveBeenCalled();
     expect(hoisted.queueUpdates).not.toHaveBeenCalled();
   });
 
@@ -246,17 +218,8 @@ describe("onAppChanged", () => {
       expect.anything(),
       "SubGoal",
     );
-    expect(hoisted.clearLegacySubscriberErasureTombstones).toHaveBeenCalledWith(
-      expect.anything(),
-    );
-    expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalledWith(
-      expect.anything(),
-    );
     expect(hoisted.initializeOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.scheduleOnboardingReminder).not.toHaveBeenCalled();
-    expect(
-      hoisted.initializeRecentSubscriberIndexMigration,
-    ).toHaveBeenCalledWith(expect.anything());
     expect(hoisted.scheduleAppRepair).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Number),
@@ -515,6 +478,13 @@ describe("onAppChanged", () => {
     expect(hoisted.scheduleAppRepair).toHaveBeenCalled();
     expect(hoisted.reconcileSubscriberGoalHighlights).not.toHaveBeenCalled();
     expect(hoisted.initializePostKindMigration).not.toHaveBeenCalled();
+    for (const key of [
+      "subscriber_stats_migration_state",
+      "recent_subscriber_index_migration_state",
+      "subscriber_stats_erased_user_ids",
+    ]) {
+      expect(hoisted.readRedisHash).not.toHaveBeenCalledWith(key);
+    }
   });
 
   it("continues independent initialization after an early phase fails", async () => {
@@ -527,8 +497,6 @@ describe("onAppChanged", () => {
       onAppChanged({ lifecycleSource: "install" }),
     ).resolves.toBeUndefined();
 
-    expect(hoisted.clearLegacySubscriberErasureTombstones).toHaveBeenCalled();
-    expect(hoisted.initializeSubscriberStatsMigration).toHaveBeenCalled();
     expect(hoisted.initializeOnboardingSubscriberGoal).toHaveBeenCalled();
     expect(
       hoisted.initializeLegacyAfterSubscribeActionMigration,

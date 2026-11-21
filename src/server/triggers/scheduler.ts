@@ -5,7 +5,6 @@ import {
   checkCompletionStatus,
   clearAutomaticSuccessorSuppression,
   getSubGoalData,
-  processRecentSubscriberIndexMigrationBatch,
   repairAutoCreateNextGoal,
 } from "../data/subGoalData";
 import {
@@ -22,7 +21,6 @@ import {
   processCrosspostDispatchQueue,
 } from "./modAction";
 import { countPendingCrossposts } from "../data/crosspostData";
-import { processSubscriberStatsMigrationBatch } from "../data/subscriberStats";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
@@ -371,32 +369,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    await processSubscriberStatsMigrationBatch(redis);
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "subscriber_stats_migration" },
-      error,
-    );
-  }
-  try {
     await processSubscriberTrackingRepairs(redis);
   } catch (error) {
     logDiagnostic(
       "error",
       "scheduler_task_failed",
       { workflow: "subscriber_tracking_repair" },
-      error,
-    );
-  }
-  try {
-    await processRecentSubscriberIndexMigrationBatch(redis);
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "recent_subscriber_migration" },
       error,
     );
   }

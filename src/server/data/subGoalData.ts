@@ -29,7 +29,7 @@ import {
   type PostKind,
 } from "../../shared/postKind";
 import { dispatchNewPost } from "./crosspostData";
-import { ensureUpdateQueued, postsKey, trackPost } from "./updaterData";
+import { ensureUpdateQueued, trackPost } from "./updaterData";
 import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
 import { getCurrentSubredditNsfw } from "../utils/subredditSafety";
 import {
@@ -61,7 +61,7 @@ export const postColorThemeSuffix = "_color_theme";
 export const postAutoCreateNextGoalSuffix = "_auto_create_next_goal";
 export const postAutomaticSuccessorSuppressionSuffix =
   "_automatic_successor_suppression";
-export const postLanguageSuffix = "_language";
+const postLanguageSuffix = "_language";
 export const postHeightSuffix = "_post_height";
 export const postKindSuffix = "_post_kind";
 export const postAfterSubscribeActionSuffix = "_after_subscribe_action";
@@ -92,10 +92,6 @@ export const autoCreateNextGoalRetryDelayMs = [
 ] as const;
 export const recentSubscriberPostsByUsernameKey =
   "recent_subscriber_posts_by_username";
-export const recentSubscriberIndexMigrationStateKey =
-  "recent_subscriber_index_migration_state";
-export const recentSubscriberIndexMigrationVersion =
-  "recent_subscriber_index_v1";
 export const autoCreateNextGoalDelayMs = 24 * 60 * 60 * 1000;
 
 export const subscriberGoalPostFieldSuffixes = [
@@ -117,10 +113,6 @@ export const subscriberGoalPostFieldSuffixes = [
   postAfterSubscribeColorThemeSuffix,
   postAfterSubscribePresetSuffix,
 ] as const;
-
-const recentSubscriberIndexBatchSize = 25;
-const recentSubscriberIndexCooldownMinMs = 5 * 60 * 1000;
-const recentSubscriberIndexCooldownMaxMs = 15 * 60 * 1000;
 
 export const parsePersistedSubscriberGoal = (
   value: string | null | undefined,
@@ -163,18 +155,6 @@ export type CrosspostDispatchResult = {
   errorMessage?: string;
 };
 
-type RecentSubscriberIndexMigrationStatus = "pending" | "running" | "complete";
-
-type RecentSubscriberIndexMigrationState = {
-  version: string;
-  status: RecentSubscriberIndexMigrationStatus;
-  cursor: number;
-  nextRunAt: number;
-  scannedTotal: number;
-  indexedTotal: number;
-  lastRunAt: number;
-};
-
 const normalizeUsername = (username: string): string =>
   username.trim().toLowerCase();
 
@@ -205,54 +185,6 @@ const parsePostIdList = (raw: string | undefined): string[] => {
 
 const stringifyPostIdList = (postIds: string[]): string =>
   JSON.stringify([...new Set(postIds)]);
-
-const nextCooldown = (
-  nowMs: number,
-  cooldownMinMs: number,
-  cooldownMaxMs: number,
-): number => {
-  const min = Math.max(0, cooldownMinMs);
-  const max = Math.max(min, cooldownMaxMs);
-  return nowMs + min + Math.floor(Math.random() * (max - min + 1));
-};
-
-const parseRecentSubscriberIndexMigrationState = (
-  raw: Record<string, string>,
-): RecentSubscriberIndexMigrationState | undefined => {
-  if (raw.version !== recentSubscriberIndexMigrationVersion) {
-    return undefined;
-  }
-  const status =
-    raw.status === "pending" ||
-    raw.status === "running" ||
-    raw.status === "complete"
-      ? raw.status
-      : undefined;
-  if (!status) {
-    return undefined;
-  }
-  return {
-    version: raw.version,
-    status,
-    cursor: parseInt(raw.cursor ?? "0", 10) || 0,
-    nextRunAt: parseInt(raw.nextRunAt ?? "0", 10) || 0,
-    scannedTotal: parseInt(raw.scannedTotal ?? "0", 10) || 0,
-    indexedTotal: parseInt(raw.indexedTotal ?? "0", 10) || 0,
-    lastRunAt: parseInt(raw.lastRunAt ?? "0", 10) || 0,
-  };
-};
-
-const serializeRecentSubscriberIndexMigrationState = (
-  state: RecentSubscriberIndexMigrationState,
-): Record<string, string> => ({
-  version: state.version,
-  status: state.status,
-  cursor: state.cursor.toString(),
-  nextRunAt: state.nextRunAt.toString(),
-  scannedTotal: state.scannedTotal.toString(),
-  indexedTotal: state.indexedTotal.toString(),
-  lastRunAt: state.lastRunAt.toString(),
-});
 
 export async function addRecentSubscriberPostIndex(
   redis: RedisClient,
@@ -1193,112 +1125,6 @@ function serializeInitialAfterSubscribeAction(
   };
 }
 
-export async function initializeRecentSubscriberIndexMigration(
-  redis: RedisClient,
-  options: {
-    nowMs?: number;
-    cooldownMinMs?: number;
-    cooldownMaxMs?: number;
-  } = {},
-): Promise<void> {
-  const existing = parseRecentSubscriberIndexMigrationState(
-    await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
-  );
-  if (existing) {
-    return;
-  }
-  const nowMs = options.nowMs ?? Date.now();
-  const cooldownMinMs =
-    options.cooldownMinMs ?? recentSubscriberIndexCooldownMinMs;
-  const cooldownMaxMs =
-    options.cooldownMaxMs ?? recentSubscriberIndexCooldownMaxMs;
-  await redis.hSet(
-    recentSubscriberIndexMigrationStateKey,
-    serializeRecentSubscriberIndexMigrationState({
-      version: recentSubscriberIndexMigrationVersion,
-      status: "pending",
-      cursor: 0,
-      nextRunAt: nextCooldown(nowMs, cooldownMinMs, cooldownMaxMs),
-      scannedTotal: 0,
-      indexedTotal: 0,
-      lastRunAt: 0,
-    }),
-  );
-}
-
-export async function processRecentSubscriberIndexMigrationBatch(
-  redis: RedisClient,
-  options: {
-    nowMs?: number;
-    batchSize?: number;
-    cooldownMinMs?: number;
-    cooldownMaxMs?: number;
-  } = {},
-): Promise<void> {
-  const nowMs = options.nowMs ?? Date.now();
-  const cooldownMinMs =
-    options.cooldownMinMs ?? recentSubscriberIndexCooldownMinMs;
-  const cooldownMaxMs =
-    options.cooldownMaxMs ?? recentSubscriberIndexCooldownMaxMs;
-  const batchSize = Math.max(
-    1,
-    Math.floor(options.batchSize ?? recentSubscriberIndexBatchSize),
-  );
-  let state = parseRecentSubscriberIndexMigrationState(
-    await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
-  );
-  if (!state) {
-    await initializeRecentSubscriberIndexMigration(redis, {
-      nowMs,
-      cooldownMinMs,
-      cooldownMaxMs,
-    });
-    state = parseRecentSubscriberIndexMigrationState(
-      await redis.hGetAll(recentSubscriberIndexMigrationStateKey),
-    );
-  }
-  if (!state || state.status === "complete" || nowMs < state.nextRunAt) {
-    return;
-  }
-
-  const result = await redis.zScan(
-    postsKey,
-    state.cursor,
-    undefined,
-    batchSize,
-  );
-  let indexedThisRun = 0;
-  for (const entry of result.members) {
-    const recentSubscriber = await redis.hGet(
-      subscriberGoalsKey,
-      `${entry.member}${postRecentSubscriberSuffix}`,
-    );
-    if (recentSubscriber && recentSubscriber.length > 0) {
-      await addRecentSubscriberPostIndex(redis, recentSubscriber, entry.member);
-      indexedThisRun += 1;
-    }
-  }
-
-  const nextState: RecentSubscriberIndexMigrationState = {
-    version: recentSubscriberIndexMigrationVersion,
-    status: result.cursor === 0 ? "complete" : "running",
-    cursor: result.cursor,
-    nextRunAt:
-      result.cursor === 0
-        ? 0
-        : nextCooldown(nowMs, cooldownMinMs, cooldownMaxMs),
-    scannedTotal: state.scannedTotal + result.members.length,
-    indexedTotal: state.indexedTotal + indexedThisRun,
-    lastRunAt: nowMs,
-  };
-  await redis.hSet(
-    recentSubscriberIndexMigrationStateKey,
-    serializeRecentSubscriberIndexMigrationState(nextState),
-  );
-  console.info(
-    `[recentSubscriberIndexMigration] batch complete: scanned=${result.members.length} indexed=${indexedThisRun} scannedTotal=${nextState.scannedTotal} indexedTotal=${nextState.indexedTotal} cursor=${nextState.cursor} status=${nextState.status}`,
-  );
-}
 export async function findRecentSubscriberUserIdsByUsername(
   redis: RedisClient,
   username: string,
