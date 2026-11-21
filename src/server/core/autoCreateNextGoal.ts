@@ -49,6 +49,7 @@ import {
   isAutomaticGoalEligibilityUncertain,
 } from "./automaticGoalEligibility";
 import { checkAppAccountHealth } from "./appAccountHealth";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -94,7 +95,6 @@ export async function processDueAutoCreateNextGoals({
 
   for (const sourcePostId of duePostIds) {
     const lockKey = `${autoCreateNextGoalLockKeyPrefix}:${sourcePostId}`;
-    const lockToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
     const operationId = `auto-next:${sourcePostId}`;
     let language: unknown;
     const deferPrerequisite = async (): Promise<void> => {
@@ -136,7 +136,7 @@ export async function processDueAutoCreateNextGoals({
     };
     let creationAttempted = false;
     let creationFinished = false;
-    let acquired = false;
+    let lockToken: string | undefined;
     let mutationLease: CommunityGoalMutationLease | undefined;
     let acquiredMutationLease = false;
     try {
@@ -170,12 +170,13 @@ export async function processDueAutoCreateNextGoals({
         continue;
       }
 
-      await redis.set(lockKey, lockToken, {
-        nx: true,
-        expiration: new Date(nowMs + autoCreateNextGoalLockTtlMs),
-      });
-      acquired = (await redis.get(lockKey)) === lockToken;
-      if (!acquired) {
+      lockToken = await acquireRedisLock(
+        redis,
+        lockKey,
+        autoCreateNextGoalLockTtlMs,
+        { nowMs },
+      );
+      if (!lockToken) {
         summary.skipped += 1;
         continue;
       }
@@ -643,8 +644,8 @@ export async function processDueAutoCreateNextGoals({
         );
       }
     } finally {
-      if (acquired && (await redis.get(lockKey)) === lockToken) {
-        await redis.del(lockKey);
+      if (lockToken) {
+        await releaseRedisLock(redis, lockKey, lockToken);
       }
       if (mutationLease && acquiredMutationLease) {
         await releaseCommunityGoalMutationLease(redis, mutationLease);
