@@ -487,7 +487,10 @@ export class FakeRedditImpl {
   hiddenFromListing = new Set<string>();
   private nextId = 1;
 
-  constructor(public subreddit: FakeSubreddit) {}
+  constructor(
+    public subreddit: FakeSubreddit,
+    private readonly plan: FaultPlan,
+  ) {}
 
   addPost(
     overrides: Partial<FakePost> & { postData?: Record<string, unknown> } = {},
@@ -542,6 +545,12 @@ export class FakeRedditImpl {
         this.highlights = this.highlights.filter((h) => h.postId !== id);
       },
     };
+    // Post methods bypass the client proxy, so wrap highlight writes here.
+    post.highlight = withFaults(
+      "reddit",
+      { highlight: post.highlight },
+      this.plan,
+    ).highlight;
     this.posts.set(id, post);
     return post;
   }
@@ -622,15 +631,18 @@ export function createFaultWorld(
 ): FaultWorld {
   const plan = new FaultPlan();
   const redisImpl = new FakeRedisImpl();
-  const redditImpl = new FakeRedditImpl({
-    id: "t5_test",
-    name: "testsub",
-    numberOfSubscribers: 5_000,
-    type: "public",
-    nsfw: false,
-    language: "en",
-    ...subreddit,
-  });
+  const redditImpl = new FakeRedditImpl(
+    {
+      id: "t5_test",
+      name: "testsub",
+      numberOfSubscribers: 5_000,
+      type: "public",
+      nsfw: false,
+      language: "en",
+      ...subreddit,
+    },
+    plan,
+  );
   return {
     plan,
     redisImpl,

@@ -256,6 +256,10 @@ describe("upgrading a community with an active legacy goal", () => {
     expect(await world.redisImpl.hGetAll(highlightManagementStateKey)).toEqual(
       {},
     );
+    expect(
+      await world.redisImpl.hGet(legacyHighlightManagementStateKey, "version"),
+    ).toBe("highlight_management_v1");
+    expect(world.plan.calls("reddit", "highlight")).toHaveLength(0);
   });
 });
 
