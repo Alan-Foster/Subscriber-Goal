@@ -26,7 +26,7 @@ import {
   goalJourneyAnalytics,
 } from "../analytics/goalJourneyAnalytics";
 import { logDiagnostic } from "../../shared/diagnostics";
-import { NotificationSettingsPage } from "./pages/NotificationSettingsPage";
+import { LoadedNotificationSettingsPage } from "./pages/NotificationSettingsPage";
 import { useNotificationSettings } from "./hooks/useNotificationSettings";
 import { getNotificationMessages } from "../../shared/notificationI18n";
 import { NotificationConfirmationPage } from "./pages/NotificationConfirmationPage";
@@ -361,13 +361,9 @@ export const App = () => {
       );
     } else if (page === "notifications") {
       content = (
-        <NotificationSettingsPage
+        <LoadedNotificationSettingsPage
           state={state}
-          authenticated={notificationSettings.settings?.authenticated ?? false}
-          enabled={notificationSettings.settings?.enabled ?? false}
-          loading={notificationSettings.loading}
-          submitting={notificationSettings.submitting}
-          error={notificationSettings.error}
+          notificationSettings={notificationSettings}
           onToggle={handleToggleNotifications}
           onReturn={handleReturnFromNotifications}
           onVisitPromoSub={handleVisitPromo}

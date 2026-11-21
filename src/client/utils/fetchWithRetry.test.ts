@@ -10,6 +10,7 @@ const jsonResponse = (payload: unknown, status: number): Response =>
 
 describe('requestJsonWithRetry', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -146,6 +147,92 @@ describe('requestJsonWithRetry', () => {
     expect(result.error).toBe('unavailable');
     expect(result.aborted).toBe(false);
   });
+
+  it.each([
+    {
+      reason: 'protocol_error',
+      status: 200,
+      error: 'Invalid JSON response',
+      respond: async () => new Response('invalid JSON'),
+    },
+    {
+      reason: 'http_retryable',
+      status: 503,
+      error: 'unavailable',
+      respond: async () => jsonResponse({ message: 'unavailable' }, 503),
+    },
+    {
+      reason: 'network_error',
+      error: 'connection failed',
+      respond: async () => {
+        throw new Error('connection failed');
+      },
+    },
+    {
+      reason: 'timeout',
+      error: 'Request timed out',
+      respond: (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true }
+          );
+        }),
+    },
+  ])(
+    'aborts during the $reason retry wait',
+    async ({ respond, ...details }) => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fetchMock = vi.fn(respond);
+      vi.stubGlobal('fetch', fetchMock);
+      const controller = new AbortController();
+      const events: RetryEvent[] = [];
+      const result = requestJsonWithRetry(
+        '/api/init',
+        { signal: controller.signal },
+        {
+          maxDurationMs: 1000,
+          initialDelayMs: 200,
+          attemptTimeoutMs: 25,
+          jitterRatio: 0,
+          onEvent: (event) => {
+            events.push(event);
+            if (event.event === 'retry_wait') {
+              window.setTimeout(() => controller.abort(), 5);
+            }
+          },
+        }
+      );
+
+      await vi.runAllTimersAsync();
+
+      const remainingMs = details.reason === 'timeout' ? 975 : 1000;
+      await expect(result).resolves.toEqual({
+        data: null,
+        error: null,
+        aborted: true,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(events).toStrictEqual([
+        { event: 'attempt', attempt: 1, remainingMs: 1000 },
+        {
+          event: 'retry_wait',
+          attempt: 1,
+          waitMs: 200,
+          remainingMs,
+          ...details,
+        },
+        {
+          event: 'terminal',
+          attempt: 1,
+          remainingMs: remainingMs - 5,
+          reason: 'aborted',
+        },
+      ]);
+    }
+  );
 
   it.each([
     ['gateway', 'failed to call devvit application: unavailable'],

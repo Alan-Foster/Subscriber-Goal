@@ -1,22 +1,11 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
+import { confettiColors } from "../confettiPresets";
+import { ConfettiPiece } from "./ConfettiPiece";
 
 type ConfettiBurstProps = {
   pieceCount?: number;
   reducedMotion?: boolean;
 };
-
-type ConfettiStyle = CSSProperties & {
-  "--confetti-drift"?: string;
-};
-
-const colors = [
-  "#ff4500",
-  "#f59e0b",
-  "#10b981",
-  "#3b82f6",
-  "#a855f7",
-  "#f472b6",
-];
 
 export const ConfettiBurst = ({
   pieceCount = 70,
@@ -31,7 +20,8 @@ export const ConfettiBurst = ({
         duration: 1.6 + Math.random() * 1.4,
         size: 6 + Math.random() * 6,
         rotate: Math.random() * 360,
-        color: colors[Math.floor(Math.random() * colors.length)],
+        color:
+          confettiColors[Math.floor(Math.random() * confettiColors.length)],
       })),
     [pieceCount],
   );
@@ -53,27 +43,9 @@ export const ConfettiBurst = ({
       data-celebration-effect="confetti"
       data-confetti-piece-count={pieceCount}
     >
-      {pieces.map((piece, index) => {
-        const style: ConfettiStyle = {
-          left: `${piece.left}%`,
-          animationDelay: `${piece.delay}s`,
-          animationDuration: `${piece.duration}s`,
-          "--confetti-drift": `${piece.drift}px`,
-        };
-        return (
-          <span key={index} className="confetti-piece" style={style}>
-            <span
-              className="block rounded-sm"
-              style={{
-                width: piece.size,
-                height: piece.size * 1.4,
-                backgroundColor: piece.color,
-                transform: `rotate(${piece.rotate}deg)`,
-              }}
-            />
-          </span>
-        );
-      })}
+      {pieces.map((piece, index) => (
+        <ConfettiPiece key={index} piece={piece} variant="confetti" />
+      ))}
     </div>
   );
 };
