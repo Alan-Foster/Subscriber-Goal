@@ -154,6 +154,42 @@ describe("Community Highlights manager", () => {
     expect(harness.subreddit.reorderHighlightedPosts).not.toHaveBeenCalled();
   });
 
+  it("restores the displaced app pin when a listed replacement cannot be independently verified", async () => {
+    const ids = [
+      "t3_old_tiny",
+      "t3_other1",
+      "t3_other2",
+      "t3_other3",
+      "t3_other4",
+      "t3_other5",
+    ];
+    const harness = createHarness(ids);
+    harness.target.isHighlighted.mockResolvedValue(false);
+
+    const result = await highlightAndVerifyPost(
+      harness.reddit as never,
+      harness.subreddit,
+      harness.target,
+      {
+        ...verification,
+        removableManagedPostIds: ["t3_old_tiny"],
+        rollbackUnverifiedReplacement: true,
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "not_highlighted",
+      verifiedHighlighted: false,
+      failureCategory: "verification",
+      rollbackOutcome: "restored",
+    });
+    expect(harness.target.unhighlight).toHaveBeenCalledOnce();
+    expect(harness.getIds()).toEqual([...ids.slice(1), "t3_old_tiny"]);
+    for (const id of ids.slice(1)) {
+      expect(harness.posts.get(id)?.unhighlight).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not restore a managed highlight whose expiration passed during rollback", async () => {
     const ids = [
       "t3_oldgoal",

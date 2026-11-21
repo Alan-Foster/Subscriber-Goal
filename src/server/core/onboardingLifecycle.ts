@@ -294,10 +294,12 @@ async function reconcileOnboardingForLifecycleUnderLease(
         highlighted.postId &&
         highlighted.source
       ) {
+        const compactSelected =
+          highlighted.classification === "tiny" ||
+          highlighted.classification === "cta";
         if (
           lifecycleSource === "upgrade" &&
-          (highlighted.classification === "tiny" ||
-            highlighted.classification === "cta")
+          (compactSelected || highlighted.deferredCompletedGoal)
         ) {
           for (const supersededPostId of highlighted.supersededCompletedPostIds ??
             []) {
@@ -320,18 +322,21 @@ async function reconcileOnboardingForLifecycleUnderLease(
               workflow: "onboarding_lifecycle",
               phase: "upgrade_classification",
               lifecycleSource,
-              protectedPostId: highlighted.postId,
+              protectedPostId:
+                highlighted.eligiblePostIds[0] ?? highlighted.postId,
               sourcePostId: deferred.postId,
               outcome: recovery.outcome,
             });
           }
-          logDiagnostic("info", "upgrade_protected_experience_preserved", {
-            workflow: "onboarding_lifecycle",
-            phase: "upgrade_classification",
-            lifecycleSource,
-            postId: highlighted.postId,
-            classification: highlighted.classification,
-          });
+          if (compactSelected) {
+            logDiagnostic("info", "upgrade_protected_experience_preserved", {
+              workflow: "onboarding_lifecycle",
+              phase: "upgrade_classification",
+              lifecycleSource,
+              postId: highlighted.postId,
+              classification: highlighted.classification,
+            });
+          }
         }
         const operationId =
           previousGoal?.operationId ?? createOperationId(nowMs);

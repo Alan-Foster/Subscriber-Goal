@@ -61,7 +61,7 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 ### Behavior policies (intended, do not "fix")
 
 - After a moderator unhighlights the canonical goal, the app highlights it again (since commit `d70b036`).
-- The app never removes a moderator's own highlight to make room. It only frees a slot by unhighlighting a completed Subscriber Goal.
+- Reconciliation keeps one app-managed highlight. It prefers the newest unfinished goal, then the newest goal in its 24-hour completion window, then the newest Tiny or Action Button post. The completion window extends by 30 minutes when AutoGoal is enabled and no successor is mapped. Other app-managed highlights are removed after verification, including app posts manually pinned by a moderator. When capacity is full, repair can free one app-managed slot before pinning and attempts to restore it if verification fails. Moderator-owned posts and ambiguous posts are preserved.
 - Removed or spam-filtered goal posts are reversible (they may be approved later). Author-deleted posts are permanent.
 
 ## Commands

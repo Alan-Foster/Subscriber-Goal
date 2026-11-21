@@ -1182,7 +1182,7 @@ describe("onboarding lifecycle reconciliation", () => {
       sourcePostId: post.id,
     });
 
-    expect(post.highlight).not.toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledOnce();
     expect(
       lifecycleHoisted.processDueAutoCreateNextGoals,
     ).not.toHaveBeenCalled();
@@ -1191,7 +1191,7 @@ describe("onboarding lifecycle reconciliation", () => {
     ]);
   });
 
-  it("uses the original deadline for an enabled overdue goal during upgrade", async () => {
+  it("runs AutoGoal at its original deadline while the highlight gets a grace period", async () => {
     const completedTime = nowMs - 24 * 60 * 60 * 1000;
     const post = makeLifecycleGoalPost({ id: "t3_completed" });
     await seedGoalData(redis, post.id, { goal: 1_500, completedTime });
@@ -1212,8 +1212,11 @@ describe("onboarding lifecycle reconciliation", () => {
       ),
     ).resolves.toMatchObject({ status: "replacement_created" });
 
-    expect(post.highlight).not.toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledOnce();
     expect(lifecycleHoisted.processDueAutoCreateNextGoals).toHaveBeenCalled();
+    await expect(redis.hGetAll(appRepairStateKey)).resolves.toMatchObject({
+      nextRunAt: String(nowMs + 30 * 60 * 1000),
+    });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({
@@ -1289,7 +1292,7 @@ describe("onboarding lifecycle reconciliation", () => {
       ),
     ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
-    expect(post.highlight).not.toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledOnce();
     await expect(
       redis.hGet("subscriber_goals", `${post.id}_completed_time`),
     ).resolves.toBe(String(nowMs));
@@ -1613,7 +1616,7 @@ describe("onboarding lifecycle reconciliation", () => {
       ),
     ).resolves.toMatchObject({ status: "replacement_scheduled" });
 
-    expect(post.highlight).not.toHaveBeenCalled();
+    expect(post.highlight).toHaveBeenCalledOnce();
     await expect(redis.zRange(autoCreateNextGoalQueueKey)).resolves.toEqual([
       { member: post.id, score: nowMs + 24 * 60 * 60 * 1000 },
     ]);
@@ -1830,8 +1833,8 @@ describe("existing goal highlight ensurance", () => {
     };
   };
 
-  it("fills available slots newest first and quietly restores a waiting goal when a slot opens", async () => {
-    const protectedPosts = Array.from({ length: 4 }, (_, i) => ({
+  it("preserves six moderator and other-app highlights until a slot opens", async () => {
+    const protectedPosts = Array.from({ length: 6 }, (_, i) => ({
       ...makePost({
         id: `t3_protected${i}`,
         createdAt: "2026-09-14",
@@ -1873,9 +1876,8 @@ describe("existing goal highlight ensurance", () => {
       capacityOnly: true,
       unhighlightedEligiblePostIds: [older.id],
     });
-    expect(cta.highlight.mock.invocationCallOrder[0]).toBeLessThan(
-      tiny.highlight.mock.invocationCallOrder[0]!,
-    );
+    expect(cta.highlight).not.toHaveBeenCalled();
+    expect(tiny.highlight).not.toHaveBeenCalled();
     expect(older.highlight).not.toHaveBeenCalled();
     await run(nowMs + 60_000);
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
@@ -1895,7 +1897,7 @@ describe("existing goal highlight ensurance", () => {
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
   });
 
-  it("sends one permission Modmail for multiple goals and reopens the incident after recovery", async () => {
+  it("sends permission Modmail for the selected goal and reopens the incident after recovery", async () => {
     const posts = Array.from({ length: 3 }, (_, i) =>
       makePost({
         id: `t3_goal${i}`,
@@ -1925,12 +1927,9 @@ describe("existing goal highlight ensurance", () => {
     });
     const message = reddit.modMail.createModNotification.mock
       .calls[0] as unknown as [{ bodyMarkdown: string }];
-    for (const post of posts) {
-      expect(message[0].bodyMarkdown).toContain(
-        "/comments/" + post.id.slice(3),
-      );
-      expect(post.highlight).not.toHaveBeenCalled();
-    }
+    expect(message[0].bodyMarkdown).toContain("/comments/goal2");
+    expect(message[0].bodyMarkdown).not.toContain("/comments/goal0");
+    for (const post of posts) expect(post.highlight).not.toHaveBeenCalled();
     await expect(run(nowMs + 60_000)).resolves.toMatchObject({
       notificationOutcome: "skipped_duplicate",
     });
@@ -1996,7 +1995,156 @@ describe("existing goal highlight ensurance", () => {
     expect(cta.highlight).toHaveBeenCalledOnce();
   });
 
-  it("reconciles every active classic goal without displacing either", async () => {
+  it.each([
+    { label: "AutoGoal off", enabled: false, mapped: false, graceMinutes: 0 },
+    {
+      label: "AutoGoal awaiting a successor",
+      enabled: true,
+      mapped: false,
+      graceMinutes: 30,
+    },
+    {
+      label: "AutoGoal successor mapped",
+      enabled: true,
+      mapped: true,
+      graceMinutes: 0,
+    },
+  ])(
+    "hands off a completed highlight at the correct deadline with $label",
+    async ({ enabled, mapped, graceMinutes }) => {
+      const completion = nowMs - 3 * 60 * 60 * 1000;
+      const normalDeadline = completion + 24 * 60 * 60 * 1000;
+      const deadline = normalDeadline + graceMinutes * 60 * 1000;
+      const completed = makePost({
+        id: "t3_celebration",
+        createdAt: "2026-09-15",
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        highlighted: true,
+      });
+      const tiny = makePost({
+        id: "t3_between",
+        createdAt: "2026-09-14",
+        postKind: "subscribe-only-v1",
+        postHeight: "tiny",
+        highlighted: true,
+      });
+      const cta = makePost({
+        id: "t3_between_newer",
+        createdAt: "2026-09-16",
+        postKind: "cta-only-v1",
+        postHeight: "cta",
+      });
+      const redis = new InMemoryRedis();
+      const reddit = makeReddit([completed, tiny, cta]);
+      await seedGoalData(redis, completed.id, {
+        goal: 1000,
+        completedTime: completion,
+        autoCreateNextGoal: enabled,
+      });
+      if (mapped) {
+        await redis.hSet(autoCreateNextGoalSuccessorsKey, {
+          [completed.id]: "t3_successor",
+        });
+      }
+      const run = (time: number) =>
+        ensureExistingSubscriberGoalHighlighted({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs: time,
+          reconciliationContext: "repair",
+        });
+
+      await expect(run(nowMs)).resolves.toMatchObject({
+        postId: completed.id,
+        eligiblePostIds: [cta.id, tiny.id],
+      });
+      expect(tiny.unhighlight).toHaveBeenCalledOnce();
+      await expect(redis.hGetAll(appRepairStateKey)).resolves.toMatchObject({
+        status: "pending",
+        nextRunAt: String(nowMs + 6 * 60 * 60 * 1000),
+      });
+      await redis.hSet(appRepairStateKey, { status: "processing" });
+      if (graceMinutes) {
+        await expect(run(normalDeadline)).resolves.toMatchObject({
+          postId: completed.id,
+        });
+      }
+      await expect(run(deadline - 1)).resolves.toMatchObject({
+        postId: completed.id,
+      });
+      expect(completed.unhighlight).not.toHaveBeenCalled();
+      expect(cta.highlight).not.toHaveBeenCalled();
+      await expect(redis.hGetAll(appRepairStateKey)).resolves.toMatchObject({
+        status: "pending",
+        nextRunAt: String(deadline),
+        reason: "completed_goal_highlight_window_ends",
+      });
+
+      await expect(run(deadline)).resolves.toMatchObject({ postId: cta.id });
+      expect(completed.unhighlight).toHaveBeenCalledOnce();
+      expect(cta.highlight).toHaveBeenCalledOnce();
+      expect(completed.unhighlight.mock.invocationCallOrder[0]).toBeGreaterThan(
+        cta.highlight.mock.invocationCallOrder[0]!,
+      );
+      await expect(
+        (await reddit.getCurrentSubreddit()).getHighlightedPosts(),
+      ).resolves.toEqual([{ postId: cta.id }]);
+      await expect(run(deadline + 60 * 60 * 1000)).resolves.toMatchObject({
+        postId: cta.id,
+        managedHighlightsRemoved: [],
+      });
+      expect(cta.highlight).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("preserves the current Tiny highlight after the chosen goal fails and cleans it up on retry", async () => {
+    const tiny = makePost({
+      id: "t3_waiting_tiny",
+      createdAt: "2026-09-14",
+      postKind: "subscribe-only-v1",
+      postHeight: "tiny",
+      highlighted: true,
+    });
+    const goal = makePost({
+      id: "t3_pending_highlight",
+      createdAt: "2026-09-16",
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+    });
+    goal.highlight.mockRejectedValueOnce(new Error("Highlight write failed"));
+    const redis = new InMemoryRedis();
+    const reddit = makeReddit([tiny, goal]);
+    await seedGoalData(redis, goal.id, { goal: 3000 });
+    const run = (time: number) =>
+      ensureExistingSubscriberGoalHighlighted({
+        reddit: reddit as never,
+        redis: redis as never,
+        nowMs: time,
+        reconciliationContext: "repair",
+        highlightVerification: { maxWaitMs: 0, intervalMs: 0 },
+      });
+
+    await expect(run(nowMs)).resolves.toMatchObject({
+      status: "existing_not_highlighted",
+      postId: goal.id,
+      managedHighlightsRemoved: [],
+    });
+    expect(tiny.unhighlight).not.toHaveBeenCalled();
+    const retryAt = nowMs + 5 * 60 * 1000;
+    await expect(redis.hGetAll(appRepairStateKey)).resolves.toMatchObject({
+      status: "pending",
+      nextRunAt: String(retryAt),
+    });
+    await expect(run(retryAt)).resolves.toMatchObject({
+      status: "existing",
+      postId: goal.id,
+      managedHighlightsRemoved: [tiny.id],
+    });
+    expect(tiny.unhighlight).toHaveBeenCalledOnce();
+  });
+
+  it("pins the newest active classic and keeps the older one in inventory", async () => {
     const highlighted = makePost({
       id: "t3_highlighted",
       createdAt: "2026-09-15T00:00:00Z",
@@ -2026,11 +2174,14 @@ describe("existing goal highlight ensurance", () => {
       eligiblePostIds: ["t3_newer", "t3_highlighted"],
       unhighlightedEligiblePostIds: [],
     });
-    expect(highlighted.unhighlight).not.toHaveBeenCalled();
+    expect(highlighted.unhighlight).toHaveBeenCalledOnce();
     expect(newer.highlight).toHaveBeenCalledOnce();
+    expect(highlighted.unhighlight.mock.invocationCallOrder[0]).toBeGreaterThan(
+      newer.highlight.mock.invocationCallOrder[0]!,
+    );
   });
 
-  it("consolidates only older classic highlights and preserves CTA, Tiny, and ambiguous highlights", async () => {
+  it("consolidates manually highlighted app surfaces and preserves ambiguous highlights", async () => {
     const oldClassic = makePost({
       id: "t3_oldclassic",
       createdAt: "2026-09-14T00:00:00Z",
@@ -2084,12 +2235,13 @@ describe("existing goal highlight ensurance", () => {
       nowMs,
     });
 
-    expect(result.classicPostsUnhighlighted).toEqual([]);
-    expect(result.protectedHighlightsPreserved).toEqual(["t3_cta", "t3_tiny"]);
-    expect(oldClassic.unhighlight).not.toHaveBeenCalled();
+    expect(result.classicPostsUnhighlighted).toEqual([oldClassic.id]);
+    expect(result.protectedHighlightsPreserved).toEqual([]);
+    expect(result.managedHighlightsRemoved).toEqual([oldClassic.id, cta.id, tiny.id]);
+    expect(oldClassic.unhighlight).toHaveBeenCalledOnce();
     expect(newClassic.unhighlight).not.toHaveBeenCalled();
-    expect(cta.unhighlight).not.toHaveBeenCalled();
-    expect(tiny.unhighlight).not.toHaveBeenCalled();
+    expect(cta.unhighlight).toHaveBeenCalledOnce();
+    expect(tiny.unhighlight).toHaveBeenCalledOnce();
     expect(ambiguous.unhighlight).not.toHaveBeenCalled();
   });
 
@@ -2135,9 +2287,9 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({ status: "existing", postId: active.id });
-    expect(result.classicPostsUnhighlighted).toEqual([]);
-    expect(firstCompleted.unhighlight).not.toHaveBeenCalled();
-    expect(secondCompleted.unhighlight).not.toHaveBeenCalled();
+    expect(result.classicPostsUnhighlighted).toEqual([firstCompleted.id, secondCompleted.id]);
+    expect(firstCompleted.unhighlight).toHaveBeenCalledOnce();
+    expect(secondCompleted.unhighlight).toHaveBeenCalledOnce();
     expect(active.unhighlight).not.toHaveBeenCalled();
     await expect(
       redis.hGet(autoCreateNextGoalSuccessorsKey, firstCompleted.id),

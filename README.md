@@ -41,6 +41,7 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 
 ## Changelog
 
+- Unreleased - Highlight repair keeps one Subscriber Goal surface pinned. It prioritizes unfinished goals, then goals in their 24-hour completion window, then Tiny or Action Button posts. The completion window extends by 30 minutes when AutoGoal is enabled and is still waiting for a successor. Repair may unpin a second app post that a moderator manually highlighted. It preserves highlights on moderator-owned posts.
 - 2.8.1 - Double-button UI. Many changes and fixes which can be found in the [2.8.1 Stabilizing Update](https://www.reddit.com/r/SubGoal/comments/1y1n1qx/subscriber_goal_281_double_buttons_and/).
 - 2.7.3 - Fixed a bug where goals break if they are caught by AutoMod / removed then approved. Joins require valid states and fixed a crosspost queue error.
 - 2.7.2 - Finished 2 button implementation. Improved cron recovery and transient auto-goal failures.

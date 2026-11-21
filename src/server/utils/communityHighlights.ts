@@ -282,12 +282,45 @@ async function fetchHighlightablePost(
   return (await reddit.getPostById(postId)) as unknown as HighlightablePost;
 }
 
+async function rollbackUnverifiedReplacement(
+  subreddit: HighlightableSubreddit,
+  post: HighlightablePost,
+  removed: RemovedHighlight[],
+  options: HighlightVerificationOptions,
+): Promise<HighlightResult["rollbackOutcome"]> {
+  try {
+    if (typeof post.unhighlight !== "function") {
+      throw new Error("Unable to remove an unverified Community Highlight.");
+    }
+    await post.unhighlight();
+    if (!(await pollForState(subreddit, post, false, options)).matches) {
+      throw new Error(
+        "Reddit did not confirm removal of the unverified Community Highlight.",
+      );
+    }
+    return await restoreRemovedHighlights(subreddit, removed, options);
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "highlight_operation_failed",
+      {
+        workflow: "community_highlights",
+        phase: "unverified_replacement_rollback",
+        postId: post.id,
+      },
+      error,
+    );
+    return "failed";
+  }
+}
+
 export async function highlightAndVerifyPost(
   reddit: RedditClient,
   subreddit: HighlightableSubreddit,
   post: HighlightablePost,
   options: HighlightVerificationOptions & {
     removableManagedPostIds?: readonly LinkId[];
+    rollbackUnverifiedReplacement?: boolean;
   },
 ): Promise<HighlightResult> {
   const initial = await subreddit.getHighlightedPosts();
@@ -336,7 +369,7 @@ export async function highlightAndVerifyPost(
           category: "capacity",
           postId: post.id,
           message:
-            "All six Community Highlight slots are occupied and no obsolete classic Subscriber Goal can be safely removed.",
+            "All six Community Highlight slots are occupied and no obsolete app-managed highlight can be safely removed.",
         });
         return resultWithIssues({
           status: "not_highlighted",
@@ -514,7 +547,9 @@ export async function highlightAndVerifyPost(
             "Reddit did not confirm the Community Highlight write.",
         });
       }
-      if (verification.listed) {
+      const mustUndoReplacement =
+        verification.listed && options.rollbackUnverifiedReplacement && removed.length > 0;
+      if (verification.listed && !mustUndoReplacement) {
         return resultWithIssues({
           status: "highlighted",
           selectedPostId: post.id,
@@ -531,11 +566,9 @@ export async function highlightAndVerifyPost(
           rollbackOutcome,
         });
       }
-      rollbackOutcome = await restoreRemovedHighlights(
-        subreddit,
-        removed,
-        options,
-      );
+      rollbackOutcome = mustUndoReplacement
+        ? await rollbackUnverifiedReplacement(subreddit, post, removed, options)
+        : await restoreRemovedHighlights(subreddit, removed, options);
       if (rollbackOutcome === "failed") {
         issues.push({
           category: "rollback",

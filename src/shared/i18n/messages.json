@@ -2487,7 +2487,7 @@
         "outbound.highlight.newIntro": "The new Subscriber Goal post was created successfully, but it could not be highlighted in r/{subredditName}.",
         "outbound.highlight.manualReview": "Manual moderator review is required.",
         "outbound.highlight.manualAction": "The app attempted to add it to Community Highlights, but could not confirm the change. A subreddit can have at most six Community Highlights.\n\nManual moderator action is required. Please remove an existing Community Highlight if appropriate, then highlight the {origin} Subscriber Goal post.",
-        "outbound.highlight.preservation": "The app removes only older classic Subscriber Goal highlights during replacement; CTA, Tiny, ambiguous, and unrelated Community Highlights are preserved.",
+        "outbound.highlight.preservation": "Subscriber Goal can remove other highlights it manages during replacement. Ambiguous and unrelated Community Highlights are preserved.",
         "outbound.highlight.subreddit": "Subreddit: r/{subredditName}",
         "outbound.highlight.goalHeading": "{origin} Subscriber Goal:",
         "outbound.highlight.technicalNote": "Technical note: {errorMessage}",
