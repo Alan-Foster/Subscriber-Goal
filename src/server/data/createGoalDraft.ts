@@ -10,7 +10,7 @@ import {
   type AfterSubscribePreset,
 } from "../../shared/afterSubscribeAction";
 import type { RedisClient } from "../types";
-import { releaseOwnedRedisLock } from "../utils/redisOwnedLock";
+import { withRedisLock } from "../utils/redisOwnedLock";
 
 export const createGoalDraftExpirationMs = 30 * 60 * 1000;
 export const createGoalDraftLeaseExpirationMs = 15 * 60 * 1000;
@@ -177,33 +177,20 @@ export async function withCreateGoalDraftLease<T>(
     throw new Error("invalid_creation_attempt_id");
   }
   const key = getCreateGoalDraftLeaseKey(userId, creationAttemptId);
-  const token = createLeaseToken();
-  await redis.set(key, token, {
-    nx: true,
-    expiration: new Date(Date.now() + createGoalDraftLeaseExpirationMs),
-  });
-  if ((await redis.get(key)) !== token) {
-    throw new CreateGoalDraftLeaseInProgressError();
-  }
-
-  try {
-    return await callback();
-  } finally {
-    try {
-      await releaseOwnedRedisLock(redis, key, token);
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "create_goal_draft_lease_release_failed",
-        { workflow: "create_goal_draft", phase: "lease_release" },
-        error,
-      );
-    }
-  }
-}
-
-function createLeaseToken(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const lock = await withRedisLock(
+    redis,
+    key,
+    createGoalDraftLeaseExpirationMs,
+    callback,
+    {
+      releaseDiagnostic: {
+        event: "create_goal_draft_lease_release_failed",
+        context: { workflow: "create_goal_draft", phase: "lease_release" },
+      },
+    },
+  );
+  if (!lock.acquired) throw new CreateGoalDraftLeaseInProgressError();
+  return lock.result;
 }
 
 function isCreateGoalDraft(
