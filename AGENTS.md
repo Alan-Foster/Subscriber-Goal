@@ -30,6 +30,7 @@ Do not rely on memory for Devvit behavior. If the docs do not answer the questio
 ### Known platform limits (confirmed)
 
 - A server request or scheduled job must finish within **30 seconds**. Any loop over posts, users, or Redis keys must be bounded and batched, and must save a cursor to resume on the next run.
+- The scheduler allows **10 live recurring actions** per installation. `runJob()` allows up to **60 calls per minute** and **60 deliveries per minute** per installation. See [Scheduler limitations](https://developers.reddit.com/docs/capabilities/server/scheduler#limitations).
 - Redis storage is capped at **5 GB** for published apps and **100 MB** for unpublished (playtest) apps. Every new key needs an expiration or a cleanup path.
 - `reddit.getPostById` is typed as `Promise<Post>` (never `undefined`). Code must still handle a post that has been deleted or removed. Wrap the call and check the post's status.
 
@@ -38,16 +39,19 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 ## Project rules
 
 ### Redis data safety
+
 - **Never rename, reformat, or change the value of an existing Redis key or field name.** Stored data on live subreddits must stay readable. To move a key constant, move the declaration and re-export it. Keep the string byte-for-byte identical.
 - Any change to a stored data format needs a migration plus code that still reads the old format, and must survive running twice (replay-safe).
 - Prefer atomic writes (`watch`/`multi`, `SET NX`) over read-then-write when two runs could overlap. Assume every scheduled job and trigger can run twice, run concurrently, or be killed halfway.
 
 ### Locks, retries, timers
+
 - Release locks only through `releaseOwnedRedisLock` (`src/server/utils/redisOwnedLock.ts`). Never `get` a lock and then `del` it: if the lock expired in between, that deletes another run's lock.
 - Do not create a new hand-written lock, backoff formula, or "next run at" state machine when an existing helper or state can be reused. Search for one first and name it in the PR.
 - Retries must have a cap and an exhausted state that is logged or reported. Never retry silently forever.
 
 ### Code size and structure
+
 - Reuse before you write: search `src/` for an existing helper before adding a new one.
 - Do not add to files over 1,500 lines (`onboardingSubscriberGoal.ts`, `modAction.ts`, `publicApi.ts`, `internalUi.ts`, `onboardingReminder.ts`, `subGoalData.ts`) when the new code can live in its own module.
 - Keep new functions under about 80 lines. Split long flows into named steps.
@@ -55,20 +59,21 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 - Don't add entries to `eslint-suppressions.json`; split the function instead. Run `npx eslint ./src --prune-suppressions` in refactor PRs to remove fixed violations.
 
 ### Behavior policies (intended, do not "fix")
+
 - After a moderator unhighlights the canonical goal, the app highlights it again (since commit `d70b036`).
 - The app never removes a moderator's own highlight to make room. It only frees a slot by unhighlighting a completed Subscriber Goal.
 - Removed or spam-filtered goal posts are reversible (they may be approved later). Author-deleted posts are permanent.
 
 ## Commands
 
-| Purpose | Command |
-|---|---|
-| Install | `npm ci` |
+| Purpose                   | Command             |
+| ------------------------- | ------------------- |
+| Install                   | `npm ci`            |
 | Unit tests (CI runs this) | `npm run test:unit` |
-| Lint (CI runs this) | `npm run lint:ci` |
-| Full local check | `npm run check` |
-| Build | `npm run build` |
-| Playtest | `npm run dev` |
+| Lint (CI runs this)       | `npm run lint:ci`   |
+| Full local check          | `npm run check`     |
+| Build                     | `npm run build`     |
+| Playtest                  | `npm run dev`       |
 
 - `npm run check` **rewrites files**: it runs `eslint --fix` and `prettier --write .`. Commit only formatting changes to files your task touched. Discard formatting changes to unrelated files.
 - Never run `npm run deploy` or `npm run launch`. Never run `devvit upload` or `devvit publish`.
