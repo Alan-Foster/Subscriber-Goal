@@ -19,14 +19,22 @@ import {
   type RecentSubscriberOrder,
 } from "./recentSubscriberOrder";
 import { retiredSubscriberGoalKeyPrefix } from "../core/postRetirement";
+import {
+  subscriberStatsKey,
+  subscriberStatsByUserIdKey,
+  subscriberStatusByUserIdKey,
+  subscriberStatsUsernameToUserIdKey,
+  subscriberStatsLegacyMembersByUserIdKey,
+} from "./subscriberStatsKeys";
 
-export const subscriberStatsKey = "subscriber_stats";
-export const subscriberStatsByUserIdKey = "subscriber_stats_by_user_id";
-export const subscriberStatusByUserIdKey = "subscriber_status_by_user_id";
-export const subscriberStatsUsernameToUserIdKey =
-  "subscriber_stats_username_to_user_id";
-export const subscriberStatsLegacyMembersByUserIdKey =
-  "subscriber_stats_legacy_members_by_user_id";
+export {
+  subscriberStatsKey,
+  subscriberStatsByUserIdKey,
+  subscriberStatusByUserIdKey,
+  subscriberStatsUsernameToUserIdKey,
+  subscriberStatsLegacyMembersByUserIdKey,
+} from "./subscriberStatsKeys";
+
 export const subscriberStatsErasedUserIdsKey =
   "subscriber_stats_erased_user_ids";
 export const subscriberStatsMigrationStateKey =
@@ -43,19 +51,6 @@ export type SubscriberStats = {
   timestamp: number;
   subscribers: number;
 };
-
-export function isSubscriberStats(object: unknown): object is SubscriberStats {
-  if (!object || typeof object !== "object") {
-    return false;
-  }
-  const subStats = object as SubscriberStats;
-  return (
-    typeof subStats.id === "string" &&
-    typeof subStats.username === "string" &&
-    typeof subStats.timestamp === "number" &&
-    typeof subStats.subscribers === "number"
-  );
-}
 
 type ParsedSubscriberMember = {
   id: string;

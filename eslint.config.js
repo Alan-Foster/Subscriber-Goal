@@ -46,6 +46,8 @@ export default defineConfig([
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/no-unused-vars': ['off'],
       'no-unused-vars': ['off'],
     },
