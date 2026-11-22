@@ -67,22 +67,6 @@
       "count": 1
     }
   },
-  "src/server/core/appAccountHealth.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/core/appAccountRecovery.ts": {
-    "complexity": {
-      "count": 3
-    },
-    "max-lines-per-function": {
-      "count": 2
-    }
-  },
   "src/server/core/appRepair.ts": {
     "max-lines-per-function": {
       "count": 1

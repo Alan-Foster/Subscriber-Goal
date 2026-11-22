@@ -178,32 +178,21 @@ export async function scheduleAppAccountRecovery({
 }): Promise<string> {
   const normalizedRemovedBy = normalizeUsername(removedBy);
   const current = await redis.hGetAll(appAccountRecoveryStateKey);
-  if (
+  const preserveRemoval =
     reason === "upgrade" &&
     current.reason === "removal" &&
-    (current.status === "pending" || current.status === "processing") &&
-    current.incidentToken
+    (current.status === "pending" || current.status === "processing");
+  if (
+    current.incidentToken &&
+    (preserveRemoval ||
+      isDuplicateRecovery(current, {
+        reason,
+        subredditName,
+        normalizedRemovedBy,
+        actionedAt,
+        forceNewIncident,
+      }))
   ) {
-    if (!current.schedulerJobId && current.status === "pending") {
-      const jobId = await scheduler.runJob({
-        name: appAccountRecoveryJobName,
-        runAt: new Date(Number(current.dueAt) || dueAtMs),
-        data: { incidentToken: current.incidentToken },
-      });
-      await redis.hSet(appAccountRecoveryStateKey, { schedulerJobId: jobId });
-    }
-    return current.incidentToken;
-  }
-  const duplicate =
-    !forceNewIncident &&
-    (current.status === "pending" || current.status === "processing") &&
-    current.reason === reason &&
-    current.subredditName?.toLowerCase() === subredditName.toLowerCase() &&
-    (reason !== "removal" ||
-      current.removedBy?.toLowerCase() ===
-        normalizedRemovedBy?.toLowerCase()) &&
-    (!actionedAt || !current.actionedAt || current.actionedAt === actionedAt);
-  if (duplicate && current.incidentToken) {
     if (!current.schedulerJobId && current.status === "pending") {
       const jobId = await scheduler.runJob({
         name: appAccountRecoveryJobName,
@@ -246,6 +235,60 @@ export async function scheduleAppAccountRecovery({
   return incidentToken;
 }
 
+function isDuplicateRecovery(
+  current: Record<string, string>,
+  {
+    reason,
+    subredditName,
+    normalizedRemovedBy,
+    actionedAt,
+    forceNewIncident,
+  }: {
+    reason: AppAccountRecoveryReason;
+    subredditName: string;
+    normalizedRemovedBy: string | undefined;
+    actionedAt: string | undefined;
+    forceNewIncident: boolean;
+  },
+): boolean {
+  return (
+    !forceNewIncident &&
+    (current.status === "pending" || current.status === "processing") &&
+    current.reason === reason &&
+    current.subredditName?.toLowerCase() === subredditName.toLowerCase() &&
+    (reason !== "removal" ||
+      current.removedBy?.toLowerCase() ===
+        normalizedRemovedBy?.toLowerCase()) &&
+    (!actionedAt || !current.actionedAt || current.actionedAt === actionedAt)
+  );
+}
+
+type ModeratorActionOptions = {
+  reddit: RedditClient;
+  redis: RedisClient;
+  scheduler: SchedulerLike;
+  action: string;
+  moderatorName?: string;
+  actionedAt?: string;
+  subredditName: string;
+  subredditId?: string;
+  language?: unknown;
+  nowMs?: number;
+  acceptInvite?: (subredditName: string) => Promise<void>;
+};
+
+type ModeratorInviteEvent = {
+  reddit: RedditClient;
+  redis: RedisClient;
+  scheduler: SchedulerLike;
+  subredditName: string;
+  subredditId: string | undefined;
+  language: unknown;
+  nowMs: number;
+  acceptInvite: (subredditName: string) => Promise<void>;
+  eventClaim: ModeratorEventClaim | undefined;
+};
+
 export async function handleAppAccountModeratorAction({
   reddit,
   redis,
@@ -258,19 +301,7 @@ export async function handleAppAccountModeratorAction({
   language,
   nowMs = Date.now(),
   acceptInvite = acceptModeratorInvite,
-}: {
-  reddit: RedditClient;
-  redis: RedisClient;
-  scheduler: SchedulerLike;
-  action: string;
-  moderatorName?: string;
-  actionedAt?: string;
-  subredditName: string;
-  subredditId?: string;
-  language?: unknown;
-  nowMs?: number;
-  acceptInvite?: (subredditName: string) => Promise<void>;
-}): Promise<AppAccountRecoveryResult | undefined> {
+}: ModeratorActionOptions): Promise<AppAccountRecoveryResult | undefined> {
   const eventClaim = actionedAt
     ? await claimModeratorEvent(
         redis,
@@ -308,120 +339,17 @@ export async function handleAppAccountModeratorAction({
   }
 
   if (action === "invitemoderator") {
-    const installation = await redis.hGetAll(appAccountInstallationStateKey);
-    const installedAt = Number(installation.installedAt);
-    if (Number.isFinite(installedAt) && nowMs < installedAt + 60_000) {
-      await completeModeratorEvent(redis, eventClaim, "handled", nowMs);
-      return { status: "not_due" };
-    }
-    const activeRecovery = await redis.hGetAll(appAccountRecoveryStateKey);
-    if (
-      activeRecovery.reason === "removal" &&
-      activeRecovery.status === "pending" &&
-      activeRecovery.incidentToken &&
-      activeRecovery.subredditName
-    ) {
-      const inspection = await inspectModeratorAccount(reddit, subredditName);
-      if (
-        inspection.status === "missing" ||
-        inspection.status === "inaccessible"
-      ) {
-        try {
-          await acceptInvite(subredditName);
-          await redis.hSet(appAccountRecoveryStateKey, {
-            invitationAcceptedAt: String(nowMs),
-          });
-        } catch (error) {
-          logDiagnostic(
-            "warn",
-            "app_account_invitation_acceptance_failed",
-            {
-              workflow: "app_account_recovery",
-              phase: "reinvite_event",
-              subredditName,
-            },
-            error,
-          );
-          await redis.hSet(appAccountRecoveryStateKey, {
-            lastError: error instanceof Error ? error.message : String(error),
-          });
-          const result: AppAccountRecoveryResult = {
-            status: "pending",
-            incidentToken: activeRecovery.incidentToken,
-          };
-          await completeModeratorEvent(
-            redis,
-            eventClaim,
-            activeRecovery.incidentToken,
-            nowMs,
-          );
-          return result;
-        }
-      }
-      const verified =
-        inspection.status === "missing" || inspection.status === "inaccessible"
-          ? await inspectModeratorAccount(reddit, subredditName)
-          : inspection;
-      if (verified.status === "healthy") {
-        await checkAppAccountHealth({
-          reddit,
-          redis,
-          subredditName,
-          ...(subredditId ? { subredditId } : {}),
-          ...(typeof language === "string" ? { language } : {}),
-          notify: false,
-          scheduleUnknownRetry: false,
-          nowMs,
-        });
-        await redis.hSet(appAccountRecoveryStateKey, {
-          recoveredAt: String(nowMs),
-          permissions: verified.permissions.join(","),
-          lastError: "",
-        });
-        const result: AppAccountRecoveryResult = {
-          status: "healthy",
-          incidentToken: activeRecovery.incidentToken,
-        };
-        await completeModeratorEvent(
-          redis,
-          eventClaim,
-          activeRecovery.incidentToken,
-          nowMs,
-        );
-        return result;
-      }
-      const result: AppAccountRecoveryResult = {
-        status: "pending",
-        incidentToken: activeRecovery.incidentToken,
-      };
-      await completeModeratorEvent(
-        redis,
-        eventClaim,
-        activeRecovery.incidentToken,
-        nowMs,
-      );
-      return result;
-    }
-    const incidentToken = await scheduleAppAccountRecovery({
-      redis,
-      scheduler,
-      reason: "reinvite",
-      subredditName,
-      ...(subredditId ? { subredditId } : {}),
-      ...(typeof language === "string" ? { language } : {}),
-      nowMs,
-      dueAtMs: nowMs,
-    });
-    const result = await processAppAccountRecovery({
+    return handleModeratorInviteEvent({
       reddit,
       redis,
       scheduler,
-      incidentToken,
+      subredditName,
+      subredditId,
+      language,
       nowMs,
       acceptInvite,
+      eventClaim,
     });
-    await completeModeratorEvent(redis, eventClaim, incidentToken, nowMs);
-    return result;
   }
 
   await checkAppAccountHealth({
@@ -433,6 +361,134 @@ export async function handleAppAccountModeratorAction({
   });
   await completeModeratorEvent(redis, eventClaim, "handled", nowMs);
   return undefined;
+}
+
+async function handleModeratorInviteEvent(
+  event: ModeratorInviteEvent,
+): Promise<AppAccountRecoveryResult> {
+  const {
+    reddit,
+    redis,
+    scheduler,
+    subredditName,
+    subredditId,
+    language,
+    nowMs,
+    acceptInvite,
+    eventClaim,
+  } = event;
+  const installation = await redis.hGetAll(appAccountInstallationStateKey);
+  const installedAt = Number(installation.installedAt);
+  if (Number.isFinite(installedAt) && nowMs < installedAt + 60_000) {
+    await completeModeratorEvent(redis, eventClaim, "handled", nowMs);
+    return { status: "not_due" };
+  }
+  const activeRecovery = await redis.hGetAll(appAccountRecoveryStateKey);
+  if (
+    activeRecovery.reason === "removal" &&
+    activeRecovery.status === "pending" &&
+    activeRecovery.incidentToken &&
+    activeRecovery.subredditName
+  ) {
+    return handleInviteDuringRemoval(event, activeRecovery.incidentToken);
+  }
+  const incidentToken = await scheduleAppAccountRecovery({
+    redis,
+    scheduler,
+    reason: "reinvite",
+    subredditName,
+    ...(subredditId ? { subredditId } : {}),
+    ...(typeof language === "string" ? { language } : {}),
+    nowMs,
+    dueAtMs: nowMs,
+  });
+  const result = await processAppAccountRecovery({
+    reddit,
+    redis,
+    scheduler,
+    incidentToken,
+    nowMs,
+    acceptInvite,
+  });
+  await completeModeratorEvent(redis, eventClaim, incidentToken, nowMs);
+  return result;
+}
+
+async function handleInviteDuringRemoval(
+  {
+    reddit,
+    redis,
+    subredditName,
+    subredditId,
+    language,
+    nowMs,
+    acceptInvite,
+    eventClaim,
+  }: ModeratorInviteEvent,
+  incidentToken: string,
+): Promise<AppAccountRecoveryResult> {
+  const inspection = await inspectModeratorAccount(reddit, subredditName);
+  if (inspection.status === "missing" || inspection.status === "inaccessible") {
+    try {
+      await acceptInvite(subredditName);
+      await redis.hSet(appAccountRecoveryStateKey, {
+        invitationAcceptedAt: String(nowMs),
+      });
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "app_account_invitation_acceptance_failed",
+        {
+          workflow: "app_account_recovery",
+          phase: "reinvite_event",
+          subredditName,
+        },
+        error,
+      );
+      await redis.hSet(appAccountRecoveryStateKey, {
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+      const result: AppAccountRecoveryResult = {
+        status: "pending",
+        incidentToken,
+      };
+      await completeModeratorEvent(redis, eventClaim, incidentToken, nowMs);
+      return result;
+    }
+  }
+  const verified =
+    inspection.status === "missing" || inspection.status === "inaccessible"
+      ? await inspectModeratorAccount(reddit, subredditName)
+      : inspection;
+  if (verified.status === "healthy") {
+    await checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName,
+      ...(subredditId ? { subredditId } : {}),
+      ...(typeof language === "string" ? { language } : {}),
+      notify: false,
+      scheduleUnknownRetry: false,
+      nowMs,
+    });
+    await redis.hSet(appAccountRecoveryStateKey, {
+      recoveredAt: String(nowMs),
+      permissions: verified.permissions.join(","),
+      lastError: "",
+    });
+    const result: AppAccountRecoveryResult = {
+      status: "healthy",
+      incidentToken,
+    };
+    await completeModeratorEvent(redis, eventClaim, incidentToken, nowMs);
+    return result;
+  }
+  const result: AppAccountRecoveryResult = {
+    status: "pending",
+    incidentToken,
+  };
+  await completeModeratorEvent(redis, eventClaim, incidentToken, nowMs);
+  return result;
 }
 
 function toRecoveryResultStatus(value: string | undefined): RecoveryStatus {
@@ -557,6 +613,21 @@ export async function processDueAppAccountRecovery({
   };
 }
 
+type ActiveRecoveryState = Record<string, string> & {
+  incidentToken: string;
+  subredditName: string;
+  reason: string;
+};
+
+type ActiveRecovery = {
+  reddit: RedditClient;
+  redis: RedisClient;
+  scheduler: SchedulerLike;
+  activeState: ActiveRecoveryState;
+  nowMs: number;
+  acceptInvite: (subredditName: string) => Promise<void>;
+};
+
 export async function processAppAccountRecovery({
   reddit,
   redis,
@@ -580,11 +651,7 @@ export async function processAppAccountRecovery({
   ) {
     return { status: "stale" };
   }
-  const activeState = state as Record<string, string> & {
-    incidentToken: string;
-    subredditName: string;
-    reason: string;
-  };
+  const activeState = state as ActiveRecoveryState;
   if (activeState.status !== "pending" && activeState.status !== "processing") {
     return { status: activeState.status as RecoveryStatus, incidentToken };
   }
@@ -603,166 +670,112 @@ export async function processAppAccountRecovery({
   }
 
   try {
-    if (
-      !(await updateRecoveryState(redis, activeState, {
-        status: "processing",
-        startedAt: String(nowMs),
-      }))
-    )
-      return { status: "stale", incidentToken };
-    activeState.status = "processing";
-    const removalNotificationDelivered = await sendRemovalNotificationOnce(
+    return await recoverAppAccount({
       reddit,
       redis,
+      scheduler,
       activeState,
       nowMs,
-    );
+      acceptInvite,
+    });
+  } finally {
+    await releaseRedisLock(redis, appAccountRecoveryLockKey, lockToken);
+  }
+}
 
-    const inspection = await inspectModeratorAccount(
+async function recoverAppAccount(
+  recovery: ActiveRecovery,
+): Promise<AppAccountRecoveryResult> {
+  const { reddit, redis, scheduler, activeState, nowMs } = recovery;
+  const { incidentToken } = activeState;
+  if (
+    !(await updateRecoveryState(redis, activeState, {
+      status: "processing",
+      startedAt: String(nowMs),
+    }))
+  )
+    return { status: "stale", incidentToken };
+  activeState.status = "processing";
+  const removalNotificationDelivered = await sendRemovalNotificationOnce(
+    reddit,
+    redis,
+    activeState,
+    nowMs,
+  );
+
+  const inspection = await inspectModeratorAccount(
+    reddit,
+    activeState.subredditName,
+  );
+  const outcome = await recordRecoveryInspection(
+    recovery,
+    inspection,
+    removalNotificationDelivered,
+  );
+  if (outcome) return outcome;
+  if (inspection.status === "unknown") {
+    return retryOrExhaust({
       reddit,
-      activeState.subredditName,
+      redis,
+      scheduler,
+      state: activeState,
+      nowMs,
+      error: inspection.error ?? "Moderator membership could not be verified.",
+      terminalStatus: "verification_failed",
+      suppressHealthNotification: removalNotificationDelivered,
+    });
+  }
+  if (activeState.invitationAcceptedAt) {
+    return retryOrExhaust({
+      reddit,
+      redis,
+      scheduler,
+      state: activeState,
+      nowMs,
+      error: inspection.error ?? "Invitation acceptance could not be verified.",
+      terminalStatus: "verification_failed",
+      suppressHealthNotification: removalNotificationDelivered,
+    });
+  }
+
+  return acceptAndVerifyRecoveryInvite(recovery, removalNotificationDelivered);
+}
+
+async function acceptAndVerifyRecoveryInvite(
+  recovery: ActiveRecovery,
+  removalNotificationDelivered: boolean,
+): Promise<AppAccountRecoveryResult> {
+  const { reddit, redis, scheduler, activeState, nowMs, acceptInvite } =
+    recovery;
+  const { incidentToken } = activeState;
+  try {
+    await acceptInvite(activeState.subredditName);
+    await redis.hSet(appAccountRecoveryStateKey, {
+      invitationAcceptedAt: String(nowMs),
+    });
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "app_account_invitation_acceptance_failed",
+      {
+        workflow: "app_account_recovery",
+        phase: "scheduled_acceptance",
+        subredditName: activeState.subredditName,
+      },
+      error,
     );
-    if (inspection.status === "healthy") {
-      const recorded = await recordHealthy(
-        reddit,
-        redis,
-        activeState,
-        inspection.permissions,
-        nowMs,
-      );
-      if (recorded === "stale") return { status: "stale", incidentToken };
-      if (recorded === "unverified")
-        return retryOrExhaust({
-          reddit,
-          redis,
-          scheduler,
-          state: activeState,
-          nowMs,
-          error: "Permissions could not be verified.",
-          terminalStatus: "verification_failed",
-          suppressHealthNotification: removalNotificationDelivered,
-        });
-      return { status: "healthy", incidentToken };
-    }
-    if (inspection.status === "insufficient_permissions") {
+    if (error instanceof ModeratorInviteRejectedError) {
       await recordUnhealthy(
         reddit,
         redis,
         activeState,
-        "insufficient_permissions",
-        inspection.permissions,
+        "missing",
+        [],
         nowMs,
-        "",
+        error.message,
         removalNotificationDelivered,
       );
-      return { status: "insufficient_permissions", incidentToken };
-    }
-    if (inspection.status === "unknown") {
-      return retryOrExhaust({
-        reddit,
-        redis,
-        scheduler,
-        state: activeState,
-        nowMs,
-        error:
-          inspection.error ?? "Moderator membership could not be verified.",
-        terminalStatus: "verification_failed",
-        suppressHealthNotification: removalNotificationDelivered,
-      });
-    }
-    if (activeState.invitationAcceptedAt) {
-      return retryOrExhaust({
-        reddit,
-        redis,
-        scheduler,
-        state: activeState,
-        nowMs,
-        error:
-          inspection.error ?? "Invitation acceptance could not be verified.",
-        terminalStatus: "verification_failed",
-        suppressHealthNotification: removalNotificationDelivered,
-      });
-    }
-
-    try {
-      await acceptInvite(activeState.subredditName);
-      await redis.hSet(appAccountRecoveryStateKey, {
-        invitationAcceptedAt: String(nowMs),
-      });
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "app_account_invitation_acceptance_failed",
-        {
-          workflow: "app_account_recovery",
-          phase: "scheduled_acceptance",
-          subredditName: activeState.subredditName,
-        },
-        error,
-      );
-      if (error instanceof ModeratorInviteRejectedError) {
-        await recordUnhealthy(
-          reddit,
-          redis,
-          activeState,
-          "missing",
-          [],
-          nowMs,
-          error.message,
-          removalNotificationDelivered,
-        );
-        return { status: "missing", incidentToken };
-      }
-      return retryOrExhaust({
-        reddit,
-        redis,
-        scheduler,
-        state: activeState,
-        nowMs,
-        error: error instanceof Error ? error.message : String(error),
-        terminalStatus: "acceptance_failed",
-        suppressHealthNotification: removalNotificationDelivered,
-      });
-    }
-
-    const verified = await inspectModeratorAccount(
-      reddit,
-      activeState.subredditName,
-    );
-    if (verified.status === "healthy") {
-      const recorded = await recordHealthy(
-        reddit,
-        redis,
-        activeState,
-        verified.permissions,
-        nowMs,
-      );
-      if (recorded === "stale") return { status: "stale", incidentToken };
-      if (recorded === "unverified")
-        return retryOrExhaust({
-          reddit,
-          redis,
-          scheduler,
-          state: activeState,
-          nowMs,
-          error: "Permissions could not be verified.",
-          terminalStatus: "verification_failed",
-          suppressHealthNotification: removalNotificationDelivered,
-        });
-      return { status: "healthy", incidentToken };
-    }
-    if (verified.status === "insufficient_permissions") {
-      await recordUnhealthy(
-        reddit,
-        redis,
-        activeState,
-        "insufficient_permissions",
-        verified.permissions,
-        nowMs,
-        "",
-        removalNotificationDelivered,
-      );
-      return { status: "insufficient_permissions", incidentToken };
+      return { status: "missing", incidentToken };
     }
     return retryOrExhaust({
       reddit,
@@ -770,13 +783,76 @@ export async function processAppAccountRecovery({
       scheduler,
       state: activeState,
       nowMs,
-      error: verified.error ?? "Invitation acceptance could not be verified.",
-      terminalStatus: "verification_failed",
+      error: error instanceof Error ? error.message : String(error),
+      terminalStatus: "acceptance_failed",
       suppressHealthNotification: removalNotificationDelivered,
     });
-  } finally {
-    await releaseRedisLock(redis, appAccountRecoveryLockKey, lockToken);
   }
+
+  const verified = await inspectModeratorAccount(
+    reddit,
+    activeState.subredditName,
+  );
+  const outcome = await recordRecoveryInspection(
+    recovery,
+    verified,
+    removalNotificationDelivered,
+  );
+  if (outcome) return outcome;
+  return retryOrExhaust({
+    reddit,
+    redis,
+    scheduler,
+    state: activeState,
+    nowMs,
+    error: verified.error ?? "Invitation acceptance could not be verified.",
+    terminalStatus: "verification_failed",
+    suppressHealthNotification: removalNotificationDelivered,
+  });
+}
+
+async function recordRecoveryInspection(
+  { reddit, redis, scheduler, activeState, nowMs }: ActiveRecovery,
+  inspection: ModeratorInspection,
+  removalNotificationDelivered: boolean,
+): Promise<AppAccountRecoveryResult | undefined> {
+  const { incidentToken } = activeState;
+  if (inspection.status === "healthy") {
+    const recorded = await recordHealthy(
+      reddit,
+      redis,
+      activeState,
+      inspection.permissions,
+      nowMs,
+    );
+    if (recorded === "stale") return { status: "stale", incidentToken };
+    if (recorded === "unverified")
+      return retryOrExhaust({
+        reddit,
+        redis,
+        scheduler,
+        state: activeState,
+        nowMs,
+        error: "Permissions could not be verified.",
+        terminalStatus: "verification_failed",
+        suppressHealthNotification: removalNotificationDelivered,
+      });
+    return { status: "healthy", incidentToken };
+  }
+  if (inspection.status === "insufficient_permissions") {
+    await recordUnhealthy(
+      reddit,
+      redis,
+      activeState,
+      "insufficient_permissions",
+      inspection.permissions,
+      nowMs,
+      "",
+      removalNotificationDelivered,
+    );
+    return { status: "insufficient_permissions", incidentToken };
+  }
+  return undefined;
 }
 
 async function inspectModeratorAccount(
