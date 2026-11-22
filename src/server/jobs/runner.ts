@@ -17,6 +17,7 @@ const batchSize = 25;
 type RunResult = "not_due" | "complete" | "retry" | "exhausted" | "budget";
 type JobOutcome<T extends JobRecord> =
   | { status: "complete"; fields?: Partial<T> }
+  | { status: "remove" }
   | { status: "defer"; nextRunAt: number }
   | { status: "retry"; message: string };
 
@@ -32,13 +33,18 @@ type JobWorker<T extends JobRecord> = {
   lockKey: string;
   lockTtlMs: number;
   backoff: BackoffPolicy;
-  handle(record: Partial<T>, startedAt: number): Promise<JobOutcome<T>>;
+  index?(redis: RedisClient): Promise<void>;
+  handle(
+    record: Partial<T>,
+    startedAt: number,
+    canStart: () => boolean,
+  ): Promise<JobOutcome<T>>;
 };
 
 export function defineDueJob<T extends JobRecord>(worker: JobWorker<T>): Job {
   return {
     id: worker.storage.id,
-    index: (redis) => indexStoredJob(redis, worker.storage),
+    index: worker.index ?? ((redis) => indexStoredJob(redis, worker.storage)),
     run: (redis, window) => runDueJob(redis, worker, window),
   };
 }
@@ -156,7 +162,12 @@ async function runDueJob<T extends JobRecord>(
         );
         return "budget";
       }
-      const outcome = await executeJob(worker, record, startedAt);
+      const outcome = await executeJob(
+        worker,
+        record,
+        startedAt,
+        () => now() < deadlineMs,
+      );
       return persistJobOutcome(
         redis,
         worker,
@@ -179,9 +190,10 @@ async function executeJob<T extends JobRecord>(
   worker: JobWorker<T>,
   record: Partial<T>,
   startedAt: number,
+  canStart: () => boolean,
 ): Promise<JobOutcome<T>> {
   try {
-    return await worker.handle(record, startedAt);
+    return await worker.handle(record, startedAt, canStart);
   } catch (error) {
     logDiagnostic(
       "warn",
@@ -216,6 +228,7 @@ async function persistJobOutcome<T extends JobRecord>(
       current.status !== "processing"
     )
       return;
+    if (outcome.status === "remove") return null;
     return outcome.status === "defer"
       ? {
           status: "pending",
@@ -230,7 +243,7 @@ async function persistJobOutcome<T extends JobRecord>(
           activeRunId: "",
         };
   });
-  return finished && outcome.status === "complete" ? "complete" : "retry";
+  return finished && outcome.status !== "defer" ? "complete" : "retry";
 }
 
 async function retryJob<T extends JobRecord>(

@@ -22,7 +22,9 @@ function getDueAt(record: Partial<JobRecord>, version: string): number | null {
 export async function updateJobRecord<T extends JobRecord>(
   redis: RedisClient,
   job: JobStorage<T>,
-  update: (record: Partial<T>) => Partial<JobRecord> | Partial<T> | undefined,
+  update: (
+    record: Partial<T>,
+  ) => Partial<JobRecord> | Partial<T> | null | undefined,
 ): Promise<Partial<T> | undefined> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const tx = await redis.watch(job.stateKey);
@@ -30,15 +32,19 @@ export async function updateJobRecord<T extends JobRecord>(
     try {
       const record = job.codec.parse(await redis.hGetAll(job.stateKey));
       const patch = update(record);
-      if (!patch) {
+      if (patch === undefined) {
         await tx.unwatch();
         return undefined;
       }
-      const fields = job.codec.serialize(patch as Partial<T>);
-      const dueAt = getDueAt({ ...record, ...patch }, job.version);
+      const fields =
+        patch === null ? {} : job.codec.serialize(patch as Partial<T>);
+      const dueAt =
+        patch === null ? null : getDueAt({ ...record, ...patch }, job.version);
       await tx.multi();
       multiStarted = true;
-      if (Object.keys(fields).length > 0) await tx.hSet(job.stateKey, fields);
+      if (patch === null) await tx.del(job.stateKey);
+      else if (Object.keys(fields).length > 0)
+        await tx.hSet(job.stateKey, fields);
       if (dueAt === null) await tx.zRem(dueJobsKey, [job.id]);
       else await tx.zAdd(dueJobsKey, { member: job.id, score: dueAt });
       if ((await tx.exec()).length > 0) return record;

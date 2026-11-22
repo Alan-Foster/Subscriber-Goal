@@ -76,14 +76,13 @@ const hoisted = vi.hoisted(() => ({
   ensureCommunityPostActivityBackfill: vi.fn(),
   processDueAppAccountHealthCheck: vi.fn(),
   processDueAppAccountRecovery: vi.fn(),
-  processDueAppRepair: vi.fn(),
+  dispatchScheduledJobs: vi.fn(),
   processDueScheduledPostDisplacementChecks: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getPostOperationalState: vi.fn(),
   savePostOperationalState: vi.fn(),
   clearPostOperationalState: vi.fn(),
   scheduleHighlightRepair: vi.fn(),
-  processDueSourcePostDeletions: vi.fn(),
   queueConfirmedSourceDeletionCleanup: vi.fn(),
 }));
 
@@ -197,14 +196,13 @@ vi.mock("../core/appAccountRecovery", () => ({
   processDueAppAccountRecovery: hoisted.processDueAppAccountRecovery,
 }));
 
-vi.mock("../core/appRepair", () => ({
-  processDueAppRepair: hoisted.processDueAppRepair,
+vi.mock("../jobs/scheduled", () => ({
+  dispatchScheduledJobs: hoisted.dispatchScheduledJobs,
 }));
 vi.mock("../core/scheduledPostDisplacement", () => ({
   processDueScheduledPostDisplacementChecks: hoisted.processDueScheduledPostDisplacementChecks,
 }));
 vi.mock("../core/sourcePostDeletion", () => ({
-  processDueSourcePostDeletions: hoisted.processDueSourcePostDeletions,
   queueConfirmedSourceDeletionCleanup:
     hoisted.queueConfirmedSourceDeletionCleanup,
 }));
@@ -252,16 +250,14 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.getLastKnownSubscriberCount.mockReset();
     hoisted.processDueAppAccountHealthCheck.mockReset();
     hoisted.processDueAppAccountRecovery.mockReset();
-    hoisted.processDueAppRepair.mockReset();
+    hoisted.dispatchScheduledJobs.mockReset();
     hoisted.processDueScheduledPostDisplacementChecks.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
     hoisted.getPostOperationalState.mockReset();
     hoisted.savePostOperationalState.mockReset();
     hoisted.clearPostOperationalState.mockReset();
     hoisted.scheduleHighlightRepair.mockReset();
-    hoisted.processDueSourcePostDeletions.mockReset();
     hoisted.queueConfirmedSourceDeletionCleanup.mockReset();
-    hoisted.processDueSourcePostDeletions.mockResolvedValue(undefined);
     hoisted.queueConfirmedSourceDeletionCleanup.mockResolvedValue("dispatched");
     hoisted.getPostOperationalState.mockResolvedValue(undefined);
     hoisted.retireSubscriberGoalPost.mockImplementation(
@@ -333,7 +329,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
     hoisted.processDueAppAccountHealthCheck.mockResolvedValue(undefined);
     hoisted.processDueAppAccountRecovery.mockResolvedValue({ status: "stale" });
-    hoisted.processDueAppRepair.mockResolvedValue("not_due");
+    hoisted.dispatchScheduledJobs.mockResolvedValue(undefined);
   });
 
   it("skips crosspost ingestion and pending-depth lookup outside authority installs", async () => {
@@ -400,11 +396,10 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
-    expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+    expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
     expect(hoisted.processDueScheduledPostDisplacementChecks).not.toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
-    expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
     expect(hoisted.getQueuedUpdates).toHaveBeenCalled();
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
@@ -413,24 +408,24 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       status: "healthy",
     });
     await onPostsUpdaterJob();
-    expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+    expect(hoisted.dispatchScheduledJobs).toHaveBeenCalledOnce();
     expect(hoisted.processDueScheduledPostDisplacementChecks).toHaveBeenCalledOnce();
     expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
     expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
-    expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
   });
 
   it("defers runner work when earlier scheduler work spends the budget", async () => {
     const startedAt = Date.now();
     let now = startedAt;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
-    hoisted.processDueSourcePostDeletions.mockImplementationOnce(async () => {
+    hoisted.processDueAppAccountHealthCheck.mockImplementationOnce(async () => {
       now = startedAt + 20_000;
+      return { healthy: true };
     });
     try {
       await onPostsUpdaterJob();
-      expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
-      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.processDueAppAccountHealthCheck).toHaveBeenCalledOnce();
+      expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
     } finally {
       clock.mockRestore();
     }
@@ -465,7 +460,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       expect(hoisted.applyTextFallback).toHaveBeenCalled();
       expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
       expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
-      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
       expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
     },
   );
@@ -483,8 +478,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
           healthy: false,
         });
       await onPostsUpdaterJob();
-      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
-      expect(hoisted.processDueSourcePostDeletions).not.toHaveBeenCalled();
+      expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
       expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
       expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
     },
@@ -537,7 +531,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       const now = vi.spyOn(Date, "now").mockReturnValue(999);
       await onPostsUpdaterJob();
       expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
-      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+      expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
       expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
       expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
       expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledOnce();
@@ -547,7 +541,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
       expect(hashes.has(health.appAccountHealthRetryStateKey)).toBe(false);
       expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
-      expect(hoisted.processDueAppRepair).toHaveBeenCalledOnce();
+      expect(hoisted.dispatchScheduledJobs).toHaveBeenCalledOnce();
       expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
       expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
 

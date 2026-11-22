@@ -36,7 +36,7 @@ import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
-import { processDueAppRepair } from "../core/appRepair";
+import { dispatchScheduledJobs } from "../jobs/scheduled";
 import { jobRunnerBudgetMs } from "../jobs/runner";
 import { processDueScheduledPostDisplacementChecks } from "../core/scheduledPostDisplacement";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
@@ -54,10 +54,7 @@ import {
 import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
 import { processSubscriberTrackingRepairs } from "../data/subscriberTracking";
-import {
-  processDueSourcePostDeletions,
-  queueConfirmedSourceDeletionCleanup,
-} from "../core/sourcePostDeletion";
+import { queueConfirmedSourceDeletionCleanup } from "../core/sourcePostDeletion";
 import {
   MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
   recoverMilestoneNotificationContinuations,
@@ -254,20 +251,9 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    if (permissionWorkAllowed)
-      await processDueSourcePostDeletions(reddit, redis, appSettings);
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "source_post_deletion" },
-      error,
-    );
-  }
-  try {
     if (permissionWorkAllowed) {
       if (Date.now() < jobDeadlineMs) {
-        await processDueAppRepair({ reddit, redis, deadlineMs: jobDeadlineMs });
+        await dispatchScheduledJobs(reddit, redis, appSettings, jobDeadlineMs);
       } else {
         logDiagnostic("info", "job_runner_budget_deferred", {
           workflow: "job_runner",
@@ -279,7 +265,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
     logDiagnostic(
       "error",
       "scheduler_task_failed",
-      { workflow: "app_repair" },
+      { workflow: "job_runner" },
       error,
     );
   }
