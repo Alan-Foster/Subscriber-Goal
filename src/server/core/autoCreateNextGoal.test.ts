@@ -310,6 +310,25 @@ describe("processDueAutoCreateNextGoals", () => {
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
   });
 
+  it("leaves a due source queued while a pre-upgrade worker still owns its source lock", async () => {
+    const legacyLock = "auto_create_next_goal_v1_lock:t3_source";
+    hoisted.redisValues.set(legacyLock, "old-worker");
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(10_000);
+
+    await expect(
+      processDueAutoCreateNextGoals({
+        reddit: hoisted.reddit as never,
+        redis: hoisted.redis as never,
+        appSettings: baseSettings,
+        nowMs: 10_000,
+      }),
+    ).resolves.toMatchObject({ due: 1, skipped: 1, failed: 0 });
+    expect(hoisted.getSubGoalData).not.toHaveBeenCalled();
+    expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
+    expect(hoisted.redisValues.get(legacyLock)).toBe("old-worker");
+  });
+
   it("suppresses a due successor while orphaned-goal onboarding owns it", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
     hoisted.redisHashes.set(

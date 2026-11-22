@@ -24,18 +24,18 @@ const appSettings: ServerAppSettings = {
 const hoisted = vi.hoisted(() => ({
   clearAutomaticSuccessorSuppression: vi.fn(),
   repairAutoCreateNextGoal: vi.fn(),
-  processDueAutoCreateNextGoals: vi.fn(),
+  runAutoGoalSuccessorQueue: vi.fn(),
 }));
 
 vi.mock("../data/subGoalData", () => ({
   clearAutomaticSuccessorSuppression:
     hoisted.clearAutomaticSuccessorSuppression,
   repairAutoCreateNextGoal: hoisted.repairAutoCreateNextGoal,
+  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
 }));
 
-vi.mock("./autoCreateNextGoal", () => ({
-  autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
-  processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
+vi.mock("../jobs/automaticGoalRetry", () => ({
+  runAutoGoalSuccessorQueue: hoisted.runAutoGoalSuccessorQueue,
 }));
 
 import { reconcileCompletedGoal } from "./completedGoalReconciliation";
@@ -95,8 +95,8 @@ describe("reconcileCompletedGoal community mutation lease", () => {
         return { status: "scheduled", runAt: 1_000, failureCount: 0 };
       },
     );
-    hoisted.processDueAutoCreateNextGoals.mockReset();
-    hoisted.processDueAutoCreateNextGoals.mockResolvedValue({
+    hoisted.runAutoGoalSuccessorQueue.mockReset();
+    hoisted.runAutoGoalSuccessorQueue.mockResolvedValue({
       due: 1,
       created: 1,
       skipped: 0,
@@ -120,7 +120,7 @@ describe("reconcileCompletedGoal community mutation lease", () => {
       }),
     ).resolves.toMatchObject({ outcome: "replacement_created" });
 
-    const workerLease = hoisted.processDueAutoCreateNextGoals.mock.calls[0]?.[0]
+    const workerLease = hoisted.runAutoGoalSuccessorQueue.mock.calls[0]?.[0]
       ?.mutationLease as CommunityGoalMutationLease;
     expect(workerLease.key).toBe(communityGoalMutationLockKey);
     expect(redis.suppression.has("t3_source")).toBe(false);
@@ -151,7 +151,7 @@ describe("reconcileCompletedGoal community mutation lease", () => {
 
     expect(setSpy).not.toHaveBeenCalled();
     expect(delSpy).not.toHaveBeenCalled();
-    expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledWith(
+    expect(hoisted.runAutoGoalSuccessorQueue).toHaveBeenCalledWith(
       expect.objectContaining({ mutationLease }),
     );
     expect(redis.values.get(communityGoalMutationLockKey)).toBe("inherited");
@@ -207,6 +207,6 @@ describe("reconcileCompletedGoal community mutation lease", () => {
     expect(redis.queued.has("t3_source")).toBe(false);
     expect(hoisted.clearAutomaticSuccessorSuppression).not.toHaveBeenCalled();
     expect(hoisted.repairAutoCreateNextGoal).not.toHaveBeenCalled();
-    expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.runAutoGoalSuccessorQueue).not.toHaveBeenCalled();
   });
 });

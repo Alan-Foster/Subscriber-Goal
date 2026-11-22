@@ -580,15 +580,14 @@ export async function repairAutoCreateNextGoal(
   nowMs = Date.now(),
   rearmExhausted = false,
 ): Promise<AutoCreateNextGoalRepairResult> {
-  const [pending, rawFailureCount, exhausted, reconciliationExhausted] =
+  const [queuedAt, rawFailureCount, exhausted, reconciliationExhausted] =
     await Promise.all([
-      redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+      getAutoCreateNextGoalRunAt(redis, postId),
       redis.hGet(autoCreateNextGoalRetryAttemptsKey, postId),
       redis.hGet(autoCreateNextGoalExhaustedKey, postId),
       redis.hGet(autoCreateNextGoalReconciliationExhaustedKey, postId),
     ]);
   let failureCount = Number(rawFailureCount) || 0;
-  const queued = pending.find((entry) => entry.member === postId);
   if (
     reconciliationExhausted &&
     rearmExhausted &&
@@ -601,7 +600,7 @@ export async function repairAutoCreateNextGoal(
   ) {
     await redis.hDel(autoCreateNextGoalReconciliationExhaustedKey, [postId]);
     const runAt = Math.max(
-      queued?.score ?? nowMs,
+      queuedAt ?? nowMs,
       completedTime + autoCreateNextGoalDelayMs,
     );
     await scheduleAutoCreateNextGoalReconciliation(redis, postId, runAt);
@@ -611,10 +610,10 @@ export async function repairAutoCreateNextGoal(
     await redis.zRem(autoCreateNextGoalQueueKey, [postId]);
     return { status: "exhausted", failureCount };
   }
-  if (queued) {
+  if (queuedAt !== undefined) {
     return {
       status: failureCount > 0 ? "retrying" : "queued",
-      runAt: queued.score,
+      runAt: queuedAt,
       failureCount,
     };
   }
@@ -746,15 +745,16 @@ export async function cancelAllAutoCreateNextGoals(
 export async function getDueAutoCreateNextGoalPostIds(
   redis: RedisClient,
   nowMs: number,
-  limit?: number,
 ): Promise<string[]> {
-  const pending =
-    limit === undefined
-      ? await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)
-      : await redis.zRange(autoCreateNextGoalQueueKey, "-inf", nowMs, {
-          by: "score",
-          limit: { offset: 0, count: limit },
-        });
+  const pending = await redis.zRange(
+    autoCreateNextGoalQueueKey,
+    "-inf",
+    nowMs,
+    {
+      by: "score",
+      limit: { offset: 0, count: 10 },
+    },
+  );
   return pending
     .filter(({ score }) => score <= nowMs)
     .map(({ member }) => member);

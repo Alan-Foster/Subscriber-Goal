@@ -1,5 +1,9 @@
 import { logDiagnostic } from "../../shared/diagnostics";
-import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
+import {
+  processDueAutoCreateNextGoals,
+  type AutoCreateNextGoalSummary,
+} from "../core/autoCreateNextGoal";
+import type { CommunityGoalMutationLease } from "../core/communityGoalMutation";
 import { autoCreateNextGoalQueueKey } from "../data/subGoalData";
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
@@ -13,8 +17,6 @@ const automaticGoalJob = {
   version: "1",
   codec: createJobCodec({ ...jobRecordFields, sourceDueAt: timeField }),
 };
-
-const batchSize = 10;
 
 async function nextAutomaticGoalDeadline(redis: RedisClient) {
   const [head] = await redis.zRange(autoCreateNextGoalQueueKey, 0, 0);
@@ -40,33 +42,43 @@ async function indexAutomaticGoalJob(redis: RedisClient): Promise<void> {
   });
 }
 
-function createAutomaticGoalRetryJob(
-  reddit: RedditClient,
-  redis: RedisClient,
-  appSettings: ServerAppSettings,
-) {
-  return defineDueJob({
+export async function runAutoGoalSuccessorQueue({
+  reddit,
+  redis,
+  appSettings,
+  nowMs,
+  mutationLease,
+  deadlineMs,
+}: {
+  reddit: RedditClient;
+  redis: RedisClient;
+  appSettings: ServerAppSettings;
+  nowMs?: number;
+  mutationLease?: CommunityGoalMutationLease;
+  deadlineMs?: number;
+}): Promise<AutoCreateNextGoalSummary | undefined> {
+  const invokedAt = Date.now();
+  const now =
+    nowMs === undefined
+      ? Date.now
+      : () => nowMs + Math.max(0, Date.now() - invokedAt);
+  let summary: AutoCreateNextGoalSummary | undefined;
+  const worker = defineDueJob({
     storage: automaticGoalJob,
     lockKey: "automatic_goal_retry_job_v1_lock",
     lockTtlMs: 60_000,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexAutomaticGoalJob,
-    handle: async (_record, nowMs, canStart) => {
+    handle: async (_record, startedAt, canStart) => {
       // Retries and first attempts share the same ordered source queue.
-      const summary = await processDueAutoCreateNextGoals({
+      summary = await processDueAutoCreateNextGoals({
         reddit,
         redis,
         appSettings,
-        nowMs,
-        limit: batchSize,
+        nowMs: nowMs ?? startedAt,
+        ...(mutationLease ? { mutationLease } : {}),
         canStart,
       });
-      if (summary.due > 0) {
-        const fields = Object.entries(summary)
-          .map(([name, count]) => `${name}=${count}`)
-          .join(" ");
-        console.info(`[autoCreateNextGoal] scheduler summary: ${fields}`);
-      }
       const nextRunAt = await nextAutomaticGoalDeadline(redis);
       return nextRunAt === undefined
         ? { status: "remove" }
@@ -81,6 +93,11 @@ function createAutomaticGoalRetryJob(
           };
     },
   });
+  await dispatchDueJobs(redis, [worker], {
+    now,
+    ...(deadlineMs === undefined ? {} : { deadlineMs }),
+  });
+  return summary;
 }
 
 export async function dispatchAutomaticGoalRetryJob(
@@ -90,13 +107,18 @@ export async function dispatchAutomaticGoalRetryJob(
   deadlineMs: number,
 ): Promise<void> {
   try {
-    await dispatchDueJobs(
+    const summary = await runAutoGoalSuccessorQueue({
+      reddit,
       redis,
-      [createAutomaticGoalRetryJob(reddit, redis, appSettings)],
-      {
-        deadlineMs,
-      },
-    );
+      appSettings,
+      deadlineMs,
+    });
+    if (summary && summary.due > 0) {
+      const fields = Object.entries(summary)
+        .map(([name, count]) => `${name}=${count}`)
+        .join(" ");
+      console.info(`[autoCreateNextGoal] scheduler summary: ${fields}`);
+    }
   } catch (error) {
     logDiagnostic(
       "error",
