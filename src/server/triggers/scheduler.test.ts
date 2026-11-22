@@ -76,7 +76,7 @@ const hoisted = vi.hoisted(() => ({
   getLastKnownSubscriberCount: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
   resolveAppAccountHealthGate: vi.fn(),
-  processDueAppAccountRecovery: vi.fn(),
+  resolveAppAccountRecoveryGate: vi.fn(),
   dispatchScheduledJobs: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
   getPostOperationalState: vi.fn(),
@@ -192,8 +192,8 @@ vi.mock("../core/onboardingWarning", () => ({
 vi.mock("../jobs/appAccountHealth", () => ({
   resolveAppAccountHealthGate: hoisted.resolveAppAccountHealthGate,
 }));
-vi.mock("../core/appAccountRecovery", () => ({
-  processDueAppAccountRecovery: hoisted.processDueAppAccountRecovery,
+vi.mock("../jobs/appAccountRecovery", () => ({
+  resolveAppAccountRecoveryGate: hoisted.resolveAppAccountRecoveryGate,
 }));
 
 vi.mock("../jobs/scheduled", () => ({
@@ -246,7 +246,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.observeDailySubscriberCount.mockReset();
     hoisted.getLastKnownSubscriberCount.mockReset();
     hoisted.resolveAppAccountHealthGate.mockReset();
-    hoisted.processDueAppAccountRecovery.mockReset();
+    hoisted.resolveAppAccountRecoveryGate.mockReset();
     hoisted.dispatchScheduledJobs.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
     hoisted.getPostOperationalState.mockReset();
@@ -317,7 +317,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     });
     hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
     hoisted.resolveAppAccountHealthGate.mockResolvedValue(undefined);
-    hoisted.processDueAppAccountRecovery.mockResolvedValue({ status: "stale" });
+    hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({
+      status: "stale",
+    });
     hoisted.dispatchScheduledJobs.mockResolvedValue(undefined);
   });
 
@@ -375,13 +377,13 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
   });
 
   it("continues independent work while permission-dependent queues wait, then resumes", async () => {
-    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+    hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({
       status: "missing",
     });
 
     await onPostsUpdaterJob();
 
-    expect(hoisted.processDueAppAccountRecovery).toHaveBeenCalledOnce();
+    expect(hoisted.resolveAppAccountRecoveryGate).toHaveBeenCalledOnce();
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
     expect(hoisted.resolveAppAccountHealthGate).not.toHaveBeenCalled();
@@ -392,7 +394,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
 
-    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+    hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({
       status: "healthy",
     });
     await onPostsUpdaterJob();
@@ -435,7 +437,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
   ])(
     "defers posting during %s recovery while detecting goal completion",
     async (status) => {
-      hoisted.processDueAppAccountRecovery.mockResolvedValue({ status });
+      hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({ status });
       hoisted.context.subredditName = "SubGoal";
       hoisted.getQueuedUpdates.mockResolvedValue(["t3_goal"]);
       hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
@@ -502,7 +504,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         status: "healthy",
         incidentToken: "existing",
       });
-      hoisted.processDueAppAccountRecovery.mockResolvedValue({
+      hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({
         status: "healthy",
       });
       hoisted.resolveAppAccountHealthGate.mockImplementation((args) =>
@@ -633,7 +635,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
 
   it("skips crosspost dispatch and depth reads on a permission-gated authority tick", async () => {
     hoisted.context.subredditName = "SubGoal";
-    hoisted.processDueAppAccountRecovery.mockResolvedValue({
+    hoisted.resolveAppAccountRecoveryGate.mockResolvedValue({
       status: "missing",
     });
     await onPostsUpdaterJob();

@@ -2,6 +2,34 @@ import type { RedisClient } from "../types";
 
 export const appAccountRecoveryStateKey = "app_account_recovery_v1_state";
 
+export type RecoveryStatus =
+  | "pending"
+  | "processing"
+  | "healthy"
+  | "missing"
+  | "insufficient_permissions"
+  | "acceptance_failed"
+  | "verification_failed"
+  | "exhausted";
+
+export function toRecoveryResultStatus(
+  value: string | undefined,
+): RecoveryStatus {
+  const statuses = new Set<RecoveryStatus>([
+    "pending",
+    "processing",
+    "healthy",
+    "missing",
+    "insufficient_permissions",
+    "acceptance_failed",
+    "verification_failed",
+    "exhausted",
+  ]);
+  return statuses.has(value as RecoveryStatus)
+    ? (value as RecoveryStatus)
+    : "pending";
+}
+
 export function isTerminalRecoveryStatus(status: string | undefined): boolean {
   return [
     "missing",
