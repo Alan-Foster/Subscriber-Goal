@@ -486,131 +486,24 @@ export async function getStatisticsReport(
   hours: 24 | 168,
   nowMs = Date.now(),
 ): Promise<StatisticsResponse> {
-  const currentStart = hourStart(nowMs) - (hours - 1) * hourMs;
-  const previousStart = currentStart - hours * hourMs;
-  const retainedStart = hourStart(nowMs) - (retentionHours - 1) * hourMs;
-  const currentHours = range(currentStart, hours);
-  const previousHours = range(previousStart, hours);
-  const historicalHours = range(
-    retainedStart,
-    Math.max(0, (previousStart - retainedStart) / hourMs),
-  );
-  const allHours = [...historicalHours, ...previousHours, ...currentHours];
-  const [allRows, allVisitors] = await Promise.all([
-    Promise.all(allHours.map((hour) => redis.hGetAll(countsKey(hour)))),
-    bitmapRows(redis, allHours, visitorKey),
-  ]);
-  const offset = historicalHours.length;
-  const previousRows = allRows.slice(offset, offset + hours);
-  const currentRows = allRows.slice(offset + hours);
-  const previousVisitors = allVisitors.slice(offset, offset + hours);
-  const currentVisitors = allVisitors.slice(offset + hours);
-  const previousCohorts = cohorts(
-    union(allVisitors.slice(0, offset)),
-    previousVisitors,
-  );
-  const currentCohorts = cohorts(
-    union(allVisitors.slice(0, offset + hours)),
-    currentVisitors,
-  );
-  const firstLegacyIndex = allRows.findIndex(
-    (row, index) =>
-      Object.keys(row).length > 0 || bitCount(allVisitors[index]!) > 0,
-  );
-  const trafficCoverage = await coverage(
+  const windows = getStatisticsWindows(hours, nowMs);
+  const { currentStart, previousStart } = windows;
+  const traffic = await readStatisticsTraffic(redis, windows, hours);
+  const coverage = await readStatisticsCoverage(
     redis,
-    "traffic",
-    firstLegacyIndex < 0 ? null : allHours[firstLegacyIndex]!,
-    currentStart,
-    previousStart,
+    windows,
+    traffic.firstObservedAt,
     nowMs,
     hours,
   );
-  const sessionCoverage = await coverage(
+  const { trafficCoverage, sessionCoverage, ctrCoverage } = coverage;
+  const sessions = await readStatisticsSessions(redis, windows);
+  const clicks = countStatisticsClicks(traffic);
+  const byLabel = await readStatisticsCtaLabels(
     redis,
-    "sessions",
-    null,
-    currentStart,
-    previousStart,
-    nowMs,
-    hours,
-  );
-  const ctrCoverage = await coverage(
-    redis,
-    "ctr-invariants",
-    null,
-    currentStart,
-    previousStart,
-    nowMs,
-    hours,
-  );
-
-  const sessionPair = async (kind: SessionKind) => {
-    const [current, previous] = await Promise.all([
-      hourlyEstimateSum(redis, currentHours, (hour) => sessionKey(kind, hour)),
-      hourlyEstimateSum(redis, previousHours, (hour) => sessionKey(kind, hour)),
-    ]);
-    return [current, previous] as const;
-  };
-  const [
-    sessions,
-    subscribed,
-    joinEligible,
-    secondaryEligible,
-    ctaOnlyEligible,
-    interactionEligible,
-    interactions,
-    joinSessions,
-    secondarySessions,
-    ctaOnlySessions,
-  ] = await Promise.all([
-    sessionPair("all"),
-    sessionPair("subscribed"),
-    sessionPair("join_eligible"),
-    sessionPair("secondary_eligible"),
-    sessionPair("cta_only_eligible"),
-    sessionPair("interaction_eligible"),
-    sessionPair("interaction"),
-    sessionPair("join_click"),
-    sessionPair("secondary_click"),
-    sessionPair("cta_only_click"),
-  ]);
-  const jc = sumField(currentRows, "join_clicks"),
-    jp = sumField(previousRows, "join_clicks"),
-    cc = sumField(currentRows, "join_confirmed"),
-    cp = sumField(previousRows, "join_confirmed");
-  const sc = sumField(currentRows, "secondary_cta_clicks"),
-    sp = sumField(previousRows, "secondary_cta_clicks"),
-    oc = sumField(currentRows, "cta_only_clicks"),
-    op = sumField(previousRows, "cta_only_clicks");
-  const ac = sumField(currentRows, "cta_clicks"),
-    ap = sumField(previousRows, "cta_clicks");
-  const labels = new Map<string, string>();
-  for (const row of [...currentRows, ...previousRows])
-    for (const [field, value] of Object.entries(row))
-      if (field.startsWith("cta_label:")) labels.set(field.slice(10), value);
-  const byLabel = await Promise.all(
-    [...labels.entries()]
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(async ([id, label]) => {
-        const [current, previous] = await Promise.all([
-          hourlyEstimateSum(redis, currentHours, (hour) =>
-            ctaSessionKey(id, hour),
-          ),
-          hourlyEstimateSum(redis, previousHours, (hour) =>
-            ctaSessionKey(id, hour),
-          ),
-        ]);
-        return {
-          label,
-          clicks: comparable(
-            sumField(currentRows, `secondary_cta_click:${id}`),
-            sumField(previousRows, `secondary_cta_click:${id}`),
-            sessionCoverage,
-          ),
-          uniqueSessions: comparable(current, previous, sessionCoverage),
-        };
-      }),
+    windows,
+    traffic,
+    sessionCoverage,
   );
 
   return {
@@ -626,128 +519,9 @@ export async function getStatisticsReport(
       bucketGranularitySeconds: 3600,
     },
     metrics: {
-      traffic: {
-        impressions: comparable(
-          sumField(currentRows, "loads_total"),
-          sumField(previousRows, "loads_total"),
-          trafficCoverage,
-        ),
-        viewingSessions: comparable(sessions[0], sessions[1], sessionCoverage),
-      },
-      visitors: {
-        unique: comparable(
-          currentCohorts.unique,
-          previousCohorts.unique,
-          trafficCoverage,
-        ),
-        new: comparable(
-          currentCohorts.newVisitors,
-          previousCohorts.newVisitors,
-          trafficCoverage,
-        ),
-        returning: comparable(
-          currentCohorts.returning,
-          previousCohorts.returning,
-          trafficCoverage,
-        ),
-        returningRate: comparable(
-          rate(currentCohorts.returning, currentCohorts.unique),
-          rate(previousCohorts.returning, previousCohorts.unique),
-          trafficCoverage,
-        ),
-      },
-      membership: {
-        appTrackedSubscribedSessions: comparable(
-          subscribed[0],
-          subscribed[1],
-          sessionCoverage,
-        ),
-        joinEligibleSessions: comparable(
-          joinEligible[0],
-          joinEligible[1],
-          sessionCoverage,
-        ),
-      },
-      joins: {
-        clicks: comparable(jc, jp, sessionCoverage),
-        uniqueClickSessions: comparable(
-          joinSessions[0],
-          joinSessions[1],
-          sessionCoverage,
-        ),
-        confirmed: comparable(cc, cp, sessionCoverage),
-        clickSuccessRate: comparable(
-          rate(cc, jc),
-          rate(cp, jp),
-          sessionCoverage,
-        ),
-        ctr: comparable(
-          rate(joinSessions[0], joinEligible[0]),
-          rate(joinSessions[1], joinEligible[1]),
-          ctrCoverage,
-        ),
-      },
-      ctas: {
-        clicks: comparable(sc, sp, sessionCoverage),
-        uniqueClickSessions: comparable(
-          secondarySessions[0],
-          secondarySessions[1],
-          sessionCoverage,
-        ),
-        eligibleSessions: comparable(
-          secondaryEligible[0],
-          secondaryEligible[1],
-          sessionCoverage,
-        ),
-        ctr: comparable(
-          rate(secondarySessions[0], secondaryEligible[0]),
-          rate(secondarySessions[1], secondaryEligible[1]),
-          ctrCoverage,
-        ),
-        byLabel,
-      },
-      ctaOnly: {
-        clicks: comparable(oc, op, sessionCoverage),
-        uniqueClickSessions: comparable(
-          ctaOnlySessions[0],
-          ctaOnlySessions[1],
-          sessionCoverage,
-        ),
-        eligibleSessions: comparable(
-          ctaOnlyEligible[0],
-          ctaOnlyEligible[1],
-          sessionCoverage,
-        ),
-        ctr: comparable(
-          rate(ctaOnlySessions[0], ctaOnlyEligible[0]),
-          rate(ctaOnlySessions[1], ctaOnlyEligible[1]),
-          ctrCoverage,
-        ),
-      },
-      interactions: {
-        uniqueSessions: comparable(
-          interactions[0],
-          interactions[1],
-          sessionCoverage,
-        ),
-        eligibleSessions: comparable(
-          interactionEligible[0],
-          interactionEligible[1],
-          sessionCoverage,
-        ),
-        ctr: comparable(
-          rate(interactions[0], interactionEligible[0]),
-          rate(interactions[1], interactionEligible[1]),
-          ctrCoverage,
-        ),
-      },
-      legacy: {
-        unclassifiedCtaClicks: comparable(
-          Math.max(0, ac - sc - oc),
-          Math.max(0, ap - sp - op),
-          trafficCoverage,
-        ),
-      },
+      ...buildTrafficAndMembershipMetrics(traffic, sessions, coverage),
+      ...buildJoinAndCtaMetrics(clicks, sessions, coverage, byLabel),
+      ...buildInteractionAndLegacyMetrics(clicks, sessions, coverage),
     },
     coverage: {
       trafficAndVisitors: trafficCoverage,
@@ -787,6 +561,375 @@ export async function getStatisticsReport(
         "One anonymous visitor plus post per fixed UTC hour. Same-hour retries and remounts are deduplicated, separate hours and different posts count independently, and multiple genuine same-post openings within one hour cannot be distinguished.",
       ctrCoverageDefinition:
         "CTR denominator-repair invariants apply from coverage.ctrInvariants.firstKnownAt; earlier retained session data remains available but may have incomplete eligible-session denominators.",
+    },
+  };
+}
+
+function getStatisticsWindows(hours: 24 | 168, nowMs: number) {
+  const currentStart = hourStart(nowMs) - (hours - 1) * hourMs;
+  const previousStart = currentStart - hours * hourMs;
+  const retainedStart = hourStart(nowMs) - (retentionHours - 1) * hourMs;
+  const currentHours = range(currentStart, hours);
+  const previousHours = range(previousStart, hours);
+  const historicalHours = range(
+    retainedStart,
+    Math.max(0, (previousStart - retainedStart) / hourMs),
+  );
+  return {
+    currentStart,
+    previousStart,
+    currentHours,
+    previousHours,
+    historicalHours,
+  };
+}
+
+type StatisticsWindows = ReturnType<typeof getStatisticsWindows>;
+
+async function readStatisticsTraffic(
+  redis: RedisClient,
+  { currentHours, previousHours, historicalHours }: StatisticsWindows,
+  hours: 24 | 168,
+) {
+  const allHours = [...historicalHours, ...previousHours, ...currentHours];
+  const [allRows, allVisitors] = await Promise.all([
+    Promise.all(allHours.map((hour) => redis.hGetAll(countsKey(hour)))),
+    bitmapRows(redis, allHours, visitorKey),
+  ]);
+  const offset = historicalHours.length;
+  const previousRows = allRows.slice(offset, offset + hours);
+  const currentRows = allRows.slice(offset + hours);
+  const previousVisitors = allVisitors.slice(offset, offset + hours);
+  const currentVisitors = allVisitors.slice(offset + hours);
+  const previousCohorts = cohorts(
+    union(allVisitors.slice(0, offset)),
+    previousVisitors,
+  );
+  const currentCohorts = cohorts(
+    union(allVisitors.slice(0, offset + hours)),
+    currentVisitors,
+  );
+  const firstLegacyIndex = allRows.findIndex(
+    (row, index) =>
+      Object.keys(row).length > 0 || bitCount(allVisitors[index]!) > 0,
+  );
+  return {
+    currentRows,
+    previousRows,
+    currentCohorts,
+    previousCohorts,
+    firstObservedAt: firstLegacyIndex < 0 ? null : allHours[firstLegacyIndex]!,
+  };
+}
+
+type StatisticsTraffic = Awaited<ReturnType<typeof readStatisticsTraffic>>;
+
+async function readStatisticsCoverage(
+  redis: RedisClient,
+  { currentStart, previousStart }: StatisticsWindows,
+  firstObservedAt: number | null,
+  nowMs: number,
+  hours: 24 | 168,
+) {
+  const trafficCoverage = await coverage(
+    redis,
+    "traffic",
+    firstObservedAt,
+    currentStart,
+    previousStart,
+    nowMs,
+    hours,
+  );
+  const sessionCoverage = await coverage(
+    redis,
+    "sessions",
+    null,
+    currentStart,
+    previousStart,
+    nowMs,
+    hours,
+  );
+  const ctrCoverage = await coverage(
+    redis,
+    "ctr-invariants",
+    null,
+    currentStart,
+    previousStart,
+    nowMs,
+    hours,
+  );
+  return { trafficCoverage, sessionCoverage, ctrCoverage };
+}
+
+type StatisticsReportCoverage = Awaited<
+  ReturnType<typeof readStatisticsCoverage>
+>;
+
+async function readStatisticsSessions(
+  redis: RedisClient,
+  { currentHours, previousHours }: StatisticsWindows,
+) {
+  const sessionPair = async (kind: SessionKind) => {
+    const [current, previous] = await Promise.all([
+      hourlyEstimateSum(redis, currentHours, (hour) => sessionKey(kind, hour)),
+      hourlyEstimateSum(redis, previousHours, (hour) => sessionKey(kind, hour)),
+    ]);
+    return [current, previous] as const;
+  };
+  const [
+    sessions,
+    subscribed,
+    joinEligible,
+    secondaryEligible,
+    ctaOnlyEligible,
+    interactionEligible,
+    interactions,
+    joinSessions,
+    secondarySessions,
+    ctaOnlySessions,
+  ] = await Promise.all([
+    sessionPair("all"),
+    sessionPair("subscribed"),
+    sessionPair("join_eligible"),
+    sessionPair("secondary_eligible"),
+    sessionPair("cta_only_eligible"),
+    sessionPair("interaction_eligible"),
+    sessionPair("interaction"),
+    sessionPair("join_click"),
+    sessionPair("secondary_click"),
+    sessionPair("cta_only_click"),
+  ]);
+  return {
+    sessions,
+    subscribed,
+    joinEligible,
+    secondaryEligible,
+    ctaOnlyEligible,
+    interactionEligible,
+    interactions,
+    joinSessions,
+    secondarySessions,
+    ctaOnlySessions,
+  };
+}
+
+type StatisticsSessions = Awaited<ReturnType<typeof readStatisticsSessions>>;
+
+function countStatisticsClicks({
+  currentRows,
+  previousRows,
+}: StatisticsTraffic) {
+  const sumPeriod = (field: string) =>
+    [sumField(currentRows, field), sumField(previousRows, field)] as const;
+  return {
+    joinClicks: sumPeriod("join_clicks"),
+    joinConfirmations: sumPeriod("join_confirmed"),
+    secondaryCtaClicks: sumPeriod("secondary_cta_clicks"),
+    ctaOnlyClicks: sumPeriod("cta_only_clicks"),
+    ctaClicks: sumPeriod("cta_clicks"),
+  };
+}
+
+type StatisticsClickCounts = ReturnType<typeof countStatisticsClicks>;
+
+async function readStatisticsCtaLabels(
+  redis: RedisClient,
+  { currentHours, previousHours }: StatisticsWindows,
+  { currentRows, previousRows }: StatisticsTraffic,
+  sessionCoverage: StatisticsCoverage,
+): Promise<StatisticsResponse["metrics"]["ctas"]["byLabel"]> {
+  const labels = new Map<string, string>();
+  for (const row of [...currentRows, ...previousRows])
+    for (const [field, value] of Object.entries(row))
+      if (field.startsWith("cta_label:")) labels.set(field.slice(10), value);
+  return Promise.all(
+    [...labels.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(async ([id, label]) => {
+        const [current, previous] = await Promise.all([
+          hourlyEstimateSum(redis, currentHours, (hour) =>
+            ctaSessionKey(id, hour),
+          ),
+          hourlyEstimateSum(redis, previousHours, (hour) =>
+            ctaSessionKey(id, hour),
+          ),
+        ]);
+        return {
+          label,
+          clicks: comparable(
+            sumField(currentRows, `secondary_cta_click:${id}`),
+            sumField(previousRows, `secondary_cta_click:${id}`),
+            sessionCoverage,
+          ),
+          uniqueSessions: comparable(current, previous, sessionCoverage),
+        };
+      }),
+  );
+}
+
+function buildTrafficAndMembershipMetrics(
+  {
+    currentRows,
+    previousRows,
+    currentCohorts,
+    previousCohorts,
+  }: StatisticsTraffic,
+  { sessions, subscribed, joinEligible }: StatisticsSessions,
+  { trafficCoverage, sessionCoverage }: StatisticsReportCoverage,
+): Pick<StatisticsResponse["metrics"], "traffic" | "visitors" | "membership"> {
+  return {
+    traffic: {
+      impressions: comparable(
+        sumField(currentRows, "loads_total"),
+        sumField(previousRows, "loads_total"),
+        trafficCoverage,
+      ),
+      viewingSessions: comparable(sessions[0], sessions[1], sessionCoverage),
+    },
+    visitors: {
+      unique: comparable(
+        currentCohorts.unique,
+        previousCohorts.unique,
+        trafficCoverage,
+      ),
+      new: comparable(
+        currentCohorts.newVisitors,
+        previousCohorts.newVisitors,
+        trafficCoverage,
+      ),
+      returning: comparable(
+        currentCohorts.returning,
+        previousCohorts.returning,
+        trafficCoverage,
+      ),
+      returningRate: comparable(
+        rate(currentCohorts.returning, currentCohorts.unique),
+        rate(previousCohorts.returning, previousCohorts.unique),
+        trafficCoverage,
+      ),
+    },
+    membership: {
+      appTrackedSubscribedSessions: comparable(
+        subscribed[0],
+        subscribed[1],
+        sessionCoverage,
+      ),
+      joinEligibleSessions: comparable(
+        joinEligible[0],
+        joinEligible[1],
+        sessionCoverage,
+      ),
+    },
+  };
+}
+
+function buildJoinAndCtaMetrics(
+  {
+    joinClicks,
+    joinConfirmations,
+    secondaryCtaClicks,
+    ctaOnlyClicks,
+  }: StatisticsClickCounts,
+  {
+    joinSessions,
+    joinEligible,
+    secondarySessions,
+    secondaryEligible,
+    ctaOnlySessions,
+    ctaOnlyEligible,
+  }: StatisticsSessions,
+  { sessionCoverage, ctrCoverage }: StatisticsReportCoverage,
+  byLabel: StatisticsResponse["metrics"]["ctas"]["byLabel"],
+): Pick<StatisticsResponse["metrics"], "joins" | "ctas" | "ctaOnly"> {
+  return {
+    joins: {
+      clicks: comparable(...joinClicks, sessionCoverage),
+      uniqueClickSessions: comparable(
+        joinSessions[0],
+        joinSessions[1],
+        sessionCoverage,
+      ),
+      confirmed: comparable(...joinConfirmations, sessionCoverage),
+      clickSuccessRate: comparable(
+        rate(joinConfirmations[0], joinClicks[0]),
+        rate(joinConfirmations[1], joinClicks[1]),
+        sessionCoverage,
+      ),
+      ctr: comparable(
+        rate(joinSessions[0], joinEligible[0]),
+        rate(joinSessions[1], joinEligible[1]),
+        ctrCoverage,
+      ),
+    },
+    ctas: {
+      clicks: comparable(...secondaryCtaClicks, sessionCoverage),
+      uniqueClickSessions: comparable(
+        secondarySessions[0],
+        secondarySessions[1],
+        sessionCoverage,
+      ),
+      eligibleSessions: comparable(
+        secondaryEligible[0],
+        secondaryEligible[1],
+        sessionCoverage,
+      ),
+      ctr: comparable(
+        rate(secondarySessions[0], secondaryEligible[0]),
+        rate(secondarySessions[1], secondaryEligible[1]),
+        ctrCoverage,
+      ),
+      byLabel,
+    },
+    ctaOnly: {
+      clicks: comparable(...ctaOnlyClicks, sessionCoverage),
+      uniqueClickSessions: comparable(
+        ctaOnlySessions[0],
+        ctaOnlySessions[1],
+        sessionCoverage,
+      ),
+      eligibleSessions: comparable(
+        ctaOnlyEligible[0],
+        ctaOnlyEligible[1],
+        sessionCoverage,
+      ),
+      ctr: comparable(
+        rate(ctaOnlySessions[0], ctaOnlyEligible[0]),
+        rate(ctaOnlySessions[1], ctaOnlyEligible[1]),
+        ctrCoverage,
+      ),
+    },
+  };
+}
+
+function buildInteractionAndLegacyMetrics(
+  { secondaryCtaClicks, ctaOnlyClicks, ctaClicks }: StatisticsClickCounts,
+  { interactions, interactionEligible }: StatisticsSessions,
+  { sessionCoverage, ctrCoverage, trafficCoverage }: StatisticsReportCoverage,
+): Pick<StatisticsResponse["metrics"], "interactions" | "legacy"> {
+  return {
+    interactions: {
+      uniqueSessions: comparable(
+        interactions[0],
+        interactions[1],
+        sessionCoverage,
+      ),
+      eligibleSessions: comparable(
+        interactionEligible[0],
+        interactionEligible[1],
+        sessionCoverage,
+      ),
+      ctr: comparable(
+        rate(interactions[0], interactionEligible[0]),
+        rate(interactions[1], interactionEligible[1]),
+        ctrCoverage,
+      ),
+    },
+    legacy: {
+      unclassifiedCtaClicks: comparable(
+        Math.max(0, ctaClicks[0] - secondaryCtaClicks[0] - ctaOnlyClicks[0]),
+        Math.max(0, ctaClicks[1] - secondaryCtaClicks[1] - ctaOnlyClicks[1]),
+        trafficCoverage,
+      ),
     },
   };
 }

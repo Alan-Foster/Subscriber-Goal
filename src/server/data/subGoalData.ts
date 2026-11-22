@@ -245,6 +245,69 @@ export async function getSubGoalData(
   postId: string,
   customPostData?: unknown,
 ): Promise<SubGoalData> {
+  const stored = await readStoredSubGoalFields(redis, postId);
+  const parsedGoal = parsePersistedSubscriberGoal(stored.goal);
+  const resolvedAutomaticSuccessorSuppression =
+    stored.automaticSuccessorSuppression === "auto_goal_reconciliation" ||
+    stored.automaticSuccessorSuppression === "onboarding_reconciliation"
+      ? stored.automaticSuccessorSuppression
+      : stored.automaticSuccessorSuppression?.trim()
+        ? "unknown"
+        : null;
+  if (resolvedAutomaticSuccessorSuppression === "unknown") {
+    logDiagnostic("warn", "stored_state_conflict", {
+      workflow: "sub_goal_data",
+      phase: "automatic_successor_suppression_resolution",
+      postId,
+    });
+  }
+  const { postKind, resolvedHeight } = resolveStoredPostFormat(
+    stored,
+    postId,
+    parsedGoal,
+    customPostData,
+  );
+  const resolvedColorTheme = resolveSubGoalColorTheme(stored.colorTheme);
+  const resolvedLanguage = resolveSubGoalLanguage(stored.language);
+  const afterSubscribeAction = resolveStoredAfterSubscribeAction(
+    stored,
+    postKind,
+    parsedGoal,
+    resolvedLanguage,
+    resolvedColorTheme,
+  );
+  return {
+    postKind,
+    goal: parsedGoal,
+    recentSubscriber: stored.recentSubscriber ?? null,
+    completedTime: stored.completedTime ? parseInt(stored.completedTime) : 0,
+    subredditDisplayName:
+      stored.subredditDisplayName && stored.subredditDisplayName.length > 0
+        ? stored.subredditDisplayName
+        : null,
+    headerText:
+      stored.headerText && stored.headerText.length > 0
+        ? stored.headerText
+        : null,
+    colorTheme: resolvedColorTheme,
+    // Successors are mandatory for classic numeric goals. Legacy false and
+    // missing values remain detectable below but can no longer opt out.
+    autoCreateNextGoal: parsedGoal > 0,
+    autoCreateNextGoalConfigured:
+      stored.autoCreateNextGoal === "true" ||
+      stored.autoCreateNextGoal === "false",
+    automaticSuccessorSuppression: resolvedAutomaticSuccessorSuppression,
+    language: resolvedLanguage,
+    postHeight: resolvedHeight,
+    afterSubscribeAction,
+    afterSubscribePreset: resolveAfterSubscribePreset(
+      stored.afterSubscribePreset,
+      afterSubscribeAction,
+    ),
+  };
+}
+
+async function readStoredSubGoalFields(redis: RedisClient, postId: string) {
   const [
     goal,
     recentSubscriber,
@@ -297,21 +360,34 @@ export async function getSubGoalData(
     string | null,
     string | null,
   ];
-  const parsedGoal = parsePersistedSubscriberGoal(goal);
-  const resolvedAutomaticSuccessorSuppression =
-    automaticSuccessorSuppression === "auto_goal_reconciliation" ||
-    automaticSuccessorSuppression === "onboarding_reconciliation"
-      ? automaticSuccessorSuppression
-      : automaticSuccessorSuppression?.trim()
-        ? "unknown"
-        : null;
-  if (resolvedAutomaticSuccessorSuppression === "unknown") {
-    logDiagnostic("warn", "stored_state_conflict", {
-      workflow: "sub_goal_data",
-      phase: "automatic_successor_suppression_resolution",
-      postId,
-    });
-  }
+  return {
+    goal,
+    recentSubscriber,
+    completedTime,
+    subredditDisplayName,
+    headerText,
+    colorTheme,
+    autoCreateNextGoal,
+    automaticSuccessorSuppression,
+    language,
+    postHeight,
+    storedPostKind,
+    afterSubscribeActionType,
+    afterSubscribeButtonText,
+    afterSubscribeUrl,
+    afterSubscribeColorTheme,
+    afterSubscribePreset,
+  };
+}
+
+type StoredSubGoalFields = Awaited<ReturnType<typeof readStoredSubGoalFields>>;
+
+function resolveStoredPostFormat(
+  { goal, storedPostKind, postHeight }: StoredSubGoalFields,
+  postId: string,
+  parsedGoal: number,
+  customPostData: unknown,
+) {
   const postDataKind = resolvePostKindFromPostData(customPostData);
   const persistedKind = resolvePostKind(storedPostKind);
   const rawHeight = resolveSubGoalPostHeight(postHeight);
@@ -352,8 +428,21 @@ export async function getSubGoalData(
         : rawHeight === "short"
           ? "short"
           : "regular";
-  const resolvedColorTheme = resolveSubGoalColorTheme(colorTheme);
-  const resolvedLanguage = resolveSubGoalLanguage(language);
+  return { postKind, resolvedHeight };
+}
+
+function resolveStoredAfterSubscribeAction(
+  {
+    afterSubscribeActionType,
+    afterSubscribeButtonText,
+    afterSubscribeUrl,
+    afterSubscribeColorTheme,
+  }: StoredSubGoalFields,
+  postKind: PostKind,
+  parsedGoal: number,
+  resolvedLanguage: SubGoalLanguage,
+  resolvedColorTheme: SubGoalColorTheme,
+): AfterSubscribeAction {
   const hasActionMetadata =
     typeof afterSubscribeActionType === "string" &&
     afterSubscribeActionType.trim().length > 0;
@@ -369,7 +458,7 @@ export async function getSubGoalData(
       ? afterSubscribeColorTheme
       : resolvedColorTheme,
   });
-  const afterSubscribeAction = isActionlessLegacySubscriberGoal
+  return isActionlessLegacySubscriberGoal
     ? defaultAfterSubscribeAction
     : resolveAfterSubscribeAction({
         type: afterSubscribeActionType,
@@ -381,31 +470,6 @@ export async function getSubGoalData(
           ? { invalidConfigurationFallback: legacyFallbackAction }
           : {}),
       }).action;
-  return {
-    postKind,
-    goal: parsedGoal,
-    recentSubscriber: recentSubscriber ?? null,
-    completedTime: completedTime ? parseInt(completedTime) : 0,
-    subredditDisplayName:
-      subredditDisplayName && subredditDisplayName.length > 0
-        ? subredditDisplayName
-        : null,
-    headerText: headerText && headerText.length > 0 ? headerText : null,
-    colorTheme: resolvedColorTheme,
-    // Successors are mandatory for classic numeric goals. Legacy false and
-    // missing values remain detectable below but can no longer opt out.
-    autoCreateNextGoal: parsedGoal > 0,
-    autoCreateNextGoalConfigured:
-      autoCreateNextGoal === "true" || autoCreateNextGoal === "false",
-    automaticSuccessorSuppression: resolvedAutomaticSuccessorSuppression,
-    language: resolvedLanguage,
-    postHeight: resolvedHeight,
-    afterSubscribeAction,
-    afterSubscribePreset: resolveAfterSubscribePreset(
-      afterSubscribePreset,
-      afterSubscribeAction,
-    ),
-  };
 }
 
 export async function setSubGoalData(
@@ -1157,42 +1221,12 @@ export async function eraseFromRecentSubscribers(
     await redis.hGet(recentSubscriberPostsByUsernameKey, normalized),
   );
   if (typeof (redis as Partial<RedisClient>).watch !== "function") {
-    const keysToUpdate: Record<string, string> = {};
-    const preservedPostIds: string[] = [];
-    for (const postId of indexedPostIds) {
-      const key = `${postId}${postRecentSubscriberSuffix}`;
-      const value = await redis.hGet(subscriberGoalsKey, key);
-      const order = parseRecentSubscriberOrder(
-        await redis.hGet(
-          subscriberGoalsKey,
-          `${postId}${postRecentSubscriberOrderSuffix}`,
-        ),
-      );
-      const generation = order
-        ? ((await redis.get(subscriberTrackingGenerationKey(order.userId))) ??
-          "")
-        : undefined;
-      if (
-        value?.toLowerCase() === normalized &&
-        order &&
-        ((userId && order.userId !== userId) ||
-          generation === order.erasureGeneration)
-      ) {
-        preservedPostIds.push(postId);
-        continue;
-      }
-      if (value?.toLowerCase() === normalized) keysToUpdate[key] = "";
-    }
-    if (Object.keys(keysToUpdate).length > 0) {
-      await redis.hSet(subscriberGoalsKey, keysToUpdate);
-    }
-    if (preservedPostIds.length > 0) {
-      await redis.hSet(recentSubscriberPostsByUsernameKey, {
-        [normalized]: stringifyPostIdList(preservedPostIds),
-      });
-    } else {
-      await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
-    }
+    await eraseRecentSubscriberFieldsWithoutWatch(
+      redis,
+      normalized,
+      indexedPostIds,
+      userId,
+    );
     return;
   }
   for (const postId of indexedPostIds) {
@@ -1240,5 +1274,48 @@ export async function eraseFromRecentSubscribers(
       if (result.length > 0) break;
       if (retry === 2) throw new Error("recent_subscriber_erasure_conflict");
     }
+  }
+}
+
+async function eraseRecentSubscriberFieldsWithoutWatch(
+  redis: RedisClient,
+  normalized: string,
+  indexedPostIds: string[],
+  userId: string | undefined,
+): Promise<void> {
+  const keysToUpdate: Record<string, string> = {};
+  const preservedPostIds: string[] = [];
+  for (const postId of indexedPostIds) {
+    const key = `${postId}${postRecentSubscriberSuffix}`;
+    const value = await redis.hGet(subscriberGoalsKey, key);
+    const order = parseRecentSubscriberOrder(
+      await redis.hGet(
+        subscriberGoalsKey,
+        `${postId}${postRecentSubscriberOrderSuffix}`,
+      ),
+    );
+    const generation = order
+      ? ((await redis.get(subscriberTrackingGenerationKey(order.userId))) ?? "")
+      : undefined;
+    if (
+      value?.toLowerCase() === normalized &&
+      order &&
+      ((userId && order.userId !== userId) ||
+        generation === order.erasureGeneration)
+    ) {
+      preservedPostIds.push(postId);
+      continue;
+    }
+    if (value?.toLowerCase() === normalized) keysToUpdate[key] = "";
+  }
+  if (Object.keys(keysToUpdate).length > 0) {
+    await redis.hSet(subscriberGoalsKey, keysToUpdate);
+  }
+  if (preservedPostIds.length > 0) {
+    await redis.hSet(recentSubscriberPostsByUsernameKey, {
+      [normalized]: stringifyPostIdList(preservedPostIds),
+    });
+  } else {
+    await redis.hDel(recentSubscriberPostsByUsernameKey, [normalized]);
   }
 }
