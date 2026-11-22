@@ -38,6 +38,7 @@ export type CreateSubscriberGoalOptions = {
   reconciliationContext?: HighlightReconciliationContext;
   mutationLease?: CommunityGoalMutationLease;
   reconciliationNowMs?: number;
+  canStartSubmissionReconciliation?: () => boolean;
   /** Trusted server-only identity for an interactive/manual invocation. */
   manualActorUserId?: string;
 };

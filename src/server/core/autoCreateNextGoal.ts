@@ -79,7 +79,7 @@ export async function processDueAutoCreateNextGoals({
   nowMs = Date.now(),
   mutationLease: existingMutationLease,
   limit,
-  canStart = () => true,
+  canStart,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
@@ -99,9 +99,9 @@ export async function processDueAutoCreateNextGoals({
     exhausted: 0,
   };
 
-  const run = { reddit, redis, appSettings, nowMs, summary };
+  const run = { reddit, redis, appSettings, nowMs, summary, canStart };
   for (const sourcePostId of duePostIds) {
-    if (!canStart()) break;
+    if (canStart && !canStart()) break;
     const outcome = await processDueSource(
       run,
       sourcePostId,
@@ -118,6 +118,7 @@ type AutoGoalRun = {
   appSettings: ServerAppSettings;
   nowMs: number;
   summary: AutoCreateNextGoalSummary;
+  canStart: (() => boolean) | undefined;
 };
 
 type AutoGoalAttempt = AutoGoalRun & {
@@ -535,6 +536,9 @@ async function createSuccessor(
       reconciliationContext: "automatic_successor",
       mutationLease,
       reconciliationNowMs: nowMs,
+      ...(attempt.canStart
+        ? { canStartSubmissionReconciliation: attempt.canStart }
+        : {}),
     },
   });
   attempt.creationFinished = true;

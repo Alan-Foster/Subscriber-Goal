@@ -1,15 +1,24 @@
-export type BackoffPolicy = {
+type ExponentialBackoffPolicy = {
   baseMs: number;
   maxMs: number;
   jitterFraction?: number;
   maxAttempts?: number;
 };
 
+export type BackoffPolicy =
+  ExponentialBackoffPolicy | { delaysMs: readonly number[] };
+
 export function getJobRetry(
   policy: BackoffPolicy,
   failedAttempts: number,
   random = Math.random,
 ): { exhausted: true } | { exhausted: false; delayMs: number } {
+  if ("delaysMs" in policy) {
+    const delayMs = policy.delaysMs[failedAttempts - 1];
+    return delayMs === undefined
+      ? { exhausted: true }
+      : { exhausted: false, delayMs };
+  }
   if (
     policy.maxAttempts !== undefined &&
     failedAttempts >= policy.maxAttempts
@@ -23,7 +32,7 @@ export function getJobRetry(
 }
 
 export function getJobBackoffDelay(
-  policy: BackoffPolicy,
+  policy: ExponentialBackoffPolicy,
   failedAttempts: number,
   random = Math.random,
 ): number {
