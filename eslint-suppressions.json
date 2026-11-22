@@ -109,19 +109,6 @@
       "count": 1
     }
   },
-  "src/server/triggers/appChanged.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/triggers/modAction.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
   "src/server/triggers/scheduler.ts": {
     "complexity": {
       "count": 1
