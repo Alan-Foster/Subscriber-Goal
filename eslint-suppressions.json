@@ -59,14 +59,6 @@
       "count": 1
     }
   },
-  "src/client/utils/fetchWithRetry.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {
     "complexity": {
       "count": 1
