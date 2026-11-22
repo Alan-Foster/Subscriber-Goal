@@ -109,27 +109,6 @@
       "count": 1
     }
   },
-  "src/server/data/statisticsAnalytics.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/data/subGoalData.ts": {
-    "complexity": {
-      "count": 2
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/data/subscriberTracking.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 2
-    }
-  },
   "src/server/triggers/appChanged.ts": {
     "complexity": {
       "count": 1

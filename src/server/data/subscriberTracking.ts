@@ -359,6 +359,33 @@ export async function applySubscriberTracking(
       member,
     ]),
   ];
+  const recent = await planRecentSubscriberUpdate(
+    redis,
+    operation,
+    normalized,
+    retired,
+    storedRecentOrderRaw,
+    storedRecentSubscriber,
+  );
+  return commitSubscriberTracking(tx, {
+    operation,
+    current,
+    existingStats,
+    normalized,
+    member,
+    legacyMembers,
+    recent,
+  });
+}
+
+async function planRecentSubscriberUpdate(
+  redis: RedisClient,
+  operation: PendingSubscriberTracking,
+  normalized: string,
+  retired: string | undefined,
+  storedRecentOrderRaw: string | undefined,
+  storedRecentSubscriber: string | undefined,
+) {
   const operationOrder: RecentSubscriberOrder = {
     timestamp: operation.timestamp,
     operationId: operation.operationId,
@@ -396,6 +423,36 @@ export async function applySubscriberTracking(
       );
     }
   }
+  return {
+    shouldUpdateRecentSubscriber,
+    nextRecentSubscriber,
+    operationOrder,
+    recentIndexUpdates,
+  };
+}
+
+type SubscriberTrackingTransaction = Awaited<ReturnType<RedisClient["watch"]>>;
+
+async function commitSubscriberTracking(
+  tx: SubscriberTrackingTransaction,
+  {
+    operation,
+    current,
+    existingStats,
+    normalized,
+    member,
+    legacyMembers,
+    recent,
+  }: {
+    operation: PendingSubscriberTracking;
+    current: PendingSubscriberTracking;
+    existingStats: string | undefined;
+    normalized: string;
+    member: string;
+    legacyMembers: string[];
+    recent: Awaited<ReturnType<typeof planRecentSubscriberUpdate>>;
+  },
+): Promise<"applied"> {
   const completed = { ...current, phase: "complete" as const };
   await tx.multi();
   if (!existingStats) {
@@ -414,6 +471,12 @@ export async function applySubscriberTracking(
     member,
     score: operation.timestamp,
   });
+  const {
+    shouldUpdateRecentSubscriber,
+    nextRecentSubscriber,
+    operationOrder,
+    recentIndexUpdates,
+  } = recent;
   if (shouldUpdateRecentSubscriber) {
     await tx.hSet(subscriberGoalsKey, {
       [`${operation.postId}${postRecentSubscriberSuffix}`]:
@@ -572,6 +635,12 @@ async function rescheduleSubscriberTracking(
   throw new Error("subscriber_tracking_reschedule_conflict");
 }
 
+type SubscriberTrackingRepairCounts = {
+  completed: number;
+  failed: number;
+  failedReschedule: boolean;
+};
+
 export async function processSubscriberTrackingRepairs(
   redis: RedisClient,
   options: { nowMs?: number; batchSize?: number } = {},
@@ -591,139 +660,163 @@ export async function processSubscriberTrackingRepairs(
   if (entries.length === 0 && safeOffset > 0) {
     await redis.set(subscriberTrackingRepairCursorKey, "0");
   }
-  let completed = 0;
-  let failed = 0;
-  let failedReschedule = false;
+  const counts: SubscriberTrackingRepairCounts = {
+    completed: 0,
+    failed: 0,
+    failedReschedule: false,
+  };
   for (const entry of entries) {
     if (entry.score > nowMs) continue;
-    let raw: string | undefined;
-    try {
-      raw = await redis.hGet(
-        subscriberTrackingPendingByOperationKey,
-        entry.member,
-      );
-    } catch (error) {
-      failed += 1;
-      logDiagnostic(
-        "warn",
-        "subscriber_tracking_pending_read_failed",
-        {
-          workflow: "subscriber_tracking_repair",
-          phase: "pending_read",
-          operationId: entry.member,
-        },
-        error,
-      );
-      try {
-        await redis.zAdd(subscriberTrackingQueueKey, {
-          member: entry.member,
-          score: nowMs + retryDelay(0),
-        });
-      } catch (deferError) {
-        failedReschedule = true;
-        logDiagnostic(
-          "error",
-          "subscriber_tracking_reschedule_failed",
-          {
-            workflow: "subscriber_tracking_repair",
-            phase: "read_failure_defer",
-            operationId: entry.member,
-          },
-          deferError,
-        );
-      }
-      continue;
-    }
-    const operation = decode(raw);
-    if (!operation) {
-      try {
-        await removeUnusableQueueEntry(redis, entry.member, raw);
-        completed += 1;
-        logDiagnostic("warn", "subscriber_tracking_unusable_removed", {
-          workflow: "subscriber_tracking_repair",
-          phase: raw === undefined ? "orphan" : "invalid_payload",
-          operationId: entry.member,
-        });
-      } catch (error) {
-        failed += 1;
-        failedReschedule = true;
-        logDiagnostic(
-          "error",
-          "subscriber_tracking_unusable_cleanup_failed",
-          {
-            workflow: "subscriber_tracking_repair",
-            phase: raw === undefined ? "orphan" : "invalid_payload",
-            operationId: entry.member,
-          },
-          error,
-        );
-      }
-      continue;
-    }
-    try {
-      const result = await applySubscriberTracking(redis, operation);
-      if (
-        result === "applied" ||
-        result === "complete" ||
-        result === "obsolete"
-      ) {
-        const latest = decode(
-          await redis.hGet(
-            subscriberTrackingPendingByOperationKey,
-            operation.operationId,
-          ),
-        ) ?? { ...operation, phase: "complete" as const };
-        if (await cleanupSubscriberTracking(redis, latest)) completed += 1;
-        else throw new Error("subscriber_tracking_cleanup_not_committed");
-      } else if (result === "invalidated") {
-        await redis.zRem(subscriberTrackingQueueKey, [operation.operationId]);
-        completed += 1;
-      }
-    } catch (error) {
-      failed += 1;
-      logDiagnostic(
-        "warn",
-        "subscriber_tracking_repair_failed",
-        {
-          workflow: "subscriber_tracking_repair",
-          phase: "apply_or_cleanup",
-          operationId: operation.operationId,
-        },
-        error,
-      );
-      try {
-        const result = await rescheduleSubscriberTracking(
-          redis,
-          operation,
-          nowMs + retryDelay(operation.attempts),
-        );
-        if (result === "invalidated") {
-          await redis.zRem(subscriberTrackingQueueKey, [operation.operationId]);
-          completed += 1;
-        }
-      } catch (rescheduleError) {
-        // The old due queue member remains discoverable if rescheduling fails.
-        failedReschedule = true;
-        logDiagnostic(
-          "error",
-          "subscriber_tracking_reschedule_failed",
-          {
-            workflow: "subscriber_tracking_repair",
-            phase: "reschedule",
-            operationId: operation.operationId,
-          },
-          rescheduleError,
-        );
-      }
-    }
+    await repairSubscriberTrackingEntry(redis, entry.member, nowMs, counts);
   }
   await redis.set(
     subscriberTrackingRepairCursorKey,
-    failedReschedule && entries.length === batchSize
+    counts.failedReschedule && entries.length === batchSize
       ? String(safeOffset + entries.length)
       : "0",
   );
-  return { read: entries.length, completed, failed };
+  return {
+    read: entries.length,
+    completed: counts.completed,
+    failed: counts.failed,
+  };
+}
+
+async function repairSubscriberTrackingEntry(
+  redis: RedisClient,
+  operationId: string,
+  nowMs: number,
+  counts: SubscriberTrackingRepairCounts,
+): Promise<void> {
+  let raw: string | undefined;
+  try {
+    raw = await redis.hGet(
+      subscriberTrackingPendingByOperationKey,
+      operationId,
+    );
+  } catch (error) {
+    counts.failed += 1;
+    logDiagnostic(
+      "warn",
+      "subscriber_tracking_pending_read_failed",
+      {
+        workflow: "subscriber_tracking_repair",
+        phase: "pending_read",
+        operationId,
+      },
+      error,
+    );
+    try {
+      await redis.zAdd(subscriberTrackingQueueKey, {
+        member: operationId,
+        score: nowMs + retryDelay(0),
+      });
+    } catch (deferError) {
+      counts.failedReschedule = true;
+      logDiagnostic(
+        "error",
+        "subscriber_tracking_reschedule_failed",
+        {
+          workflow: "subscriber_tracking_repair",
+          phase: "read_failure_defer",
+          operationId,
+        },
+        deferError,
+      );
+    }
+    return;
+  }
+  const operation = decode(raw);
+  if (!operation) {
+    try {
+      await removeUnusableQueueEntry(redis, operationId, raw);
+      counts.completed += 1;
+      logDiagnostic("warn", "subscriber_tracking_unusable_removed", {
+        workflow: "subscriber_tracking_repair",
+        phase: raw === undefined ? "orphan" : "invalid_payload",
+        operationId,
+      });
+    } catch (error) {
+      counts.failed += 1;
+      counts.failedReschedule = true;
+      logDiagnostic(
+        "error",
+        "subscriber_tracking_unusable_cleanup_failed",
+        {
+          workflow: "subscriber_tracking_repair",
+          phase: raw === undefined ? "orphan" : "invalid_payload",
+          operationId,
+        },
+        error,
+      );
+    }
+    return;
+  }
+  await applyTrackingRepair(redis, operation, nowMs, counts);
+}
+
+async function applyTrackingRepair(
+  redis: RedisClient,
+  operation: PendingSubscriberTracking,
+  nowMs: number,
+  counts: SubscriberTrackingRepairCounts,
+): Promise<void> {
+  try {
+    const result = await applySubscriberTracking(redis, operation);
+    if (
+      result === "applied" ||
+      result === "complete" ||
+      result === "obsolete"
+    ) {
+      const latest = decode(
+        await redis.hGet(
+          subscriberTrackingPendingByOperationKey,
+          operation.operationId,
+        ),
+      ) ?? { ...operation, phase: "complete" as const };
+      if (await cleanupSubscriberTracking(redis, latest)) counts.completed += 1;
+      else throw new Error("subscriber_tracking_cleanup_not_committed");
+    } else if (result === "invalidated") {
+      await redis.zRem(subscriberTrackingQueueKey, [operation.operationId]);
+      counts.completed += 1;
+    }
+  } catch (error) {
+    counts.failed += 1;
+    logDiagnostic(
+      "warn",
+      "subscriber_tracking_repair_failed",
+      {
+        workflow: "subscriber_tracking_repair",
+        phase: "apply_or_cleanup",
+        operationId: operation.operationId,
+      },
+      error,
+    );
+    try {
+      const result = await rescheduleSubscriberTracking(
+        redis,
+        operation,
+        nowMs + retryDelay(operation.attempts),
+      );
+      if (result === "invalidated") {
+        await redis.zRem(subscriberTrackingQueueKey, [operation.operationId]);
+        counts.completed += 1;
+      }
+    } catch (rescheduleError) {
+      // The old due queue member remains discoverable if rescheduling fails.
+      counts.failedReschedule = true;
+      logDiagnostic(
+        "error",
+        "subscriber_tracking_reschedule_failed",
+        {
+          workflow: "subscriber_tracking_repair",
+          phase: "reschedule",
+          operationId: operation.operationId,
+        },
+        rescheduleError,
+      );
+    }
+  }
 }
 
 export async function invalidateSubscriberTracking(
