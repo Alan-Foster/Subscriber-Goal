@@ -425,6 +425,13 @@ export class FakeRedisImpl {
     const queued: Array<() => Promise<unknown>> = [];
     return {
       multi: async () => {},
+      set: async (
+        key: string,
+        value: string,
+        options?: Parameters<FakeRedisImpl["set"]>[2],
+      ) => {
+        queued.push(() => this.set(key, value, options));
+      },
       del: async (...keys: string[]) => {
         queued.push(() => this.del(...keys));
       },

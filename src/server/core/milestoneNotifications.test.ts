@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MilestoneNotificationJob } from "../../shared/types/api";
+import { createMilestoneNotificationRecoveryJob } from "../jobs/milestoneNotificationRecovery";
+import { dueJobsKey } from "../jobs/queue";
+import { dispatchDueJobs } from "../jobs/runner";
+import { FakeRedisImpl, Gate } from "../testing/faultHarness";
 import {
   MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
   isMilestoneNotificationJob,
@@ -11,10 +15,12 @@ import {
   milestoneNotificationDeadline,
   milestoneNotificationJobName,
   milestoneNotificationPageKey,
+  milestoneNotificationRecoveryKey,
   milestoneNotificationTitle,
   processMilestoneNotificationBatch,
   recoverMilestoneNotificationContinuations,
   renderMilestoneNotificationCopy,
+  type MilestoneNotificationPageState,
 } from "./milestoneNotifications";
 
 const job: MilestoneNotificationJob = {
@@ -511,5 +517,161 @@ describe("milestone notifications", () => {
     });
     expect(expired.status).toBe("expired");
     expect(reads).not.toHaveBeenCalled();
+  });
+});
+
+describe("milestone continuation recovery runner", () => {
+  function recoveryFixture() {
+    const redis = new FakeRedisImpl();
+    const dueAt = Date.now() + 10_000;
+    const parent = { ...job, completedTime: dueAt - 20_000 };
+    const child = { ...parent, cursor: "saved-cursor", attemptedRecipients: 1 };
+    const parentKey = milestoneNotificationPageKey(parent);
+    const parentState: MilestoneNotificationPageState = {
+      version: 2,
+      job: parent,
+      phase: "confirmed",
+      child,
+      continuation: "pending",
+      recoveryAttempts: 2,
+      nextRecoveryAt: dueAt,
+      updatedAt: dueAt - 4_000,
+    };
+    const currentCampaign = {
+      ...campaign,
+      completedTime: parent.completedTime,
+    };
+    const runJob = vi.fn<() => Promise<string>>().mockResolvedValue("accepted");
+    const worker = createMilestoneNotificationRecoveryJob(redis as never, {
+      deliveryEnabled: true,
+      schedulerClient: { runJob },
+      getCampaign: async () => currentCampaign,
+    });
+    return {
+      redis,
+      dueAt,
+      child,
+      parentKey,
+      parentState,
+      currentCampaign,
+      runJob,
+      seed: async () => {
+        await redis.set(parentKey, JSON.stringify(parentState));
+        await redis.zAdd(milestoneNotificationRecoveryKey, {
+          member: parentKey,
+          score: dueAt,
+        });
+      },
+      tick: (now: number, deadlineMs = now + 20_000) =>
+        dispatchDueJobs(redis as never, [worker], {
+          now: () => now,
+          deadlineMs,
+        }),
+    };
+  }
+
+  it("indexes a legacy continuation at its original score and schedules the saved child once across overlapping ticks", async () => {
+    const { redis, dueAt, child, parentKey, parentState, runJob, seed, tick } =
+      recoveryFixture();
+    const queuedJob = "milestone_notification_recovery";
+    await seed();
+    await tick(dueAt - 1);
+    await tick(dueAt, dueAt);
+    expect(runJob).not.toHaveBeenCalled();
+    expect(await redis.zScore(dueJobsKey, queuedJob)).toBe(dueAt);
+    expect(await redis.get(parentKey)).toBe(JSON.stringify(parentState));
+
+    const scheduling = new Gate();
+    runJob.mockImplementationOnce(async () => {
+      scheduling.arrive();
+      await scheduling.released;
+      return "accepted";
+    });
+    const first = tick(dueAt);
+    try {
+      await Promise.race([
+        scheduling.reached,
+        first.then(() => {
+          throw new Error("The due continuation did not reach the scheduler");
+        }),
+      ]);
+      await tick(dueAt);
+      expect(runJob).toHaveBeenCalledOnce();
+    } finally {
+      scheduling.release();
+      await first;
+    }
+    await tick(dueAt);
+    expect(runJob).toHaveBeenCalledExactlyOnceWith({
+      name: milestoneNotificationJobName,
+      data: child,
+      runAt: new Date(dueAt + milestoneNotificationBatchDelayMs),
+    });
+    expect(await redis.get(parentKey)).toContain('"continuation":"scheduled"');
+    expect(
+      await redis.zScore(milestoneNotificationRecoveryKey, parentKey),
+    ).toBeUndefined();
+    expect(await redis.zScore(dueJobsKey, queuedJob)).toBeUndefined();
+    expect(
+      await redis.hGetAll("milestone_notification_recovery_job_v1_state"),
+    ).toEqual({});
+  });
+
+  it("keeps the original backoff after a lost scheduling response and deduplicates child delivery", async () => {
+    const {
+      redis,
+      dueAt,
+      child,
+      parentKey,
+      currentCampaign,
+      runJob,
+      seed,
+      tick,
+    } = recoveryFixture();
+    await seed();
+    runJob.mockRejectedValueOnce(new Error("scheduler response lost"));
+    await tick(dueAt);
+    const retryAt = dueAt + 8_000;
+    expect(JSON.parse((await redis.get(parentKey))!)).toMatchObject({
+      continuation: "pending",
+      recoveryAttempts: 3,
+      nextRecoveryAt: retryAt,
+    });
+    expect(
+      await redis.zScore(dueJobsKey, "milestone_notification_recovery"),
+    ).toBe(retryAt);
+    await tick(retryAt - 1);
+    expect(runJob).toHaveBeenCalledOnce();
+    await tick(retryAt);
+    expect(runJob).toHaveBeenCalledTimes(2);
+    expect(runJob).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: child }),
+    );
+
+    const enqueue = vi
+      .fn()
+      .mockResolvedValue({ successCount: 1, failureCount: 0 });
+    const debit = vi.fn().mockResolvedValue(1);
+    const options = {
+      deliveryEnabled: true,
+      stateClient: redis as never,
+      dailyBudgetClient: {
+        incrBy: debit,
+        expire: vi.fn(),
+      } as never,
+      notificationClient: {
+        listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_alice"] }),
+        enqueue,
+      } as never,
+      now: () => retryAt + milestoneNotificationBatchDelayMs,
+    };
+    await expect(
+      processMilestoneNotificationBatch(child, currentCampaign, options),
+    ).resolves.toMatchObject({ status: "processed" });
+    await expect(
+      processMilestoneNotificationBatch(child, currentCampaign, options),
+    ).resolves.toMatchObject({ status: "duplicate" });
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(debit).toHaveBeenCalledOnce();
   });
 });
