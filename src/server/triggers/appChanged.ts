@@ -19,13 +19,38 @@ import { recordLifecycleAndScheduleRecovery } from "../core/appAccountRecovery";
 import { scheduleAppRepair } from "../core/appRepair";
 import { reconcileOnboardingForLifecycle } from "../core/onboardingLifecycle";
 
+type LifecycleSource = "install" | "upgrade" | "unknown";
+type InstallOrUpgrade = Exclude<LifecycleSource, "unknown">;
+type LifecycleSubreddit = Awaited<
+  ReturnType<typeof reddit.getCurrentSubreddit>
+>;
+
 export async function onAppChanged({
   lifecycleSource = "unknown",
   installerUsername,
 }: {
-  lifecycleSource?: "install" | "upgrade" | "unknown";
+  lifecycleSource?: LifecycleSource;
   installerUsername?: string;
 } = {}): Promise<void> {
+  const community = await resolveLifecycleCommunity();
+  if (!community) return;
+
+  await recordLifecycleAndScheduleRepairs(
+    lifecycleSource,
+    community.subredditName,
+    installerUsername,
+  );
+  await saveLifecycleDisplayName(community.subredditName);
+  if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
+    await setUpLifecycleOnboarding(
+      lifecycleSource,
+      installerUsername,
+      community.currentSubreddit,
+    );
+  }
+}
+
+async function resolveLifecycleCommunity() {
   if (!context.subredditName && !context.subredditId) {
     console.info(
       "[appChanged] skipping subreddit setup: no subreddit context on lifecycle trigger",
@@ -34,8 +59,7 @@ export async function onAppChanged({
   }
 
   let subredditName = context.subredditName;
-  let currentSubreddit:
-    Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | undefined;
+  let currentSubreddit: LifecycleSubreddit | undefined;
   if (!subredditName) {
     try {
       currentSubreddit = await reddit.getCurrentSubreddit();
@@ -50,23 +74,14 @@ export async function onAppChanged({
       throw error;
     }
   }
+  return { subredditName, currentSubreddit };
+}
 
-  const runPhase = async (
-    phase: string,
-    operation: () => Promise<unknown>,
-  ): Promise<void> => {
-    try {
-      await operation();
-    } catch (error) {
-      logDiagnostic(
-        "warn",
-        "app_changed_phase_failed",
-        { workflow: "app_changed", phase },
-        error,
-      );
-    }
-  };
-
+async function recordLifecycleAndScheduleRepairs(
+  lifecycleSource: LifecycleSource,
+  subredditName: string,
+  installerUsername: string | undefined,
+): Promise<void> {
   await rememberAppInstaller(redis, installerUsername);
   if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
     await recordLifecycleAndScheduleRecovery({
@@ -82,102 +97,150 @@ export async function onAppChanged({
     force: lifecycleSource === "install" || lifecycleSource === "upgrade",
     reason: `lifecycle_${lifecycleSource}`,
   });
+}
 
-  await runPhase("subreddit_display_name", () =>
-    ensureSavedSubredditDisplayName(redis, subredditName),
-  );
-  if (lifecycleSource === "install" || lifecycleSource === "upgrade") {
-    const automaticOnboardingEnabled =
-      shouldInitializeReleaseOnboarding(lifecycleSource);
-    if (!currentSubreddit) {
-      try {
-        currentSubreddit = await reddit.getCurrentSubreddit();
-      } catch (error) {
-        logDiagnostic(
-          "warn",
-          "app_changed_phase_failed",
-          { workflow: "app_changed", phase: "onboarding_eligibility" },
-          error,
-        );
-        throw error;
-      }
-    }
-    const eligibility = getOnboardingEligibility(currentSubreddit);
-    logDiagnostic("info", "onboarding_eligibility_checked", {
-      workflow: "app_changed",
-      phase: "lifecycle_setup",
-      lifecycleSource,
-      upgradeActor: installerUsername ?? "unknown",
-      subscriberCount: eligibility.subscriberCount,
-      minimumSubscriberCount: onboardingMinimumSubscriberCount,
-      subredditType: eligibility.subredditType,
-      isSfw: eligibility.isSfw,
-      safetyStatus: eligibility.safetyStatus,
-      eligible: eligibility.eligible,
-      reason: eligibility.reason ?? "none",
-    });
-    console.info(
-      `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} safetyStatus=${eligibility.safetyStatus} isSfw=${eligibility.isSfw} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
-    );
-    const reconciliation = await reconcileOnboardingForLifecycle(
-      reddit,
-      redis,
-      {
-        lifecycleSource: lifecycleSource === "install" ? "install" : "upgrade",
-        allowOnboardingRearm:
-          automaticOnboardingEnabled && eligibility.eligible,
-      },
-    );
-    const reconciliationStatus = reconciliation.status;
-    if (automaticOnboardingEnabled) {
-      await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
-      await scheduleOnboardingReminder(redis, { lifecycleSource });
-      if (!eligibility.eligible) {
-        const nowMs = Date.now();
-        await markOnboardingReminderIneligible(
-          redis,
-          eligibility.subscriberCount,
-          nowMs,
-          eligibility.reason,
-        );
-        await markOnboardingSubscriberGoalIneligible(
-          redis,
-          eligibility.subscriberCount,
-          nowMs,
-          eligibility.reason,
-        );
-      }
-    }
-    const [goalState, reminderState] = await Promise.all([
-      getOnboardingSubscriberGoalState(redis),
-      getOnboardingReminderState(redis),
-    ]);
-    const nextAction = describeOnboardingNextAction(goalState, reminderState);
-    logDiagnostic("info", "onboarding_lifecycle_setup_complete", {
-      workflow: "onboarding_lifecycle",
-      phase: "lifecycle_setup_complete",
-      lifecycleSource,
-      upgradeActor: installerUsername ?? "unknown",
-      eligible: eligibility.eligible,
-      reconciliationStatus,
-      nextAction,
-      timerArmed:
-        reminderState?.status === "pending" || goalState?.status === "pending",
-      goalState: goalState?.status ?? "missing_or_unparseable",
-      goalResult: goalState?.resultStatus ?? "none",
-      goalOperationId: goalState?.operationId ?? "none",
-      goalArmedAt: goalState?.armedAt ?? "none",
-      goalNextRunAt: goalState?.nextRunAt ?? "none",
-      goalNextRunAtIso: formatOptionalTimestamp(goalState?.nextRunAt),
-      reminderState: reminderState?.status ?? "missing_or_unparseable",
-      reminderResult: reminderState?.result ?? "none",
-      reminderNextRunAt: reminderState?.nextRunAt ?? "none",
-      reminderNextRunAtIso: formatOptionalTimestamp(reminderState?.nextRunAt),
-    });
-    console.info(
-      `[appChanged] onboarding setup: reconciliation=${reconciliationStatus} nextAction=${nextAction} timerArmed=${reminderState?.status === "pending" || goalState?.status === "pending"} goal=${goalState?.status ?? "missing_or_unparseable"}/${goalState?.resultStatus ?? "none"} reminder=${reminderState?.status ?? "missing_or_unparseable"}/${reminderState?.result ?? "none"} reminderNextRunAt=${formatOptionalTimestamp(reminderState?.nextRunAt)} goalNextRunAt=${formatOptionalTimestamp(goalState?.nextRunAt)} operationId=${goalState?.operationId ?? "none"}`,
+async function saveLifecycleDisplayName(subredditName: string): Promise<void> {
+  try {
+    await ensureSavedSubredditDisplayName(redis, subredditName);
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "app_changed_phase_failed",
+      { workflow: "app_changed", phase: "subreddit_display_name" },
+      error,
     );
   }
+}
+
+async function setUpLifecycleOnboarding(
+  lifecycleSource: InstallOrUpgrade,
+  installerUsername: string | undefined,
+  currentSubreddit: LifecycleSubreddit | undefined,
+): Promise<void> {
+  const automaticOnboardingEnabled =
+    shouldInitializeReleaseOnboarding(lifecycleSource);
+  const eligibility = await checkLifecycleOnboardingEligibility(
+    lifecycleSource,
+    installerUsername,
+    currentSubreddit,
+  );
+  const reconciliation = await reconcileOnboardingForLifecycle(reddit, redis, {
+    lifecycleSource,
+    allowOnboardingRearm: automaticOnboardingEnabled && eligibility.eligible,
+  });
+  const reconciliationStatus = reconciliation.status;
+  if (automaticOnboardingEnabled) {
+    await initializeLifecycleOnboarding(lifecycleSource, eligibility);
+  }
+  await reportLifecycleOnboardingState(
+    lifecycleSource,
+    installerUsername,
+    eligibility.eligible,
+    reconciliationStatus,
+  );
+}
+
+async function checkLifecycleOnboardingEligibility(
+  lifecycleSource: InstallOrUpgrade,
+  installerUsername: string | undefined,
+  currentSubreddit: LifecycleSubreddit | undefined,
+) {
+  if (!currentSubreddit) {
+    try {
+      currentSubreddit = await reddit.getCurrentSubreddit();
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "app_changed_phase_failed",
+        { workflow: "app_changed", phase: "onboarding_eligibility" },
+        error,
+      );
+      throw error;
+    }
+  }
+  const eligibility = getOnboardingEligibility(currentSubreddit);
+  logDiagnostic("info", "onboarding_eligibility_checked", {
+    workflow: "app_changed",
+    phase: "lifecycle_setup",
+    lifecycleSource,
+    upgradeActor: installerUsername ?? "unknown",
+    subscriberCount: eligibility.subscriberCount,
+    minimumSubscriberCount: onboardingMinimumSubscriberCount,
+    subredditType: eligibility.subredditType,
+    isSfw: eligibility.isSfw,
+    safetyStatus: eligibility.safetyStatus,
+    eligible: eligibility.eligible,
+    reason: eligibility.reason ?? "none",
+  });
+  console.info(
+    `[appChanged] onboarding eligibility: source=${lifecycleSource} subscriberCount=${eligibility.subscriberCount} minimumSubscriberCount=${onboardingMinimumSubscriberCount} subredditType=${eligibility.subredditType} safetyStatus=${eligibility.safetyStatus} isSfw=${eligibility.isSfw} eligible=${eligibility.eligible} reason=${eligibility.reason ?? "none"}`,
+  );
+  return eligibility;
+}
+
+async function initializeLifecycleOnboarding(
+  lifecycleSource: InstallOrUpgrade,
+  eligibility: ReturnType<typeof getOnboardingEligibility>,
+): Promise<void> {
+  await initializeOnboardingSubscriberGoal(redis, { lifecycleSource });
+  await scheduleOnboardingReminder(redis, { lifecycleSource });
+  if (!eligibility.eligible) {
+    const nowMs = Date.now();
+    await markOnboardingReminderIneligible(
+      redis,
+      eligibility.subscriberCount,
+      nowMs,
+      eligibility.reason,
+    );
+    await markOnboardingSubscriberGoalIneligible(
+      redis,
+      eligibility.subscriberCount,
+      nowMs,
+      eligibility.reason,
+    );
+  }
+}
+
+async function reportLifecycleOnboardingState(
+  lifecycleSource: InstallOrUpgrade,
+  installerUsername: string | undefined,
+  eligible: boolean,
+  reconciliationStatus: Awaited<
+    ReturnType<typeof reconcileOnboardingForLifecycle>
+  >["status"],
+): Promise<void> {
+  const [goalState, reminderState] = await Promise.all([
+    getOnboardingSubscriberGoalState(redis),
+    getOnboardingReminderState(redis),
+  ]);
+  const nextAction = describeOnboardingNextAction(goalState, reminderState);
+  const details = {
+    lifecycleSource,
+    upgradeActor: installerUsername ?? "unknown",
+    eligible,
+    reconciliationStatus,
+    nextAction,
+    timerArmed:
+      reminderState?.status === "pending" || goalState?.status === "pending",
+    goalState: goalState?.status ?? "missing_or_unparseable",
+    goalResult: goalState?.resultStatus ?? "none",
+    goalOperationId: goalState?.operationId ?? "none",
+    goalArmedAt: goalState?.armedAt ?? "none",
+    goalNextRunAt: goalState?.nextRunAt ?? "none",
+    goalNextRunAtIso: formatOptionalTimestamp(goalState?.nextRunAt),
+    reminderState: reminderState?.status ?? "missing_or_unparseable",
+    reminderResult: reminderState?.result ?? "none",
+    reminderNextRunAt: reminderState?.nextRunAt ?? "none",
+    reminderNextRunAtIso: formatOptionalTimestamp(reminderState?.nextRunAt),
+  };
+  logDiagnostic("info", "onboarding_lifecycle_setup_complete", {
+    workflow: "onboarding_lifecycle",
+    phase: "lifecycle_setup_complete",
+    ...details,
+  });
+  console.info(
+    `[appChanged] onboarding setup: reconciliation=${reconciliationStatus} nextAction=${nextAction} timerArmed=${details.timerArmed} goal=${details.goalState}/${details.goalResult} reminder=${details.reminderState}/${details.reminderResult} reminderNextRunAt=${details.reminderNextRunAtIso} goalNextRunAt=${details.goalNextRunAtIso} operationId=${details.goalOperationId}`,
+  );
 }
 
 function describeOnboardingNextAction(
@@ -206,7 +269,7 @@ function formatOptionalTimestamp(timestamp: number | undefined): string {
 }
 
 export function shouldInitializeReleaseOnboarding(
-  lifecycleSource: "install" | "upgrade" | "unknown",
+  lifecycleSource: LifecycleSource,
   automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
 ): boolean {
   return (

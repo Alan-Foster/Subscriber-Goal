@@ -1,7 +1,7 @@
 import { reddit, redis, context, scheduler } from '@devvit/web/server';
-import { getAppSettings } from '../settings';
+import { getAppSettings, type ServerAppSettings } from '../settings';
 import { dispatchPostAction, modToPostActionMap } from '../data/crosspostData';
-import { isLinkId } from '../types';
+import { isLinkId, type LinkId } from '../types';
 import { logDiagnostic } from '../../shared/diagnostics';
 import {
   appAccountHealthStateKey,
@@ -42,6 +42,26 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   const subredditName = context.subredditName ?? currentSubreddit!.name;
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);
 
+  await handleAppAccountHealthAction(event, subredditName, currentSubreddit);
+
+  const isAuthority =
+    toNormalizedSubredditName(subredditName) === authoritySubreddit;
+  if (isAuthority) {
+    if (event.action === 'wikirevise') {
+      await processCrosspostDispatchQueue(appSettings, 'mod_action_wikirevise');
+    }
+    if (event.action !== 'approvelink') return;
+  }
+
+  await handleManagedPostModAction(event, appSettings, isAuthority);
+}
+
+async function handleAppAccountHealthAction(
+  event: ModActionEvent,
+  subredditName: string,
+  currentSubreddit:
+    Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | undefined
+): Promise<void> {
   const moderatorHealthActions = new Set([
     'removemoderator',
     'uninvitemoderator',
@@ -85,16 +105,13 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
         : {}),
     });
   }
+}
 
-  const isAuthority =
-    toNormalizedSubredditName(subredditName) === authoritySubreddit;
-  if (isAuthority) {
-    if (event.action === 'wikirevise') {
-      await processCrosspostDispatchQueue(appSettings, 'mod_action_wikirevise');
-    }
-    if (event.action !== 'approvelink') return;
-  }
-
+async function handleManagedPostModAction(
+  event: ModActionEvent,
+  appSettings: ServerAppSettings,
+  isAuthority: boolean
+): Promise<void> {
   if (event.action === 'unsticky') {
     logDiagnostic('info', 'scheduled_post_displacement_unpin_received', {
       workflow: 'scheduled_post_displacement',
@@ -139,19 +156,7 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   }
 
   if (event.action === 'approvelink' && isLinkId(event.targetPost.id)) {
-    try {
-      await redis.del(getPostUpdateRecheckKey(event.targetPost.id));
-    } catch (error) {
-      logDiagnostic(
-        'warn',
-        'subscriber_goal_update_recheck_clear_failed',
-        {
-          workflow: 'mod_action',
-          postId: event.targetPost.id,
-        },
-        error
-      );
-    }
+    await clearPostUpdateRecheck(event.targetPost.id);
   }
   if (isAuthority) return;
 
@@ -182,6 +187,22 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
     event.targetPost.id,
     mappedAction
   );
+}
+
+async function clearPostUpdateRecheck(postId: LinkId): Promise<void> {
+  try {
+    await redis.del(getPostUpdateRecheckKey(postId));
+  } catch (error) {
+    logDiagnostic(
+      'warn',
+      'subscriber_goal_update_recheck_clear_failed',
+      {
+        workflow: 'mod_action',
+        postId,
+      },
+      error
+    );
+  }
 }
 
 // Keep the previous exports available while crosspost callers move to their own modules.
