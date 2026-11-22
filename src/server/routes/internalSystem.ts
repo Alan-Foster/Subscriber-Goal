@@ -16,6 +16,16 @@ import {
 import { processAppAccountRecovery } from "../core/appAccountRecovery";
 
 export function registerInternalSystemRoutes(router: Router): void {
+  registerAppInstallRoute(router);
+  registerAppUpgradeRoute(router);
+  registerModActionRoute(router);
+  registerPostCreateRoute(router);
+  registerAppAccountRecoveryJobRoute(router);
+  registerPostsUpdaterJobRoute(router);
+  registerMilestoneNotificationJobRoute(router);
+}
+
+function registerAppInstallRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppInstall,
     async (req, res): Promise<void> => {
@@ -42,7 +52,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerAppUpgradeRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppUpgrade,
     async (req, res): Promise<void> => {
@@ -69,7 +81,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerModActionRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onModAction,
     async (req, res): Promise<void> => {
@@ -93,7 +107,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerPostCreateRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onPostCreate,
     async (req, res): Promise<void> => {
@@ -125,7 +141,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerAppAccountRecoveryJobRoute(router: Router): void {
   router.post(
     internalRoutes.scheduler.appAccountRecoveryJob,
     async (req, res): Promise<void> => {
@@ -162,7 +180,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerPostsUpdaterJobRoute(router: Router): void {
   router.post(
     internalRoutes.scheduler.postsUpdaterJob,
     async (_req, res): Promise<void> => {
@@ -185,7 +205,9 @@ export function registerInternalSystemRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerMilestoneNotificationJobRoute(router: Router): void {
   router.post(
     internalRoutes.scheduler.milestoneNotificationJob,
     async (req, res): Promise<void> => {

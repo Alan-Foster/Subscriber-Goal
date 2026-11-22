@@ -130,24 +130,6 @@
       "count": 2
     }
   },
-  "src/server/routes/internalSystem.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/routes/internalUi.deleteGoal.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 2
-    }
-  },
-  "src/server/routes/internalUi.eraseData.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/triggers/appChanged.ts": {
     "complexity": {
       "count": 1

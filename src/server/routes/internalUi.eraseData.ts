@@ -3,6 +3,7 @@ import type { UiResponse } from "@devvit/web/shared";
 import { context, reddit, redis } from "@devvit/web/server";
 import { formNames, internalRoutes } from "../../shared/routes";
 import { translate } from "../../shared/i18n/catalog";
+import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
 import { createOperationId, logDiagnostic } from "../../shared/diagnostics";
 import {
   requireCurrentActorAuthority,
@@ -20,6 +21,13 @@ import {
 import { findPendingSubscriberUserIdByUsername } from "../data/subscriberTracking";
 
 export function registerEraseDataRoutes(router: Router): void {
+  registerEraseDataMenuRoute(router);
+  registerEraseMyDataMenuRoute(router);
+  registerEraseDataFormRoute(router);
+  registerEraseMyDataFormRoute(router);
+}
+
+function registerEraseDataMenuRoute(router: Router): void {
   router.post(
     internalRoutes.menu.eraseData,
     async (_req, res: Response<UiResponse>) => {
@@ -60,7 +68,9 @@ export function registerEraseDataRoutes(router: Router): void {
       });
     },
   );
+}
 
+function registerEraseMyDataMenuRoute(router: Router): void {
   router.post(
     internalRoutes.menu.eraseMyData,
     async (_req, res: Response<UiResponse>) => {
@@ -87,7 +97,9 @@ export function registerEraseDataRoutes(router: Router): void {
       });
     },
   );
+}
 
+function registerEraseDataFormRoute(router: Router): void {
   router.post(
     internalRoutes.forms.eraseData,
     async (req, res: Response<UiResponse>) => {
@@ -124,40 +136,13 @@ export function registerEraseDataRoutes(router: Router): void {
         return;
       }
 
-      let resolvedUserId = userId;
-      let resolvedUsername = userId ? undefined : normalizedUsername;
-      let identityLookupWarning: string | null = null;
-
-      if (resolvedUserId && !resolvedUserId.startsWith("t2_")) {
-        resolvedUserId = `t2_${resolvedUserId}`;
-      }
-
-      try {
-        if (resolvedUserId) {
-          const typedUserId = resolvedUserId as `t2_${string}`;
-          const user = await reddit.getUserById(typedUserId);
-          if (user) {
-            resolvedUsername = user.username;
-          }
-        } else if (resolvedUsername) {
-          const user = await reddit.getUserByUsername(resolvedUsername);
-          if (user) {
-            resolvedUserId = user.id;
-            resolvedUsername = user.username;
-          }
-        }
-      } catch (error) {
-        logDiagnostic(
-          "warn",
-          "erase_user_identity_lookup_failed",
-          { workflow: "erase_user_data", phase: "identity_lookup" },
-          error,
-        );
-        identityLookupWarning = translate(
-          language,
-          "moderator.data.identityWarning",
-        );
-      }
+      const identity = await resolveEraseDataIdentity(
+        userId,
+        normalizedUsername,
+        language,
+      );
+      let { resolvedUserId } = identity;
+      const { resolvedUsername, identityLookupWarning } = identity;
 
       try {
         if (!resolvedUserId && resolvedUsername) {
@@ -207,7 +192,9 @@ export function registerEraseDataRoutes(router: Router): void {
       }
     },
   );
+}
 
+function registerEraseMyDataFormRoute(router: Router): void {
   router.post(
     internalRoutes.forms.eraseMyData,
     async (req, res: Response<UiResponse>) => {
@@ -274,4 +261,46 @@ export function registerEraseDataRoutes(router: Router): void {
       }
     },
   );
+}
+
+async function resolveEraseDataIdentity(
+  userId: EraseDataFormValues["userId"],
+  normalizedUsername: string | undefined,
+  language: SubGoalLanguage,
+) {
+  let resolvedUserId = userId;
+  let resolvedUsername = userId ? undefined : normalizedUsername;
+  let identityLookupWarning: string | null = null;
+
+  if (resolvedUserId && !resolvedUserId.startsWith("t2_")) {
+    resolvedUserId = `t2_${resolvedUserId}`;
+  }
+
+  try {
+    if (resolvedUserId) {
+      const typedUserId = resolvedUserId as `t2_${string}`;
+      const user = await reddit.getUserById(typedUserId);
+      if (user) {
+        resolvedUsername = user.username;
+      }
+    } else if (resolvedUsername) {
+      const user = await reddit.getUserByUsername(resolvedUsername);
+      if (user) {
+        resolvedUserId = user.id;
+        resolvedUsername = user.username;
+      }
+    }
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "erase_user_identity_lookup_failed",
+      { workflow: "erase_user_data", phase: "identity_lookup" },
+      error,
+    );
+    identityLookupWarning = translate(
+      language,
+      "moderator.data.identityWarning",
+    );
+  }
+  return { resolvedUserId, resolvedUsername, identityLookupWarning };
 }
