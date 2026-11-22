@@ -43,14 +43,6 @@
       "count": 1
     }
   },
-  "src/client/hooks/useSubGoal.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/client/subscribe-only/SubscribeOnlyApp.tsx": {
     "complexity": {
       "count": 1

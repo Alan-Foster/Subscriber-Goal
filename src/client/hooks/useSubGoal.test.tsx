@@ -111,6 +111,24 @@ const SubscribeHarness = () => {
   );
 };
 
+const RealtimeSubscribeHarness = () => {
+  const { state, subscribe, notice } = useSubGoal();
+  return (
+    <>
+      <button onClick={() => void subscribe({ attemptId })}>Subscribe</button>
+      <output>
+        {state && "subscribed" in state && state.subscribed
+          ? "joined"
+          : "viewer"}
+        {":"}
+        {state?.subreddit.subscribers}
+        {":"}
+        {notice ?? "welcome"}
+      </output>
+    </>
+  );
+};
+
 describe("useSubGoal tiny behavior", () => {
   beforeEach(() => {
     (
@@ -279,6 +297,76 @@ describe("useSubGoal tiny behavior", () => {
     await act(async () => root.unmount());
     expect(vi.getTimerCount()).toBe(0);
     container.remove();
+  });
+
+  it("keeps one request and connection through a subscribe, realtime notice, and unmount", async () => {
+    vi.useFakeTimers();
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    hoisted.connectRealtime.mockResolvedValueOnce({ disconnect });
+    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
+      data: { type: "init", postId: "t3_goal", state: regularState },
+      error: null,
+      aborted: false,
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          type: "subscribe",
+          postId: "t3_goal",
+          state: { ...regularState, subscribed: true },
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    document.body.append(container);
+
+    try {
+      await act(async () => root.render(<RealtimeSubscribeHarness />));
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await act(async () => container.querySelector("button")?.click());
+      expect(container.querySelector("output")?.textContent).toBe(
+        "joined:100:welcome",
+      );
+      const onMessage = hoisted.connectRealtime.mock.calls[0]?.[0]
+        ?.onMessage as ((data: unknown) => void) | undefined;
+      const message = {
+        type: "sub",
+        newSubscriberCount: 101,
+        recentSubscriber: "bob",
+      };
+      await act(async () => onMessage?.(message));
+      expect(container.querySelector("output")?.textContent).toBe(
+        "joined:101:u/bob just joined!",
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(1_400));
+      await act(async () => onMessage?.(message));
+      await act(async () => vi.advanceTimersByTimeAsync(1_400));
+      expect(container.querySelector("output")?.textContent).toBe(
+        "joined:101:welcome",
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(hoisted.requestJsonWithRetry).toHaveBeenCalledExactlyOnceWith(
+      "/api/init",
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      "/api/subscribe",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ attemptId }),
+      }),
+    );
+    expect(hoisted.connectRealtime).toHaveBeenCalledOnce();
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 
   it("polls Tiny aggregate state every minute without connecting realtime", async () => {
@@ -1022,6 +1110,77 @@ describe("reconcileSubscriptionStatus", () => {
     const reconciliation = reconcileSubscriptionStatus(attemptId);
     await vi.advanceTimersByTimeAsync(30_000);
     await expect(reconciliation).resolves.toMatchObject({ outcome: "timeout" });
+  });
+});
+
+describe("sub goal state field groups", () => {
+  it.each([
+    [
+      "subreddit identity",
+      { subreddit: { ...regularState.subreddit, id: "" } },
+    ],
+    [
+      "subreddit count",
+      { subreddit: { ...regularState.subreddit, subscribers: Infinity } },
+    ],
+    [
+      "subreddit NSFW flag",
+      { subreddit: { ...regularState.subreddit, isNsfw: undefined } },
+    ],
+    ["goal threshold", { goal: 0 }],
+    ["completion time", { completedTime: -1 }],
+    ["subscriber label", { recentSubscriber: 7 }],
+    ["statistics capability", { canViewStatistics: null }],
+    [
+      "automatic action",
+      {
+        automaticAfterSubscribeAction: {
+          type: "link",
+          colorTheme: "red",
+          buttonText: "Open",
+          url: "mailto:test@example.com",
+        },
+      },
+    ],
+    ["viewer", { user: { id: "t2_user", username: "" } }],
+    ["app settings", { appSettings: { promoSubreddit: "" } }],
+    ["shared CTA tracking flag", { trackCtaClicks: "false" }],
+  ])("rejects an invalid regular %s", (_label, fields) => {
+    expect(isSubGoalState({ ...regularState, ...fields })).toBe(false);
+  });
+
+  it("accepts the nullable regular fields and CTA without viewer fields", () => {
+    expect(
+      isSubGoalState({
+        ...regularState,
+        postHeight: "short",
+        user: null,
+        goal: null,
+        completedTime: 0,
+        automaticAfterSubscribeAction: null,
+      }),
+    ).toBe(true);
+    const {
+      subscribed: _subscribed,
+      authenticated: _authenticated,
+      ...compact
+    } = tinyState;
+    expect(isSubGoalState({ ...compact, postHeight: "cta" })).toBe(true);
+    expect(isSubGoalState(compact)).toBe(false);
+  });
+
+  it.each([
+    { promoSubreddit: "" },
+    { authenticated: undefined },
+    {
+      subreddit: {
+        ...tinyState.subreddit,
+        growth: { count: 0, period: "year" },
+      },
+    },
+    { ctaActivity: { kind: "clicks", count: -1, period: "week" } },
+  ])("rejects invalid compact fields %j", (fields) => {
+    expect(isSubGoalState({ ...tinyState, ...fields })).toBe(false);
   });
 });
 
