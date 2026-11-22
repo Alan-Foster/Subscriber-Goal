@@ -78,14 +78,18 @@ export async function processDueAutoCreateNextGoals({
   appSettings,
   nowMs = Date.now(),
   mutationLease: existingMutationLease,
+  limit,
+  canStart = () => true,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   appSettings: ServerAppSettings;
   nowMs?: number;
   mutationLease?: CommunityGoalMutationLease;
+  limit?: number;
+  canStart?: () => boolean;
 }): Promise<AutoCreateNextGoalSummary> {
-  const duePostIds = await getDueAutoCreateNextGoalPostIds(redis, nowMs);
+  const duePostIds = await getDueAutoCreateNextGoalPostIds(redis, nowMs, limit);
   const summary: AutoCreateNextGoalSummary = {
     due: duePostIds.length,
     created: 0,
@@ -97,6 +101,7 @@ export async function processDueAutoCreateNextGoals({
 
   const run = { reddit, redis, appSettings, nowMs, summary };
   for (const sourcePostId of duePostIds) {
+    if (!canStart()) break;
     const outcome = await processDueSource(
       run,
       sourcePostId,

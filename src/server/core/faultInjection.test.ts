@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activeFaultWorld,
   createFaultWorld,
+  Gate,
   type FakePost,
   type FaultWorld,
 } from "../testing/faultHarness";
@@ -63,14 +64,21 @@ vi.mock("../utils/actorAuthorization", () => ({
 
 import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
 import { createSubscriberGoal } from "./createSubscriberGoal";
-import { AutomaticGoalPrerequisiteError } from "./automaticGoalRetry";
+import {
+  AutomaticGoalPrerequisiteError,
+  automaticGoalRetryGenerationsKey,
+} from "./automaticGoalRetry";
+import { dispatchAutomaticGoalRetryJob } from "../jobs/automaticGoalRetry";
+import { dueJobsKey } from "../jobs/queue";
 import {
   autoCreateNextGoalDelayMs,
   autoCreateNextGoalQueueKey,
+  autoCreateNextGoalRetryAttemptsKey,
   autoCreateNextGoalSuccessorsKey,
   postCompletedTimeSuffix,
   registerNewSubGoalPost,
   registerNewSubscribeOnlyPost,
+  recordAutoCreateNextGoalFailure,
   scheduleAutoCreateNextGoal,
   subscriberGoalsKey,
 } from "../data/subGoalData";
@@ -155,6 +163,16 @@ async function tick(atMs: number) {
   });
 }
 
+async function scheduledTick(atMs: number, deadlineMs = atMs + 20_000) {
+  vi.setSystemTime(atMs);
+  await dispatchAutomaticGoalRetryJob(
+    world.reddit as never,
+    world.redis as never,
+    appSettings,
+    deadlineMs,
+  );
+}
+
 /** Runs ticks at each scheduled time for the source, up to `max` runs. */
 async function runUntilSettled(sourcePostId: string, max = 12) {
   for (let i = 0; i < max; i += 1) {
@@ -198,6 +216,93 @@ describe("harness sanity", () => {
       successor!.id,
     );
     expect((await op(source.id)).status).toBe("complete");
+  });
+});
+
+describe("scheduled automatic goal retries", () => {
+  it("preserves a queued legacy retry and dispatches it once across overlapping ticks", async () => {
+    const { source, dueAt } = await seedCompletedSource();
+    const operationId = `auto-next:${source.id}`;
+    await world.redisImpl.hSet(automaticGoalRetryGenerationsKey, {
+      [operationId]: "2",
+    });
+    const { retryAt } = await recordAutoCreateNextGoalFailure(
+      world.redis as never,
+      source.id,
+      dueAt,
+    );
+    expect(retryAt).toBe(dueAt + 5 * minute);
+    const at = retryAt!;
+
+    await scheduledTick(at - 1);
+    await scheduledTick(at, at);
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(0);
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "automatic_goal_retry"),
+    ).toBe(at);
+    expect(await queuedAt(source.id)).toBe(at);
+    expect(
+      await world.redisImpl.hGet(autoCreateNextGoalRetryAttemptsKey, source.id),
+    ).toBe("1");
+
+    const submission = new Gate();
+    world.plan.add({
+      target: "reddit",
+      method: "submitCustomPost",
+      mode: "pause",
+      gate: submission,
+    });
+    const first = scheduledTick(at);
+    try {
+      await Promise.race([
+        submission.reached,
+        first.then(() => {
+          throw new Error("The scheduled retry did not reach submission");
+        }),
+      ]);
+      await scheduledTick(at);
+      expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+    } finally {
+      submission.release();
+      await first;
+    }
+    await scheduledTick(at);
+
+    expect(successorPosts(source)).toHaveLength(1);
+    expect(await queuedAt(source.id)).toBeUndefined();
+    expect(
+      await world.redisImpl.hGet(automaticGoalRetryGenerationsKey, operationId),
+    ).toBe("2");
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "automatic_goal_retry"),
+    ).toBeUndefined();
+    expect(
+      await world.redisImpl.hGetAll("automatic_goal_retry_job_v1_state"),
+    ).toEqual({});
+  });
+
+  it("reconciles a lost submission response on the next scheduled tick without reposting", async () => {
+    const { source, dueAt } = await seedCompletedSource();
+    world.plan.add({
+      target: "reddit",
+      method: "submitCustomPost",
+      mode: "commit-then-throw",
+      error: new Error("socket hang up"),
+    });
+
+    await scheduledTick(dueAt);
+    expect((await op(source.id)).status).toBe("submission_unknown");
+    expect(await queuedAt(source.id)).toBe(dueAt + minute);
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "automatic_goal_retry"),
+    ).toBe(dueAt + minute);
+
+    await scheduledTick(dueAt + minute);
+    await scheduledTick(dueAt + 2 * minute);
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+    expect(successorPosts(source)).toHaveLength(1);
+    expect((await op(source.id)).status).toBe("complete");
+    expect(await queuedAt(source.id)).toBeUndefined();
   });
 });
 

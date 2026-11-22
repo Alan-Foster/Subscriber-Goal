@@ -746,11 +746,18 @@ export async function cancelAllAutoCreateNextGoals(
 export async function getDueAutoCreateNextGoalPostIds(
   redis: RedisClient,
   nowMs: number,
+  limit?: number,
 ): Promise<string[]> {
-  const pending = await redis.zRange(autoCreateNextGoalQueueKey, 0, -1);
+  const pending =
+    limit === undefined
+      ? await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)
+      : await redis.zRange(autoCreateNextGoalQueueKey, "-inf", nowMs, {
+          by: "score",
+          limit: { offset: 0, count: limit },
+        });
   return pending
-    .filter((entry) => entry.score <= nowMs)
-    .map((entry) => entry.member);
+    .filter(({ score }) => score <= nowMs)
+    .map(({ member }) => member);
 }
 
 export async function getAutoCreateNextGoalRunAt(
