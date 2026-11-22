@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activeFaultWorld,
   createFaultWorld,
+  Gate,
   type FakePost,
   type FaultWorld,
 } from "../testing/faultHarness";
@@ -99,6 +100,17 @@ import {
   highlightManagementStateKey,
 } from "../data/highlightManagement";
 import { subscriberGoalPostKind } from "../../shared/postKind";
+import { processDueOnboarding } from "./onboarding";
+import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
+import {
+  migrateOnboardingWarning,
+  onboardingReminderStateKey,
+  onboardingSubscriberGoalLockKey,
+  onboardingSubscriberGoalLockTtlMs,
+  onboardingSubscriberGoalStateKey,
+  readOnboardingWarningFields,
+} from "./onboardingState";
+import { withRedisLock } from "../utils/redisOwnedLock";
 
 const legacyHighlightManagementStateKey =
   "subscriber_goal_highlight_management_v1_state";
@@ -475,4 +487,222 @@ describe("migration queues", () => {
       await world.redisImpl.zScore(postKindMigrationQueueKey, healthyGoal.id),
     ).toBeUndefined();
   });
+});
+
+describe("#134 unified onboarding", () => {
+  function runOnboarding(at: number): Promise<void> {
+    vi.setSystemTime(at);
+    return processDueOnboarding({
+      reddit: world.reddit as never,
+      redis: world.redis as never,
+      appSettings,
+      permissionWorkAllowed: true,
+    });
+  }
+
+  const pairs = ["pending", "processing", "dispatching", "complete"].flatMap(
+    (warning) =>
+      ["awaiting_warning", "pending", "processing", "complete"].map((goal) => ({
+        warning,
+        goal,
+      })),
+  );
+  it.each(pairs)(
+    "replays migration for a $warning warning and $goal goal",
+    async ({ warning, goal }) => {
+      vi.setSystemTime(T0);
+      const oldWarning = {
+        version: "onboarding_reminder_v3",
+        status: warning,
+        armedAt: String(T0 - minute),
+        nextRunAt: String(T0 + minute),
+        lifecycleSource: "upgrade",
+        reminderStaggerMinutes: "2",
+        ...(warning === "complete"
+          ? { result: "sent", sentAt: String(T0 - minute) }
+          : {}),
+      };
+      const oldGoal = {
+        version: "onboarding_subscriber_goal_v4",
+        status: goal,
+        armedAt: String(T0 - minute),
+        nextRunAt: String(T0 + 3 * minute),
+        lifecycleSource: "upgrade",
+        creationStaggerMinutes: "3",
+        operationId: "legacy-onboarding-operation",
+      };
+      await world.redisImpl.hSet(onboardingReminderStateKey, oldWarning);
+      await world.redisImpl.hSet(onboardingSubscriberGoalStateKey, oldGoal);
+      const migrate = (): Promise<unknown> =>
+        withRedisLock(
+          world.redis as never,
+          onboardingSubscriberGoalLockKey,
+          onboardingSubscriberGoalLockTtlMs,
+          () => migrateOnboardingWarning(world.redis as never, Date.now()),
+        );
+      await migrate();
+      const migrated = await world.redisImpl.hGetAll(
+        onboardingSubscriberGoalStateKey,
+      );
+      const savedWarning = await readOnboardingWarningFields(
+        world.redis as never,
+      );
+      expect(savedWarning).toMatchObject({
+        nextRunAt: oldWarning.nextRunAt,
+        status: warning === "dispatching" ? "complete" : warning,
+      });
+      if (warning === "dispatching")
+        expect(savedWarning.result).toBe("delivery_unknown");
+      expect(migrated).toMatchObject({
+        nextRunAt: oldGoal.nextRunAt,
+        operationId: oldGoal.operationId,
+        status:
+          warning === "dispatching" && goal === "awaiting_warning"
+            ? "complete"
+            : goal,
+      });
+      vi.setSystemTime(T0 + day);
+      await migrate();
+      expect(
+        await world.redisImpl.hGetAll(onboardingSubscriberGoalStateKey),
+      ).toEqual(migrated);
+      expect(await world.redisImpl.hGetAll(onboardingReminderStateKey)).toEqual(
+        oldWarning,
+      );
+    },
+  );
+
+  it("sends one warning and creates one goal even when an upgrade races the warning", async () => {
+    vi.setSystemTime(T0);
+    await onAppChanged({ lifecycleSource: "install" });
+    const warning = await readOnboardingWarningFields(world.redis as never);
+    const warningAt = Number(warning.nextRunAt);
+    await runOnboarding(warningAt - 1);
+    expect(world.redditImpl.modmailNotifications).toHaveLength(0);
+    const gate = new Gate();
+    world.plan.add({
+      target: "reddit",
+      method: "createModNotification",
+      mode: "pause",
+      gate,
+    });
+    const tick = runOnboarding(warningAt);
+    await Promise.race([
+      gate.reached,
+      tick.then(() => {
+        throw new Error("Onboarding finished without dispatching its warning");
+      }),
+    ]);
+    try {
+      await onAppChanged({ lifecycleSource: "upgrade" });
+      await runOnboarding(warningAt);
+      expect(world.plan.calls("reddit", "createModNotification")).toHaveLength(
+        1,
+      );
+      expect(goalPosts()).toHaveLength(0);
+    } finally {
+      gate.release();
+      await tick;
+    }
+    const goal = await world.redisImpl.hGetAll(
+      onboardingSubscriberGoalStateKey,
+    );
+    expect(goal).toMatchObject({
+      status: "pending",
+      reminderSentAt: String(warningAt),
+    });
+    expect(world.redditImpl.modmailNotifications).toHaveLength(1);
+    const creationAt = Number(goal.nextRunAt);
+    await runOnboarding(creationAt - 1);
+    expect(goalPosts()).toHaveLength(0);
+    await runOnboarding(creationAt);
+    await runOnboarding(creationAt + minute);
+    expect(goalPosts()).toHaveLength(1);
+    expect(world.redditImpl.modmailNotifications).toHaveLength(1);
+    expect(await world.redisImpl.hGetAll(onboardingReminderStateKey)).toEqual(
+      {},
+    );
+  });
+
+  it("never resends a committed warning whose response was lost, even after another upgrade", async () => {
+    vi.setSystemTime(T0);
+    await onAppChanged({ lifecycleSource: "install" });
+    const warning = await readOnboardingWarningFields(world.redis as never);
+    const warningAt = Number(warning.nextRunAt);
+    world.plan.add({
+      target: "reddit",
+      method: "createModNotification",
+      mode: "commit-then-throw",
+    });
+    await runOnboarding(warningAt);
+    expect(
+      await readOnboardingWarningFields(world.redis as never),
+    ).toMatchObject({ status: "complete", result: "delivery_unknown" });
+    expect(
+      await world.redisImpl.hGetAll(onboardingSubscriberGoalStateKey),
+    ).toMatchObject({ status: "complete", resultStatus: "delivery_unknown" });
+    vi.setSystemTime(warningAt + minute);
+    await expect(
+      reconcileOnboardingForLifecycle(
+        world.reddit as never,
+        world.redis as never,
+        { lifecycleSource: "upgrade", appSettings },
+      ),
+    ).resolves.toMatchObject({
+      status: "unchanged",
+      reason: "warning_delivery_unknown_preserved",
+    });
+    await runOnboarding(warningAt + day);
+    expect(world.plan.calls("reddit", "createModNotification")).toHaveLength(1);
+    expect(world.redditImpl.modmailNotifications).toHaveLength(1);
+    expect(goalPosts()).toHaveLength(0);
+  });
+
+  it.each(["pending", "dispatching"] as const)(
+    "upgrades a due legacy %s warning without shifting its deadline or repeating a dispatch",
+    async (status) => {
+      vi.setSystemTime(T0);
+      const warningAt = T0 + minute;
+      await world.redisImpl.hSet(onboardingSubscriberGoalStateKey, {
+        version: "onboarding_subscriber_goal_v4",
+        status: "awaiting_warning",
+        lifecycleSource: "install",
+        armedAt: String(T0),
+        creationStaggerMinutes: "2",
+        operationId: "original-onboarding-operation",
+      });
+      await world.redisImpl.hSet(onboardingReminderStateKey, {
+        version: "onboarding_reminder_v3",
+        status,
+        lifecycleSource: "install",
+        armedAt: String(T0),
+        nextRunAt: String(warningAt),
+        reminderStaggerMinutes: "1",
+      });
+
+      await onAppChanged({ lifecycleSource: "upgrade" });
+      await runOnboarding(warningAt - 1);
+      expect(world.redditImpl.modmailNotifications).toHaveLength(0);
+      expect(
+        await readOnboardingWarningFields(world.redis as never),
+      ).toMatchObject({
+        nextRunAt: String(warningAt),
+      });
+      await runOnboarding(warningAt);
+      await onAppChanged({ lifecycleSource: "upgrade" });
+      await runOnboarding(warningAt + 1);
+
+      expect(
+        await world.redisImpl.hGetAll(onboardingSubscriberGoalStateKey),
+      ).toMatchObject({
+        operationId: "original-onboarding-operation",
+        ...(status === "dispatching"
+          ? { status: "complete", resultStatus: "delivery_unknown" }
+          : { status: "pending", reminderSentAt: String(warningAt) }),
+      });
+      expect(world.redditImpl.modmailNotifications).toHaveLength(
+        status === "pending" ? 1 : 0,
+      );
+    },
+  );
 });

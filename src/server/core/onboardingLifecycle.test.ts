@@ -1,3 +1,4 @@
+import { readOnboardingWarningFields } from "./onboardingState";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   autoCreateNextGoalExhaustedKey,
@@ -13,10 +14,9 @@ import {
   processDueOnboardingSubscriberGoal,
 } from "./onboardingSubscriberGoal";
 import {
-  onboardingReminderLockKey,
   onboardingReminderStateKey,
   processDueOnboardingReminder,
-} from "./onboardingReminder";
+} from "./onboardingWarning";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import { appRepairStateKey } from "../data/highlightRepair";
 import {
@@ -227,7 +227,7 @@ describe("onboarding lifecycle reconciliation", () => {
       });
     await expect(upgrade(nowMs)).resolves.toMatchObject({ status: "rearmed" });
     const reminderAt = Number(
-      (await redis.hGetAll(onboardingReminderStateKey)).nextRunAt,
+      (await readOnboardingWarningFields(redis as never)).nextRunAt,
     );
     await expect(
       processDueOnboardingReminder({
@@ -713,7 +713,7 @@ describe("onboarding lifecycle reconciliation", () => {
       operationId: `onboarding:onboarding_subscriber_goal_v4:${nowMs}`,
     });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
       nextRunAt: String(nowMs + 60_000),
@@ -742,7 +742,7 @@ describe("onboarding lifecycle reconciliation", () => {
       pausedForAccountRecovery: "true",
     });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
       nextRunAt: String(nowMs + 5 * 60_000),
@@ -763,7 +763,7 @@ describe("onboarding lifecycle reconciliation", () => {
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toEqual({});
-    await expect(redis.hGetAll(onboardingReminderStateKey)).resolves.toEqual(
+    await expect(readOnboardingWarningFields(redis as never)).resolves.toEqual(
       {},
     );
   });
@@ -789,7 +789,7 @@ describe("onboarding lifecycle reconciliation", () => {
       postId: "t3_highlighted",
     });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "complete",
       result: "existing",
@@ -828,7 +828,7 @@ describe("onboarding lifecycle reconciliation", () => {
         resultStatus: "",
       });
       await expect(
-        redis.hGetAll(onboardingReminderStateKey),
+        readOnboardingWarningFields(redis as never),
       ).resolves.toMatchObject({ status: "pending", result: "" });
     },
   );
@@ -930,7 +930,7 @@ describe("onboarding lifecycle reconciliation", () => {
       result: "sent",
     });
     const goal = await redis.hGetAll(onboardingSubscriberGoalStateKey);
-    const reminder = await redis.hGetAll(onboardingReminderStateKey);
+    const reminder = await readOnboardingWarningFields(redis as never);
 
     await expect(
       reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
@@ -943,8 +943,8 @@ describe("onboarding lifecycle reconciliation", () => {
     });
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
-    ).resolves.toEqual(goal);
-    await expect(redis.hGetAll(onboardingReminderStateKey)).resolves.toEqual(
+    ).resolves.toEqual({ ...goal, warningState: JSON.stringify(reminder) });
+    await expect(readOnboardingWarningFields(redis as never)).resolves.toEqual(
       reminder,
     );
   });
@@ -971,7 +971,7 @@ describe("onboarding lifecycle reconciliation", () => {
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toMatchObject({ status: "complete", resultStatus: "existing" });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({ status: "complete", result: "existing" });
   });
 
@@ -992,29 +992,32 @@ describe("onboarding lifecycle reconciliation", () => {
     ).resolves.toEqual({ unexpected: "data" });
   });
 
-  it("releases the goal lock when the reminder lock is busy", async () => {
-    await redis.set(onboardingReminderLockKey, "busy");
+  it("defers migration and releases the workflow lock when the old warning lock is busy", async () => {
+    await redis.set("onboarding_reminder_v3_lock", "busy");
 
     await expect(
       reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
         lifecycleSource: "upgrade",
         nowMs,
       }),
-    ).rejects.toThrow("Onboarding lifecycle state is currently locked");
+    ).resolves.toEqual({
+      status: "unchanged",
+      reason: "legacy_workflow_in_progress",
+    });
     await expect(
       redis.get(onboardingSubscriberGoalLockKey),
     ).resolves.toBeUndefined();
   });
 
-  it("rolls back a newly written goal when the reminder write fails", async () => {
-    redis.failReminderWrite = true;
+  it("leaves the workflow absent when the atomic state write fails", async () => {
+    redis.failWorkflowWrite = true;
 
     await expect(
       reconcileOnboardingForLifecycle(createReddit() as never, redis as never, {
         lifecycleSource: "upgrade",
         nowMs,
       }),
-    ).rejects.toThrow("reminder write failed");
+    ).rejects.toThrow("workflow write failed");
     await expect(
       redis.hGetAll(onboardingSubscriberGoalStateKey),
     ).resolves.toEqual({});

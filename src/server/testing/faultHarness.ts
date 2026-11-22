@@ -478,6 +478,27 @@ export type FakeSubreddit = {
 };
 
 export class FakeRedditImpl {
+  readonly modmailNotifications: {
+    subredditId: string;
+    subject: string;
+    bodyMarkdown: string;
+  }[] = [];
+
+  get modMail() {
+    return withFaults(
+      "reddit",
+      {
+        createModNotification: async (
+          notification: (typeof this.modmailNotifications)[number],
+        ) => {
+          this.modmailNotifications.push(notification);
+          return "onboarding-modmail";
+        },
+      },
+      this.plan,
+    );
+  }
+
   posts = new Map<string, FakePost>();
   approvals: string[] = [];
   wikiUpdates: Array<{ subredditName: string; page: string; content: string }> =

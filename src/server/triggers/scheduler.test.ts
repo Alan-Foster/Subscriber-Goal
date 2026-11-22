@@ -186,7 +186,7 @@ vi.mock("../data/highlightRepair", () => ({
   scheduleHighlightRepair: hoisted.scheduleHighlightRepair,
 }));
 
-vi.mock("../core/onboardingReminder", () => ({
+vi.mock("../core/onboardingWarning", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
 }));
 

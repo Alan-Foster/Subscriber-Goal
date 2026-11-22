@@ -1,3 +1,9 @@
+import {
+  onboardingSubscriberGoalLockKey as onboardingReminderLockKey,
+  onboardingSubscriberGoalStateKey,
+  onboardingWarningFields,
+  readOnboardingWarningFields,
+} from "./onboardingState";
 import { watchTestString } from "../testing/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,12 +36,19 @@ vi.mock("./onboardingSubscriberGoal", async (importOriginal) => ({
   getOnboardingEligibility: (
     await importOriginal<typeof import("./onboardingSubscriberGoal")>()
   ).getOnboardingEligibility,
+  isExpectedCompletedReplacement: (
+    await importOriginal<typeof import("./onboardingSubscriberGoal")>()
+  ).isExpectedCompletedReplacement,
+  logOnboardingGoalScheduled: vi.fn(),
   getOnboardingSubscriberGoalState: hoisted.getOnboardingSubscriberGoalState,
   initializeOnboardingSubscriberGoal:
     hoisted.initializeOnboardingSubscriberGoal,
   markOnboardingSubscriberGoalExisting:
     hoisted.markOnboardingSubscriberGoalExisting,
-  markOnboardingSubscriberGoalExistingNotHighlighted: vi.fn(),
+  markOnboardingSubscriberGoalExistingNotHighlighted: vi.fn(
+    (store, _postId, _source, _nowMs, _error, _held, warning) =>
+      persistMockWarning(store, warning),
+  ),
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
   markOnboardingSubscriberGoalCancelled:
@@ -67,20 +80,29 @@ vi.mock("../data/liveSubscriberGoalHighlights", () => ({
 import {
   buildOnboardingReminderMessage,
   onboardingReminderDelayMs,
-  onboardingReminderLockKey,
   onboardingReminderStaggerMaxMinutes,
   onboardingReminderStaggerMinMinutes,
-  onboardingReminderStateKey,
   processDueOnboardingReminder,
   scheduleOnboardingReminder,
   selectOnboardingReminderStaggerMinutes,
-} from "./onboardingReminder";
+} from "./onboardingWarning";
 import {
   onboardingGoalBaseDelayMs,
   onboardingGoalStaggerMaxMinutes,
   onboardingGoalStaggerMinMinutes,
 } from "./onboardingConfig";
 import { CommunityGoalMutationInProgressError } from "./communityGoalMutation";
+
+async function persistMockWarning(
+  store: InMemoryRedis,
+  warning?: Record<string, string>,
+): Promise<void> {
+  if (warning)
+    await store.hSet(
+      onboardingSubscriberGoalStateKey,
+      onboardingWarningFields(warning),
+    );
+}
 
 class InMemoryRedis {
   watch(key: string) {
@@ -164,19 +186,44 @@ describe("onboarding reminder", () => {
       createdPostId: "",
       errorMessage: "",
     });
+    hoisted.markOnboardingSubscriberGoalCancelled
+      .mockReset()
+      .mockImplementation(
+        async (store, _result, _nowMs, _errorMessage, _lock, warning) => {
+          if (warning)
+            await store.hSet(
+              onboardingSubscriberGoalStateKey,
+              onboardingWarningFields(warning),
+            );
+        },
+      );
     hoisted.initializeOnboardingSubscriberGoal.mockReset();
     hoisted.initializeOnboardingSubscriberGoal.mockResolvedValue(undefined);
     hoisted.markOnboardingSubscriberGoalExisting.mockReset();
-    hoisted.markOnboardingSubscriberGoalExisting.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalExisting.mockImplementation(
+      (store, _postId, _source, _nowMs, _held, warning) =>
+        persistMockWarning(store, warning),
+    );
     hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockReset();
-    hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockResolvedValue(
-      undefined,
+    hoisted.scheduleOnboardingSubscriberGoalAfterWarning.mockImplementation(
+      async (store, _sentAt, _lockHeld, warning) => {
+        if (warning)
+          await store.hSet(
+            onboardingSubscriberGoalStateKey,
+            onboardingWarningFields(warning),
+          );
+      },
     );
     hoisted.saveOnboardingState.mockReset();
-    hoisted.saveOnboardingState.mockResolvedValue(undefined);
+    hoisted.saveOnboardingState.mockImplementation((store, _goal, warning) =>
+      persistMockWarning(store, warning),
+    );
     hoisted.ensureExistingSubscriberGoalHighlighted.mockReset();
     hoisted.markOnboardingSubscriberGoalIneligible.mockReset();
-    hoisted.markOnboardingSubscriberGoalIneligible.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalIneligible.mockImplementation(
+      (store, _count, _nowMs, _reason, _held, warning) =>
+        persistMockWarning(store, warning),
+    );
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
       status: "missing",
       candidateCount: 0,
@@ -196,10 +243,11 @@ describe("onboarding reminder", () => {
       stalePruned: 0,
       failed: 0,
     });
-    hoisted.markOnboardingSubscriberGoalCancelled.mockReset();
-    hoisted.markOnboardingSubscriberGoalCancelled.mockResolvedValue(undefined);
     hoisted.markOnboardingSubscriberGoalCompleted.mockReset();
-    hoisted.markOnboardingSubscriberGoalCompleted.mockResolvedValue(undefined);
+    hoisted.markOnboardingSubscriberGoalCompleted.mockImplementation(
+      (store, _postId, _source, _result, _nowMs, _held, warning) =>
+        persistMockWarning(store, warning),
+    );
     hoisted.reconcileCompletedGoal.mockReset();
     hoisted.reconcileCompletedGoal.mockResolvedValue({
       outcome: "replacement_scheduled",
@@ -279,7 +327,7 @@ describe("onboarding reminder", () => {
     });
 
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       reminderStaggerMinutes: String(onboardingReminderStaggerMaxMinutes),
       nextRunAt: String(
@@ -299,12 +347,12 @@ describe("onboarding reminder", () => {
         nowMs: nowMs + 1,
       }),
     ]);
-    const first = await redis.hGetAll(onboardingReminderStateKey);
+    const first = await readOnboardingWarningFields(redis as never);
     await scheduleOnboardingReminder(redis as never, {
       lifecycleSource: "upgrade",
       nowMs: nowMs + 2,
     });
-    await expect(redis.hGetAll(onboardingReminderStateKey)).resolves.toEqual(
+    await expect(readOnboardingWarningFields(redis as never)).resolves.toEqual(
       first,
     );
   });
@@ -340,13 +388,15 @@ describe("onboarding reminder", () => {
         numberOfSubscribers,
         nowMs + onboardingReminderDelayMs,
         "subscriber_count",
+        true,
+        expect.objectContaining({ result: "ineligible" }),
       );
       expect(
         hoisted.ensureExistingSubscriberGoalHighlighted,
       ).not.toHaveBeenCalled();
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
       await expect(
-        redis.hGetAll(onboardingReminderStateKey),
+        readOnboardingWarningFields(redis as never),
       ).resolves.toMatchObject({
         result: "ineligible",
         eligibilitySubscriberCount: String(numberOfSubscribers),
@@ -505,7 +555,7 @@ describe("onboarding reminder", () => {
 
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
       await expect(
-        redis.hGetAll(onboardingReminderStateKey),
+        readOnboardingWarningFields(redis as never),
       ).resolves.toMatchObject({
         status: "pending",
         result: "failed",
@@ -561,6 +611,8 @@ describe("onboarding reminder", () => {
     ).toHaveBeenCalledWith(
       expect.anything(),
       nowMs + onboardingReminderDelayMs,
+      true,
+      expect.objectContaining({ result: "sent" }),
     );
   });
 
@@ -582,7 +634,7 @@ describe("onboarding reminder", () => {
     });
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
       result: "failed",
@@ -632,7 +684,7 @@ describe("onboarding reminder", () => {
       });
       expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
       await expect(
-        redis.hGetAll(onboardingReminderStateKey),
+        readOnboardingWarningFields(redis as never),
       ).resolves.toMatchObject({
         status: "complete",
         result: "existing",
@@ -729,7 +781,7 @@ describe("onboarding reminder", () => {
       }),
     ).resolves.toMatchObject({ status: "failed" });
 
-    const pending = await redis.hGetAll(onboardingReminderStateKey);
+    const pending = await readOnboardingWarningFields(redis as never);
     expect(pending).toMatchObject({
       status: "pending",
       attempts: "1",
@@ -752,7 +804,7 @@ describe("onboarding reminder", () => {
       hoisted.markOnboardingSubscriberGoalCompleted,
     ).toHaveBeenCalledOnce();
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({ status: "complete" });
   });
 
@@ -795,7 +847,7 @@ describe("onboarding reminder", () => {
     );
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
     });
@@ -839,9 +891,10 @@ describe("onboarding reminder", () => {
       expect(hoisted.saveOnboardingState).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ pausedForAccountRecovery: true }),
+        expect.objectContaining({ status: "pending" }),
       );
       await expect(
-        redis.hGetAll(onboardingReminderStateKey),
+        readOnboardingWarningFields(redis as never),
       ).resolves.toMatchObject({ status: "pending" });
     },
   );
@@ -872,7 +925,7 @@ describe("onboarding reminder", () => {
         });
       const start = nowMs + onboardingReminderDelayMs;
       await run(start);
-      const pending = await redis.hGetAll(onboardingReminderStateKey);
+      const pending = await readOnboardingWarningFields(redis as never);
       expect(pending).toMatchObject({ status: "pending" });
       expect(
         hoisted.markOnboardingSubscriberGoalCancelled,
@@ -880,6 +933,7 @@ describe("onboarding reminder", () => {
       expect(hoisted.saveOnboardingState).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ status: "complete" }),
+        expect.anything(),
       );
       hoisted.checkAppAccountHealth.mockResolvedValue({
         status: "healthy",
@@ -922,7 +976,7 @@ describe("onboarding reminder", () => {
     await expect(
       run(start + automaticGoalPrerequisiteMaxAgeMs),
     ).resolves.toMatchObject({ status: "complete" });
-    expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+    expect(await readOnboardingWarningFields(redis as never)).toMatchObject({
       status: "complete",
       result: "retry_exhausted",
     });
@@ -932,6 +986,7 @@ describe("onboarding reminder", () => {
         status: "complete",
         resultStatus: "retry_exhausted",
       }),
+      expect.objectContaining({ result: "retry_exhausted" }),
     );
     await run(start + automaticGoalPrerequisiteMaxAgeMs + 1);
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
@@ -960,7 +1015,7 @@ describe("onboarding reminder", () => {
     let at = nowMs + onboardingReminderDelayMs;
     for (let attempt = 0; attempt < 5; attempt++) {
       await expect(run(at)).resolves.toMatchObject({ status: "not_due" });
-      expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+      expect(await readOnboardingWarningFields(redis as never)).toMatchObject({
         status: "pending",
         attempts: "0",
         nextRunAt: String(at + hour),
@@ -995,9 +1050,12 @@ describe("onboarding reminder", () => {
     hoisted.getOnboardingSubscriberGoalState.mockImplementation(
       async () => goal,
     );
-    hoisted.saveOnboardingState.mockImplementation(async (_redis, nextGoal) => {
-      goal = nextGoal;
-    });
+    hoisted.saveOnboardingState.mockImplementation(
+      async (store, nextGoal, warning) => {
+        await persistMockWarning(store, warning);
+        goal = nextGoal;
+      },
+    );
     hoisted.checkAppAccountHealth.mockResolvedValue({
       status: "unknown",
       healthy: false,
@@ -1027,7 +1085,7 @@ describe("onboarding reminder", () => {
         pausedForAccountRecovery: true,
         operationId: "onboarding:long-account-recovery",
       });
-      expect(await redis.hGetAll(onboardingReminderStateKey)).toMatchObject({
+      expect(await readOnboardingWarningFields(redis as never)).toMatchObject({
         status: "pending",
         nextRunAt: String(at + 300_000),
       });
@@ -1044,13 +1102,13 @@ describe("onboarding reminder", () => {
       status: "healthy",
       healthy: true,
     });
-    const pending = await redis.hGetAll(onboardingReminderStateKey);
+    const pending = await readOnboardingWarningFields(redis as never);
     await expect(run(Number(pending.nextRunAt))).resolves.toMatchObject({
       status: "not_due",
     });
     expect(goal).not.toHaveProperty("pausedForAccountRecovery");
     expect(reddit.modMail.createModNotification).not.toHaveBeenCalled();
-    const resumed = await redis.hGetAll(onboardingReminderStateKey);
+    const resumed = await readOnboardingWarningFields(redis as never);
     await expect(run(Number(resumed.nextRunAt))).resolves.toMatchObject({
       status: "sent",
     });
@@ -1097,9 +1155,10 @@ describe("onboarding reminder", () => {
         creationStaggerMinutes: 1,
         operationId: "onboarding:test",
       }),
+      expect.objectContaining({ status: "pending" }),
     );
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
       nextRunAt: String(
@@ -1148,6 +1207,7 @@ describe("onboarding reminder", () => {
         operationId: "onboarding:orphan",
         replacementSourcePostId: "t3_expected",
       }),
+      expect.objectContaining({ status: "pending" }),
     );
   });
 
@@ -1245,7 +1305,7 @@ describe("onboarding reminder", () => {
       }),
     ).resolves.toMatchObject({ status: "not_due" });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "pending",
       nextRunAt: String(dueAt + 1 + 60_000),
@@ -1268,13 +1328,13 @@ describe("onboarding reminder", () => {
         redis: redis as never,
         nowMs: runAt,
       });
-      const state = await redis.hGetAll(onboardingReminderStateKey);
+      const state = await readOnboardingWarningFields(redis as never);
       expect(state.attempts).toBe(String(attempt));
       if (attempt < 3) runAt = Number(state.nextRunAt);
     }
 
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "complete",
       result: "retry_exhausted",
@@ -1285,10 +1345,15 @@ describe("onboarding reminder", () => {
 
   it("cancels a stale dispatching state without resending", async () => {
     await scheduleOnboardingReminder(redis as never, { nowMs });
-    await redis.hSet(onboardingReminderStateKey, {
-      status: "dispatching",
-      dispatchToken: "legacy-dispatch",
-    });
+    const oldWarning = await readOnboardingWarningFields(redis as never);
+    await redis.hSet(
+      onboardingSubscriberGoalStateKey,
+      onboardingWarningFields({
+        ...oldWarning,
+        status: "dispatching",
+        dispatchToken: "interrupted-dispatch",
+      }),
+    );
 
     await expect(
       processDueOnboardingReminder({
@@ -1303,6 +1368,8 @@ describe("onboarding reminder", () => {
       "delivery_unknown",
       nowMs + onboardingReminderDelayMs,
       expect.any(String),
+      true,
+      expect.objectContaining({ result: "delivery_unknown" }),
     );
   });
 
@@ -1324,7 +1391,7 @@ describe("onboarding reminder", () => {
       errorMessage: "Error: modmail unavailable",
     });
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "complete",
       result: "delivery_unknown",
@@ -1334,6 +1401,8 @@ describe("onboarding reminder", () => {
       "delivery_unknown",
       nowMs + onboardingReminderDelayMs,
       "Error: modmail unavailable",
+      true,
+      expect.objectContaining({ result: "delivery_unknown" }),
     );
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('"event":"onboarding_modmail_delivery_unknown"'),
@@ -1345,7 +1414,10 @@ describe("onboarding reminder", () => {
     const originalHSet = redis.hSet.bind(redis);
     reddit.modMail.createModNotification.mockImplementation(async () => {
       vi.spyOn(redis, "hSet").mockImplementation(async (key, fields) => {
-        if (key === onboardingReminderStateKey && fields.result === "sent") {
+        if (
+          typeof fields.warningState === "string" &&
+          JSON.parse(fields.warningState).result === "sent"
+        ) {
           throw new Error("confirmation unavailable");
         }
         return originalHSet(key, fields);
@@ -1364,13 +1436,13 @@ describe("onboarding reminder", () => {
     });
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
     await expect(
-      redis.hGetAll(onboardingReminderStateKey),
+      readOnboardingWarningFields(redis as never),
     ).resolves.toMatchObject({
       status: "complete",
       result: "delivery_unknown",
     });
     expect(
       hoisted.scheduleOnboardingSubscriberGoalAfterWarning,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledOnce();
   });
 });

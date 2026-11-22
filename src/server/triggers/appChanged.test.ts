@@ -58,7 +58,7 @@ vi.mock("../core/onboardingSubscriberGoal", async (importOriginal) => ({
   onboardingUpgradeWaveEnabled: true,
 }));
 
-vi.mock("../core/onboardingReminder", () => ({
+vi.mock("../core/onboardingWarning", () => ({
   getOnboardingReminderState: hoisted.getOnboardingReminderState,
   markOnboardingReminderIneligible: hoisted.markOnboardingReminderIneligible,
   scheduleOnboardingReminder: hoisted.scheduleOnboardingReminder,
