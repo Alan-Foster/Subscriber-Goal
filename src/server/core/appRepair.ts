@@ -58,14 +58,7 @@ export async function processDueAppRepair({
   deadlineMs?: number;
 }): Promise<"not_due" | "complete" | "retry"> {
   const now = nowMs === undefined ? Date.now : () => nowMs;
-  const worker = defineDueJob({
-    storage: appRepairJob,
-    lockKey: appRepairLockKey,
-    lockTtlMs: 15 * 60 * 1000,
-    backoff: repairBackoff,
-    handle: (record, startedAt) =>
-      runAppRepair({ reddit, redis }, record, startedAt),
-  });
+  const worker = createAppRepairJob(reddit, redis);
   const outcomes = await dispatchDueJobs(redis, [worker], {
     now,
     ...(deadlineMs === undefined ? {} : { deadlineMs }),
@@ -73,6 +66,17 @@ export async function processDueAppRepair({
   const outcome = outcomes.get(worker.id);
   if (outcome === "complete" || outcome === "retry") return outcome;
   return "not_due";
+}
+
+export function createAppRepairJob(reddit: RedditClient, redis: RedisClient) {
+  return defineDueJob({
+    storage: appRepairJob,
+    lockKey: appRepairLockKey,
+    lockTtlMs: 15 * 60 * 1000,
+    backoff: repairBackoff,
+    handle: (record, startedAt) =>
+      runAppRepair({ reddit, redis }, record, startedAt),
+  });
 }
 
 type RepairWork = { reddit: RedditClient; redis: RedisClient };

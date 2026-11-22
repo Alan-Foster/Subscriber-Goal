@@ -1,3 +1,7 @@
+import { getJobBackoffDelay, getJobRetry } from "../jobs/backoff";
+import { createJobCodec, jobRecordFields } from "../jobs/record";
+import { dueJobsKey, updateJobRecord } from "../jobs/queue";
+import { defineDueJob } from "../jobs/runner";
 import type { ServerAppSettings } from "../settings";
 import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
 import { dispatchPostAction } from "../data/crosspostData";
@@ -6,6 +10,7 @@ import {
   listDueSourcePostDeletionIntents,
   saveSourcePostDeletionIntent,
   sourcePostDeletionIntentId,
+  sourcePostDeletionDueKey,
   type SourcePostDeletionIntent,
 } from "../data/sourcePostDeletion";
 import { classifyPostLookupError } from "./postRetirement";
@@ -15,13 +20,13 @@ import {
 } from "./communityGoalMutation";
 import { logDiagnostic } from "../../shared/diagnostics";
 
-const retryBaseMs = 60_000;
-const retryMaxMs = 30 * 60_000;
-const maxAttempts = 20;
-
-function nextDelay(attemptCount: number): number {
-  return Math.min(retryBaseMs * 2 ** Math.max(0, attemptCount), retryMaxMs);
-}
+const retryPolicy = { baseMs: 60_000, maxMs: 30 * 60_000, maxAttempts: 20 };
+const sourceDeletionJob = {
+  id: "source_post_deletion",
+  stateKey: "source_post_deletion_job_v1_state",
+  version: "source_post_deletion_job_v1",
+  codec: createJobCodec(jobRecordFields),
+};
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -67,7 +72,7 @@ export async function recordSourceDeleteAttempt(
     ...intent,
     status: "verify_source",
     updatedAtMs: nowMs,
-    nextAttemptMs: nowMs + retryBaseMs,
+    nextAttemptMs: nowMs + retryPolicy.baseMs,
     deleteAttemptCount: intent.deleteAttemptCount + 1,
     deleteLeaseToken: leaseToken,
     lastError: null,
@@ -163,14 +168,26 @@ async function reschedule(
   nowMs: number,
 ): Promise<void> {
   const attemptCount = intent.attemptCount + 1;
+  const retry = getJobRetry(retryPolicy, attemptCount);
   await saveSourcePostDeletionIntent(redis, {
     ...intent,
-    status: attemptCount >= maxAttempts ? "terminal_failed" : intent.status,
+    status: retry.exhausted ? "terminal_failed" : intent.status,
     updatedAtMs: nowMs,
-    nextAttemptMs: nowMs + nextDelay(intent.attemptCount),
+    nextAttemptMs:
+      nowMs +
+      (retry.exhausted
+        ? getJobBackoffDelay(retryPolicy, attemptCount)
+        : retry.delayMs),
     attemptCount,
     lastError: toErrorMessage(error),
   });
+  if (retry.exhausted) {
+    logDiagnostic("warn", "source_post_deletion_attempts_exhausted", {
+      workflow: "source_post_deletion",
+      postId: intent.postId,
+      attemptCount,
+    });
+  }
 }
 
 async function processOneDueIntent(
@@ -257,18 +274,74 @@ async function processOneDueIntent(
   });
 }
 
-export async function processDueSourcePostDeletions(
+export function createSourcePostDeletionJob(
   reddit: RedditClient,
   redis: RedisClient,
   appSettings: ServerAppSettings,
-  options: { nowMs?: number; limit?: number } = {},
+  limit = 10,
+) {
+  return defineDueJob({
+    storage: sourceDeletionJob,
+    lockKey: "source_post_deletion_job_v1_lock",
+    lockTtlMs: 60_000,
+    backoff: { baseMs: 60_000, maxMs: 60_000 },
+    index: indexSourceDeletionJob,
+    handle: async (_record, startedAt, canStart) => {
+      await processSourceDeletionBatch(
+        reddit,
+        redis,
+        appSettings,
+        startedAt,
+        limit,
+        canStart,
+      );
+      const nextRunAt = await getFirstSourceDeletionDeadline(redis);
+      return nextRunAt === undefined
+        ? { status: "remove" }
+        : { status: "complete", fields: { recurring: true, nextRunAt } };
+    },
+  });
+}
+
+async function getFirstSourceDeletionDeadline(
+  redis: RedisClient,
+): Promise<number | undefined> {
+  const [first] = await redis.zRange(sourcePostDeletionDueKey, 0, 0);
+  return first?.score;
+}
+
+async function indexSourceDeletionJob(redis: RedisClient): Promise<void> {
+  // The v1 index remains the per-intent queue. The runner record represents one bounded batch of that work.
+  const nextRunAt = await getFirstSourceDeletionDeadline(redis);
+  const indexedAt = await redis.zScore(dueJobsKey, sourceDeletionJob.id);
+  if ((indexedAt ?? undefined) === nextRunAt) return;
+  await updateJobRecord(redis, sourceDeletionJob, (current) => {
+    if (current.status === "processing") return;
+    if (nextRunAt === undefined) return null;
+    return { version: sourceDeletionJob.version, status: "pending", nextRunAt };
+  });
+}
+
+async function processSourceDeletionBatch(
+  reddit: RedditClient,
+  redis: RedisClient,
+  appSettings: ServerAppSettings,
+  nowMs: number,
+  limit: number,
+  canStart: () => boolean,
 ): Promise<void> {
-  const nowMs = options.nowMs ?? Date.now();
   const due = await listDueSourcePostDeletionIntents(redis, {
     nowMs,
-    limit: options.limit ?? 10,
+    limit,
   });
   for (const intent of due) {
+    if (!canStart()) {
+      logDiagnostic("info", "job_runner_budget_deferred", {
+        workflow: "job_runner",
+        jobId: sourceDeletionJob.id,
+      });
+      return;
+    }
     try {
       await processOneDueIntent(reddit, redis, appSettings, intent, nowMs);
     } catch (error) {
