@@ -54,10 +54,7 @@ import { ctaOnlyPostKind, subscribeOnlyPostKind } from "../../shared/postKind";
 import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
 import { processSubscriberTrackingRepairs } from "../data/subscriberTracking";
 import { queueConfirmedSourceDeletionCleanup } from "../core/sourcePostDeletion";
-import {
-  MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
-  recoverMilestoneNotificationContinuations,
-} from "../core/milestoneNotifications";
+import { dispatchMilestoneNotificationRecovery } from "../jobs/milestoneNotificationRecovery";
 
 type CompletedUpdateCleanupPreparation =
   | "auto_disabled"
@@ -183,34 +180,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
   const appSettings = getAppSettings();
-  try {
-    await recoverMilestoneNotificationContinuations({
-      redisClient: redis,
-      schedulerClient: scheduler,
-      deliveryEnabled: MILESTONE_NOTIFICATION_DELIVERY_ENABLED,
-      getCampaign: async (job) => {
-        const goal = await getSubGoalData(redis, job.postId);
-        if (goal.completedTime !== job.completedTime || goal.goal <= 0) {
-          return undefined;
-        }
-        const community = await reddit.getCurrentSubreddit();
-        return {
-          postId: job.postId,
-          completedTime: goal.completedTime,
-          subredditName: goal.subredditDisplayName ?? community.name,
-          goal: goal.goal,
-          language: goal.language,
-        };
-      },
-    });
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "milestone_notification_recovery" },
-      error,
-    );
-  }
+  await dispatchMilestoneNotificationRecovery(
+    reddit,
+    redis,
+    scheduler,
+    jobDeadlineMs,
+  );
   // Own-post rendering, completion detection, statistics, and data migrations
   // remain independent. Posting and moderation workers retain their queues
   // until the current recovery incident permits them to run.

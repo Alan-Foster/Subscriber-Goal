@@ -6,6 +6,7 @@ import { isLinkId } from "../types";
 import { formatSubscriberCount } from "../../shared/numberFormat";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
+import { getJobBackoffDelay } from "../jobs/backoff";
 
 export const MILESTONE_NOTIFICATION_DELIVERY_ENABLED = false;
 export const milestoneNotificationBatchSize = 200;
@@ -777,7 +778,7 @@ async function markContinuationScheduled(
   }
 }
 
-export async function recoverMilestoneNotificationContinuations(options: {
+type MilestoneRecoveryOptions = {
   redisClient?: StateRedis;
   schedulerClient?: SchedulerClient;
   getCampaign: (
@@ -785,7 +786,12 @@ export async function recoverMilestoneNotificationContinuations(options: {
   ) => Promise<MilestoneNotificationCampaignData | undefined>;
   deliveryEnabled?: boolean;
   now?: () => number;
-}): Promise<{
+  canStart?: () => boolean;
+};
+
+export async function recoverMilestoneNotificationContinuations(
+  options: MilestoneRecoveryOptions,
+): Promise<{
   due: number;
   scheduled: number;
   failed: number;
@@ -801,73 +807,89 @@ export async function recoverMilestoneNotificationContinuations(options: {
     limit: { offset: 0, count: milestoneNotificationRecoveryBatchSize },
   });
   summary.due = due.length;
-  for (const item of due) {
-    const key = typeof item === "string" ? item : item.member;
+  for (const { member: key } of due) {
+    if (options.canStart && !options.canStart()) break;
     try {
-      const state = parseState(await client.get(key));
-      if (!state?.child || state.continuation !== "pending") {
-        await client.zRem(milestoneNotificationRecoveryKey, [key]);
-        continue;
-      }
-      if (
-        !isMilestoneNotificationJob(state.child) ||
-        now >= milestoneNotificationDeadline(state.child.completedTime)
-      ) {
-        await terminalRecovery(client, key, state, now, "expired_or_invalid");
-        summary.expired += 1;
-        continue;
-      }
-      const campaign = await options.getCampaign(state.child);
-      if (
-        !campaign ||
-        !isMilestoneCampaignEligible(state.child, campaign, now)
-      ) {
-        await terminalRecovery(
-          client,
-          key,
-          state,
-          now,
-          "expired_or_ineligible",
-        );
-        summary.expired += 1;
-        continue;
-      }
-      await (options.schedulerClient ?? scheduler).runJob({
-        name: milestoneNotificationJobName,
-        data: state.child,
-        runAt: new Date(now + milestoneNotificationBatchDelayMs),
-      });
-      await markContinuationScheduled(client, key, now);
-      summary.scheduled += 1;
+      const outcome = await recoverMilestoneContinuation(
+        client,
+        key,
+        now,
+        options,
+      );
+      if (outcome) summary[outcome] += 1;
     } catch (error) {
       summary.failed += 1;
-      const state = parseState(await client.get(key));
-      if (state?.child && state.continuation === "pending") {
-        const attempts = (state.recoveryAttempts ?? 0) + 1;
-        const next = Math.min(
-          milestoneNotificationDeadline(state.job.completedTime),
-          now + Math.min(3_600_000, 2 ** Math.min(attempts, 10) * 1_000),
-        );
-        try {
-          await rescheduleRecovery(client, key, state, attempts, next, now);
-        } catch (persistenceError) {
-          logDiagnostic(
-            "error",
-            "milestone_notification_recovery_persistence_failed",
-            { workflow: "milestone_notification", phase: "recovery_backoff" },
-            persistenceError,
-          );
-        }
-      }
       logDiagnostic(
         "warn",
         "milestone_notification_recovery_failed",
         { workflow: "milestone_notification", phase: "continuation_recovery" },
         error,
       );
+      await retryMilestoneContinuation(client, key, now);
     }
   }
   return summary;
+}
+
+async function recoverMilestoneContinuation(
+  client: StateRedis,
+  key: string,
+  now: number,
+  options: MilestoneRecoveryOptions,
+): Promise<"scheduled" | "expired" | undefined> {
+  const state = parseState(await client.get(key));
+  if (!state?.child || state.continuation !== "pending") {
+    await client.zRem(milestoneNotificationRecoveryKey, [key]);
+    return;
+  }
+  if (
+    !isMilestoneNotificationJob(state.child) ||
+    now >= milestoneNotificationDeadline(state.child.completedTime)
+  ) {
+    await terminalRecovery(client, key, state, now, "expired_or_invalid");
+    return "expired";
+  }
+  const campaign = await options.getCampaign(state.child);
+  if (!campaign || !isMilestoneCampaignEligible(state.child, campaign, now)) {
+    await terminalRecovery(client, key, state, now, "expired_or_ineligible");
+    return "expired";
+  }
+  if (options.canStart && !options.canStart()) return;
+  await (options.schedulerClient ?? scheduler).runJob({
+    name: milestoneNotificationJobName,
+    data: state.child,
+    runAt: new Date(now + milestoneNotificationBatchDelayMs),
+  });
+  await markContinuationScheduled(client, key, now);
+  return "scheduled";
+}
+
+// The existing retry series doubles from two seconds to 2^10 seconds.
+const milestoneRecoveryBackoff = { baseMs: 2_000, maxMs: 1_024_000 };
+
+async function retryMilestoneContinuation(
+  client: StateRedis,
+  key: string,
+  now: number,
+): Promise<void> {
+  const state = parseState(await client.get(key));
+  if (state?.child && state.continuation === "pending") {
+    const attempts = (state.recoveryAttempts ?? 0) + 1;
+    const next = Math.min(
+      milestoneNotificationDeadline(state.job.completedTime),
+      now + getJobBackoffDelay(milestoneRecoveryBackoff, attempts),
+    );
+    try {
+      await rescheduleRecovery(client, key, state, attempts, next, now);
+    } catch (persistenceError) {
+      logDiagnostic(
+        "error",
+        "milestone_notification_recovery_persistence_failed",
+        { workflow: "milestone_notification", phase: "recovery_backoff" },
+        persistenceError,
+      );
+    }
+  }
 }
 
 async function rescheduleRecovery(
