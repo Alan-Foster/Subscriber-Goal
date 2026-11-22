@@ -15,7 +15,7 @@ import {
 } from "../data/updaterData";
 import { isLinkId } from "../types";
 import { applyTextFallback } from "../utils/textFallback";
-import { getAppSettings } from "../settings";
+import { getAppSettings, type ServerAppSettings } from "../settings";
 import { isCrosspostAuthorityInstall } from "../crosspost/bookkeeping";
 import { processCrosspostDispatchQueue } from "../crosspost/dispatch";
 import { countPendingCrossposts } from "../data/crosspostData";
@@ -23,7 +23,7 @@ import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { dispatchAutomaticGoalRetryJob } from "../jobs/automaticGoalRetry";
 import { onboardingSubscriberGoalStateKey } from "../core/onboardingSubscriberGoal";
-import { processDueOnboarding } from "../core/onboarding";
+import { dispatchOnboardingJob } from "../jobs/onboarding";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
   getPostAvailability,
@@ -197,22 +197,9 @@ async function appAccountHealthAllowsPermissionWork(
   }
 }
 
-export async function onPostsUpdaterJob(): Promise<void> {
-  const jobDeadlineMs = Date.now() + jobRunnerBudgetMs;
-  console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
+type CurrentSubreddit = Awaited<ReturnType<typeof reddit.getCurrentSubreddit>>;
 
-  const appSettings = getAppSettings();
-  await dispatchMilestoneNotificationRecovery(
-    reddit,
-    redis,
-    scheduler,
-    jobDeadlineMs,
-  );
-  // Own-post rendering, completion detection, statistics, and data migrations
-  // remain independent. Posting and moderation workers retain their queues
-  // until the current recovery incident permits them to run.
-  let permissionWorkAllowed =
-    await appAccountRecoveryAllowsPermissionWork(jobDeadlineMs);
+async function observeCommunityActivity(): Promise<CurrentSubreddit | null> {
   let subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | null =
     null;
   try {
@@ -238,9 +225,16 @@ export async function onPostsUpdaterJob(): Promise<void> {
       );
     }
   }
-  permissionWorkAllowed &&=
-    await appAccountHealthAllowsPermissionWork(jobDeadlineMs);
-  const currentSubredditName = context.subredditName ?? subreddit?.name;
+  return subreddit;
+}
+
+async function runPermissionGatedJobs(
+  appSettings: ServerAppSettings,
+  jobDeadlineMs: number,
+  subreddit: CurrentSubreddit | null,
+  currentSubredditName: string | undefined,
+  permissionWorkAllowed: boolean,
+): Promise<void> {
   try {
     if (permissionWorkAllowed) {
       if (Date.now() < jobDeadlineMs) {
@@ -272,6 +266,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
+}
+
+async function runCrosspostDispatch(
+  appSettings: ServerAppSettings,
+  currentSubredditName: string | undefined,
+  permissionWorkAllowed: boolean,
+): Promise<void> {
   try {
     if (
       permissionWorkAllowed &&
@@ -316,6 +317,11 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
+}
+
+async function runMaintenanceMigrations(
+  subreddit: CurrentSubreddit | null,
+): Promise<void> {
   try {
     await processPostKindMigrationBatch(reddit, redis);
   } catch (error) {
@@ -351,21 +357,13 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
-  await processDueOnboarding({
-    reddit,
-    redis,
-    appSettings,
-    permissionWorkAllowed,
-  });
-  if (permissionWorkAllowed) {
-    await dispatchAutomaticGoalRetryJob(
-      reddit,
-      redis,
-      appSettings,
-      jobDeadlineMs,
-    );
-  }
+}
 
+async function updateQueuedPosts(
+  appSettings: ServerAppSettings,
+  initialSubreddit: CurrentSubreddit | null,
+): Promise<void> {
+  let subreddit = initialSubreddit;
   const postIds = await getQueuedUpdates(redis);
   if (!postIds.length) {
     return;
@@ -386,177 +384,256 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`Updating ${postIds.length} posts`);
 
   for (const postId of postIds) {
-    try {
-      const recheckKey = getPostUpdateRecheckKey(postId);
-      const recheckAt = Number(await redis.get(recheckKey));
-      if (recheckAt > Date.now()) continue;
-      const subGoalData = await getSubGoalData(redis, postId);
-      if (
-        !isUsableSubscriberGoal(subGoalData.goal) &&
-        (subGoalData.postKind === subscribeOnlyPostKind ||
-          subGoalData.postKind === ctaOnlyPostKind)
-      ) {
-        continue;
-      }
+    await updateQueuedPost(postId, subreddit, appSettings);
+  }
+}
 
-      if (!isLinkId(postId)) {
-        logDiagnostic("error", "scheduler_post_update_failed", {
-          workflow: "post_update",
-          phase: "invalid_post_id",
-          postId,
-        });
-        await cleanupInactivePost(postId, "invalid_post_id");
-        continue;
-      }
-      const post = await reddit.getPostById(postId);
-      const availability = getPostAvailability(post);
-      if (availability.status === "temporarily_removed") {
-        const nextCheckAt = Date.now() + temporarilyRemovedPostRecheckDelayMs;
-        await redis.set(recheckKey, String(nextCheckAt), {
-          expiration: new Date(nextCheckAt),
-        });
-        logDiagnostic("info", "subscriber_goal_update_paused", {
-          workflow: "post_update",
-          phase: "post_availability",
-          postId,
-          category: availability.category ?? "unknown",
-        });
-        continue;
-      }
-      if (recheckAt) await redis.del(recheckKey);
-      if (availability.status === "terminal") {
-        const removedByCategory = availability.category;
-        if (removedByCategory === "deleted") {
-          await queueConfirmedSourceDeletionCleanup(
-            reddit,
-            redis,
-            appSettings,
-            {
-              postId,
-              subredditId: subreddit.id,
-              subredditName: subreddit.name,
-            },
-          );
-        }
-        await retireSubscriberGoalPost(
-          redis,
-          postId,
-          `removedByCategory:${removedByCategory}`,
-        );
-        console.info(
-          `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
-        );
-        continue;
-      }
+async function loadQueuedPost(
+  postId: string,
+  subreddit: CurrentSubreddit,
+  appSettings: ServerAppSettings,
+) {
+  const recheckKey = getPostUpdateRecheckKey(postId);
+  const recheckAt = Number(await redis.get(recheckKey));
+  if (recheckAt > Date.now()) return;
+  const subGoalData = await getSubGoalData(redis, postId);
+  if (
+    !isUsableSubscriberGoal(subGoalData.goal) &&
+    (subGoalData.postKind === subscribeOnlyPostKind ||
+      subGoalData.postKind === ctaOnlyPostKind)
+  ) {
+    return;
+  }
 
-      let effectiveGoal = subGoalData.goal;
-      let effectiveSubscribers = subreddit.numberOfSubscribers;
-      if (!isUsableSubscriberGoal(effectiveGoal)) {
-        const recovery = await recoverEmergencySubscriberGoal({
-          redis,
-          postId,
-          workflow: "post_update",
-          currentSubscribers: effectiveSubscribers,
-          completed: subGoalData.completedTime > 0,
-        });
-        effectiveGoal = recovery.goal;
-        effectiveSubscribers = recovery.subscribers;
-      }
+  if (!isLinkId(postId)) {
+    logDiagnostic("error", "scheduler_post_update_failed", {
+      workflow: "post_update",
+      phase: "invalid_post_id",
+      postId,
+    });
+    await cleanupInactivePost(postId, "invalid_post_id");
+    return;
+  }
+  const post = await reddit.getPostById(postId);
+  const availability = getPostAvailability(post);
+  if (availability.status === "temporarily_removed") {
+    const nextCheckAt = Date.now() + temporarilyRemovedPostRecheckDelayMs;
+    await redis.set(recheckKey, String(nextCheckAt), {
+      expiration: new Date(nextCheckAt),
+    });
+    logDiagnostic("info", "subscriber_goal_update_paused", {
+      workflow: "post_update",
+      phase: "post_availability",
+      postId,
+      category: availability.category ?? "unknown",
+    });
+    return;
+  }
+  if (recheckAt) await redis.del(recheckKey);
+  if (availability.status === "terminal") {
+    const removedByCategory = availability.category;
+    if (removedByCategory === "deleted") {
+      await queueConfirmedSourceDeletionCleanup(reddit, redis, appSettings, {
+        postId,
+        subredditId: subreddit.id,
+        subredditName: subreddit.name,
+      });
+    }
+    await retireSubscriberGoalPost(
+      redis,
+      postId,
+      `removedByCategory:${removedByCategory}`,
+    );
+    console.info(
+      `[updater] cleaned up inactive post: postId=${postId} reason=removedByCategory:${removedByCategory}`,
+    );
+    return;
+  }
 
-      if (effectiveSubscribers >= effectiveGoal && !subGoalData.completedTime) {
-        subGoalData.completedTime = await checkCompletionStatus(
-          reddit,
-          redis,
-          postId,
-        );
-      }
+  return { post, subGoalData };
+}
 
-      const completedTime = subGoalData.completedTime
-        ? new Date(subGoalData.completedTime)
-        : null;
-      const archived = post.archived === true;
-      const locked = post.locked === true;
-      const previousOperationalState = await getPostOperationalState(
+async function updateQueuedPost(
+  postId: string,
+  subreddit: CurrentSubreddit,
+  appSettings: ServerAppSettings,
+): Promise<void> {
+  try {
+    const queued = await loadQueuedPost(postId, subreddit, appSettings);
+    if (!queued) return;
+    const { post, subGoalData } = queued;
+    let effectiveGoal = subGoalData.goal;
+    let effectiveSubscribers = subreddit.numberOfSubscribers;
+    if (!isUsableSubscriberGoal(effectiveGoal)) {
+      const recovery = await recoverEmergencySubscriberGoal({
+        redis,
+        postId,
+        workflow: "post_update",
+        currentSubscribers: effectiveSubscribers,
+        completed: subGoalData.completedTime > 0,
+      });
+      effectiveGoal = recovery.goal;
+      effectiveSubscribers = recovery.subscribers;
+    }
+
+    if (effectiveSubscribers >= effectiveGoal && !subGoalData.completedTime) {
+      subGoalData.completedTime = await checkCompletionStatus(
+        reddit,
         redis,
         postId,
       );
-      if (archived) {
-        await savePostOperationalState(redis, {
-          postId,
-          archived: true,
-          locked,
-          highlightBlocked: previousOperationalState?.highlightBlocked ?? false,
-          updatedAt: Date.now(),
-        });
-        logDiagnostic("info", "subscriber_goal_post_archived", {
-          workflow: "post_update",
-          phase: "render_skipped",
-          postId,
-          locked,
-        });
-        if (subGoalData.completedTime) {
-          await cleanupCompletedUpdate(postId);
-        }
-        continue;
-      }
-      if (previousOperationalState?.archived) {
-        await clearPostOperationalState(redis, postId);
-        await scheduleHighlightRepair(redis, {
-          delayMs: 0,
-          force: true,
-          reason: "post_unarchived",
-          targetPostId: postId,
-        });
-      } else if (locked) {
-        await savePostOperationalState(redis, {
-          postId,
-          archived: false,
-          locked: true,
-          highlightBlocked: false,
-          updatedAt: Date.now(),
-        });
-        logDiagnostic("info", "subscriber_goal_post_locked", {
-          workflow: "post_update",
-          phase: "render_continues",
-          postId,
-        });
-      } else {
-        await clearPostOperationalState(redis, postId);
-      }
-      await applyTextFallback(post, {
-        goal: effectiveGoal,
-        subscribers: effectiveSubscribers,
-        subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
-        completedTime,
-        language: subGoalData.language,
-      });
-      await applyGoalPostFrameStyle(post, subGoalData.postHeight);
-
-      if (subGoalData.completedTime) {
-        await cleanupCompletedUpdate(postId);
-        continue;
-      }
-
-      await queueUpdate(redis, postId, new Date());
-    } catch (e) {
-      if (isLinkId(postId) && isMissingPostError(e, postId)) {
-        await queueConfirmedSourceDeletionCleanup(reddit, redis, appSettings, {
-          postId,
-          subredditId: subreddit.id,
-          subredditName: subreddit.name,
-        });
-        await retireSubscriberGoalPost(redis, postId, "confirmed_missing_post");
-        console.info(
-          `[updater] cleaned up inactive post: postId=${postId} reason=confirmed_missing_post`,
-        );
-        continue;
-      }
-      logDiagnostic(
-        "error",
-        "scheduler_post_update_failed",
-        { workflow: "post_update", postId },
-        e,
-      );
     }
+
+    const completedTime = subGoalData.completedTime
+      ? new Date(subGoalData.completedTime)
+      : null;
+    if (
+      !(await recordQueuedPostOperationalState(
+        postId,
+        post,
+        Boolean(completedTime),
+      ))
+    )
+      return;
+    await applyTextFallback(post, {
+      goal: effectiveGoal,
+      subscribers: effectiveSubscribers,
+      subredditName: subGoalData.subredditDisplayName ?? subreddit.name,
+      completedTime,
+      language: subGoalData.language,
+    });
+    await applyGoalPostFrameStyle(post, subGoalData.postHeight);
+
+    if (subGoalData.completedTime) {
+      await cleanupCompletedUpdate(postId);
+      return;
+    }
+
+    await queueUpdate(redis, postId, new Date());
+  } catch (e) {
+    if (isLinkId(postId) && isMissingPostError(e, postId)) {
+      await queueConfirmedSourceDeletionCleanup(reddit, redis, appSettings, {
+        postId,
+        subredditId: subreddit.id,
+        subredditName: subreddit.name,
+      });
+      await retireSubscriberGoalPost(redis, postId, "confirmed_missing_post");
+      console.info(
+        `[updater] cleaned up inactive post: postId=${postId} reason=confirmed_missing_post`,
+      );
+      return;
+    }
+    logDiagnostic(
+      "error",
+      "scheduler_post_update_failed",
+      { workflow: "post_update", postId },
+      e,
+    );
   }
+}
+
+async function recordQueuedPostOperationalState(
+  postId: string,
+  post: Awaited<ReturnType<typeof reddit.getPostById>>,
+  completed: boolean,
+): Promise<boolean> {
+  const archived = post.archived === true;
+  const locked = post.locked === true;
+  const previousOperationalState = await getPostOperationalState(redis, postId);
+  if (archived) {
+    await savePostOperationalState(redis, {
+      postId,
+      archived: true,
+      locked,
+      highlightBlocked: previousOperationalState?.highlightBlocked ?? false,
+      updatedAt: Date.now(),
+    });
+    logDiagnostic("info", "subscriber_goal_post_archived", {
+      workflow: "post_update",
+      phase: "render_skipped",
+      postId,
+      locked,
+    });
+    if (completed) {
+      await cleanupCompletedUpdate(postId);
+    }
+    return false;
+  }
+  if (previousOperationalState?.archived) {
+    await clearPostOperationalState(redis, postId);
+    await scheduleHighlightRepair(redis, {
+      delayMs: 0,
+      force: true,
+      reason: "post_unarchived",
+      targetPostId: postId,
+    });
+  } else if (locked) {
+    await savePostOperationalState(redis, {
+      postId,
+      archived: false,
+      locked: true,
+      highlightBlocked: false,
+      updatedAt: Date.now(),
+    });
+    logDiagnostic("info", "subscriber_goal_post_locked", {
+      workflow: "post_update",
+      phase: "render_continues",
+      postId,
+    });
+  } else {
+    await clearPostOperationalState(redis, postId);
+  }
+  return true;
+}
+
+export async function onPostsUpdaterJob(): Promise<void> {
+  const jobDeadlineMs = Date.now() + jobRunnerBudgetMs;
+  console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
+
+  const appSettings = getAppSettings();
+  await dispatchMilestoneNotificationRecovery(
+    reddit,
+    redis,
+    scheduler,
+    jobDeadlineMs,
+  );
+  // Own-post rendering, completion detection, statistics, and data migrations
+  // remain independent. Posting and moderation workers retain their queues
+  // until the current recovery incident permits them to run.
+  let permissionWorkAllowed =
+    await appAccountRecoveryAllowsPermissionWork(jobDeadlineMs);
+  const subreddit = await observeCommunityActivity();
+  permissionWorkAllowed &&=
+    await appAccountHealthAllowsPermissionWork(jobDeadlineMs);
+  const currentSubredditName = context.subredditName ?? subreddit?.name;
+  await runPermissionGatedJobs(
+    appSettings,
+    jobDeadlineMs,
+    subreddit,
+    currentSubredditName,
+    permissionWorkAllowed,
+  );
+  await runCrosspostDispatch(
+    appSettings,
+    currentSubredditName,
+    permissionWorkAllowed,
+  );
+  await runMaintenanceMigrations(subreddit);
+  await dispatchOnboardingJob({
+    reddit,
+    redis,
+    appSettings,
+    permissionWorkAllowed,
+    deadlineMs: jobDeadlineMs,
+  });
+  if (permissionWorkAllowed) {
+    await dispatchAutomaticGoalRetryJob(
+      reddit,
+      redis,
+      appSettings,
+      jobDeadlineMs,
+    );
+  }
+
+  await updateQueuedPosts(appSettings, subreddit);
 }

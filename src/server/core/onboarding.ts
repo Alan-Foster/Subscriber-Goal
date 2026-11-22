@@ -9,14 +9,19 @@ export async function processDueOnboarding({
   redis,
   appSettings,
   permissionWorkAllowed,
+  nowMs = Date.now(),
+  canStart = () => true,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   appSettings: ServerAppSettings;
   permissionWorkAllowed: boolean;
+  nowMs?: number;
+  canStart?: () => boolean;
 }): Promise<void> {
+  if (!canStart()) return;
   try {
-    await processDueOnboardingReminder({ reddit, redis });
+    await processDueOnboardingReminder({ reddit, redis, nowMs, canStart });
   } catch (error) {
     logDiagnostic(
       "error",
@@ -25,9 +30,15 @@ export async function processDueOnboarding({
       error,
     );
   }
-  if (!permissionWorkAllowed) return;
+  if (!permissionWorkAllowed || !canStart()) return;
   try {
-    await processDueOnboardingSubscriberGoal({ reddit, redis, appSettings });
+    await processDueOnboardingSubscriberGoal({
+      reddit,
+      redis,
+      appSettings,
+      nowMs,
+      canStart,
+    });
   } catch (error) {
     logDiagnostic(
       "error",

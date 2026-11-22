@@ -1,3 +1,4 @@
+import { getExponentialJobBackoffCap } from "../jobs/backoff";
 import {
   getOnboardingEligibility,
   type OnboardingEligibility,
@@ -575,12 +576,14 @@ export async function processDueOnboardingSubscriberGoal({
   appSettings,
   nowMs = Date.now(),
   automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
+  canStart,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   appSettings: ServerAppSettings;
   nowMs?: number;
   automationEnabled?: boolean;
+  canStart?: (() => boolean) | undefined;
 }): Promise<OnboardingSubscriberGoalSummary> {
   try {
     return await withCommunityGoalMutationLease(
@@ -600,6 +603,7 @@ export async function processDueOnboardingSubscriberGoal({
             appSettings,
             nowMs,
             automationEnabled,
+            canStart,
             mutationLease,
           });
         } finally {
@@ -625,6 +629,7 @@ type OnboardingCreationWork = {
   appSettings: ServerAppSettings;
   nowMs: number;
   automationEnabled: boolean;
+  canStart: (() => boolean) | undefined;
   mutationLease: CommunityGoalMutationLease;
 };
 type OnboardingCreationProgress = {
@@ -644,6 +649,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   appSettings,
   nowMs = Date.now(),
   automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
+  canStart,
   mutationLease,
 }: {
   reddit: RedditClient;
@@ -651,6 +657,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
   appSettings: ServerAppSettings;
   nowMs?: number;
   automationEnabled?: boolean;
+  canStart?: (() => boolean) | undefined;
   mutationLease: CommunityGoalMutationLease;
 }): Promise<OnboardingSubscriberGoalSummary> {
   const base = emptySummary();
@@ -716,6 +723,7 @@ async function processDueOnboardingSubscriberGoalUnderLease({
     appSettings,
     nowMs,
     automationEnabled,
+    canStart,
     mutationLease,
   };
   const progress: OnboardingCreationProgress = {
@@ -1029,7 +1037,9 @@ async function createOnboardingGoal(
   progress: OnboardingCreationProgress,
   subreddit: OnboardingCreationSubreddit,
 ): Promise<OnboardingSubscriberGoalSummary> {
-  const { reddit, redis, appSettings, nowMs, mutationLease } = work;
+  const { reddit, redis, appSettings, nowMs, mutationLease, canStart } = work;
+  if (canStart && !canStart())
+    return { status: "not_due", ...progress.inspected };
   const reloaded = progress.activeState;
   const crosspost = isCrosspostEligible(subreddit, appSettings.promoSubreddit);
   const useTinyPost =
@@ -1085,6 +1095,7 @@ async function createOnboardingGoal(
       reconciliationContext: "onboarding",
       mutationLease,
       reconciliationNowMs: nowMs,
+      ...(canStart ? { canStartSubmissionReconciliation: canStart } : {}),
     },
   });
   progress.creationFinished = true;
@@ -1416,9 +1427,9 @@ export function selectOnboardingRetryDelayMs(
   attempts: number,
   randomValue = Math.random(),
 ): number {
-  const cap = Math.min(
-    onboardingRetryMaxMs,
-    onboardingRetryBaseMs * 2 ** Math.max(0, attempts - 1),
+  const cap = getExponentialJobBackoffCap(
+    { baseMs: onboardingRetryBaseMs, maxMs: onboardingRetryMaxMs },
+    attempts,
   );
   const normalized = Math.min(Math.max(randomValue, 0), 1 - Number.EPSILON);
   return Math.floor(

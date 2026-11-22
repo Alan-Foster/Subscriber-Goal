@@ -1,3 +1,4 @@
+import { getExponentialJobBackoffCap } from "../jobs/backoff";
 import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedditClient, RedisClient } from "../types";
 import {
@@ -76,9 +77,9 @@ export async function checkCanonicalHighlightContradiction({
       "Reddit reported contradictory Community Highlight state; moderator intent was not recorded.",
     );
     await scheduleHighlightRepair(redis, {
-      delayMs: Math.min(
-        60 * 60 * 1000,
-        5 * 60 * 1000 * 2 ** (contradiction.consecutiveCount - 1),
+      delayMs: getExponentialJobBackoffCap(
+        { baseMs: 5 * 60_000, maxMs: 60 * 60_000 },
+        contradiction.consecutiveCount,
       ),
       force: true,
       reason: "contradictory_highlight_state",

@@ -414,11 +414,13 @@ export async function processDueOnboardingReminder({
   redis,
   nowMs = Date.now(),
   automationEnabled = AUTOMATIC_ONBOARDING_ENABLED,
+  canStart,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
   automationEnabled?: boolean;
+  canStart?: () => boolean;
 }): Promise<OnboardingReminderSummary> {
   const notDue = () => ({ status: "not_due" as const, ...emptySummary() });
   try {
@@ -439,6 +441,7 @@ export async function processDueOnboardingReminder({
             redis,
             nowMs,
             automationEnabled,
+            canStart,
             mutationLease,
           });
         } finally {
@@ -468,6 +471,7 @@ type WarningWork = {
   redis: RedisClient;
   nowMs: number;
   automationEnabled: boolean;
+  canStart: (() => boolean) | undefined;
   mutationLease: CommunityGoalMutationLease;
 };
 type WarningProgress = {
@@ -986,7 +990,7 @@ async function deferWarningPrerequisite(
 }
 
 async function dispatchOnboardingWarning(
-  { reddit, redis, nowMs }: WarningWork,
+  { reddit, redis, nowMs, canStart }: WarningWork,
   progress: WarningProgress,
   { reloaded, subreddit, activeGoalState, operationId }: WarningAttempt,
 ): Promise<OnboardingReminderSummary> {
@@ -1028,6 +1032,8 @@ async function dispatchOnboardingWarning(
     subreddit.language,
     activeGoalState?.intent,
   );
+  if (canStart && !canStart())
+    return { status: "not_due", ...progress.inspected };
   const dispatchToken = `${nowMs}:${Math.random().toString(36).slice(2)}`;
   await saveOnboardingReminderState(redis, {
     ...reloaded,

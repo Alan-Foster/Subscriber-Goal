@@ -18,6 +18,12 @@ const legacyLocks = [
   "onboarding_subscriber_goal_v4_init_lock",
 ] as const;
 
+export function hasEmbeddedOnboardingWarning(
+  workflow: Record<string, string>,
+): boolean {
+  return workflow[warningField] !== undefined;
+}
+
 export function onboardingWarningFields(
   raw: Record<string, string>,
 ): Record<string, string> {
