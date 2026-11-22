@@ -1,3 +1,15 @@
+import { createJobCodec, jobRecordFields, timeField } from "../jobs/record";
+import { dueJobsKey, updateJobRecord } from "../jobs/queue";
+import { defineDueJob } from "../jobs/runner";
+import {
+  displacementBatchSize,
+  displacementPendingKey,
+  displacementWaitMs as waitMs,
+  enqueueDisplacementCheck,
+  indexLegacyDisplacementPage,
+  scheduledPostDisplacementKey,
+  updateDisplacementCheck,
+} from "../data/scheduledPostDisplacementQueue";
 import { subscriberGoalPostKind } from "../../shared/postKind";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { getSubGoalData } from "../data/subGoalData";
@@ -18,8 +30,7 @@ import {
 } from "./communityGoalMutation";
 import { isSubscriberGoalPostRetired } from "./postRetirement";
 
-export const scheduledPostDisplacementKey = "scheduled_post_displacement_v1";
-const waitMs = 15 * 60_000;
+export { scheduledPostDisplacementKey } from "../data/scheduledPostDisplacementQueue";
 const retryWindowMs = 60 * 60_000;
 const logLimit = 25;
 const workflow = "scheduled_post_displacement";
@@ -40,39 +51,13 @@ export async function recordScheduledPostDisplacementCheck(
     return;
   }
 
-  await redis.hSet(scheduledPostDisplacementKey, {
-    [postId]: String(unpinnedAt),
-  });
+  await enqueueDisplacementCheck(redis, postId, unpinnedAt);
   logDiagnostic("info", "scheduled_post_displacement_queued", {
     workflow,
     postId,
     unpinnedAt,
     dueAt: unpinnedAt + waitMs,
   });
-}
-
-// A newer unpin can replace the hash field while the scheduler awaits Reddit.
-async function consumeCheck(
-  redis: RedisClient,
-  postId: string,
-  expected: string,
-): Promise<boolean> {
-  const tx = await redis.watch(scheduledPostDisplacementKey);
-  let inMulti = false;
-  try {
-    if ((await redis.hGet(scheduledPostDisplacementKey, postId)) !== expected) {
-      await tx.unwatch();
-      return false;
-    }
-    await tx.multi();
-    inMulti = true;
-    await tx.hDel(scheduledPostDisplacementKey, [postId]);
-    return (await tx.exec()).length > 0;
-  } catch (error) {
-    if (inMulti) await tx.discard();
-    else await tx.unwatch();
-    throw error;
-  }
 }
 
 async function repinGoal(
@@ -127,89 +112,202 @@ async function repinGoal(
   });
 }
 
-export async function processDueScheduledPostDisplacementChecks({
-  reddit,
-  redis,
-  subreddit,
-  nowMs = Date.now(),
-}: {
+const displacementJob = {
+  id: workflow,
+  version: "scheduled_post_displacement_job_v1",
+  stateKey: "scheduled_post_displacement_job_v1_state",
+  codec: createJobCodec({ ...jobRecordFields, scanCursor: timeField }),
+};
+
+export function createScheduledPostDisplacementJob(
+  reddit: RedditClient,
+  redis: RedisClient,
+  subreddit: Subreddit,
+) {
+  return defineDueJob({
+    storage: displacementJob,
+    lockKey: "scheduled_post_displacement_job_v1_lock",
+    lockTtlMs: 60_000,
+    backoff: { baseMs: 60_000, maxMs: 60_000 },
+    index: indexDisplacementJob,
+    handle: async (record, startedAt, canStart) => {
+      const scanCursor =
+        record.scanCursor === null
+          ? null
+          : await indexLegacyDisplacementPage(redis, record.scanCursor ?? 0);
+      await processDisplacementBatch(
+        { reddit, redis, subreddit },
+        startedAt,
+        canStart,
+      );
+      const nextRunAt =
+        scanCursor === null
+          ? await firstDisplacementDeadline(redis)
+          : startedAt;
+      return nextRunAt === undefined
+        ? { status: "remove" }
+        : {
+            status: "complete",
+            fields: { recurring: true, nextRunAt, scanCursor },
+          };
+    },
+  });
+}
+
+async function firstDisplacementDeadline(
+  redis: RedisClient,
+): Promise<number | undefined> {
+  const [first] = await redis.zRange(displacementPendingKey, 0, 0);
+  return first?.score;
+}
+
+async function indexDisplacementJob(
+  redis: RedisClient,
+  nowMs: number,
+): Promise<void> {
+  const indexedAt = await redis.zScore(dueJobsKey, displacementJob.id);
+  const earliest = await firstDisplacementDeadline(redis);
+  if (
+    indexedAt == null &&
+    earliest === undefined &&
+    (await redis.hLen(scheduledPostDisplacementKey)) === 0
+  )
+    return;
+  await updateJobRecord(redis, displacementJob, (current) => {
+    if (current.status === "processing") return;
+    const nextRunAt = current.scanCursor === null ? earliest : nowMs;
+    if (nextRunAt === undefined) return null;
+    if (indexedAt === nextRunAt && current.nextRunAt === nextRunAt) return;
+    return { version: displacementJob.version, status: "pending", nextRunAt };
+  });
+}
+
+type DisplacementWork = {
   reddit: RedditClient;
   redis: RedisClient;
   subreddit: Subreddit;
-  nowMs?: number;
-}): Promise<void> {
-  const checks = await redis.hGetAll(scheduledPostDisplacementKey);
-  for (const [postId, raw] of Object.entries(checks)) {
-    const unpinnedAt = Number(raw);
-    const dueAt = unpinnedAt + waitMs;
-    if (
-      !isLinkId(postId) ||
-      !Number.isFinite(unpinnedAt) ||
-      nowMs >= dueAt + retryWindowMs
-    ) {
-      await consumeCheck(redis, postId, raw);
-      continue;
-    }
-    if (nowMs < dueAt) continue;
+};
 
-    const diagnostic = {
-      workflow,
-      postId,
-      unpinnedAt,
-      dueAt,
-      subredditName: subreddit.name,
-    };
-    try {
-      await withCommunityGoalMutationLease(redis, async () => {
-        if ((await redis.hGet(scheduledPostDisplacementKey, postId)) !== raw)
-          return;
-        let submissions;
-        try {
-          submissions = await reddit
-            .getModerationLog({
-              subredditName: subreddit.name,
-              type: "submit_scheduled_post",
-              limit: logLimit,
-              pageSize: logLimit,
-            })
-            .get(logLimit);
-        } catch (error) {
-          logDiagnostic(
-            "warn",
-            "scheduled_post_displacement_log_read_failed",
-            diagnostic,
-            error,
-          );
-          return;
-        }
-        const match = submissions.find((entry) => {
-          const publishedAt = entry.createdAt.getTime();
-          return (
-            entry.type === "submit_scheduled_post" &&
-            publishedAt >= unpinnedAt - waitMs &&
-            publishedAt <= dueAt
-          );
-        });
-        logDiagnostic("info", "scheduled_post_displacement_checked", {
-          ...diagnostic,
-          entriesRead: submissions.length,
-          matchedAt: match?.createdAt.getTime(),
-          matchedActionId: match?.id,
-        });
-
-        // Consume before the write so a failed or ambiguous attempt cannot repeat.
-        if (!(await consumeCheck(redis, postId, raw)) || !match) return;
-        await repinGoal(reddit, redis, subreddit, postId);
+async function processDisplacementBatch(
+  work: DisplacementWork,
+  nowMs: number,
+  canStart: () => boolean,
+): Promise<void> {
+  const due = await work.redis.zRange(displacementPendingKey, "-inf", nowMs, {
+    by: "score",
+    limit: { offset: 0, count: displacementBatchSize },
+  });
+  for (const { member } of due) {
+    if (!canStart()) {
+      logDiagnostic("info", "job_runner_budget_deferred", {
+        workflow: "job_runner",
+        jobId: displacementJob.id,
       });
+      return;
+    }
+    try {
+      await checkScheduledDisplacement(work, member, nowMs);
     } catch (error) {
-      if (!(error instanceof CommunityGoalMutationInProgressError)) {
+      logDiagnostic(
+        "warn",
+        "scheduled_post_displacement_check_failed",
+        {
+          workflow,
+          postId: member,
+          phase: "pending_index",
+          subredditName: work.subreddit.name,
+        },
+        error,
+      );
+    }
+  }
+}
+
+async function checkScheduledDisplacement(
+  { reddit, redis, subreddit }: DisplacementWork,
+  postId: string,
+  nowMs: number,
+): Promise<void> {
+  const raw = await redis.hGet(scheduledPostDisplacementKey, postId);
+  const unpinnedAt = Number(raw);
+  const dueAt = unpinnedAt + waitMs;
+  if (
+    !isLinkId(postId) ||
+    raw === undefined ||
+    !Number.isFinite(unpinnedAt) ||
+    nowMs >= dueAt + retryWindowMs
+  ) {
+    await updateDisplacementCheck(redis, postId, raw);
+    return;
+  }
+  if (nowMs < dueAt) {
+    await updateDisplacementCheck(redis, postId, raw, dueAt);
+    return;
+  }
+
+  const diagnostic = {
+    workflow,
+    postId,
+    unpinnedAt,
+    dueAt,
+    subredditName: subreddit.name,
+  };
+  try {
+    const complete = await withCommunityGoalMutationLease(redis, async () => {
+      if ((await redis.hGet(scheduledPostDisplacementKey, postId)) !== raw)
+        return true;
+      let submissions;
+      try {
+        submissions = await reddit
+          .getModerationLog({
+            subredditName: subreddit.name,
+            type: "submit_scheduled_post",
+            limit: logLimit,
+            pageSize: logLimit,
+          })
+          .get(logLimit);
+      } catch (error) {
         logDiagnostic(
           "warn",
-          "scheduled_post_displacement_check_failed",
+          "scheduled_post_displacement_log_read_failed",
           diagnostic,
           error,
         );
+        return false;
       }
+      const match = submissions.find((entry) => {
+        const publishedAt = entry.createdAt.getTime();
+        return (
+          entry.type === "submit_scheduled_post" &&
+          publishedAt >= unpinnedAt - waitMs &&
+          publishedAt <= dueAt
+        );
+      });
+      logDiagnostic("info", "scheduled_post_displacement_checked", {
+        ...diagnostic,
+        entriesRead: submissions.length,
+        matchedAt: match?.createdAt.getTime(),
+        matchedActionId: match?.id,
+      });
+
+      // Consume before the write so a failed or ambiguous attempt cannot repeat.
+      if ((await updateDisplacementCheck(redis, postId, raw)) && match) {
+        await repinGoal(reddit, redis, subreddit, postId);
+      }
+      return true;
+    });
+    if (complete) return;
+  } catch (error) {
+    if (!(error instanceof CommunityGoalMutationInProgressError)) {
+      logDiagnostic(
+        "warn",
+        "scheduled_post_displacement_check_failed",
+        diagnostic,
+        error,
+      );
     }
   }
+
+  // The next cron tick can retry. Place this failure behind checks that were already due.
+  await updateDisplacementCheck(redis, postId, raw, nowMs + 1);
 }

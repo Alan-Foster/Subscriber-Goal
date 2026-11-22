@@ -138,6 +138,7 @@ class InMemoryRedis {
       set(key: string, value: string, options?: SetOptions): Promise<string>;
       hSet(key: string, fields: Record<string, string>): Promise<void>;
       hDel(key: string, fields: string[]): Promise<void>;
+      zAdd(key: string, ...entries: ZEntry[]): Promise<void>;
       zRem(key: string, members: string[]): Promise<void>;
       exec(): Promise<string>;
     } = {
@@ -152,6 +153,9 @@ class InMemoryRedis {
       },
       hDel: async (key: string, fields: string[]): Promise<void> => {
         await this.hDel(key, fields);
+      },
+      zAdd: async (key: string, ...entries: ZEntry[]): Promise<void> => {
+        await this.zAdd(key, ...entries);
       },
       zRem: async (key: string, members: string[]): Promise<void> => {
         await this.zRem(key, members);
