@@ -1,4 +1,6 @@
-import { FakeRedisImpl } from "../testing/faultHarness";
+import { FakeRedisImpl, Gate } from "../testing/faultHarness";
+import { resolveAppAccountHealthGate } from "../jobs/appAccountHealth";
+import { dueJobsKey } from "../jobs/queue";
 import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 import { appAccountRecoveryStateKey } from "./appAccountRecoveryState";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +9,6 @@ import {
   appAccountHealthRetryStateKey,
   appAccountInstallerKey,
   checkAppAccountHealth,
-  processDueAppAccountHealthCheck,
   rememberAppInstaller,
 } from "./appAccountHealth";
 
@@ -15,6 +16,7 @@ class TestRedis {
   private readonly queue = new FakeRedisImpl();
   zAdd = this.queue.zAdd.bind(this.queue);
   zRem = this.queue.zRem.bind(this.queue);
+  zScore = this.queue.zScore.bind(this.queue);
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
 
@@ -53,7 +55,7 @@ describe("app account health", () => {
   let redis: TestRedis;
   let permissions: string[];
   let reddit: {
-    getAppUser: ReturnType<typeof vi.fn>;
+    getAppUser: ReturnType<typeof vi.fn<() => Promise<unknown>>>;
     modMail: {
       createModNotification: ReturnType<typeof vi.fn<() => Promise<string>>>;
     };
@@ -84,6 +86,14 @@ describe("app account health", () => {
       subredditName: "ExampleSub",
       subredditId: "t5_example",
       nowMs: 100,
+    });
+
+  const tick = (nowMs: number, deadlineMs?: number) =>
+    resolveAppAccountHealthGate({
+      reddit: reddit as never,
+      redis: redis as never,
+      now: () => nowMs,
+      ...(deadlineMs !== undefined ? { deadlineMs } : {}),
     });
 
   it("stores a normalized installer username", async () => {
@@ -213,12 +223,6 @@ describe("app account health", () => {
           new Error("temporary Reddit failure"),
         );
       await check();
-      const tick = (nowMs: number) =>
-        processDueAppAccountHealthCheck({
-          reddit: reddit as never,
-          redis: redis as never,
-          nowMs,
-        });
       for (let attempt = 2; attempt <= 3; attempt++) {
         const retry = await redis.hGetAll(appAccountHealthRetryStateKey);
         await tick(Number(retry.nextRunAt));
@@ -263,11 +267,7 @@ describe("app account health", () => {
         const nowMs = Number(
           (await redis.hGetAll(appAccountHealthRetryStateKey)).nextRunAt,
         );
-        await processDueAppAccountHealthCheck({
-          reddit: reddit as never,
-          redis: redis as never,
-          nowMs,
-        });
+        await tick(nowMs);
         const next = await redis.hGetAll(appAccountHealthRetryStateKey);
         expect(next.attempts).toBe(String(Math.min(7, attempt)));
         expect(Number(next.nextRunAt) - nowMs).toBe(
@@ -280,6 +280,109 @@ describe("app account health", () => {
       );
     },
   );
+
+  it("indexes a legacy retry at its original time and runs it once across overlapping ticks", async () => {
+    const dueAt = 5_000;
+    const legacyRetry = {
+      status: "exhausted",
+      attempts: "5",
+      nextRunAt: String(dueAt),
+      subredditName: "ExampleSub",
+      lastError: "missing_posts_permission",
+    };
+    await redis.hSet(appAccountHealthRetryStateKey, legacyRetry);
+    await redis.zAdd(
+      dueJobsKey,
+      ...Array.from({ length: 25 }, (_, index) => ({
+        member: `other_job_${index}`,
+        score: dueAt - 1,
+      })),
+    );
+    await expect(tick(dueAt - 1)).resolves.toMatchObject({ healthy: false });
+    expect(await redis.zScore(dueJobsKey, "app_account_health")).toBe(dueAt);
+    expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toEqual(
+      legacyRetry,
+    );
+
+    const permissionLookup = new Gate();
+    reddit.getAppUser.mockImplementationOnce(async () => {
+      permissionLookup.arrive();
+      await permissionLookup.released;
+      return {
+        username: "subscriber-goal",
+        getModPermissionsForSubreddit: async () => ["posts"],
+      };
+    });
+    const first = tick(dueAt);
+    try {
+      await Promise.race([
+        permissionLookup.reached,
+        first.then(() => {
+          throw new Error("The due health retry did not start");
+        }),
+      ]);
+      await expect(tick(dueAt)).resolves.toMatchObject({ healthy: false });
+      expect(reddit.getAppUser).toHaveBeenCalledOnce();
+    } finally {
+      permissionLookup.release();
+      await first;
+    }
+    await expect(first).resolves.toMatchObject({ healthy: true });
+    await expect(tick(dueAt)).resolves.toBeUndefined();
+    expect(reddit.getAppUser).toHaveBeenCalledOnce();
+    expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toEqual({});
+    expect(await redis.hGetAll("app_account_health_job_v1_state")).toEqual({});
+    expect(
+      await redis.zScore(dueJobsKey, "app_account_health"),
+    ).toBeUndefined();
+  });
+
+  it("keeps the gate closed when the scheduler budget defers a due retry", async () => {
+    await redis.hSet(appAccountHealthRetryStateKey, {
+      status: "pending",
+      attempts: "1",
+      nextRunAt: "1000",
+      subredditName: "ExampleSub",
+    });
+    await expect(tick(1_000, 1_000)).resolves.toMatchObject({
+      status: "unknown",
+      healthy: false,
+    });
+    expect(reddit.getAppUser).not.toHaveBeenCalled();
+    expect(await redis.hGetAll(appAccountHealthRetryStateKey)).toMatchObject({
+      nextRunAt: "1000",
+      attempts: "1",
+    });
+    await expect(tick(1_001)).resolves.toMatchObject({ healthy: true });
+  });
+
+  it("backs off and retries after a Redis failure during a scheduled health check", async () => {
+    const dueAt = 1_000;
+    await redis.hSet(appAccountHealthRetryStateKey, {
+      status: "pending",
+      attempts: "1",
+      nextRunAt: String(dueAt),
+      subredditName: "ExampleSub",
+    });
+    const nextAttemptAt = dueAt + 60_000;
+    vi.spyOn(redis, "del").mockRejectedValueOnce(
+      new Error("Redis unavailable"),
+    );
+
+    await expect(tick(dueAt)).resolves.toMatchObject({ healthy: false });
+    expect(await redis.zScore(dueJobsKey, "app_account_health")).toBe(
+      nextAttemptAt,
+    );
+    await expect(tick(nextAttemptAt - 1)).resolves.toMatchObject({
+      healthy: false,
+    });
+    expect(reddit.getAppUser).toHaveBeenCalledOnce();
+    await expect(tick(nextAttemptAt)).resolves.toMatchObject({ healthy: true });
+    expect(reddit.getAppUser).toHaveBeenCalledTimes(2);
+    expect(
+      await redis.zScore(dueJobsKey, "app_account_health"),
+    ).toBeUndefined();
+  });
 
   it("can fail closed without scheduling a permission retry", async () => {
     reddit.getAppUser.mockRejectedValue(new Error("permission denied"));
