@@ -22,11 +22,8 @@ import { countPendingCrossposts } from "../data/crosspostData";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
 import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
-import {
-  onboardingSubscriberGoalStateKey,
-  processDueOnboardingSubscriberGoal,
-} from "../core/onboardingSubscriberGoal";
-import { processDueOnboardingReminder } from "../core/onboardingReminder";
+import { onboardingSubscriberGoalStateKey } from "../core/onboardingSubscriberGoal";
+import { processDueOnboarding } from "../core/onboarding";
 import { applyGoalPostFrameStyle } from "../core/post";
 import {
   getPostAvailability,
@@ -376,31 +373,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
-  try {
-    await processDueOnboardingReminder({ reddit, redis });
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "onboarding_reminder" },
-      error,
-    );
-  }
-  try {
-    if (permissionWorkAllowed)
-      await processDueOnboardingSubscriberGoal({
-        reddit,
-        redis,
-        appSettings,
-      });
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "onboarding_subscriber_goal" },
-      error,
-    );
-  }
+  await processDueOnboarding({
+    reddit,
+    redis,
+    appSettings,
+    permissionWorkAllowed,
+  });
   try {
     if (permissionWorkAllowed) {
       const autoCreateSummary = await processDueAutoCreateNextGoals({

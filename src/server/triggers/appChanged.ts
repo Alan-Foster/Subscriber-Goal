@@ -12,7 +12,7 @@ import {
   getOnboardingReminderState,
   markOnboardingReminderIneligible,
   scheduleOnboardingReminder,
-} from "../core/onboardingReminder";
+} from "../core/onboardingWarning";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { rememberAppInstaller } from "../core/appAccountHealth";
 import { recordLifecycleAndScheduleRecovery } from "../core/appAccountRecovery";

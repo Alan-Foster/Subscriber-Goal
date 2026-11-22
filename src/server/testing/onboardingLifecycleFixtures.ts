@@ -1,5 +1,4 @@
 import { watchTestHash, watchTestString } from "./testHashWatch";
-import { onboardingReminderStateKey } from "../core/onboardingReminder";
 
 export class InMemoryRedis {
   async watch(key: string) {
@@ -11,7 +10,7 @@ export class InMemoryRedis {
   hashes = new Map<string, Map<string, string>>();
   values = new Map<string, string>();
   sortedSets = new Map<string, Map<string, number>>();
-  failReminderWrite = false;
+  failWorkflowWrite = false;
 
   async set(
     key: string,
@@ -47,8 +46,8 @@ export class InMemoryRedis {
   }
 
   async hSet(key: string, values: Record<string, string>): Promise<void> {
-    if (key === onboardingReminderStateKey && this.failReminderWrite) {
-      throw new Error("reminder write failed");
+    if (values.warningState !== undefined && this.failWorkflowWrite) {
+      throw new Error("workflow write failed");
     }
     const hash = this.hashes.get(key) ?? new Map<string, string>();
     for (const [field, value] of Object.entries(values)) hash.set(field, value);

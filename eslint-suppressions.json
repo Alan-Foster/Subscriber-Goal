@@ -72,30 +72,6 @@
       "count": 1
     }
   },
-  "src/server/core/onboardingLifecycle.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/core/onboardingReminder.ts": {
-    "complexity": {
-      "count": 2
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/server/core/onboardingSubscriberGoal.ts": {
-    "complexity": {
-      "count": 3
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {
     "complexity": {
       "count": 1

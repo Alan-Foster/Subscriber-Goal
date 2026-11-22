@@ -108,7 +108,7 @@ import {
   onboardingReminderStateKey,
   processDueOnboardingReminder,
   scheduleOnboardingReminder,
-} from "./onboardingReminder";
+} from "./onboardingWarning";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
 
