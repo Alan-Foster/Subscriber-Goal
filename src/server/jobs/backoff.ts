@@ -36,13 +36,17 @@ export function getJobBackoffDelay(
   failedAttempts: number,
   random = Math.random,
 ): number {
-  const delay = Math.min(
-    policy.maxMs,
-    policy.baseMs * 2 ** Math.max(0, failedAttempts - 1),
-  );
+  const delay = getExponentialJobBackoffCap(policy, failedAttempts);
   const jitter = policy.jitterFraction ?? 0;
   return Math.min(
     policy.maxMs,
     Math.floor(jitter ? delay * (1 + random() * jitter) : delay),
   );
+}
+
+export function getExponentialJobBackoffCap(
+  { baseMs, maxMs }: ExponentialBackoffPolicy,
+  failedAttempts: number,
+): number {
+  return Math.min(maxMs, baseMs * 2 ** Math.max(0, failedAttempts - 1));
 }

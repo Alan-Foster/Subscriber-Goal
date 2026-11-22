@@ -102,7 +102,7 @@ import {
   highlightManagementStateKey,
 } from "../data/highlightManagement";
 import { subscriberGoalPostKind } from "../../shared/postKind";
-import { processDueOnboarding } from "./onboarding";
+import { dispatchOnboardingJob } from "../jobs/onboarding";
 import { reconcileOnboardingForLifecycle } from "./onboardingLifecycle";
 import {
   migrateOnboardingWarning,
@@ -528,13 +528,18 @@ describe("migration queues", () => {
 });
 
 describe("#134 unified onboarding", () => {
-  function runOnboarding(at: number): Promise<void> {
+  function runOnboarding(
+    at: number,
+    permissionWorkAllowed = true,
+    deadlineMs?: number,
+  ): Promise<void> {
     vi.setSystemTime(at);
-    return processDueOnboarding({
+    return dispatchOnboardingJob({
       reddit: world.reddit as never,
       redis: world.redis as never,
       appSettings,
-      permissionWorkAllowed: true,
+      permissionWorkAllowed,
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
     });
   }
 
@@ -616,6 +621,10 @@ describe("#134 unified onboarding", () => {
     const warning = await readOnboardingWarningFields(world.redis as never);
     const warningAt = Number(warning.nextRunAt);
     await runOnboarding(warningAt - 1);
+    expect(await world.redisImpl.zScore(dueJobsKey, "onboarding")).toBe(
+      warningAt,
+    );
+    await runOnboarding(warningAt, true, warningAt);
     expect(world.redditImpl.modmailNotifications).toHaveLength(0);
     const gate = new Gate();
     world.plan.add({
@@ -624,7 +633,7 @@ describe("#134 unified onboarding", () => {
       mode: "pause",
       gate,
     });
-    const tick = runOnboarding(warningAt);
+    const tick = runOnboarding(warningAt, false);
     await Promise.race([
       gate.reached,
       tick.then(() => {
@@ -652,11 +661,21 @@ describe("#134 unified onboarding", () => {
     expect(world.redditImpl.modmailNotifications).toHaveLength(1);
     const creationAt = Number(goal.nextRunAt);
     await runOnboarding(creationAt - 1);
+    await runOnboarding(creationAt, false);
     expect(goalPosts()).toHaveLength(0);
+    expect(await world.redisImpl.zScore(dueJobsKey, "onboarding")).toBe(
+      creationAt,
+    );
     await runOnboarding(creationAt);
     await runOnboarding(creationAt + minute);
     expect(goalPosts()).toHaveLength(1);
     expect(world.redditImpl.modmailNotifications).toHaveLength(1);
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "onboarding"),
+    ).toBeUndefined();
+    expect(await world.redisImpl.hGetAll("onboarding_job_v1_state")).toEqual(
+      {},
+    );
     expect(await world.redisImpl.hGetAll(onboardingReminderStateKey)).toEqual(
       {},
     );
@@ -696,6 +715,35 @@ describe("#134 unified onboarding", () => {
     expect(goalPosts()).toHaveLength(0);
   });
 
+  it("resumes a warning at the recorded retry deadline after a pre-dispatch failure", async () => {
+    vi.setSystemTime(T0);
+    await onAppChanged({ lifecycleSource: "install" });
+    const warning = await readOnboardingWarningFields(world.redis as never);
+    const warningAt = Number(warning.nextRunAt);
+    world.plan.add({ target: "reddit", method: "getCurrentSubreddit" });
+
+    await runOnboarding(warningAt);
+    const retry = await readOnboardingWarningFields(world.redis as never);
+    const retryAt = Number(retry.nextRunAt);
+    expect(retry).toMatchObject({ status: "pending", result: "failed" });
+    expect(retryAt).toBe(warningAt + 5 * minute);
+    expect(await world.redisImpl.zScore(dueJobsKey, "onboarding")).toBe(
+      retryAt,
+    );
+    await runOnboarding(retryAt - 1);
+    expect(world.redditImpl.modmailNotifications).toHaveLength(0);
+
+    await runOnboarding(retryAt);
+    await runOnboarding(retryAt + minute);
+    expect(world.redditImpl.modmailNotifications).toHaveLength(1);
+    expect(
+      await world.redisImpl.hGetAll(onboardingSubscriberGoalStateKey),
+    ).toMatchObject({
+      status: "pending",
+      reminderSentAt: String(retryAt),
+    });
+  });
+
   it.each(["pending", "dispatching"] as const)(
     "upgrades a due legacy %s warning without shifting its deadline or repeating a dispatch",
     async (status) => {
@@ -721,6 +769,9 @@ describe("#134 unified onboarding", () => {
       await onAppChanged({ lifecycleSource: "upgrade" });
       await runOnboarding(warningAt - 1);
       expect(world.redditImpl.modmailNotifications).toHaveLength(0);
+      expect(await world.redisImpl.zScore(dueJobsKey, "onboarding")).toBe(
+        status === "pending" ? warningAt : undefined,
+      );
       expect(
         await readOnboardingWarningFields(world.redis as never),
       ).toMatchObject({

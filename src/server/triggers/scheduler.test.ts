@@ -185,6 +185,11 @@ vi.mock("../data/highlightRepair", () => ({
   scheduleHighlightRepair: hoisted.scheduleHighlightRepair,
 }));
 
+vi.mock("../jobs/onboarding", async () => ({
+  dispatchOnboardingJob: (await import("../core/onboarding"))
+    .processDueOnboarding,
+}));
+
 vi.mock("../core/onboardingWarning", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
 }));
@@ -344,10 +349,14 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       reddit: hoisted.reddit,
       redis: expect.anything(),
       appSettings: baseSettings,
+      nowMs: expect.any(Number),
+      canStart: expect.any(Function),
     });
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalledWith({
       reddit: hoisted.reddit,
       redis: expect.anything(),
+      nowMs: expect.any(Number),
+      canStart: expect.any(Function),
     });
   });
 

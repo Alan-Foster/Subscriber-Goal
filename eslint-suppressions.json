@@ -79,13 +79,5 @@
     "complexity": {
       "count": 1
     }
-  },
-  "src/server/triggers/scheduler.ts": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
   }
 }

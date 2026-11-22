@@ -1,3 +1,4 @@
+import { getExponentialJobBackoffCap } from "../jobs/backoff";
 import { EntrypointHeight } from "@devvit/web/server";
 import {
   ctaOnlyPostKind,
@@ -151,7 +152,10 @@ async function schedulePostKindMigrationRetry(
   // retaining the minimum delay when a scheduler tick ran late.
   const delay = Math.max(
     retryBaseMs,
-    Math.min(retryBaseMs * 2 ** (attempts - 1), deadline - failedAt),
+    getExponentialJobBackoffCap(
+      { baseMs: retryBaseMs, maxMs: deadline - failedAt },
+      attempts,
+    ),
   );
   const retryAt = failedAt + delay;
   const transaction = await redis.watch(postKindMigrationQueueKey);

@@ -1,3 +1,4 @@
+import { getExponentialJobBackoffCap } from '../jobs/backoff';
 import { reddit, redis } from '@devvit/web/server';
 import { type ServerAppSettings } from '../settings';
 import { formatSubscriberCount } from '../../shared/numberFormat';
@@ -74,8 +75,7 @@ const getNextRetryDelayMs = (
   baseDelayMs: number,
   maxDelayMs: number
 ): number => {
-  const exponentialDelay = baseDelayMs * 2 ** Math.max(0, attemptCount);
-  return Math.min(exponentialDelay, maxDelayMs);
+  return getExponentialJobBackoffCap({ baseMs: baseDelayMs, maxMs: maxDelayMs }, attemptCount + 1);
 };
 
 const isRetryWindowExpired = (
