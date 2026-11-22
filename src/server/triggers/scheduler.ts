@@ -21,7 +21,7 @@ import { processCrosspostDispatchQueue } from "../crosspost/dispatch";
 import { countPendingCrossposts } from "../data/crosspostData";
 import { processPostKindMigrationBatch } from "../data/postKindMigration";
 import { processLegacyAfterSubscribeActionMigrationBatch } from "../data/legacyAfterSubscribeActionMigration";
-import { processDueAutoCreateNextGoals } from "../core/autoCreateNextGoal";
+import { dispatchAutomaticGoalRetryJob } from "../jobs/automaticGoalRetry";
 import { onboardingSubscriberGoalStateKey } from "../core/onboardingSubscriberGoal";
 import { processDueOnboarding } from "../core/onboarding";
 import { applyGoalPostFrameStyle } from "../core/post";
@@ -375,33 +375,12 @@ export async function onPostsUpdaterJob(): Promise<void> {
     appSettings,
     permissionWorkAllowed,
   });
-  try {
-    if (permissionWorkAllowed) {
-      const autoCreateSummary = await processDueAutoCreateNextGoals({
-        reddit,
-        redis,
-        appSettings,
-      });
-      if (
-        autoCreateSummary.due > 0 ||
-        autoCreateSummary.created > 0 ||
-        autoCreateSummary.skipped > 0 ||
-        autoCreateSummary.failed > 0 ||
-        autoCreateSummary.rescheduled > 0 ||
-        autoCreateSummary.exhausted > 0 ||
-        (autoCreateSummary.unresolved ?? 0) > 0
-      ) {
-        console.info(
-          `[autoCreateNextGoal] scheduler summary: due=${autoCreateSummary.due} created=${autoCreateSummary.created} skipped=${autoCreateSummary.skipped} failed=${autoCreateSummary.failed} rescheduled=${autoCreateSummary.rescheduled} exhausted=${autoCreateSummary.exhausted} unresolved=${autoCreateSummary.unresolved ?? 0} reconciliationRescheduled=${autoCreateSummary.reconciliationRescheduled ?? 0} reconciliationExhausted=${autoCreateSummary.reconciliationExhausted ?? 0}`,
-        );
-      }
-    }
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "auto_create_next_goal" },
-      error,
+  if (permissionWorkAllowed) {
+    await dispatchAutomaticGoalRetryJob(
+      reddit,
+      redis,
+      appSettings,
+      jobDeadlineMs,
     );
   }
 

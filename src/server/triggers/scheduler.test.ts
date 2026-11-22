@@ -56,7 +56,7 @@ const hoisted = vi.hoisted(() => ({
   countPendingCrossposts: vi.fn(),
   processPostKindMigrationBatch: vi.fn(),
   processLegacyAfterSubscribeActionMigrationBatch: vi.fn(),
-  processDueAutoCreateNextGoals: vi.fn(),
+  dispatchAutomaticGoalRetryJob: vi.fn(),
   processDueOnboardingSubscriberGoal: vi.fn(),
   processDueOnboardingReminder: vi.fn(),
   getQueuedUpdates: vi.fn(),
@@ -160,8 +160,8 @@ vi.mock("../utils/textFallback", () => ({
   applyTextFallback: hoisted.applyTextFallback,
 }));
 
-vi.mock("../core/autoCreateNextGoal", () => ({
-  processDueAutoCreateNextGoals: hoisted.processDueAutoCreateNextGoals,
+vi.mock("../jobs/automaticGoalRetry", () => ({
+  dispatchAutomaticGoalRetryJob: hoisted.dispatchAutomaticGoalRetryJob,
 }));
 
 vi.mock("../core/onboardingSubscriberGoal", () => ({
@@ -228,7 +228,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.countPendingCrossposts.mockReset();
     hoisted.processPostKindMigrationBatch.mockReset();
     hoisted.processLegacyAfterSubscribeActionMigrationBatch.mockReset();
-    hoisted.processDueAutoCreateNextGoals.mockReset();
+    hoisted.dispatchAutomaticGoalRetryJob.mockReset();
     hoisted.processDueOnboardingSubscriberGoal.mockReset();
     hoisted.processDueOnboardingReminder.mockReset();
     hoisted.getQueuedUpdates.mockReset();
@@ -273,14 +273,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       {},
     );
     hoisted.countPendingCrossposts.mockResolvedValue(0);
-    hoisted.processDueAutoCreateNextGoals.mockResolvedValue({
-      due: 0,
-      created: 0,
-      skipped: 0,
-      failed: 0,
-      rescheduled: 0,
-      exhausted: 0,
-    });
+    hoisted.dispatchAutomaticGoalRetryJob.mockResolvedValue(undefined);
     hoisted.processDueOnboardingSubscriberGoal.mockResolvedValue({
       status: "not_due",
       trackedInspected: 0,
@@ -394,7 +387,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.resolveAppAccountHealthGate).not.toHaveBeenCalled();
     expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
-    expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+    expect(hoisted.dispatchAutomaticGoalRetryJob).not.toHaveBeenCalled();
     expect(hoisted.getQueuedUpdates).toHaveBeenCalled();
     expect(hoisted.cancelUpdates).not.toHaveBeenCalled();
     expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
@@ -412,7 +405,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       expect.objectContaining({ name: "CorporateGifts" }),
     );
     expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
-    expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+    expect(hoisted.dispatchAutomaticGoalRetryJob).toHaveBeenCalledOnce();
   });
 
   it("defers runner work when earlier scheduler work spends the budget", async () => {
@@ -459,7 +452,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         "t3_goal",
       );
       expect(hoisted.applyTextFallback).toHaveBeenCalled();
-      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.dispatchAutomaticGoalRetryJob).not.toHaveBeenCalled();
       expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
       expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
       expect(hoisted.processCrosspostDispatchQueue).not.toHaveBeenCalled();
@@ -480,7 +473,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         });
       await onPostsUpdaterJob();
       expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
-      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.dispatchAutomaticGoalRetryJob).not.toHaveBeenCalled();
       expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
     },
   );
@@ -523,7 +516,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       await onPostsUpdaterJob();
       expect(hoisted.reddit.getAppUser).not.toHaveBeenCalled();
       expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
-      expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
+      expect(hoisted.dispatchAutomaticGoalRetryJob).not.toHaveBeenCalled();
       expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
       expect(hoisted.observeDailySubscriberCount).toHaveBeenCalledOnce();
 
@@ -535,14 +528,14 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       );
       expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
       expect(hoisted.dispatchScheduledJobs).toHaveBeenCalledOnce();
-      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+      expect(hoisted.dispatchAutomaticGoalRetryJob).toHaveBeenCalledOnce();
       expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
 
       now.mockReturnValue(2000);
       await onPostsUpdaterJob();
       expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
       expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
-      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledTimes(2);
+      expect(hoisted.dispatchAutomaticGoalRetryJob).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -627,7 +620,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       );
       expect(hoisted.processPostKindMigrationBatch).toHaveBeenCalledOnce();
       expect(hoisted.processDueOnboardingSubscriberGoal).toHaveBeenCalledOnce();
-      expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();
+      expect(hoisted.dispatchAutomaticGoalRetryJob).toHaveBeenCalledOnce();
       expect(hoisted.applyTextFallback).toHaveBeenCalledOnce();
       expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledOnce();
       expect(hoisted.queueUpdate).toHaveBeenCalledWith(

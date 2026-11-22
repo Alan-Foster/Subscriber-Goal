@@ -1,5 +1,6 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
+import { getJobBackoffDelay } from "../jobs/backoff";
 import type { RedditClient, RedisClient } from "../types";
 
 export const automaticGoalPrerequisiteRetriesKey =
@@ -8,6 +9,7 @@ export const automaticGoalPrerequisiteRetriesKey =
 export const automaticGoalPrerequisiteMaxAgeMs = 48 * 60 * 60 * 1000;
 export const automaticGoalRetryGenerationsKey =
   "automatic_goal_retry_generations_v1";
+const prerequisiteBackoff = { baseMs: 5 * 60_000, maxMs: 60 * 60_000 };
 
 // Uncertain prerequisites have capped backoff, separate from submission attempts.
 export async function nextAutomaticGoalPrerequisiteRetry(
@@ -40,11 +42,7 @@ export async function nextAutomaticGoalPrerequisiteRetry(
         ? null
         : Math.min(
             deadline,
-            nowMs +
-              Math.min(
-                60 * 60 * 1000,
-                5 * 60 * 1000 * 2 ** Math.min(4, attempts - 1),
-              ),
+            nowMs + getJobBackoffDelay(prerequisiteBackoff, attempts),
           ),
   };
 }
