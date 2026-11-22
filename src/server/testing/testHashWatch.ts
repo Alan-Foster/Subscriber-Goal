@@ -26,24 +26,41 @@ export async function watchTestHash(
   redis: {
     hGetAll(key: string): Promise<Record<string, string>>;
     hSet(key: string, changes: Record<string, string>): Promise<unknown>;
+    zAdd?(
+      key: string,
+      ...members: { member: string; score: number }[]
+    ): Promise<unknown>;
+    zRem?(key: string, members: string[]): Promise<unknown>;
   },
   key: string,
+  beforeExec?: () => Promise<void> | undefined,
 ) {
   const snapshot = JSON.stringify(await redis.hGetAll(key));
-  let changes: Record<string, string> | undefined;
+  const commands: Array<() => Promise<unknown>> = [];
   return {
     multi: async () => undefined,
     discard: async () => undefined,
     unwatch: async () => undefined,
-    hSet: async (_key: string, fields: Record<string, string>) => {
-      changes = fields;
+    hSet: async (targetKey: string, fields: Record<string, string>) => {
+      commands.push(() => redis.hSet(targetKey, fields));
+    },
+    zAdd: async (
+      key: string,
+      ...members: { member: string; score: number }[]
+    ) => {
+      commands.push(async () => redis.zAdd?.(key, ...members));
+    },
+    zRem: async (key: string, members: string[]) => {
+      commands.push(async () => redis.zRem?.(key, members));
     },
     exec: async () => {
-      if (!changes || JSON.stringify(await redis.hGetAll(key)) !== snapshot) {
+      await beforeExec?.();
+      if (JSON.stringify(await redis.hGetAll(key)) !== snapshot) {
         return [];
       }
-      await redis.hSet(key, changes);
-      return [1];
+      const results = [];
+      for (const command of commands) results.push(await command());
+      return results;
     },
   };
 }

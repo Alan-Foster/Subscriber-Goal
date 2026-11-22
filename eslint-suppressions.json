@@ -67,11 +67,6 @@
       "count": 1
     }
   },
-  "src/server/core/appRepair.ts": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {
     "complexity": {
       "count": 1

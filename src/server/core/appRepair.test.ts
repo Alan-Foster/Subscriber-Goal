@@ -53,8 +53,16 @@ import {
 import { communityGoalMutationLockKey } from "./communityGoalMutation";
 import { scheduleHighlightRepair } from "../data/highlightRepair";
 import { watchTestHash, watchTestString } from "../testing/testHashWatch";
+import { FakeRedisImpl } from "../testing/faultHarness";
+import { dueJobsKey } from "../jobs/queue";
 
 class TestRedis {
+  private readonly queue = new FakeRedisImpl();
+  zScore = this.queue.zScore.bind(this.queue);
+  zAdd = this.queue.zAdd.bind(this.queue);
+  zRem = this.queue.zRem.bind(this.queue);
+  zRange = this.queue.zRange.bind(this.queue);
+
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
 
@@ -121,6 +129,49 @@ describe("scheduled app repair", () => {
       reconciliationOutcome: "complete",
       eligiblePostIds: ["t3_registered"],
     });
+  });
+
+  it("indexes an old v3 repair and runs it once at its original deadline", async () => {
+    const start = 100_000;
+    const nextRunAt = start + 3 * 60 * 60 * 1000;
+    const legacy = {
+      version: "app_repair_community_highlights_v3",
+      status: "pending",
+      reason: "lifecycle_upgrade",
+      attempts: "2",
+      nextRunAt: String(nextRunAt),
+      scheduledAt: String(start),
+      targetPostId: "t3_registered",
+    };
+    await redis.hSet(appRepairStateKey, legacy);
+    const run = (nowMs: number) =>
+      processDueAppRepair({
+        redis: redis as never,
+        reddit: reddit as never,
+        nowMs,
+      });
+
+    await expect(run(start)).resolves.toBe("not_due");
+    await expect(run(nextRunAt - 1)).resolves.toBe("not_due");
+    expect(await redis.hGetAll(appRepairStateKey)).toEqual(legacy);
+    expect(await redis.zRange(dueJobsKey, 0, -1)).toEqual([
+      { member: "app_repair", score: nextRunAt },
+    ]);
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).not.toHaveBeenCalled();
+
+    await expect(run(nextRunAt)).resolves.toBe("complete");
+    await expect(run(nextRunAt)).resolves.toBe("not_due");
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).toHaveBeenCalledOnce();
+    expect(await redis.zRange(dueJobsKey, 0, -1)).toEqual([
+      {
+        member: "app_repair",
+        score: nextRunAt + recurringHighlightRepairIntervalMs,
+      },
+    ]);
   });
 
   it("discovers candidates and initializes the legacy after-subscribe migration in NSFW communities", async () => {
