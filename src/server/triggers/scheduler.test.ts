@@ -420,6 +420,22 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
   });
 
+  it("defers runner work when earlier scheduler work spends the budget", async () => {
+    const startedAt = Date.now();
+    let now = startedAt;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    hoisted.processDueSourcePostDeletions.mockImplementationOnce(async () => {
+      now = startedAt + 20_000;
+    });
+    try {
+      await onPostsUpdaterJob();
+      expect(hoisted.processDueSourcePostDeletions).toHaveBeenCalledOnce();
+      expect(hoisted.processDueAppRepair).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([
     "pending",
     "processing",

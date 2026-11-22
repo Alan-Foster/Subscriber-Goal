@@ -394,16 +394,24 @@ export class FakeRedisImpl {
     key: string,
     start: number | string,
     stop: number | string,
-    options?: { by?: "rank" | "score"; reverse?: boolean },
+    options?: {
+      by?: "rank" | "score";
+      reverse?: boolean;
+      limit?: { offset: number; count: number };
+    },
   ): Promise<ZEntry[]> {
     const all = [...(this.zsets.get(key) ?? [])]
       .map(([member, score]) => ({ member, score }))
       .sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
     if (options?.by === "score") {
-      const lo = Number(start);
-      const hi = Number(stop);
+      const lo = start === "-inf" ? -Infinity : Number(start);
+      const hi = stop === "+inf" ? Infinity : Number(stop);
       const ranged = all.filter((e) => e.score >= lo && e.score <= hi);
-      return options.reverse ? ranged.reverse() : ranged;
+      const ordered = options.reverse ? ranged.reverse() : ranged;
+      const { limit } = options;
+      return limit
+        ? ordered.slice(limit.offset, limit.offset + limit.count)
+        : ordered;
     }
     const ordered = options?.reverse ? all.reverse() : all;
     const s = Number(start);
@@ -422,6 +430,12 @@ export class FakeRedisImpl {
       },
       hSet: async (key: string, fields: Record<string, string>) => {
         queued.push(() => this.hSet(key, fields));
+      },
+      zAdd: async (key: string, ...members: ZEntry[]) => {
+        queued.push(() => this.zAdd(key, ...members));
+      },
+      zRem: async (key: string, members: string[]) => {
+        queued.push(() => this.zRem(key, members));
       },
       async exec() {
         const results = [];

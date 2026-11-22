@@ -37,6 +37,7 @@ import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { processDueAppRepair } from "../core/appRepair";
+import { jobRunnerBudgetMs } from "../jobs/runner";
 import { processDueScheduledPostDisplacementChecks } from "../core/scheduledPostDisplacement";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
@@ -161,6 +162,7 @@ async function cleanupInactivePost(
 }
 
 export async function onPostsUpdaterJob(): Promise<void> {
+  const jobDeadlineMs = Date.now() + jobRunnerBudgetMs;
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
   const appSettings = getAppSettings();
@@ -263,7 +265,16 @@ export async function onPostsUpdaterJob(): Promise<void> {
     );
   }
   try {
-    if (permissionWorkAllowed) await processDueAppRepair({ reddit, redis });
+    if (permissionWorkAllowed) {
+      if (Date.now() < jobDeadlineMs) {
+        await processDueAppRepair({ reddit, redis, deadlineMs: jobDeadlineMs });
+      } else {
+        logDiagnostic("info", "job_runner_budget_deferred", {
+          workflow: "job_runner",
+          phase: "scheduler",
+        });
+      }
+    }
   } catch (error) {
     logDiagnostic(
       "error",

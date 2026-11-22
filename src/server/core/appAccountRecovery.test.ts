@@ -1,4 +1,5 @@
-import { watchTestString } from "../testing/testHashWatch";
+import { FakeRedisImpl } from "../testing/faultHarness";
+import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -26,26 +27,15 @@ import {
 } from "./appAccountRecovery";
 
 class TestRedis {
+  private readonly queue = new FakeRedisImpl();
+  zAdd = this.queue.zAdd.bind(this.queue);
+  zRem = this.queue.zRem.bind(this.queue);
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
 
   async watch(key: string) {
     if (this.values.has(key)) return watchTestString(this, key);
-    const before = JSON.stringify(await this.hGetAll(key));
-    let fields: Record<string, string> = {};
-    return {
-      multi: async () => undefined,
-      unwatch: async () => undefined,
-      discard: async () => undefined,
-      hSet: async (_key: string, next: Record<string, string>) => {
-        fields = next;
-      },
-      exec: async () => {
-        if (JSON.stringify(await this.hGetAll(key)) !== before) return [];
-        await this.hSet(key, fields);
-        return [1];
-      },
-    };
+    return watchTestHash(this, key);
   }
 
   async set(
