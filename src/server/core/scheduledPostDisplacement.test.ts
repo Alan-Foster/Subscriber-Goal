@@ -1,4 +1,7 @@
-import { watchTestString } from "../testing/testHashWatch";
+import { FakeRedisImpl, Gate } from "../testing/faultHarness";
+import { dispatchDueJobs } from "../jobs/runner";
+import { dueJobsKey } from "../jobs/queue";
+import { displacementPendingKey } from "../data/scheduledPostDisplacementQueue";
 import type { ModAction } from "@devvit/reddit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,7 +12,8 @@ import { getSubGoalData } from "../data/subGoalData";
 import type { RedditClient, RedisClient } from "../types";
 import { retiredSubscriberGoalKeyPrefix } from "./postRetirement";
 import {
-  processDueScheduledPostDisplacementChecks,
+  createScheduledPostDisplacementJob,
+  recordScheduledPostDisplacementCheck,
   scheduledPostDisplacementKey,
 } from "./scheduledPostDisplacement";
 
@@ -34,29 +38,17 @@ function logEntry(
 
 function fixture(entries = [logEntry(0)]) {
   const checks = new Map<string, string>([[postId, String(unpinnedAt)]]);
-  const values = new Map<string, string>();
-  const watchDisplacement = vi.fn(async (_key: string) => ({
-    unwatch: vi.fn(),
-    multi: vi.fn(),
-    discard: vi.fn(),
-    hDel: vi.fn(async (_key: string, fields: string[]) => {
-      for (const field of fields) checks.delete(field);
-    }),
-    exec: vi.fn().mockResolvedValue([1]),
-  }));
-  const redis = {
-    get: vi.fn(async (key: string) => values.get(key)),
-    set: vi.fn(async (key: string, value: string) => {
-      values.set(key, value);
-    }),
-    del: vi.fn(async (key: string) => {
-      values.delete(key);
-    }),
-    hGetAll: vi.fn(async () => Object.fromEntries(checks)),
-    hGet: vi.fn(async (_key: string, id: string) => checks.get(id)),
-    watch: async (key: string) =>
-      values.has(key) ? watchTestString(redis, key) : watchDisplacement(key),
-  };
+  const redis = new FakeRedisImpl();
+  redis.hashes.set(scheduledPostDisplacementKey, checks);
+  const saveLock = redis.set.bind(redis);
+  vi.spyOn(redis, "set").mockImplementation((key, value, options) =>
+    saveLock(
+      key,
+      value,
+      options?.nx === undefined ? undefined : { nx: options.nx },
+    ),
+  );
+  const deleteCheck = vi.spyOn(redis, "hDel");
   const keep = [{ postId: "t3_sticky" }, { postId: "t3_announcement" }];
   const highlights = [...keep];
   const post = {
@@ -83,20 +75,23 @@ function fixture(entries = [logEntry(0)]) {
     getAppUser: vi.fn().mockResolvedValue({ id: "t2_app" }),
     sendModMail: vi.fn(),
   };
+  const client = redis as unknown as RedisClient;
+  const job = createScheduledPostDisplacementJob(
+    reddit as unknown as RedditClient,
+    client,
+    subreddit as unknown as Parameters<
+      typeof createScheduledPostDisplacementJob
+    >[2],
+  );
   const run = (minute: number) =>
-    processDueScheduledPostDisplacementChecks({
-      reddit: reddit as unknown as RedditClient,
-      redis: redis as unknown as RedisClient,
-      subreddit: subreddit as unknown as Parameters<
-        typeof processDueScheduledPostDisplacementChecks
-      >[0]["subreddit"],
-      nowMs: atMinute(minute),
-    });
+    dispatchDueJobs(client, [job], { now: () => atMinute(minute) });
   return {
     checks,
-    values,
+    values: redis.strings,
     redis,
-    watchDisplacement,
+    client,
+    job,
+    deleteCheck,
     reddit,
     getLog,
     post,
@@ -112,6 +107,124 @@ describe("scheduled post displacement", () => {
     vi.mocked(getSubGoalData)
       .mockReset()
       .mockResolvedValue(goal as Awaited<ReturnType<typeof getSubGoalData>>);
+  });
+
+  it("resumes a paged legacy migration and retains both original deadlines", async () => {
+    const { redis, checks, run, post, getLog } = fixture();
+    const second = "t3_second";
+    checks.set(second, String(unpinnedAt));
+    const scan = vi
+      .spyOn(redis, "hScan")
+      .mockResolvedValueOnce({
+        cursor: 7,
+        fieldValues: [{ field: postId, value: String(unpinnedAt) }],
+      })
+      .mockResolvedValueOnce({
+        cursor: 0,
+        fieldValues: [{ field: second, value: String(unpinnedAt) }],
+      });
+    await run(13);
+    await run(14);
+    expect(scan).toHaveBeenNthCalledWith(
+      1,
+      scheduledPostDisplacementKey,
+      0,
+      undefined,
+      25,
+    );
+    expect(scan).toHaveBeenNthCalledWith(
+      2,
+      scheduledPostDisplacementKey,
+      7,
+      undefined,
+      25,
+    );
+    expect(await redis.zScore(dueJobsKey, "scheduled_post_displacement")).toBe(
+      atMinute(15),
+    );
+    expect(await redis.zScore(displacementPendingKey, postId)).toBe(
+      atMinute(15),
+    );
+    expect(await redis.zScore(displacementPendingKey, second)).toBe(
+      atMinute(15),
+    );
+    expect(getLog).not.toHaveBeenCalled();
+    expect(checks.get(postId)).toBe(String(unpinnedAt));
+
+    await run(15);
+    await run(16);
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(getLog).toHaveBeenCalledTimes(2);
+    expect(post.highlight).toHaveBeenCalledOnce();
+    expect(
+      await redis.zScore(dueJobsKey, "scheduled_post_displacement"),
+    ).toBeUndefined();
+    expect(
+      await redis.hGetAll("scheduled_post_displacement_job_v1_state"),
+    ).toEqual({});
+  });
+
+  it("consumes a due check once across overlapping runner ticks", async () => {
+    const { run, getLog, post } = fixture();
+    const gate = new Gate();
+    getLog.mockImplementationOnce(async () => {
+      gate.arrive();
+      await gate.released;
+      return [logEntry(0)];
+    });
+    const first = run(15);
+    try {
+      await Promise.race([
+        gate.reached,
+        first.then(() => {
+          throw new Error("Check did not start");
+        }),
+      ]);
+      await run(15);
+      expect(getLog).toHaveBeenCalledOnce();
+    } finally {
+      gate.release();
+      await first;
+    }
+    await run(16);
+    expect(post.highlight).toHaveBeenCalledOnce();
+    expect(getLog).toHaveBeenCalledOnce();
+  });
+
+  it("retries an interrupted legacy scan without losing the unpin", async () => {
+    const { redis, checks, run, getLog, post } = fixture();
+    vi.spyOn(redis, "hScan").mockRejectedValueOnce(
+      new Error("scan unavailable"),
+    );
+    expect((await run(14)).get("scheduled_post_displacement")).toBe("retry");
+    expect(checks.get(postId)).toBe(String(unpinnedAt));
+    expect(getLog).not.toHaveBeenCalled();
+    await run(15);
+    await run(16);
+    expect(post.highlight).toHaveBeenCalledOnce();
+    expect(checks.has(postId)).toBe(false);
+  });
+
+  it("keeps the next due check queued when a check spends the budget", async () => {
+    const { checks, getLog, redis, client, job, run } = fixture();
+    const second = "t3_second";
+    checks.set(second, String(unpinnedAt));
+    let now = atMinute(15);
+    const deadlineMs = now + 1_000;
+    getLog.mockImplementationOnce(async () => {
+      now = deadlineMs;
+      return [logEntry(0)];
+    });
+    await dispatchDueJobs(client, [job], { now: () => now, deadlineMs });
+    expect(getLog).toHaveBeenCalledOnce();
+    expect(checks.has(postId)).toBe(false);
+    expect(checks.get(second)).toBe(String(unpinnedAt));
+    expect(await redis.zScore(displacementPendingKey, second)).toBe(
+      atMinute(15),
+    );
+    await run(16);
+    expect(getLog).toHaveBeenCalledTimes(2);
+    expect(checks.has(second)).toBe(false);
   });
 
   it.each([-15, 15])(
@@ -188,7 +301,9 @@ describe("scheduled post displacement", () => {
         } as Awaited<ReturnType<typeof getSubGoalData>>);
         break;
       case "retired":
-        values.set(`${retiredSubscriberGoalKeyPrefix}:${postId}`, "retired");
+        values.set(`${retiredSubscriberGoalKeyPrefix}:${postId}`, {
+          value: "retired",
+        });
         break;
       case "removed":
         post.removed = true;
@@ -211,28 +326,36 @@ describe("scheduled post displacement", () => {
   });
 
   it("keeps a check on log read failure and drops it an hour after it was due", async () => {
-    const { run, getLog, post, checks, watchDisplacement } = fixture();
+    const { run, getLog, post, checks, deleteCheck } = fixture();
     getLog.mockRejectedValue(new Error("moderation log unavailable"));
     await run(15);
     await run(74);
     expect(checks.has(postId)).toBe(true);
     await run(75);
     expect(checks.has(postId)).toBe(false);
-    expect(watchDisplacement).toHaveBeenCalledExactlyOnceWith(
+    expect(deleteCheck).toHaveBeenCalledExactlyOnceWith(
       scheduledPostDisplacementKey,
+      [postId],
     );
     expect(getLog).toHaveBeenCalledTimes(2);
     expect(post.highlight).not.toHaveBeenCalled();
   });
 
   it("leaves a newer unpin queued when it arrives during a log read", async () => {
-    const { run, getLog, post, checks } = fixture();
+    const { run, getLog, post, checks, client, redis } = fixture();
     getLog.mockImplementationOnce(async () => {
-      checks.set(postId, String(atMinute(15)));
+      await recordScheduledPostDisplacementCheck(
+        client,
+        postId,
+        new Date(atMinute(15)).toISOString(),
+      );
       return [logEntry(0)];
     });
     await run(15);
     expect(checks.get(postId)).toBe(String(atMinute(15)));
+    expect(await redis.zScore(displacementPendingKey, postId)).toBe(
+      atMinute(30),
+    );
     expect(post.highlight).not.toHaveBeenCalled();
   });
 

@@ -24,7 +24,7 @@ type JobOutcome<T extends JobRecord> =
 type RunWindow = { now: () => number; deadlineMs: number };
 type Job = {
   id: string;
-  index(redis: RedisClient): Promise<void>;
+  index(redis: RedisClient, nowMs: number): Promise<void>;
   run(redis: RedisClient, window: RunWindow): Promise<RunResult>;
 };
 
@@ -33,7 +33,7 @@ type JobWorker<T extends JobRecord> = {
   lockKey: string;
   lockTtlMs: number;
   backoff: BackoffPolicy;
-  index?(redis: RedisClient): Promise<void>;
+  index?(redis: RedisClient, nowMs: number): Promise<void>;
   handle(
     record: Partial<T>,
     startedAt: number,
@@ -68,7 +68,7 @@ export async function dispatchDueJobs(
       return results;
     }
     try {
-      await job.index(redis);
+      await job.index(redis, now());
     } catch (error) {
       logDiagnostic(
         "warn",

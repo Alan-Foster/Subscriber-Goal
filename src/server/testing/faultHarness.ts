@@ -431,6 +431,9 @@ export class FakeRedisImpl {
       hSet: async (key: string, fields: Record<string, string>) => {
         queued.push(() => this.hSet(key, fields));
       },
+      hDel: async (key: string, fields: string[]) => {
+        queued.push(() => this.hDel(key, fields));
+      },
       zAdd: async (key: string, ...members: ZEntry[]) => {
         queued.push(() => this.zAdd(key, ...members));
       },

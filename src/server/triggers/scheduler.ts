@@ -38,7 +38,6 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
 import { dispatchScheduledJobs } from "../jobs/scheduled";
 import { jobRunnerBudgetMs } from "../jobs/runner";
-import { processDueScheduledPostDisplacementChecks } from "../core/scheduledPostDisplacement";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
@@ -250,10 +249,23 @@ export async function onPostsUpdaterJob(): Promise<void> {
       error,
     );
   }
+  const currentSubredditName = context.subredditName ?? subreddit?.name;
   try {
     if (permissionWorkAllowed) {
       if (Date.now() < jobDeadlineMs) {
-        await dispatchScheduledJobs(reddit, redis, appSettings, jobDeadlineMs);
+        const displacementSubreddit =
+          subreddit &&
+          currentSubredditName &&
+          !isCrosspostAuthorityInstall(appSettings, currentSubredditName)
+            ? subreddit
+            : undefined;
+        await dispatchScheduledJobs(
+          reddit,
+          redis,
+          appSettings,
+          jobDeadlineMs,
+          displacementSubreddit,
+        );
       } else {
         logDiagnostic("info", "job_runner_budget_deferred", {
           workflow: "job_runner",
@@ -266,28 +278,6 @@ export async function onPostsUpdaterJob(): Promise<void> {
       "error",
       "scheduler_task_failed",
       { workflow: "job_runner" },
-      error,
-    );
-  }
-  const currentSubredditName = context.subredditName ?? subreddit?.name;
-  try {
-    if (
-      permissionWorkAllowed &&
-      subreddit &&
-      currentSubredditName &&
-      !isCrosspostAuthorityInstall(appSettings, currentSubredditName)
-    ) {
-      await processDueScheduledPostDisplacementChecks({
-        reddit,
-        redis,
-        subreddit,
-      });
-    }
-  } catch (error) {
-    logDiagnostic(
-      "warn",
-      "scheduler_task_failed",
-      { workflow: "scheduled_post_displacement" },
       error,
     );
   }
