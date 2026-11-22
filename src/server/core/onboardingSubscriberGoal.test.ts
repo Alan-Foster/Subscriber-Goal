@@ -193,6 +193,10 @@ class InMemoryRedis {
     );
   }
 
+  async zScore(key: string, member: string): Promise<number | undefined> {
+    return this.sortedSets.get(key)?.get(member);
+  }
+
   async zRem(key: string, members: string[]): Promise<void> {
     const set = this.sortedSets.get(key);
     for (const member of members) set?.delete(member);

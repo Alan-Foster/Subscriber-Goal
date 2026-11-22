@@ -69,6 +69,8 @@ vi.mock("../utils/actorAuthorization", () => ({
 }));
 
 import { onAppChanged } from "../triggers/appChanged";
+import { runAutoGoalSuccessorQueue } from "../jobs/automaticGoalRetry";
+import { dueJobsKey } from "../jobs/queue";
 import { processDueAppRepair } from "./appRepair";
 import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
 import { createSubscriberGoal } from "./createSubscriberGoal";
@@ -199,7 +201,7 @@ async function schedulerWork(atMs: number) {
     redis: world.redis as never,
     nowMs: atMs,
   });
-  await processDueAutoCreateNextGoals({
+  await runAutoGoalSuccessorQueue({
     reddit: world.reddit as never,
     redis: world.redis as never,
     appSettings,
@@ -276,6 +278,42 @@ describe("upgrading a community with an active legacy goal", () => {
 });
 
 describe("upgrading a community with an overdue completed goal", () => {
+  it("keeps a legacy queued successor at the original 24-hour deadline and creates it once", async () => {
+    vi.setSystemTime(T0);
+    const source = await seedLegacyGoal({ completedAt: T0 });
+    const dueAt = T0 + autoCreateNextGoalDelayMs;
+    await world.redisImpl.zAdd(autoCreateNextGoalQueueKey, {
+      member: source.id,
+      score: dueAt,
+    });
+
+    await upgrade(T0 + minute);
+    await schedulerWork(dueAt - 1);
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(0);
+    expect(
+      await world.redisImpl.zScore(autoCreateNextGoalQueueKey, source.id),
+    ).toBe(dueAt);
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "automatic_goal_retry"),
+    ).toBe(dueAt);
+
+    await schedulerWork(dueAt);
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+    const [successor] = goalPosts().filter((post) => post.id !== source.id);
+    expect(
+      await world.redisImpl.hGet(autoCreateNextGoalSuccessorsKey, source.id),
+    ).toBe(successor?.id);
+    await upgrade(dueAt + minute);
+    await schedulerWork(dueAt + 2 * minute);
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+    expect(
+      await world.redisImpl.zScore(autoCreateNextGoalQueueKey, source.id),
+    ).toBeUndefined();
+    expect(
+      await world.redisImpl.zScore(dueJobsKey, "automatic_goal_retry"),
+    ).toBeUndefined();
+  });
+
   it("creates exactly one successor however often upgrade and recovery run", async () => {
     vi.setSystemTime(T0);
     // Completed three days ago by a version that had no successor queue.

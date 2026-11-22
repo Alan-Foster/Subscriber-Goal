@@ -1,15 +1,13 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import {
   clearAutomaticSuccessorSuppression,
+  autoCreateNextGoalSuccessorsKey,
   repairAutoCreateNextGoal,
   type AutoCreateNextGoalRepairResult,
 } from "../data/subGoalData";
 import { getAppSettings, type ServerAppSettings } from "../settings";
 import { isLinkId, type RedditClient, type RedisClient } from "../types";
-import {
-  autoCreateNextGoalSuccessorsKey,
-  processDueAutoCreateNextGoals,
-} from "./autoCreateNextGoal";
+import { runAutoGoalSuccessorQueue } from "../jobs/automaticGoalRetry";
 import type { OnboardingLifecycleSource } from "./goalDiscovery";
 import {
   withCommunityGoalMutationLease,
@@ -144,7 +142,7 @@ async function reconcileCompletedGoalUnderLease({
     };
   }
 
-  const summary = await processDueAutoCreateNextGoals({
+  const summary = await runAutoGoalSuccessorQueue({
     reddit,
     redis,
     appSettings,
@@ -158,11 +156,11 @@ async function reconcileCompletedGoalUnderLease({
   const successorPostId =
     mappedSuccessor && isLinkId(mappedSuccessor) ? mappedSuccessor : undefined;
   const outcome: CompletedGoalReconciliationOutcome =
-    summary.created > 0 || successorPostId
+    (summary?.created ?? 0) > 0 || successorPostId
       ? "replacement_created"
-      : summary.exhausted > 0
+      : (summary?.exhausted ?? 0) > 0
         ? "replacement_exhausted"
-        : summary.rescheduled > 0 || summary.failed > 0
+        : (summary?.rescheduled ?? 0) > 0 || (summary?.failed ?? 0) > 0
           ? "replacement_retrying"
           : "replacement_scheduled";
   logDiagnostic("info", "completed_goal_replacement_processed", {

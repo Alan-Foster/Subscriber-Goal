@@ -51,7 +51,6 @@ import {
   isAutomaticGoalEligibilityUncertain,
 } from "./automaticGoalEligibility";
 import { checkAppAccountHealth } from "./appAccountHealth";
-import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export type AutoCreateNextGoalSummary = {
   due: number;
@@ -67,7 +66,6 @@ export type AutoCreateNextGoalSummary = {
 
 export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
 export { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
-const autoCreateNextGoalLockTtlMs = 15 * 60 * 1000;
 const terminalRecoveryInventoryDelayMs = 60 * 1000;
 const protectedSurfaceRecheckDelayMs = 60 * 60 * 1000;
 const onboardingSubscriberGoalStateKey = "onboarding_subscriber_goal_v4_state";
@@ -78,7 +76,6 @@ export async function processDueAutoCreateNextGoals({
   appSettings,
   nowMs = Date.now(),
   mutationLease: existingMutationLease,
-  limit,
   canStart,
 }: {
   reddit: RedditClient;
@@ -86,10 +83,9 @@ export async function processDueAutoCreateNextGoals({
   appSettings: ServerAppSettings;
   nowMs?: number;
   mutationLease?: CommunityGoalMutationLease;
-  limit?: number;
   canStart?: () => boolean;
 }): Promise<AutoCreateNextGoalSummary> {
-  const duePostIds = await getDueAutoCreateNextGoalPostIds(redis, nowMs, limit);
+  const duePostIds = await getDueAutoCreateNextGoalPostIds(redis, nowMs);
   const summary: AutoCreateNextGoalSummary = {
     due: duePostIds.length,
     created: 0,
@@ -150,7 +146,6 @@ async function processDueSource(
     creationAttempted: false,
     creationFinished: false,
   };
-  let lockToken: string | undefined;
   let mutationLease: CommunityGoalMutationLease | undefined;
   let acquiredMutationLease = false;
   try {
@@ -181,17 +176,13 @@ async function processDueSource(
       return "continue";
     }
 
-    lockToken = await acquireRedisLock(
-      redis,
-      lockKey,
-      autoCreateNextGoalLockTtlMs,
-      { nowMs },
-    );
-    if (!lockToken) {
+    // A pre-upgrade worker may still own the old source lock. New workers
+    // serialize through the community lease and the creation operation lock.
+    if (await redis.get(lockKey)) {
       summary.skipped += 1;
       return "continue";
     }
-    return await processLockedSource(attempt, sourcePostId, mutationLease);
+    return await processLeasedSource(attempt, sourcePostId, mutationLease);
   } catch (error) {
     if (error instanceof PostTemporarilyUnavailableError) {
       await pauseRemovedSource(attempt, error);
@@ -212,16 +203,13 @@ async function processDueSource(
     }
     return "continue";
   } finally {
-    if (lockToken) {
-      await releaseRedisLock(redis, lockKey, lockToken);
-    }
     if (mutationLease && acquiredMutationLease) {
       await releaseCommunityGoalMutationLease(redis, mutationLease);
     }
   }
 }
 
-async function processLockedSource(
+async function processLeasedSource(
   attempt: AutoGoalAttempt,
   sourcePostId: LinkId,
   mutationLease: CommunityGoalMutationLease,
