@@ -1,4 +1,6 @@
-import { FakeRedisImpl } from "../testing/faultHarness";
+import { resolveAppAccountRecoveryGate } from "../jobs/appAccountRecovery";
+import { dueJobsKey } from "../jobs/queue";
+import { FakeRedisImpl, Gate } from "../testing/faultHarness";
 import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +23,6 @@ import {
   appAccountRecoveryStateKey,
   handleAppAccountModeratorAction,
   processAppAccountRecovery,
-  processDueAppAccountRecovery,
   recordLifecycleAndScheduleRecovery,
   scheduleAppAccountRecovery,
 } from "./appAccountRecovery";
@@ -30,6 +31,7 @@ class TestRedis {
   private readonly queue = new FakeRedisImpl();
   zAdd = this.queue.zAdd.bind(this.queue);
   zRem = this.queue.zRem.bind(this.queue);
+  zScore = this.queue.zScore.bind(this.queue);
   values = new Map<string, string>();
   hashes = new Map<string, Map<string, string>>();
 
@@ -79,7 +81,7 @@ describe("app account recovery", () => {
   let reddit: {
     getAppUser: ReturnType<typeof vi.fn<GetAppUser>>;
     getModerators: ReturnType<typeof vi.fn>;
-    sendPrivateMessage: ReturnType<typeof vi.fn>;
+    sendPrivateMessage: ReturnType<typeof vi.fn<() => Promise<void>>>;
   };
   let scheduler: { runJob: ReturnType<typeof vi.fn> };
 
@@ -133,13 +135,113 @@ describe("app account recovery", () => {
       actual.checkAppAccountHealth,
     );
   };
-  const tick = (nowMs: number) =>
-    processDueAppAccountRecovery({
+  const tick = (nowMs: number, deadlineMs?: number) =>
+    resolveAppAccountRecoveryGate({
       reddit: reddit as never,
       redis: redis as never,
       scheduler,
-      nowMs,
+      now: () => nowMs,
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
     });
+
+  it("indexes a legacy retry at its original deadline and deduplicates concurrent cron and one-off runs", async () => {
+    const dueAt = 120_000;
+    const legacyState = {
+      status: "pending",
+      incidentToken: "legacy-removal",
+      subredditName: "ExampleSub",
+      reason: "removal",
+      removedBy: "RemovingMod",
+      attempts: "1",
+      dueAt: String(dueAt),
+    };
+    await redis.hSet(appAccountRecoveryStateKey, legacyState);
+    await expect(tick(dueAt - 1)).resolves.toMatchObject({ status: "pending" });
+    await expect(tick(dueAt, dueAt)).resolves.toMatchObject({
+      status: "pending",
+    });
+    expect(await redis.hGetAll(appAccountRecoveryStateKey)).toEqual(
+      legacyState,
+    );
+    expect(await redis.zScore(dueJobsKey, "app_account_recovery")).toBe(dueAt);
+    expect(reddit.sendPrivateMessage).not.toHaveBeenCalled();
+
+    const notification = new Gate();
+    reddit.sendPrivateMessage.mockImplementationOnce(async () => {
+      notification.arrive();
+      await notification.released;
+    });
+    moderatorResponses = [[moderator()]];
+    const first = tick(dueAt);
+    try {
+      await Promise.race([
+        notification.reached,
+        first.then(() => {
+          throw new Error(
+            "The scheduled recovery did not send its notification",
+          );
+        }),
+      ]);
+      await expect(tick(dueAt)).resolves.toMatchObject({
+        status: "processing",
+      });
+      await expect(
+        processAppAccountRecovery({
+          reddit: reddit as never,
+          redis: redis as never,
+          scheduler,
+          incidentToken: legacyState.incidentToken,
+          nowMs: dueAt,
+        }),
+      ).resolves.toMatchObject({ status: "locked" });
+    } finally {
+      notification.release();
+      await first;
+    }
+    await expect(first).resolves.toMatchObject({ status: "healthy" });
+    await expect(tick(dueAt)).resolves.toMatchObject({ status: "healthy" });
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+    expect(
+      await redis.zScore(dueJobsKey, "app_account_recovery"),
+    ).toBeUndefined();
+    expect(await redis.hGetAll("app_account_recovery_job_v1_state")).toEqual(
+      {},
+    );
+  });
+
+  it("resumes a retry from the stored deadline after one-off scheduling fails", async () => {
+    const dueAt = 60_000;
+    await redis.hSet(appAccountRecoveryStateKey, {
+      status: "pending",
+      incidentToken: "removal",
+      subredditName: "ExampleSub",
+      reason: "removal",
+      removedBy: "RemovingMod",
+      attempts: "0",
+      dueAt: String(dueAt),
+    });
+    moderatorResponses = [
+      new Error("Reddit lookup unavailable"),
+      [moderator()],
+    ];
+    scheduler.runJob.mockRejectedValueOnce(new Error("scheduler unavailable"));
+
+    const retryAt = dueAt + appAccountRecoveryDelayMs;
+    await expect(tick(dueAt)).resolves.toMatchObject({ status: "locked" });
+    expect(await redis.hGetAll(appAccountRecoveryStateKey)).toMatchObject({
+      status: "pending",
+      attempts: "1",
+      dueAt: String(retryAt),
+    });
+    await expect(tick(retryAt - 1)).resolves.toMatchObject({
+      status: "pending",
+    });
+    await expect(tick(retryAt)).resolves.toMatchObject({ status: "healthy" });
+    await expect(tick(retryAt)).resolves.toMatchObject({ status: "healthy" });
+    expect(reddit.getModerators).toHaveBeenCalledTimes(2);
+    expect(reddit.sendPrivateMessage).toHaveBeenCalledOnce();
+    expect(scheduler.runJob).toHaveBeenCalledOnce();
+  });
 
   it.each([
     "missing",

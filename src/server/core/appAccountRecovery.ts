@@ -1,7 +1,8 @@
 import {
   appAccountRecoveryStateKey,
-  isTerminalRecoveryStatus,
   updateRecoveryState,
+  toRecoveryResultStatus,
+  type RecoveryStatus,
 } from "./appAccountRecoveryState";
 export { appAccountRecoveryStateKey } from "./appAccountRecoveryState";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -17,6 +18,7 @@ import {
   checkAppAccountHealth,
   subscriberGoalAppUsername,
 } from "./appAccountHealth";
+import { getJobRetry } from "../jobs/backoff";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 
 export const appAccountInstallationStateKey =
@@ -26,6 +28,11 @@ export const appAccountRecoveryEventKeyPrefix = "app_account_recovery_v1_event";
 export const appAccountRecoveryJobName = "app-account-recovery-job";
 export const appAccountRecoveryDelayMs = 60_000;
 export const appAccountRecoveryMaxAttempts = 2;
+const activeRecoveryBackoff = {
+  baseMs: appAccountRecoveryDelayMs,
+  maxMs: appAccountRecoveryDelayMs,
+  maxAttempts: appAccountRecoveryMaxAttempts,
+};
 
 const notificationKeyPrefix = "app_account_recovery_v1_notification";
 const notificationRetentionMs = 90 * 24 * 60 * 60 * 1000;
@@ -45,16 +52,6 @@ type SchedulerLike = {
     data: AppAccountRecoveryJobData;
   }): Promise<string>;
 };
-
-type RecoveryStatus =
-  | "pending"
-  | "processing"
-  | "healthy"
-  | "missing"
-  | "insufficient_permissions"
-  | "acceptance_failed"
-  | "verification_failed"
-  | "exhausted";
 
 export type AppAccountRecoveryResult = {
   status: RecoveryStatus | "not_due" | "stale" | "locked";
@@ -491,22 +488,6 @@ async function handleInviteDuringRemoval(
   return result;
 }
 
-function toRecoveryResultStatus(value: string | undefined): RecoveryStatus {
-  const statuses = new Set<RecoveryStatus>([
-    "pending",
-    "processing",
-    "healthy",
-    "missing",
-    "insufficient_permissions",
-    "acceptance_failed",
-    "verification_failed",
-    "exhausted",
-  ]);
-  return statuses.has(value as RecoveryStatus)
-    ? (value as RecoveryStatus)
-    : "pending";
-}
-
 type ModeratorEventClaim = { key: string; token: string };
 
 async function claimModeratorEvent(
@@ -546,73 +527,6 @@ async function completeModeratorEvent(
   });
 }
 
-export async function processDueAppAccountRecovery({
-  reddit,
-  redis,
-  scheduler,
-  nowMs = Date.now(),
-  acceptInvite = acceptModeratorInvite,
-}: {
-  reddit: RedditClient;
-  redis: RedisClient;
-  scheduler: SchedulerLike;
-  nowMs?: number;
-  acceptInvite?: (subredditName: string) => Promise<void>;
-}): Promise<AppAccountRecoveryResult> {
-  const state = await redis.hGetAll(appAccountRecoveryStateKey);
-  if (!state.incidentToken) return { status: "stale" };
-  if (isTerminalRecoveryStatus(state.status)) {
-    // Legacy terminal records have no verification deadline: inspect them once
-    // immediately, then keep retrying with a one-hour ceiling.
-    if (!state.subredditName || nowMs < Number(state.nextVerificationAt || 0)) {
-      return {
-        status: state.status as RecoveryStatus,
-        incidentToken: state.incidentToken,
-      };
-    }
-    const attempts = Math.min(7, (Number(state.verificationAttempts) || 0) + 1);
-    const claimed = await updateRecoveryState(redis, state, {
-      verificationToken: crypto.randomUUID(),
-      verificationAttempts: String(attempts),
-      nextVerificationAt: String(
-        nowMs + Math.min(3_600_000, 60_000 * 2 ** (attempts - 1)),
-      ),
-    });
-    if (!claimed)
-      return { status: "locked", incidentToken: state.incidentToken };
-    await checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: state.subredditName,
-      ...(state.subredditId ? { subredditId: state.subredditId } : {}),
-      notify: false,
-      scheduleUnknownRetry: false,
-      nowMs,
-    });
-    const current = await redis.hGetAll(appAccountRecoveryStateKey);
-    return {
-      status: toRecoveryResultStatus(current.status),
-      ...(current.incidentToken
-        ? { incidentToken: current.incidentToken }
-        : {}),
-    };
-  }
-  const result = await processAppAccountRecovery({
-    reddit,
-    redis,
-    scheduler,
-    incidentToken: state.incidentToken,
-    nowMs,
-    acceptInvite,
-  });
-  if (result.status === "locked") return result;
-  const current = await redis.hGetAll(appAccountRecoveryStateKey);
-  return {
-    status: toRecoveryResultStatus(current.status),
-    ...(current.incidentToken ? { incidentToken: current.incidentToken } : {}),
-  };
-}
-
 type ActiveRecoveryState = Record<string, string> & {
   incidentToken: string;
   subredditName: string;
@@ -635,6 +549,7 @@ export async function processAppAccountRecovery({
   incidentToken,
   nowMs = Date.now(),
   acceptInvite = acceptModeratorInvite,
+  canStart,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
@@ -642,6 +557,7 @@ export async function processAppAccountRecovery({
   incidentToken: string;
   nowMs?: number;
   acceptInvite?: (subredditName: string) => Promise<void>;
+  canStart?: () => boolean;
 }): Promise<AppAccountRecoveryResult> {
   const state = await redis.hGetAll(appAccountRecoveryStateKey);
   if (
@@ -670,6 +586,7 @@ export async function processAppAccountRecovery({
   }
 
   try {
+    if (canStart && !canStart()) return { status: "not_due", incidentToken };
     return await recoverAppAccount({
       reddit,
       redis,
@@ -1031,8 +948,9 @@ async function retryOrExhaust({
   suppressHealthNotification?: boolean;
 }): Promise<AppAccountRecoveryResult> {
   const attempts = (parseInt(state.attempts || "0", 10) || 0) + 1;
-  if (attempts < appAccountRecoveryMaxAttempts) {
-    const dueAt = nowMs + appAccountRecoveryDelayMs;
+  const retry = getJobRetry(activeRecoveryBackoff, attempts);
+  if (!retry.exhausted) {
+    const dueAt = nowMs + retry.delayMs;
     const updated = await updateRecoveryState(
       redis,
       { ...state, status: "processing" },

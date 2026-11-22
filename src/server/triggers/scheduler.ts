@@ -38,7 +38,7 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { resolveAppAccountHealthGate } from "../jobs/appAccountHealth";
 import { dispatchScheduledJobs } from "../jobs/scheduled";
 import { jobRunnerBudgetMs } from "../jobs/runner";
-import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
+import { resolveAppAccountRecoveryGate } from "../jobs/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
   clearPostOperationalState,
@@ -154,6 +154,28 @@ async function cleanupInactivePost(
   );
 }
 
+async function appAccountRecoveryAllowsPermissionWork(
+  deadlineMs: number,
+): Promise<boolean> {
+  try {
+    const recovery = await resolveAppAccountRecoveryGate({
+      reddit,
+      redis,
+      scheduler,
+      deadlineMs,
+    });
+    return recovery.status === "healthy" || recovery.status === "stale";
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "app_account_recovery" },
+      error,
+    );
+    return false;
+  }
+}
+
 async function appAccountHealthAllowsPermissionWork(
   deadlineMs: number,
 ): Promise<boolean> {
@@ -189,23 +211,8 @@ export async function onPostsUpdaterJob(): Promise<void> {
   // Own-post rendering, completion detection, statistics, and data migrations
   // remain independent. Posting and moderation workers retain their queues
   // until the current recovery incident permits them to run.
-  let permissionWorkAllowed = false;
-  try {
-    const recovery = await processDueAppAccountRecovery({
-      reddit,
-      redis,
-      scheduler,
-    });
-    permissionWorkAllowed =
-      recovery.status === "healthy" || recovery.status === "stale";
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "app_account_recovery" },
-      error,
-    );
-  }
+  let permissionWorkAllowed =
+    await appAccountRecoveryAllowsPermissionWork(jobDeadlineMs);
   let subreddit: Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | null =
     null;
   try {
