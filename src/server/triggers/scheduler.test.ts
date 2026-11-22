@@ -1,3 +1,4 @@
+import { FakeRedisImpl } from "../testing/faultHarness";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
 
@@ -74,7 +75,7 @@ const hoisted = vi.hoisted(() => ({
   observeDailySubscriberCount: vi.fn(),
   getLastKnownSubscriberCount: vi.fn(),
   ensureCommunityPostActivityBackfill: vi.fn(),
-  processDueAppAccountHealthCheck: vi.fn(),
+  resolveAppAccountHealthGate: vi.fn(),
   processDueAppAccountRecovery: vi.fn(),
   dispatchScheduledJobs: vi.fn(),
   retireSubscriberGoalPost: vi.fn(),
@@ -188,8 +189,8 @@ vi.mock("../core/onboardingWarning", () => ({
   processDueOnboardingReminder: hoisted.processDueOnboardingReminder,
 }));
 
-vi.mock("../core/appAccountHealth", () => ({
-  processDueAppAccountHealthCheck: hoisted.processDueAppAccountHealthCheck,
+vi.mock("../jobs/appAccountHealth", () => ({
+  resolveAppAccountHealthGate: hoisted.resolveAppAccountHealthGate,
 }));
 vi.mock("../core/appAccountRecovery", () => ({
   processDueAppAccountRecovery: hoisted.processDueAppAccountRecovery,
@@ -244,7 +245,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.removeSubscriberGoalPost.mockReset();
     hoisted.observeDailySubscriberCount.mockReset();
     hoisted.getLastKnownSubscriberCount.mockReset();
-    hoisted.processDueAppAccountHealthCheck.mockReset();
+    hoisted.resolveAppAccountHealthGate.mockReset();
     hoisted.processDueAppAccountRecovery.mockReset();
     hoisted.dispatchScheduledJobs.mockReset();
     hoisted.retireSubscriberGoalPost.mockReset();
@@ -322,7 +323,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       growth: { count: 1, period: "week" },
     });
     hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
-    hoisted.processDueAppAccountHealthCheck.mockResolvedValue(undefined);
+    hoisted.resolveAppAccountHealthGate.mockResolvedValue(undefined);
     hoisted.processDueAppAccountRecovery.mockResolvedValue({ status: "stale" });
     hoisted.dispatchScheduledJobs.mockResolvedValue(undefined);
   });
@@ -390,7 +391,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processDueAppAccountRecovery).toHaveBeenCalledOnce();
     expect(hoisted.observeDailySubscriberCount).toHaveBeenCalled();
     expect(hoisted.processDueOnboardingReminder).toHaveBeenCalled();
-    expect(hoisted.processDueAppAccountHealthCheck).not.toHaveBeenCalled();
+    expect(hoisted.resolveAppAccountHealthGate).not.toHaveBeenCalled();
     expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
     expect(hoisted.processDueOnboardingSubscriberGoal).not.toHaveBeenCalled();
     expect(hoisted.processDueAutoCreateNextGoals).not.toHaveBeenCalled();
@@ -418,13 +419,13 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     const startedAt = Date.now();
     let now = startedAt;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
-    hoisted.processDueAppAccountHealthCheck.mockImplementationOnce(async () => {
+    hoisted.resolveAppAccountHealthGate.mockImplementationOnce(async () => {
       now = startedAt + 20_000;
       return { healthy: true };
     });
     try {
       await onPostsUpdaterJob();
-      expect(hoisted.processDueAppAccountHealthCheck).toHaveBeenCalledOnce();
+      expect(hoisted.resolveAppAccountHealthGate).toHaveBeenCalledOnce();
       expect(hoisted.dispatchScheduledJobs).not.toHaveBeenCalled();
     } finally {
       clock.mockRestore();
@@ -469,11 +470,11 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     "keeps dependent work queued for a %s health result",
     async (status) => {
       if (status === "throw")
-        hoisted.processDueAppAccountHealthCheck.mockRejectedValue(
+        hoisted.resolveAppAccountHealthGate.mockRejectedValue(
           new Error("lookup failed"),
         );
       else
-        hoisted.processDueAppAccountHealthCheck.mockResolvedValue({
+        hoisted.resolveAppAccountHealthGate.mockResolvedValue({
           status,
           healthy: false,
         });
@@ -490,39 +491,29 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       const health = await vi.importActual<
         typeof import("../core/appAccountHealth")
       >("../core/appAccountHealth");
-      const hashes = new Map<string, Record<string, string>>([
-        [
-          health.appAccountHealthRetryStateKey,
-          {
-            status: "exhausted",
-            attempts: "3",
-            nextRunAt: "1000",
-            subredditName: "CorporateGifts",
-            lastError: "missing_posts_permission",
-          },
-        ],
-        [health.appAccountHealthStateKey, { status: "unhealthy" }],
-        [
-          "app_account_recovery_v1_state",
-          { status: "healthy", incidentToken: "existing" },
-        ],
-      ]);
-      hoisted.redis.hGetAll.mockImplementation(async (key: string) => ({
-        ...hashes.get(key),
-      }));
-      hoisted.redis.hSet.mockImplementation(
-        async (key: string, fields: Record<string, string>) => {
-          hashes.set(key, { ...hashes.get(key), ...fields });
-        },
-      );
-      hoisted.redis.del.mockImplementation(async (key: string) => {
-        hashes.delete(key);
+      const { resolveAppAccountHealthGate } = await vi.importActual<
+        typeof import("../jobs/appAccountHealth")
+      >("../jobs/appAccountHealth");
+      const redis = new FakeRedisImpl();
+      await redis.hSet(health.appAccountHealthRetryStateKey, {
+        status: "exhausted",
+        attempts: "3",
+        nextRunAt: "1000",
+        subredditName: "CorporateGifts",
+        lastError: "missing_posts_permission",
+      });
+      await redis.hSet(health.appAccountHealthStateKey, {
+        status: "unhealthy",
+      });
+      await redis.hSet("app_account_recovery_v1_state", {
+        status: "healthy",
+        incidentToken: "existing",
       });
       hoisted.processDueAppAccountRecovery.mockResolvedValue({
         status: "healthy",
       });
-      hoisted.processDueAppAccountHealthCheck.mockImplementation(
-        health.processDueAppAccountHealthCheck,
+      hoisted.resolveAppAccountHealthGate.mockImplementation((args) =>
+        resolveAppAccountHealthGate({ ...args, redis: redis as never }),
       );
       hoisted.reddit.getAppUser.mockResolvedValue({
         username: "subscriber-goal",
@@ -539,7 +530,9 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       now.mockReturnValue(1000);
       await onPostsUpdaterJob();
       expect(hoisted.reddit.getAppUser).toHaveBeenCalledOnce();
-      expect(hashes.has(health.appAccountHealthRetryStateKey)).toBe(false);
+      expect(await redis.hGetAll(health.appAccountHealthRetryStateKey)).toEqual(
+        {},
+      );
       expect(hoisted.scheduleHighlightRepair).toHaveBeenCalledOnce();
       expect(hoisted.dispatchScheduledJobs).toHaveBeenCalledOnce();
       expect(hoisted.processDueAutoCreateNextGoals).toHaveBeenCalledOnce();

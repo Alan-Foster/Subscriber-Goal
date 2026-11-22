@@ -35,7 +35,7 @@ import { removeSubscriberGoalPost } from "../data/subscriberGoalPostRegistry";
 import { observeDailySubscriberCount } from "../data/subscriberDailyStats";
 import { ensureCommunityPostActivityBackfill } from "../data/ctaActivity";
 import { logDiagnostic } from "../../shared/diagnostics";
-import { processDueAppAccountHealthCheck } from "../core/appAccountHealth";
+import { resolveAppAccountHealthGate } from "../jobs/appAccountHealth";
 import { dispatchScheduledJobs } from "../jobs/scheduled";
 import { jobRunnerBudgetMs } from "../jobs/runner";
 import { processDueAppAccountRecovery } from "../core/appAccountRecovery";
@@ -157,6 +157,27 @@ async function cleanupInactivePost(
   );
 }
 
+async function appAccountHealthAllowsPermissionWork(
+  deadlineMs: number,
+): Promise<boolean> {
+  try {
+    const health = await resolveAppAccountHealthGate({
+      reddit,
+      redis,
+      deadlineMs,
+    });
+    return health?.healthy ?? true;
+  } catch (error) {
+    logDiagnostic(
+      "error",
+      "scheduler_task_failed",
+      { workflow: "app_account_health" },
+      error,
+    );
+    return false;
+  }
+}
+
 export async function onPostsUpdaterJob(): Promise<void> {
   const jobDeadlineMs = Date.now() + jobRunnerBudgetMs;
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
@@ -235,20 +256,8 @@ export async function onPostsUpdaterJob(): Promise<void> {
       );
     }
   }
-  try {
-    if (permissionWorkAllowed) {
-      const health = await processDueAppAccountHealthCheck({ reddit, redis });
-      if (health && !health.healthy) permissionWorkAllowed = false;
-    }
-  } catch (error) {
-    permissionWorkAllowed = false;
-    logDiagnostic(
-      "error",
-      "scheduler_task_failed",
-      { workflow: "app_account_health" },
-      error,
-    );
-  }
+  permissionWorkAllowed &&=
+    await appAccountHealthAllowsPermissionWork(jobDeadlineMs);
   const currentSubredditName = context.subredditName ?? subreddit?.name;
   try {
     if (permissionWorkAllowed) {

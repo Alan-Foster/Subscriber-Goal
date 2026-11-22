@@ -86,10 +86,13 @@ export async function dispatchDueJobs(
     logBudget();
     return results;
   }
-  const due = await redis.zRange(dueJobsKey, "-inf", now(), {
-    by: "score",
-    limit: { offset: 0, count: batchSize },
-  });
+  const single = jobs.length === 1 ? jobs[0] : undefined;
+  const due = single
+    ? await getDueMember(redis, single.id, now())
+    : await redis.zRange(dueJobsKey, "-inf", now(), {
+        by: "score",
+        limit: { offset: 0, count: batchSize },
+      });
   const workers = new Map(jobs.map((job) => [job.id, job]));
   for (const [index, { member }] of due.entries()) {
     if (now() >= deadlineMs) {
@@ -120,6 +123,11 @@ export async function dispatchDueJobs(
     }
   }
   return results;
+}
+
+async function getDueMember(redis: RedisClient, member: string, nowMs: number) {
+  const score = await redis.zScore(dueJobsKey, member);
+  return score != null && score <= nowMs ? [{ member }] : [];
 }
 
 async function runDueJob<T extends JobRecord>(
