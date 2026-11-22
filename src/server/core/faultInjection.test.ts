@@ -304,6 +304,54 @@ describe("scheduled automatic goal retries", () => {
     expect((await op(source.id)).status).toBe("complete");
     expect(await queuedAt(source.id)).toBeUndefined();
   });
+
+  it("defers a due reconciliation without spending a scan if earlier work uses the runner budget", async () => {
+    const { source, dueAt } = await seedCompletedSource();
+    world.plan.add({
+      target: "reddit",
+      method: "submitCustomPost",
+      mode: "commit-then-throw",
+    });
+    await scheduledTick(dueAt);
+    const scanAt = dueAt + minute;
+    const deadline = scanAt + 20_000;
+    const earlierWork = new Gate();
+    world.plan.add({
+      target: "redis",
+      method: "hGetAll",
+      match: ([key]) => key === opKey(source.id),
+      mode: "pause",
+      gate: earlierWork,
+    });
+
+    const tickInProgress = scheduledTick(scanAt, deadline);
+    try {
+      await Promise.race([
+        earlierWork.reached,
+        tickInProgress.then(() => {
+          throw new Error("Expected the scheduled tick to reach the operation");
+        }),
+      ]);
+      vi.setSystemTime(deadline);
+    } finally {
+      earlierWork.release();
+      await tickInProgress;
+    }
+    expect(await op(source.id)).toMatchObject({
+      status: "submission_unknown",
+      reconciliationAttempts: "0",
+      reconciliationNextAt: String(scanAt),
+    });
+    expect(await queuedAt(source.id)).toBe(scanAt);
+    expect(world.plan.calls("reddit", "getPostData")).toHaveLength(0);
+
+    await scheduledTick(deadline + minute);
+    await scheduledTick(deadline + 2 * minute);
+    expect((await op(source.id)).status).toBe("complete");
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+    expect(successorPosts(source)).toHaveLength(1);
+    expect(await queuedAt(source.id)).toBeUndefined();
+  });
 });
 
 describe("recovery after partial failure", () => {
