@@ -1,12 +1,4 @@
 {
-  "src/client/app/App.tsx": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/client/app/components/AfterSubscribeButton.tsx": {
     "complexity": {
       "count": 1
@@ -36,14 +28,6 @@
     }
   },
   "src/client/app/pages/SubGoalPage.tsx": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/client/subscribe-only/SubscribeOnlyApp.tsx": {
     "complexity": {
       "count": 1
     },
