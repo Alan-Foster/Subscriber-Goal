@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "concurrency": "50%",
-  "ignorePatterns": ["/dist", "/reports", "/.stryker-tmp"],
+  "ignorePatterns": ["/dist", "/reports", "/.stryker-tmp", "/coverage"],
   "testRunner": "vitest",
   "vitest": {
     "configFile": "vite.config.ts",

@@ -1,5 +1,5 @@
 import type { RedditClient, RedisClient } from "../types";
-import type { ServerAppSettings } from "../settings";
+import { defaultAppSettings, type ServerAppSettings } from "../settings";
 import { FakeRedisImpl, Gate } from "../testing/faultHarness";
 import { dueJobsKey } from "../jobs/queue";
 import { dispatchDueJobs } from "../jobs/runner";
@@ -8,11 +8,14 @@ import {
   createSourcePostDeletionJob,
   dispatchConfirmedSourceDeletion,
   prepareSourcePostDeletionIntent,
+  queueConfirmedSourceDeletionCleanup,
   recordSourceDeleteAttempt,
   recordSourceDeletionConfirmed,
 } from "./sourcePostDeletion";
 import {
   getSourcePostDeletionIntent,
+  saveSourcePostDeletionIntent,
+  sourcePostDeletionIntentId,
   sourcePostDeletionIntentsKey,
   sourcePostDeletionDueKey,
 } from "../data/sourcePostDeletion";
@@ -50,6 +53,116 @@ async function processDueSourcePostDeletions(
 }
 
 describe("durable source post deletion", () => {
+  it("dispatches confirmed cleanup once even when the caller repeats it", async () => {
+    const impl = new TestRedis();
+    const redis = impl as unknown as RedisClient;
+    const updateWikiPage = vi.fn(async () => undefined);
+    const reddit = { updateWikiPage } as unknown as RedditClient;
+    const id = sourcePostDeletionIntentId(input.subredditId, input.postId);
+
+    await expect(
+      queueConfirmedSourceDeletionCleanup(reddit, redis, defaultAppSettings, {
+        ...input,
+        nowMs: 1_000,
+      }),
+    ).resolves.toBe("dispatched");
+    await expect(
+      queueConfirmedSourceDeletionCleanup(reddit, redis, defaultAppSettings, {
+        ...input,
+        nowMs: 2_000,
+      }),
+    ).resolves.toBe("dispatched");
+
+    expect(updateWikiPage).toHaveBeenCalledOnce();
+    await expect(getSourcePostDeletionIntent(redis, id)).resolves.toMatchObject(
+      {
+        status: "dispatched",
+        dispatchedAtMs: 1_000,
+        attemptCount: 0,
+      },
+    );
+    expect(await impl.zScore(sourcePostDeletionDueKey, id)).toBeUndefined();
+  });
+
+  it.each([0, 19])(
+    "handles a dispatch outage after %i recorded failures",
+    async (attemptCount) => {
+      const impl = new TestRedis();
+      const redis = impl as unknown as RedisClient;
+      const updateWikiPage = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue(new Error("wiki unavailable"));
+      const reddit = { updateWikiPage } as unknown as RedditClient;
+      const nowMs = 1_000;
+      const id = sourcePostDeletionIntentId(input.subredditId, input.postId);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const tick = (now: number) =>
+        processDueSourcePostDeletions(reddit, redis, defaultAppSettings, {
+          nowMs: now,
+        });
+      try {
+        await expect(
+          queueConfirmedSourceDeletionCleanup(
+            reddit,
+            redis,
+            defaultAppSettings,
+            { ...input, nowMs },
+          ),
+        ).resolves.toBe("queued");
+        const queued = await getSourcePostDeletionIntent(redis, id);
+        expect(queued).toMatchObject({
+          status: "dispatch_pending",
+          nextAttemptMs: nowMs,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("source_post_deletion_dispatch_pending"),
+        );
+        if (!queued) throw new Error("Expected a persisted cleanup intent");
+        if (attemptCount > 0)
+          await saveSourcePostDeletionIntent(redis, {
+            ...queued,
+            attemptCount,
+          });
+
+        await tick(nowMs);
+        const retryAt = nowMs + (attemptCount === 0 ? 60_000 : 30 * 60_000);
+        await expect(
+          getSourcePostDeletionIntent(redis, id),
+        ).resolves.toMatchObject({
+          status: attemptCount === 0 ? "dispatch_pending" : "terminal_failed",
+          attemptCount: attemptCount + 1,
+          nextAttemptMs: retryAt,
+          lastError: "wiki unavailable",
+        });
+        expect(await impl.zScore(sourcePostDeletionDueKey, id)).toBe(
+          attemptCount === 0 ? retryAt : undefined,
+        );
+
+        await tick(retryAt - 1);
+        expect(updateWikiPage).toHaveBeenCalledTimes(2);
+        updateWikiPage.mockResolvedValue(undefined);
+        await tick(retryAt);
+        await tick(retryAt + 1);
+        expect(updateWikiPage).toHaveBeenCalledTimes(
+          attemptCount === 0 ? 3 : 2,
+        );
+        await expect(
+          getSourcePostDeletionIntent(redis, id),
+        ).resolves.toMatchObject({
+          status: attemptCount === 0 ? "dispatched" : "terminal_failed",
+          attemptCount: attemptCount + 1,
+        });
+        expect(await impl.zScore(sourcePostDeletionDueKey, id)).toBeUndefined();
+        const exhaustedLogs = warn.mock.calls.filter(([message]) =>
+          String(message).includes("source_post_deletion_attempts_exhausted"),
+        );
+        expect(exhaustedLogs).toHaveLength(attemptCount === 0 ? 0 : 1);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   it("indexes a legacy verification timer and dispatches it once at the original deadline", async () => {
     const redis = new TestRedis();
     const id = "t5_source:t3_source";

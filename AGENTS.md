@@ -69,7 +69,8 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 | Purpose                   | Command                 |
 | ------------------------- | ----------------------- |
 | Install                   | `npm ci`                |
-| Unit tests (CI runs this) | `npm run test:unit`     |
+| Unit tests                | `npm run test:unit`     |
+| Unit tests in CI          | `npm run test:coverage` |
 | Lint (CI runs this)       | `npm run lint:ci`       |
 | Required pre-PR check     | `npm run verify`        |
 | Local checks and auto-fix | `npm run check`         |
