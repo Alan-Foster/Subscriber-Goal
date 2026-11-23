@@ -66,17 +66,19 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 
 ## Commands
 
-| Purpose                   | Command             |
-| ------------------------- | ------------------- |
-| Install                   | `npm ci`            |
-| Unit tests (CI runs this) | `npm run test:unit` |
-| Lint (CI runs this)       | `npm run lint:ci`   |
-| Required pre-PR check     | `npm run verify`    |
-| Local checks and auto-fix | `npm run check`     |
-| Build                     | `npm run build`     |
-| Playtest                  | `npm run dev`       |
+| Purpose                   | Command                 |
+| ------------------------- | ----------------------- |
+| Install                   | `npm ci`                |
+| Unit tests (CI runs this) | `npm run test:unit`     |
+| Lint (CI runs this)       | `npm run lint:ci`       |
+| Required pre-PR check     | `npm run verify`        |
+| Local checks and auto-fix | `npm run check`         |
+| Build                     | `npm run build`         |
+| Playtest                  | `npm run dev`           |
+| Mutation tests (local)    | `npm run test:mutation` |
 
 - Run `npm run verify` before opening a PR. It runs the same checks as CI without rewriting tracked files.
+- Run `npm run test:mutation` locally for mutation analysis of shared code, Redis locks, and the job queue modules using their unit suites. It takes several minutes and is outside CI. The JSON report is written to `reports/mutation/mutation.json`.
 - `npm run check` **rewrites files**: it runs `eslint --fix` and `prettier --write .`. Commit only formatting changes to files your task touched. Discard formatting changes to unrelated files.
 - Never run `npm run deploy` or `npm run launch`. Never run `devvit upload` or `devvit publish`.
 - Regenerate `package-lock.json` only when dependencies change, and confirm the diff has no unrelated changes (an older npm once dropped `libc` fields from it).

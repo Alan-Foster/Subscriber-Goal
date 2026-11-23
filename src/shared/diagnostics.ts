@@ -25,7 +25,7 @@ export const sanitizeDiagnosticText = (value: unknown): string => {
     )
     .replace(/([?&](?:userId|access_token)=)[^&\s]+/gi, "$1[redacted]")
     .replace(/\b(?:u\/|\/u\/)[A-Za-z0-9_-]+/gi, "u/[redacted]")
-    .replace(/\b\/user\/[A-Za-z0-9_-]+/gi, "/user/[redacted]")
+    .replace(/\/user\/[A-Za-z0-9_-]+/gi, "/user/[redacted]")
     .replace(/([/\\]Users[/\\])[^/\\\s]+/gi, "$1[redacted]")
     .replace(/(\/home\/)[^/\s]+/gi, "$1[redacted]")
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[redacted]@")

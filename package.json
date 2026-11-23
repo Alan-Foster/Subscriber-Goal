@@ -19,6 +19,7 @@
     "login": "devvit login",
     "launch": "npm run build && npm run deploy && devvit publish",
     "prettier": "prettier-package-json --write ./package.json && prettier --write .",
+    "test:mutation": "stryker run",
     "test:unit": "vitest run",
     "type-check": "tsc --build",
     "type-check:tests": "tsc -p src/shared/tsconfig.eslint.json && tsc -p src/client/tsconfig.eslint.json && tsc -p src/server/tsconfig.eslint.json",
@@ -39,6 +40,8 @@
   "devDependencies": {
     "@devvit/reddit": "0.15.4",
     "@eslint/js": "9.39.5",
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
     "@tailwindcss/vite": "4.1.18",
     "@types/express": "5.0.6",
     "@types/node": "22.19.7",

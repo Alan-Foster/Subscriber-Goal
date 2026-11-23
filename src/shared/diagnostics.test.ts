@@ -12,6 +12,43 @@ describe("structured diagnostics", () => {
     );
   });
 
+  it.each([
+    ["/user/alice", "/user/[redacted]"],
+    ["see /user/alice now", "see /user/[redacted] now"],
+    ['"/user/alice"', '"/user/[redacted]"'],
+    [
+      "https://www.reddit.com/user/alice",
+      "https://www.reddit.com/user/[redacted]",
+    ],
+    ["/username/alice /users/", "/username/alice /users/"],
+    ["C:/users/alice", "C:/users/[redacted]"],
+    ["/user/alice and /USER/bob_2", "/user/[redacted] and /user/[redacted]"],
+  ])("sanitizes profile paths in %s", (input, expected) => {
+    expect(sanitizeDiagnosticText(input)).toBe(expected);
+  });
+
+  it.each([
+    ["open /home/alice/work", "open /home/[redacted]/work"],
+    [
+      "http://alice:secret@example.test/path",
+      "http://[redacted]@example.test/path",
+    ],
+    [
+      "Bearer   token-value and Basic\t\tbackup",
+      "Bearer [redacted] and Basic [redacted]",
+    ],
+    [
+      '{"username"  :  "alice", "userId"  :  "t2_alice"}',
+      '{"username"  :  "[redacted]", "userId"  :  "[redacted]"}',
+    ],
+    [
+      '{"username"  :"alice", "username":  "bob", "userId"  :"t2_alice", "userId":  "t2_bob"}',
+      '{"username"  :"[redacted]", "username":  "[redacted]", "userId"  :"[redacted]", "userId":  "[redacted]"}',
+    ],
+  ])("preserves the surrounding text while redacting %s", (input, expected) => {
+    expect(sanitizeDiagnosticText(input)).toBe(expected);
+  });
+
   it("sanitizes and truncates every string context field", () => {
     const warnSpy = vi
       .spyOn(globalThis.console, "warn")
@@ -46,5 +83,46 @@ describe("structured diagnostics", () => {
       expect.stringMatching(/test_failure.*"errorMessage":"failed".*"stack":/),
     );
     errorSpy.mockRestore();
+  });
+
+  it("sanitizes a non-Error reason, and the stack and cause of an Error", () => {
+    const errorSpy = vi
+      .spyOn(globalThis.console, "error")
+      .mockImplementation(() => {});
+    try {
+      const error = new Error("failed to read /user/alice", {
+        cause: "open /home/alice/project",
+      });
+      error.stack = "at /home/bob/project/file.js";
+      logDiagnostic("error", "read_failed", {}, error);
+      logDiagnostic("error", "read_failed", {}, "see /user/bob");
+
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        1,
+        '[diagnostic] {"event":"read_failed","errorName":"Error","errorMessage":"failed to read /user/[redacted]","stack":"at /home/[redacted]/project/file.js","cause":"open /home/[redacted]/project"}',
+      );
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        2,
+        '[diagnostic] {"event":"read_failed","errorName":"NonError","errorMessage":"see /user/[redacted]"}',
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("omits stack and cause fields when the error has neither", () => {
+    const errorSpy = vi
+      .spyOn(globalThis.console, "error")
+      .mockImplementation(() => {});
+    try {
+      const error = new Error("read failed");
+      delete error.stack;
+      logDiagnostic("error", "read_failed", {}, error);
+      expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
+        '[diagnostic] {"event":"read_failed","errorName":"Error","errorMessage":"read failed"}',
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
