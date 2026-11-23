@@ -88,7 +88,7 @@ describe("existing goal highlight ensurance", () => {
       for (const post of posts) {
         if (post.listed ?? (await post.isHighlighted())) {
           highlightedPosts.push({
-            postId: post.id as `t3_${string}`,
+            postId: post.id,
             ...(post.highlightLabel
               ? { highlightLabel: post.highlightLabel }
               : {}),

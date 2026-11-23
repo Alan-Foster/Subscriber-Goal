@@ -209,7 +209,7 @@ describe("TinyActionLayout coordinated text fitting", () => {
           if (type === "loadingdone") fontLoadingListener = listener;
         }),
         removeEventListener: vi.fn(),
-      } as unknown as FontFaceSet,
+      },
     });
 
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {

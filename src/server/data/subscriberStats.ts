@@ -69,7 +69,7 @@ const parseStringList = (raw: string | undefined): string[] => {
     return [];
   }
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
       logDiagnostic("warn", "persisted_json_invalid", {
         workflow: "subscriber_stats",

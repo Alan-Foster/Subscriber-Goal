@@ -1,8 +1,4 @@
-import type {
-  CreateCtaOnlyFollowUpFormValues,
-  CreateSubscribeOnlyFollowUpFormValues,
-  CreateSubscriberGoalFollowUpFormValues,
-} from "../../shared/types/api";
+import type { CreateSubscriberGoalFollowUpFormValues } from "../../shared/types/api";
 import { isCreationAttemptId } from "../data/createGoalDraft";
 
 const creationAttemptFieldMarker = "__creation_attempt__";
@@ -35,7 +31,4 @@ export function readCreationAttemptCallback<T extends Record<string, unknown>>(
   };
 }
 
-export type CreateGoalFollowUpValues =
-  | CreateSubscriberGoalFollowUpFormValues
-  | CreateSubscribeOnlyFollowUpFormValues
-  | CreateCtaOnlyFollowUpFormValues;
+export type CreateGoalFollowUpValues = CreateSubscriberGoalFollowUpFormValues;

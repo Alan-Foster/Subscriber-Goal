@@ -1,4 +1,4 @@
-import { connectRealtime } from "@devvit/web/client";
+import { connectRealtime, disconnectRealtime } from "@devvit/web/client";
 import {
   useCallback,
   useEffect,
@@ -8,6 +8,8 @@ import {
 } from "react";
 import type { RealtimeMessage, SubGoalState } from "../../../shared/types/api";
 import { logDiagnostic } from "../../../shared/diagnostics";
+
+const subscriberUpdatesChannel = "subscriber_updates";
 
 export function useSubGoalRealtime(
   postHeight: SubGoalState["postHeight"] | undefined,
@@ -70,21 +72,24 @@ export function useSubGoalRealtime(
     realtimeConnectedRef.current = true;
 
     try {
-      const connection = connectRealtime({
-        channel: "subscriber_updates",
+      connectRealtime({
+        channel: subscriberUpdatesChannel,
         onMessage: handleRealtimeMessage,
       });
 
       return () => {
-        void connection.disconnect().catch((error: unknown) => {
+        try {
+          disconnectRealtime(subscriberUpdatesChannel);
+        } catch (error) {
           logDiagnostic(
             "warn",
             "realtime_disconnect_failed",
             { workflow: "realtime", phase: "disconnect" },
             error,
           );
-        });
-        realtimeConnectedRef.current = false;
+        } finally {
+          realtimeConnectedRef.current = false;
+        }
       };
     } catch (error) {
       realtimeConnectedRef.current = false;

@@ -31,8 +31,9 @@ function registerAppInstallRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppInstall,
     async (req, res): Promise<void> => {
+      const body: unknown = req.body;
       try {
-        const installerUsername = getInstallerUsername(req.body);
+        const installerUsername = getInstallerUsername(body);
         await onAppChanged({
           lifecycleSource: "install",
           ...(installerUsername ? { installerUsername } : {}),
@@ -60,8 +61,9 @@ function registerAppUpgradeRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onAppUpgrade,
     async (req, res): Promise<void> => {
+      const body: unknown = req.body;
       try {
-        const installerUsername = getInstallerUsername(req.body);
+        const installerUsername = getInstallerUsername(body);
         await onAppChanged({
           lifecycleSource: "upgrade",
           ...(installerUsername ? { installerUsername } : {}),
@@ -130,9 +132,10 @@ function registerPostCreateRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onPostCreate,
     async (req, res): Promise<void> => {
-      const post = req.body?.post ?? req.body;
+      const body: unknown = req.body;
+      const post = isRecord(body) ? (body.post ?? body) : body;
       try {
-        if (typeof post?.id !== "string") {
+        if (!isRecord(post) || typeof post.id !== "string") {
           res.status(400).json({
             status: "error",
             message: "Post ID is required.",
@@ -164,8 +167,8 @@ function registerAppAccountRecoveryJobRoute(router: Router): void {
   router.post(
     internalRoutes.scheduler.appAccountRecoveryJob,
     async (req, res): Promise<void> => {
-      const payload = req.body?.data ?? req.body;
-      if (!payload || typeof payload.incidentToken !== "string") {
+      const payload = getSchedulerPayload(req.body);
+      if (!isRecord(payload) || typeof payload.incidentToken !== "string") {
         res.status(400).json({
           status: "error",
           message: "Recovery incident token is required.",
@@ -228,7 +231,7 @@ function registerMilestoneNotificationJobRoute(router: Router): void {
   router.post(
     internalRoutes.scheduler.milestoneNotificationJob,
     async (req, res): Promise<void> => {
-      const payload = req.body?.data ?? req.body;
+      const payload = getSchedulerPayload(req.body);
       if (!isMilestoneNotificationJob(payload)) {
         res.status(400).json({
           status: "error",
@@ -304,15 +307,18 @@ function registerMilestoneNotificationJobRoute(router: Router): void {
   );
 }
 
+function getSchedulerPayload(body: unknown): unknown {
+  return isRecord(body) ? (body.data ?? body) : body;
+}
+
 function getInstallerUsername(body: unknown): string | undefined {
-  if (!body || typeof body !== "object") return undefined;
-  const record = body as Record<string, unknown>;
+  if (!isRecord(body)) return undefined;
   const candidates = [
-    record,
-    record.event,
-    record.data,
-    record.appInstall,
-    record.appUpgrade,
+    body,
+    body.event,
+    body.data,
+    body.appInstall,
+    body.appUpgrade,
   ];
   for (const candidate of candidates) {
     if (

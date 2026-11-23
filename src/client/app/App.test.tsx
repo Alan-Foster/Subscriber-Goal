@@ -1149,7 +1149,7 @@ describe("App", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<App />));
-    hoisted.state = { ...hoisted.state } as SubGoalState;
+    hoisted.state = { ...hoisted.state };
     await act(async () => root.render(<App />));
 
     expect(

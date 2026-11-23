@@ -24,7 +24,7 @@ import {
   recordSourceDeleteAttempt,
   recordSourceDeletionConfirmed,
 } from "../core/sourcePostDeletion";
-import type { LinkId, SubredditId } from "../types";
+import type { LinkId } from "../types";
 import { getSubscriberGoalCandidatePostIds } from "../data/subscriberGoalCandidates";
 import { hasCrosspost } from "../data/crosspostData";
 import {
@@ -206,7 +206,7 @@ async function resolveDeleteGoalTarget(
   progress.phase = "post_lookup";
   const existingIntent = await getSourcePostDeletionIntent(
     redis,
-    sourcePostDeletionIntentId(subreddit.id as SubredditId, postId),
+    sourcePostDeletionIntentId(subreddit.id, postId),
   );
   const post = await reddit.getPostById(postId);
   const isCurrentSubredditPost =
@@ -316,7 +316,7 @@ async function deleteGoalUnderLease(
   progress.phase = "deletion_intent_persistence";
   let intent = await prepareSourcePostDeletionIntent(redis, {
     postId,
-    subredditId: subreddit.id as SubredditId,
+    subredditId: subreddit.id,
     subredditName,
   });
   logDiagnostic("info", "delete_goal_phase_complete", {

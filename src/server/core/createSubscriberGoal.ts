@@ -153,6 +153,7 @@ async function recoverCompletedCreation(
         "Completed Subscriber Goal operation has missing result metadata.",
       );
     }
+    const parsedHighlightResult: unknown = JSON.parse(storedHighlightResult);
     return {
       status: "complete",
       result: {
@@ -160,7 +161,7 @@ async function recoverCompletedCreation(
         post,
         crosspostDispatchResult,
         highlightResult: normalizeStoredHighlightResult(
-          JSON.parse(storedHighlightResult),
+          parsedHighlightResult,
           postId,
         ),
         flairResult: parseStoredJson(
@@ -634,9 +635,7 @@ async function recoverSubmittedPost(
     return { terminal: retired };
   }
   try {
-    recoveredPost = (await reddit.getPostById(
-      submittedPostId,
-    )) as unknown as GoalPost;
+    recoveredPost = await reddit.getPostById(submittedPostId);
     if (!recoveredPost) {
       throw new PostTemporarilyUnavailableError(submittedPostId);
     }

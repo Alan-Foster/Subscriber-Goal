@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, StrictMode, useState } from "react";
-import type { connectRealtime } from "@devvit/web/client";
+import type { connectRealtime, disconnectRealtime } from "@devvit/web/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prohibitedContentMessage } from "../../shared/contentPolicy";
@@ -13,13 +13,16 @@ import { useSubGoalRealtime } from "./subGoal/useSubGoalRealtime";
 import { useSubGoalLoading } from "./subGoal/useSubGoalLoading";
 
 const hoisted = vi.hoisted(() => ({
-  connectRealtime: vi.fn<typeof connectRealtime>(),
+  connectRealtime:
+    vi.fn<(...args: Parameters<typeof connectRealtime>) => void>(),
+  disconnectRealtime: vi.fn<typeof disconnectRealtime>(),
   requestJsonWithRetry: vi.fn(),
   journeyHeaders: vi.fn(() => ({})),
 }));
 
 vi.mock("@devvit/web/client", () => ({
   connectRealtime: hoisted.connectRealtime,
+  disconnectRealtime: hoisted.disconnectRealtime,
 }));
 
 vi.mock("../utils/fetchWithRetry", () => ({
@@ -172,9 +175,6 @@ describe("useSubGoal tiny behavior", () => {
       data: { type: "init", postId: "t3_tiny", state: tinyState },
       error: null,
       aborted: false,
-    });
-    hoisted.connectRealtime.mockReturnValue({
-      disconnect: vi.fn().mockResolvedValue(undefined),
     });
   });
 
@@ -413,8 +413,6 @@ describe("useSubGoal tiny behavior", () => {
 
   it("keeps one request and connection through a subscribe, realtime notice, and unmount", async () => {
     vi.useFakeTimers();
-    const disconnect = vi.fn().mockResolvedValue(undefined);
-    hoisted.connectRealtime.mockReturnValueOnce({ disconnect });
     hoisted.requestJsonWithRetry.mockResolvedValueOnce({
       data: { type: "init", postId: "t3_goal", state: regularState },
       error: null,
@@ -478,7 +476,9 @@ describe("useSubGoal tiny behavior", () => {
       }),
     );
     expect(hoisted.connectRealtime).toHaveBeenCalledOnce();
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(hoisted.disconnectRealtime).toHaveBeenCalledExactlyOnceWith(
+      "subscriber_updates",
+    );
   });
 
   it("polls Tiny aggregate state every minute without connecting realtime", async () => {
@@ -579,9 +579,7 @@ describe("useSubGoal tiny behavior", () => {
     container.remove();
   });
 
-  it("disconnects a synchronously returned realtime connection on unmount", async () => {
-    const disconnect = vi.fn().mockResolvedValue(undefined);
-    hoisted.connectRealtime.mockReturnValue({ disconnect });
+  it("disconnects the realtime channel on unmount", async () => {
     hoisted.requestJsonWithRetry.mockResolvedValue({
       data: { type: "init", postId: "t3_regular", state: regularState },
       error: null,
@@ -593,30 +591,30 @@ describe("useSubGoal tiny behavior", () => {
 
     await act(async () => root.render(<Harness />));
     expect(hoisted.connectRealtime).toHaveBeenCalledOnce();
-    expect(disconnect).not.toHaveBeenCalled();
+    expect(hoisted.disconnectRealtime).not.toHaveBeenCalled();
     await act(async () => root.unmount());
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(hoisted.disconnectRealtime).toHaveBeenCalledExactlyOnceWith(
+      "subscriber_updates",
+    );
     container.remove();
   });
 
   it("keeps one active realtime connection after a StrictMode remount", async () => {
-    let active: ReturnType<typeof connectRealtime> | null = null;
+    let active: (() => void) | null = null;
     const closeChannel = () => {
       active = null;
-      return Promise.resolve();
     };
     const disconnectFirst = vi.fn(closeChannel);
     const disconnectSecond = vi.fn(closeChannel);
-    const firstConnection = { disconnect: disconnectFirst };
-    const secondConnection = { disconnect: disconnectSecond };
     const openChannel = vi
-      .fn<() => ReturnType<typeof connectRealtime>>()
-      .mockReturnValueOnce(firstConnection)
-      .mockReturnValueOnce(secondConnection);
-    // The installed SDK returns the current connection until its channel is disconnected.
-    hoisted.connectRealtime.mockImplementation(
-      () => (active ??= openChannel()),
-    );
+      .fn<() => () => void>()
+      .mockReturnValueOnce(disconnectFirst)
+      .mockReturnValueOnce(disconnectSecond);
+    // The installed SDK reuses the current connection until its channel is disconnected.
+    hoisted.connectRealtime.mockImplementation(() => {
+      active ??= openChannel();
+    });
+    hoisted.disconnectRealtime.mockImplementation(() => active?.());
 
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -632,7 +630,7 @@ describe("useSubGoal tiny behavior", () => {
       expect(openChannel).toHaveBeenCalledTimes(2);
       expect(disconnectFirst).toHaveBeenCalledOnce();
       expect(disconnectSecond).not.toHaveBeenCalled();
-      expect(active).toBe(secondConnection);
+      expect(active).toBe(disconnectSecond);
     } finally {
       await act(async () => root.unmount());
     }
@@ -643,12 +641,9 @@ describe("useSubGoal tiny behavior", () => {
 
   it("logs synchronous realtime connection errors and can connect on the next effect run", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const disconnect = vi.fn().mockResolvedValue(undefined);
-    hoisted.connectRealtime
-      .mockImplementationOnce(() => {
-        throw new Error("invalid channel");
-      })
-      .mockReturnValueOnce({ disconnect });
+    hoisted.connectRealtime.mockImplementationOnce(() => {
+      throw new Error("invalid channel");
+    });
     const root = createRoot(document.createElement("div"));
     try {
       await act(async () => root.render(<RealtimeHarness />));
@@ -663,7 +658,9 @@ describe("useSubGoal tiny behavior", () => {
       await act(async () => root.unmount());
       errorSpy.mockRestore();
     }
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(hoisted.disconnectRealtime).toHaveBeenCalledExactlyOnceWith(
+      "subscriber_updates",
+    );
   });
 
   it("marks a prohibited initialization as terminal without scheduling recovery", async () => {

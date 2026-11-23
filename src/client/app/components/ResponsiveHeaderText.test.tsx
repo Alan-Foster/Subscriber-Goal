@@ -108,7 +108,7 @@ describe("ResponsiveHeaderText", () => {
           if (type === "loadingdone") fontLoadingListener = listener;
         }),
         removeEventListener: vi.fn(),
-      } as unknown as FontFaceSet,
+      },
     });
 
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {

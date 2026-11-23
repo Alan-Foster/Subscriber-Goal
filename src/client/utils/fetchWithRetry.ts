@@ -65,7 +65,7 @@ function buildFetchInit(init?: RequestInit): RequestInit {
   return out;
 }
 
-const sleep = (ms: number, signal?: AbortSignal | undefined): Promise<void> =>
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (ms <= 0) {
       resolve();
