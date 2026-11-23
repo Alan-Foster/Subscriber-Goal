@@ -11,6 +11,7 @@ import type {
   NavigationTarget,
 } from "../../../shared/types/api";
 import { apiRoutes } from "../../../shared/routes";
+import { isAfterSubscribeTargetResponse } from "./afterSubscribeTargetValidation";
 import { SubscriptionButton } from "./SubscriptionButton";
 import {
   getAfterSubscribeAnalyticsActionType,
@@ -39,6 +40,83 @@ type AfterSubscribeButtonProps = {
   automaticAction?: DynamicAfterSubscribeActionType | "link";
 };
 
+type AutomaticAction = AfterSubscribeButtonProps["automaticAction"];
+
+function recordCtaActivation(
+  action: ActionableAfterSubscribeAction,
+  analyticsContext: GoalJourneyContext | undefined,
+  automaticAction: AutomaticAction,
+) {
+  if (!automaticAction) {
+    try {
+      recordStatisticsEvent("cta_click");
+    } catch (error) {
+      logDiagnostic(
+        "warn",
+        "statistics_event_failed",
+        {
+          workflow: "after_subscribe_cta",
+          phase: "cta_click",
+        },
+        error,
+      );
+    }
+  }
+  const actionType = getAfterSubscribeAnalyticsActionType(action);
+  if (analyticsContext && !automaticAction) {
+    goalJourneyAnalytics.afterSubscribeCtaActivated(
+      analyticsContext,
+      actionType,
+    );
+  }
+  return actionType;
+}
+
+function trackLinkClick() {
+  // Defer identity generation and recording so even synchronous failures
+  // cannot interrupt the click-through.
+  void Promise.resolve()
+    .then(() =>
+      fetch(apiRoutes.ctaClick, {
+        method: "POST",
+        keepalive: true,
+        headers: statisticsRequestHeaders(),
+      }),
+    )
+    .then((response) => {
+      if (!response.ok) {
+        logDiagnostic("warn", "cta_click_tracking_failed", {
+          workflow: "after_subscribe_cta",
+          phase: "http_error",
+          status: response.status,
+        });
+      }
+    })
+    .catch((error: unknown) => {
+      logDiagnostic(
+        "warn",
+        "cta_click_tracking_failed",
+        { workflow: "after_subscribe_cta", phase: "network" },
+        error,
+      );
+    });
+}
+
+function requestDynamicTarget(automaticAction: AutomaticAction) {
+  return requestJsonWithRetry<AfterSubscribeTargetResponse>(
+    automaticAction
+      ? `${apiRoutes.afterSubscribeTarget}?automaticAction=${encodeURIComponent(automaticAction)}`
+      : apiRoutes.afterSubscribeTarget,
+    undefined,
+    {
+      // Dynamic CTA resolution historically made one request. Keep that
+      // behavior while using the shared structured-error parser.
+      maxDurationMs: 0,
+      validate: isAfterSubscribeTargetResponse,
+    },
+  );
+}
+
 export const AfterSubscribeButton = ({
   action,
   language,
@@ -56,57 +134,14 @@ export const AfterSubscribeButton = ({
       return;
     }
     resolvingRef.current = true;
-    if (!automaticAction) {
-      try {
-        recordStatisticsEvent("cta_click");
-      } catch (error) {
-        logDiagnostic(
-          "warn",
-          "statistics_event_failed",
-          {
-            workflow: "after_subscribe_cta",
-            phase: "cta_click",
-          },
-          error,
-        );
-      }
-    }
-    const actionType = getAfterSubscribeAnalyticsActionType(action);
-    if (analyticsContext && !automaticAction) {
-      goalJourneyAnalytics.afterSubscribeCtaActivated(
-        analyticsContext,
-        actionType,
-      );
-    }
+    const actionType = recordCtaActivation(
+      action,
+      analyticsContext,
+      automaticAction,
+    );
     if (action.type === "link") {
       if (trackClicks && !automaticAction) {
-        // Defer identity generation and recording so even synchronous failures
-        // cannot interrupt the click-through.
-        void Promise.resolve()
-          .then(() =>
-            fetch(apiRoutes.ctaClick, {
-              method: "POST",
-              keepalive: true,
-              headers: statisticsRequestHeaders(),
-            }),
-          )
-          .then((response) => {
-            if (!response.ok) {
-              logDiagnostic("warn", "cta_click_tracking_failed", {
-                workflow: "after_subscribe_cta",
-                phase: "http_error",
-                status: response.status,
-              });
-            }
-          })
-          .catch((error: unknown) => {
-            logDiagnostic(
-              "warn",
-              "cta_click_tracking_failed",
-              { workflow: "after_subscribe_cta", phase: "network" },
-              error,
-            );
-          });
+        trackLinkClick();
       }
       if (analyticsContext && !automaticAction) {
         goalJourneyAnalytics.afterSubscribeCtaOpened(
@@ -120,26 +155,7 @@ export const AfterSubscribeButton = ({
     }
     setResolving(true);
     try {
-      const result = await requestJsonWithRetry<AfterSubscribeTargetResponse>(
-        automaticAction
-          ? `${apiRoutes.afterSubscribeTarget}?automaticAction=${encodeURIComponent(automaticAction)}`
-          : apiRoutes.afterSubscribeTarget,
-        undefined,
-        {
-          // Dynamic CTA resolution historically made one request. Keep that
-          // behavior while using the shared structured-error parser.
-          maxDurationMs: 0,
-          validate: (payload): payload is AfterSubscribeTargetResponse =>
-            Boolean(
-              payload &&
-              typeof payload === "object" &&
-              "target" in payload &&
-              hasUsableNavigationTarget(
-                (payload as AfterSubscribeTargetResponse).target,
-              ),
-            ),
-        },
-      );
+      const result = await requestDynamicTarget(automaticAction);
       if (result.error || !result.data) {
         logDiagnostic("warn", "dynamic_target_request_failed", {
           workflow: "after_subscribe_cta",
@@ -219,30 +235,3 @@ export const AfterSubscribeButton = ({
     />
   );
 };
-
-function hasUsableNavigationTarget(
-  target: unknown,
-): target is NavigationTarget {
-  if (
-    typeof target !== "object" ||
-    target === null ||
-    !("url" in target) ||
-    typeof target.url !== "string" ||
-    target.url.trim().length === 0
-  ) {
-    return false;
-  }
-  try {
-    const url = new URL(target.url);
-    return (
-      (url.protocol === "https:" || url.protocol === "http:") &&
-      url.hostname.length > 0 &&
-      (!("permalink" in target) ||
-        target.permalink === undefined ||
-        typeof target.permalink === "string")
-    );
-  } catch {
-    // diagnostic-allow-silent: malformed navigation targets are validation input.
-    return false;
-  }
-}
