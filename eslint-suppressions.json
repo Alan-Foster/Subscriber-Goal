@@ -1,40 +1,4 @@
 {
-  "src/client/app/components/AfterSubscribeButton.tsx": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/client/app/components/SubscriptionButton.tsx": {
-    "max-lines-per-function": {
-      "count": 2
-    }
-  },
-  "src/client/app/components/TinyActionLayout.tsx": {
-    "max-lines-per-function": {
-      "count": 2
-    }
-  },
-  "src/client/app/pages/NotificationSettingsPage.tsx": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/client/app/pages/StatisticsPage.tsx": {
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
-  "src/client/app/pages/SubGoalPage.tsx": {
-    "complexity": {
-      "count": 1
-    },
-    "max-lines-per-function": {
-      "count": 1
-    }
-  },
   "src/server/data/legacyAfterSubscribeActionMigration.ts": {
     "complexity": {
       "count": 1

@@ -1,6 +1,9 @@
 import { useRef } from "react";
 import type { ReactNode } from "react";
-import type { SubGoalState } from "../../../shared/types/api";
+import type {
+  SubscriberGoalState,
+  SubGoalState,
+} from "../../../shared/types/api";
 import { getNotificationMessages } from "../../../shared/notificationI18n";
 import { NotificationBellIcon } from "../components/NotificationBellIcon";
 import { NotificationSwitch } from "../components/NotificationSwitch";
@@ -137,150 +140,61 @@ const NotificationPreferenceRow = ({
   );
 };
 
-export const NotificationSettingsPage = ({
+const NotificationBackButton = ({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    aria-label={label}
+    className="absolute left-3 top-3 z-20 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] sm:left-4 sm:top-4"
+    onClick={onClick}
+  >
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M11.75 4.25 6 10l5.75 5.75M6.5 10h8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  </button>
+);
+
+const renderRegularSettings = ({
   state,
   authenticated,
   enabled,
-  loading,
-  submitting,
   error,
   onToggle,
-  onReturn,
   onVisitPromoSub,
-}: NotificationSettingsPageProps) => {
+  backButton,
+  returnButton,
+  busy,
+  statusText,
+}: Pick<
+  NotificationSettingsPageProps,
+  "authenticated" | "enabled" | "error" | "onToggle" | "onVisitPromoSub"
+> & {
+  state: SubscriberGoalState;
+  backButton: ReactNode;
+  returnButton: ReactNode;
+  busy: boolean;
+  statusText: string;
+}) => {
   const messages = getNotificationMessages(state.language);
-  const compact = state.postHeight === "tiny" || state.postHeight === "cta";
-  const short = state.postHeight === "short";
   const subredditName = state.subreddit.name;
-  const busy = loading || submitting;
-  const returnActivatedRef = useRef(false);
-  const statusText = loading
-    ? "…"
-    : !authenticated
-      ? messages.loginRequired
-      : enabled
-        ? messages.enabled
-        : messages.disabled;
-
-  const handleReturn = () => {
-    if (returnActivatedRef.current) return;
-    returnActivatedRef.current = true;
-    onReturn();
-    window.setTimeout(() => {
-      returnActivatedRef.current = false;
-    }, 250);
-  };
-
-  const backButton = (
-    <button
-      type="button"
-      aria-label={messages.backAriaLabel}
-      className="absolute left-3 top-3 z-20 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[color:var(--sg-text-secondary)] transition hover:text-[color:var(--sg-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] sm:left-4 sm:top-4"
-      onClick={handleReturn}
-    >
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 20 20"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
-      >
-        <path
-          d="M11.75 4.25 6 10l5.75 5.75M6.5 10h8"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </button>
-  );
-
-  if (compact) {
-    const compactNotice =
-      error ?? (!authenticated && !loading ? statusText : null);
-    return (
-      <div
-        className="relative flex h-full w-full items-center justify-center px-9 py-3 text-center"
-        data-notification-layout="compact"
-      >
-        {backButton}
-        <NotificationPreferenceRow
-          label={messages.label}
-          enabledText={messages.enabled}
-          disabledText={messages.disabled}
-          enabled={enabled}
-          loading={loading}
-          submitting={submitting}
-          authenticated={authenticated}
-          error={error}
-          onToggle={onToggle}
-        />
-        {compactNotice ? (
-          <div
-            className={`absolute bottom-1 left-9 right-9 truncate text-[9px] ${error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
-            aria-live="polite"
-            title={compactNotice}
-          >
-            {compactNotice}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  const returnButton = (
-    <button
-      type="button"
-      aria-label={messages.backAriaLabel}
-      className={`cursor-pointer whitespace-nowrap rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-5 font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] ${short ? "py-2 text-base" : "py-2.5 text-sm"}`}
-      onClick={handleReturn}
-    >
-      {messages.returnShort}
-    </button>
-  );
-
-  if (short) {
-    const shortNotice =
-      error ?? (!authenticated && !loading ? messages.loginRequired : null);
-    return (
-      <div
-        className="relative flex h-full w-full items-center justify-center px-4 pb-6 pt-10 text-center sm:px-16 sm:py-6"
-        data-notification-layout="short"
-      >
-        {backButton}
-        <TopButtons
-          onVisitPromoSubPressed={onVisitPromoSub}
-          promoSubreddit={state.appSettings.promoSubreddit}
-          language={state.language}
-        />
-        <NotificationPreferenceRow
-          label={messages.label}
-          enabledText={messages.enabled}
-          disabledText={messages.disabled}
-          enabled={enabled}
-          loading={loading}
-          submitting={submitting}
-          authenticated={authenticated}
-          error={error}
-          stackOnNarrow
-          returnButton={returnButton}
-          onToggle={onToggle}
-        />
-        {shortNotice ? (
-          <div
-            className={`absolute bottom-2 left-4 right-4 truncate text-xs ${error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
-            aria-live="polite"
-            title={shortNotice}
-          >
-            {shortNotice}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center gap-3 px-4 pb-6 pt-10 text-center sm:gap-4 sm:px-16"
@@ -336,4 +250,169 @@ export const NotificationSettingsPage = ({
       {returnButton}
     </div>
   );
+};
+
+type PreferenceLayoutProps = {
+  backButton: ReactNode;
+  notice: string | null;
+  preference: NotificationPreferenceRowProps;
+};
+
+const renderCompactSettings = ({
+  backButton,
+  notice,
+  preference,
+}: PreferenceLayoutProps) => {
+  return (
+    <div
+      className="relative flex h-full w-full items-center justify-center px-9 py-3 text-center"
+      data-notification-layout="compact"
+    >
+      {backButton}
+      <NotificationPreferenceRow {...preference} />
+      {notice ? (
+        <div
+          className={`absolute bottom-1 left-9 right-9 truncate text-[9px] ${preference.error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
+          aria-live="polite"
+          title={notice}
+        >
+          {notice}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const renderShortSettings = ({
+  state,
+  backButton,
+  notice,
+  preference,
+  returnButton,
+  onVisitPromoSub,
+}: PreferenceLayoutProps & {
+  state: SubscriberGoalState;
+  returnButton: ReactNode;
+  onVisitPromoSub: () => void;
+}) => {
+  return (
+    <div
+      className="relative flex h-full w-full items-center justify-center px-4 pb-6 pt-10 text-center sm:px-16 sm:py-6"
+      data-notification-layout="short"
+    >
+      {backButton}
+      <TopButtons
+        onVisitPromoSubPressed={onVisitPromoSub}
+        promoSubreddit={state.appSettings.promoSubreddit}
+        language={state.language}
+      />
+      <NotificationPreferenceRow
+        {...preference}
+        stackOnNarrow
+        returnButton={returnButton}
+      />
+      {notice ? (
+        <div
+          className={`absolute bottom-2 left-4 right-4 truncate text-xs ${preference.error ? "text-red-500" : "text-[color:var(--sg-text-muted)]"}`}
+          aria-live="polite"
+          title={notice}
+        >
+          {notice}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+export const NotificationSettingsPage = ({
+  state,
+  authenticated,
+  enabled,
+  loading,
+  submitting,
+  error,
+  onToggle,
+  onReturn,
+  onVisitPromoSub,
+}: NotificationSettingsPageProps) => {
+  const messages = getNotificationMessages(state.language);
+  const compact = state.postHeight === "tiny" || state.postHeight === "cta";
+  const short = state.postHeight === "short";
+  const busy = loading || submitting;
+  const returnActivatedRef = useRef(false);
+  const statusText = loading
+    ? "…"
+    : !authenticated
+      ? messages.loginRequired
+      : enabled
+        ? messages.enabled
+        : messages.disabled;
+
+  const handleReturn = () => {
+    if (returnActivatedRef.current) return;
+    returnActivatedRef.current = true;
+    onReturn();
+    window.setTimeout(() => {
+      returnActivatedRef.current = false;
+    }, 250);
+  };
+
+  const backButton = (
+    <NotificationBackButton
+      label={messages.backAriaLabel}
+      onClick={handleReturn}
+    />
+  );
+
+  const notice =
+    error ?? (!authenticated && !loading ? messages.loginRequired : null);
+  const preference = {
+    label: messages.label,
+    enabledText: messages.enabled,
+    disabledText: messages.disabled,
+    enabled,
+    loading,
+    submitting,
+    authenticated,
+    error,
+    onToggle,
+  };
+  if (compact) {
+    return renderCompactSettings({ backButton, notice, preference });
+  }
+
+  const returnButton = (
+    <button
+      type="button"
+      aria-label={messages.backAriaLabel}
+      className={`cursor-pointer whitespace-nowrap rounded-full border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-5 font-semibold text-[color:var(--sg-text-secondary)] shadow-sm transition hover:bg-[color:var(--sg-surface-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] ${short ? "py-2 text-base" : "py-2.5 text-sm"}`}
+      onClick={handleReturn}
+    >
+      {messages.returnShort}
+    </button>
+  );
+
+  if (short) {
+    return renderShortSettings({
+      state,
+      backButton,
+      notice,
+      preference,
+      returnButton,
+      onVisitPromoSub,
+    });
+  }
+
+  return renderRegularSettings({
+    state,
+    authenticated,
+    enabled,
+    error,
+    onToggle,
+    onVisitPromoSub,
+    backButton,
+    returnButton,
+    busy,
+    statusText,
+  });
 };

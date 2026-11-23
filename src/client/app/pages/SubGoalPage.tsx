@@ -1,5 +1,12 @@
-import { getAutomaticAfterSubscribeAction } from "../../../shared/afterSubscribeAction";
-import type { CtaOnlyState, SubGoalState } from "../../../shared/types/api";
+import {
+  getSecondaryActions,
+  getSubscriptionAction,
+} from "./subGoalPageActions";
+import type {
+  CtaOnlyState,
+  SubscriberGoalState,
+  SubGoalState,
+} from "../../../shared/types/api";
 import { getSubGoalPostMessages } from "../../../shared/subGoalPostI18n";
 import { ProgressBar } from "../components/ProgressBar";
 import { SubscriptionButton } from "../components/SubscriptionButton";
@@ -26,108 +33,93 @@ type SubGoalPageProps = {
   onStatistics?: () => void;
 };
 
-export const SubGoalPage = ({
+type GoalActionProps = Pick<
+  SubGoalPageProps,
+  "onSubscribe" | "onAfterSubscribeNavigate"
+> & {
+  subscription: ReturnType<typeof getSubscriptionAction>;
+};
+
+const TinyGoalLayout = ({
   state,
   onSubscribe,
-  onVisitPromoSub,
-  isSubmitting,
-  shareUsername,
-  onShareUsernameChange,
-  notice,
   onAfterSubscribeNavigate,
-  onNotifications,
-  onStatistics,
-}: SubGoalPageProps) => {
+  subscription,
+}: GoalActionProps & {
+  state: Extract<SubGoalPageProps["state"], { postHeight: "tiny" }>;
+}) => {
   const messages = getSubGoalPostMessages(state.language);
-  const notificationMessages = getNotificationMessages(state.language);
-  const afterSubscribeAction =
-    state.subscribed && state.afterSubscribeAction.type !== "disabled"
-      ? state.afterSubscribeAction
-      : null;
-  const buttonMode = isSubmitting
-    ? "submitting"
-    : afterSubscribeAction
-      ? "link"
-      : state.subscribed
-        ? "subscribed"
-        : "subscribe";
-  const isDisabled = buttonMode === "submitting" || buttonMode === "subscribed";
-  const authenticated =
-    state.postHeight === "tiny" ? state.authenticated : Boolean(state.user);
-  const showAuthenticationButtons =
-    !authenticated && !state.subscribed && !isSubmitting;
-  const buttonLabel = afterSubscribeAction
-    ? afterSubscribeAction.buttonText
-    : state.subscribed
-      ? messages.subscribedButton({ subredditName: state.subreddit.name })
-      : messages.subscribeButton({ subredditName: state.subreddit.name });
-  const handleButtonClick = onSubscribe;
-  const iconAction = state.subscribed ? undefined : onSubscribe;
-  const showNotice = Boolean(notice);
-  if (state.postHeight === "tiny") {
-    const actionButton = showAuthenticationButtons ? (
-      <LoggedOutAuthButtons
-        signUpLabel={messages.signUpButton}
-        logInLabel={messages.logInButton}
-        onAuthenticate={handleButtonClick}
-      />
-    ) : afterSubscribeAction ? (
-      <AfterSubscribeButton
-        action={afterSubscribeAction}
-        analyticsContext={getGoalJourneyContext(state)}
-        language={state.language}
-        onNavigate={onAfterSubscribeNavigate}
-        trackClicks={state.trackCtaClicks === true}
-      />
-    ) : (
-      <SubscriptionButton
-        label={buttonLabel}
-        mode={buttonMode}
-        onClick={handleButtonClick}
-      />
-    );
+  const {
+    afterSubscribeAction,
+    buttonMode,
+    buttonLabel,
+    showAuthenticationButtons,
+  } = subscription;
+  const actionButton = showAuthenticationButtons ? (
+    <LoggedOutAuthButtons
+      signUpLabel={messages.signUpButton}
+      logInLabel={messages.logInButton}
+      onAuthenticate={onSubscribe}
+    />
+  ) : afterSubscribeAction ? (
+    <AfterSubscribeButton
+      action={afterSubscribeAction}
+      analyticsContext={getGoalJourneyContext(state)}
+      language={state.language}
+      onNavigate={onAfterSubscribeNavigate}
+      trackClicks={state.trackCtaClicks === true}
+    />
+  ) : (
+    <SubscriptionButton
+      label={buttonLabel}
+      mode={buttonMode}
+      onClick={onSubscribe}
+    />
+  );
 
-    return (
-      <div
-        className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
-        data-sg-theme={state.colorTheme}
+  return (
+    <div
+      className="relative flex h-full w-full items-center justify-center px-4 py-3 text-center text-[color:var(--sg-text-primary)]"
+      data-sg-theme={state.colorTheme}
+    >
+      <TinyActionLayout
+        state={state}
+        showCtaActivity={Boolean(afterSubscribeAction)}
       >
-        <TinyActionLayout
-          state={state}
-          showCtaActivity={Boolean(afterSubscribeAction)}
-        >
-          {actionButton}
-        </TinyActionLayout>
-      </div>
-    );
-  }
+        {actionButton}
+      </TinyActionLayout>
+    </div>
+  );
+};
 
-  const automaticAction =
-    state.subscribed &&
-    authenticated &&
-    !isSubmitting &&
-    state.completedTime === null
-      ? state.automaticAfterSubscribeAction === undefined
-        ? getAutomaticAfterSubscribeAction(
-            state.afterSubscribeAction,
-            state.language,
-          )
-        : state.automaticAfterSubscribeAction
-      : null;
-  const secondaryAction =
-    (!state.subscribed || automaticAction) &&
-    state.afterSubscribeAction.type !== "disabled"
-      ? state.afterSubscribeAction
-      : null;
-  const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
-  const balanceShareUsernameControlOnDesktop =
-    state.postHeight === "regular" && showShareUsernameControl;
-  const headerText = state.headerText ?? `r/${state.subreddit.name}`;
+const GoalActionArea = ({
+  state,
+  onSubscribe,
+  onAfterSubscribeNavigate,
+  subscription,
+  isSubmitting,
+}: GoalActionProps & {
+  state: Exclude<SubGoalPageProps["state"], { postHeight: "tiny" }>;
+  isSubmitting: boolean;
+}) => {
+  const {
+    afterSubscribeAction,
+    buttonMode,
+    buttonLabel,
+    showAuthenticationButtons,
+    authenticated,
+  } = subscription;
+  const messages = getSubGoalPostMessages(state.language);
+  const { automaticAction, secondaryAction } = getSecondaryActions(
+    state,
+    authenticated,
+    isSubmitting,
+  );
   const joinButton = (
     <SubscriptionButton
       label={buttonLabel}
       mode={buttonMode}
-      onClick={handleButtonClick}
+      onClick={onSubscribe}
     />
   );
   const configuredActionButton = afterSubscribeAction ? (
@@ -178,6 +170,109 @@ export const SubGoalPage = ({
   );
 
   return (
+    <>
+      {showAuthenticationButtons ? (
+        <LoggedOutAuthButtons
+          signUpLabel={messages.signUpButton}
+          logInLabel={messages.logInButton}
+          onAuthenticate={onSubscribe}
+        />
+      ) : (
+        responsiveActionArea
+      )}
+    </>
+  );
+};
+
+const GoalHeader = ({
+  state,
+  onSubscribe,
+  notice,
+  isDisabled,
+  balanceShareUsernameControlOnDesktop,
+}: Pick<SubGoalPageProps, "onSubscribe" | "notice"> & {
+  state: SubscriberGoalState;
+  isDisabled: boolean;
+  balanceShareUsernameControlOnDesktop: boolean;
+}) => {
+  const iconAction = state.subscribed ? undefined : onSubscribe;
+  const showNotice = Boolean(notice);
+  const headerText = state.headerText ?? `r/${state.subreddit.name}`;
+  return (
+    <div
+      className={`w-full pt-12 ${
+        balanceShareUsernameControlOnDesktop ? "sm:pt-4" : ""
+      }`}
+    >
+      <div className="relative h-10 w-full" data-subgoal-header="true">
+        <button
+          type="button"
+          aria-hidden={showNotice}
+          disabled={showNotice || isDisabled}
+          onClick={showNotice || isDisabled ? undefined : onSubscribe}
+          className={`absolute inset-0 flex items-center justify-center text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+            showNotice ? "pointer-events-none opacity-0" : "opacity-100"
+          } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
+        >
+          <span
+            className="sg-header-group flex max-w-full items-center justify-center gap-2.5"
+            data-subgoal-header-group="true"
+          >
+            <SubredditIcon
+              iconUrl={state.subreddit.icon}
+              size={40}
+              hoverable={false}
+              {...(iconAction ? { onClick: iconAction } : {})}
+            />
+            <ResponsiveHeaderText text={headerText} />
+          </span>
+        </button>
+        <div
+          aria-live="polite"
+          className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
+            showNotice ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <span className="w-full truncate text-center">{notice ?? ""}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const SubGoalPage = ({
+  state,
+  onSubscribe,
+  onVisitPromoSub,
+  isSubmitting,
+  shareUsername,
+  onShareUsernameChange,
+  notice,
+  onAfterSubscribeNavigate,
+  onNotifications,
+  onStatistics,
+}: SubGoalPageProps) => {
+  const messages = getSubGoalPostMessages(state.language);
+  const notificationMessages = getNotificationMessages(state.language);
+  const subscription = getSubscriptionAction(state, isSubmitting);
+  if (state.postHeight === "tiny") {
+    return (
+      <TinyGoalLayout
+        state={state}
+        subscription={subscription}
+        onSubscribe={onSubscribe}
+        onAfterSubscribeNavigate={onAfterSubscribeNavigate}
+      />
+    );
+  }
+  const isDisabled =
+    subscription.buttonMode === "submitting" ||
+    subscription.buttonMode === "subscribed";
+  const showShareUsernameControl = !state.subscribed && !state.subreddit.isNsfw;
+  const balanceShareUsernameControlOnDesktop =
+    state.postHeight === "regular" && showShareUsernameControl;
+
+  return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center gap-6 px-4 py-6 text-center text-[color:var(--sg-text-primary)]"
       data-sg-theme={state.colorTheme}
@@ -190,79 +285,34 @@ export const SubGoalPage = ({
         promoSubreddit={state.appSettings.promoSubreddit}
         language={state.language}
       />
-      <div
-        className={`w-full pt-12 ${
-          balanceShareUsernameControlOnDesktop ? "sm:pt-4" : ""
-        }`}
-      >
-        <div className="relative h-10 w-full" data-subgoal-header="true">
-          <button
-            type="button"
-            aria-hidden={showNotice}
-            disabled={showNotice || isDisabled}
-            onClick={showNotice || isDisabled ? undefined : onSubscribe}
-            className={`absolute inset-0 flex items-center justify-center text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
-              showNotice ? "pointer-events-none opacity-0" : "opacity-100"
-            } border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--sg-border-strong)] disabled:cursor-default`}
-          >
-            <span
-              className="sg-header-group flex max-w-full items-center justify-center gap-2.5"
-              data-subgoal-header-group="true"
-            >
-              <SubredditIcon
-                iconUrl={state.subreddit.icon}
-                size={40}
-                hoverable={false}
-                {...(iconAction ? { onClick: iconAction } : {})}
-              />
-              <ResponsiveHeaderText text={headerText} />
-            </span>
-          </button>
-          <div
-            aria-live="polite"
-            className={`absolute inset-0 flex items-center justify-center gap-1 text-xl font-bold leading-7 text-[color:var(--sg-text-primary)] transition-opacity duration-500 whitespace-nowrap motion-reduce:transition-none ${
-              showNotice ? "opacity-100" : "pointer-events-none opacity-0"
-            }`}
-          >
-            <span className="w-full truncate text-center">{notice ?? ""}</span>
-          </div>
-        </div>
-      </div>
-      {state.goal !== null ? (
-        <ProgressBar
-          current={state.subreddit.subscribers}
-          end={state.goal}
-          start={0}
-          showText
-          width="70%"
-          onActivate={onSubscribe}
-          activationLabel={messages.progressSubscribeAriaLabel({
-            subredditName: state.subreddit.name,
-          })}
-          disabled={isDisabled}
-        />
-      ) : (
-        <ProgressBar
-          current={state.subreddit.subscribers}
-          start={0}
-          showText
-          width="70%"
-          onActivate={onSubscribe}
-          activationLabel={messages.progressSubscribeAriaLabel({
-            subredditName: state.subreddit.name,
-          })}
-          disabled={isDisabled}
-        />
-      )}
-      {showAuthenticationButtons ? (
-        <LoggedOutAuthButtons
-          signUpLabel={messages.signUpButton}
-          logInLabel={messages.logInButton}
-          onAuthenticate={handleButtonClick}
-        />
-      ) : (
-        responsiveActionArea
-      )}
+      <GoalHeader
+        state={state}
+        onSubscribe={onSubscribe}
+        notice={notice}
+        isDisabled={isDisabled}
+        balanceShareUsernameControlOnDesktop={
+          balanceShareUsernameControlOnDesktop
+        }
+      />
+      <ProgressBar
+        current={state.subreddit.subscribers}
+        {...(state.goal === null ? {} : { end: state.goal })}
+        start={0}
+        showText
+        width="70%"
+        onActivate={onSubscribe}
+        activationLabel={messages.progressSubscribeAriaLabel({
+          subredditName: state.subreddit.name,
+        })}
+        disabled={isDisabled}
+      />
+      <GoalActionArea
+        state={state}
+        subscription={subscription}
+        onSubscribe={onSubscribe}
+        onAfterSubscribeNavigate={onAfterSubscribeNavigate}
+        isSubmitting={isSubmitting}
+      />
       {!showShareUsernameControl ? (
         <div className="h-5" />
       ) : (
