@@ -458,6 +458,12 @@
       "placeholders": {},
       "protectedTokens": []
     },
+    "statistics.jsonLabel": {
+      "description": "Statistics dashboard: Accessible label for the JSON export field",
+      "policy": "fallback",
+      "placeholders": {},
+      "protectedTokens": ["JSON"]
+    },
     "statistics.copy": {
       "description": "Statistics dashboard: Copy statistics action",
       "policy": "fallback",
@@ -2315,6 +2321,7 @@
         "notifications.goalPrompt": "Get Notified at {goalText}",
         "notifications.label": "Notifications",
         "statistics.label": "Statistics",
+        "statistics.jsonLabel": "Statistics JSON",
         "statistics.copy": "Copy statistics",
         "statistics.copied": "Statistics copied.",
         "statistics.copyFailed": "Couldn’t copy automatically. Select and copy the text.",
