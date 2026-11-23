@@ -10,6 +10,7 @@ import {
 import { postsKey } from "../data/updaterData";
 import { scheduledPostDisplacementKey } from "../core/scheduledPostDisplacement";
 import type { ServerAppSettings } from "../settings";
+import { crosspostBookkeepingCleanupLastRunKey } from "./bookkeeping";
 
 const hoisted = vi.hoisted(() => ({
   mockContext: {} as {
@@ -1798,6 +1799,156 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
     ).toBeUndefined();
   });
 
+  it("counts thrown dispatch failures and logs degradation at the threshold", async () => {
+    mockContext.subredditName = "SubGoal";
+    safeGetWikiPageRevisionsMock.mockResolvedValue({
+      ok: true,
+      revisions: [],
+      durationMs: 1,
+    });
+    const counter = "crosspostRetryDegradedCount";
+    await redisMock.set(counter, "invalid");
+    const hLen = redisMock.hLen.bind(redisMock);
+    vi.spyOn(redisMock, "hLen").mockImplementation(async (key) => {
+      if (
+        key === getCrosspostPendingByRevisionKey(baseSettings.promoSubreddit)
+      ) {
+        throw new Error("pending queue unavailable");
+      }
+      return hLen(key);
+    });
+
+    for (const count of [1, 2, 3]) {
+      await expect(
+        processCrosspostDispatchQueue(baseSettings, "scheduler_posts_updater"),
+      ).resolves.toMatchObject({
+        status: "failed",
+        errorMessage: "pending queue unavailable",
+      });
+      expect(await redisMock.get(counter)).toBe(String(count));
+      const degraded = loggedEvents.filter(
+        ({ event }) => event === "crosspost_retry_degraded",
+      );
+      expect(degraded).toHaveLength(count === 3 ? 1 : 0);
+      if (count === 3)
+        expect(degraded[0]).toMatchObject({
+          consecutiveFailures: 3,
+          status: "failed",
+          __level: "warn",
+        });
+    }
+  });
+
+  it.each([
+    {
+      label: "missing mapping",
+      mapping: undefined,
+      targetSubreddit: "SubGoal",
+      failure: undefined,
+      reason: "missing_mapping",
+      lookupCalls: 0,
+      processed: true,
+    },
+    {
+      label: "invalid target ID",
+      mapping: "t1_comment",
+      targetSubreddit: "SubGoal",
+      failure: undefined,
+      reason: "invalid_target",
+      lookupCalls: 0,
+      processed: true,
+    },
+    {
+      label: "target in another subreddit",
+      mapping: "t3_mirror",
+      targetSubreddit: "OtherSub",
+      failure: undefined,
+      reason: "wrong_subreddit",
+      lookupCalls: 1,
+      processed: true,
+    },
+    {
+      label: "deleted target",
+      mapping: "t3_mirror",
+      targetSubreddit: "SubGoal",
+      failure: "post not found",
+      reason: "target_missing",
+      lookupCalls: 1,
+      processed: true,
+    },
+    {
+      label: "transient removal failure",
+      mapping: "t3_mirror",
+      targetSubreddit: "SubGoal",
+      failure: "temporary service failure",
+      reason: "mirror_failed",
+      lookupCalls: 1,
+      processed: false,
+    },
+  ])(
+    "handles moderation revision with $label",
+    async ({
+      mapping,
+      targetSubreddit,
+      failure,
+      reason,
+      lookupCalls,
+      processed,
+    }) => {
+      mockContext.subredditName = "SubGoal";
+      const revisionId = "rev_remove";
+      const sourceId = "t3_source";
+      safeGetWikiPageRevisionsMock.mockImplementation(
+        async (_reddit: unknown, _subreddit: string, page: string) => ({
+          ok: true,
+          revisions:
+            page === crosspostWikiPages.action.remove
+              ? [{ id: revisionId, reason: "Dispatch remove for t3_source" }]
+              : [],
+          durationMs: 1,
+        }),
+      );
+      if (mapping)
+        await redisMock.hSet(crosspostListKey, { [sourceId]: mapping });
+      // A recent cleanup leaves validation of this mapping to the mirror pass.
+      await redisMock.set(
+        crosspostBookkeepingCleanupLastRunKey,
+        String(Date.now()),
+      );
+      await redisMock.zAdd(postsKey, { member: sourceId, score: 1 });
+      const remove = vi.fn(async () => {
+        if (failure) throw new Error(failure);
+      });
+      mockReddit.getPostById.mockResolvedValue({
+        id: mapping,
+        subredditName: targetSubreddit,
+        remove,
+      });
+
+      await expect(
+        processCrosspostDispatchQueue(baseSettings, "scheduler_posts_updater"),
+      ).resolves.toMatchObject({
+        actionsMirrored: 0,
+        actionsFailed: processed ? 0 : 1,
+        crosspostsSkipped: processed ? 1 : 0,
+      });
+      expect(mockReddit.getPostById).toHaveBeenCalledTimes(lookupCalls);
+      expect(remove).toHaveBeenCalledTimes(failure ? 1 : 0);
+      expect(await redisMock.hGet("processedRevisions", revisionId)).toBe(
+        processed ? sourceId : undefined,
+      );
+      expect(await redisMock.hGet(crosspostListKey, sourceId)).toBe(
+        processed ? undefined : mapping,
+      );
+      expect(loggedEvents).toContainEqual(
+        expect.objectContaining({
+          reason: `action_remove_${reason}`,
+          revisionId,
+        }),
+      );
+    },
+  );
+
   it("preserves ordinary remove and approve mirroring", async () => {
     mockContext.subredditName = "SubGoal";
     safeGetWikiPageRevisionsMock.mockImplementation(
@@ -1854,5 +2005,11 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
     expect(await redisMock.hGet("processedRevisions", "rev_approve")).toBe(
       "t3_approve",
     );
+
+    await expect(
+      processCrosspostDispatchQueue(baseSettings, "scheduler_posts_updater"),
+    ).resolves.toMatchObject({ actionsMirrored: 0 });
+    expect(remove).toHaveBeenCalledOnce();
+    expect(approve).toHaveBeenCalledOnce();
   });
 });

@@ -29,7 +29,7 @@ jobs:
         run: npm run type-check:tests
       - name: Check localization
         run: npm run i18n:check
-      - name: Run unit tests
-        run: npm run test:unit
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
       - name: Build
         run: npm run build

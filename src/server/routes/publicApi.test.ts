@@ -744,6 +744,149 @@ describe("publicApi routes", () => {
     );
   });
 
+  describe("initialization statistics", () => {
+    const eventId = "04cb2d98-095e-47df-9d30-ef4c347efff0";
+    const visitorId = "308822bc-d3a1-4848-9d7a-fbf589701c88";
+
+    async function init(loadEventId?: string) {
+      const handler = createRouteHarness().get(apiRoutes.init);
+      if (!handler) throw new Error("Missing init route");
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+      const header = (name: string) => {
+        if (name === "X-SG-Event-ID") return loadEventId;
+        if (name === "X-SG-Visitor-ID") return visitorId;
+      };
+      await handler(
+        { header } as Request,
+        { json, status } as unknown as Response,
+      );
+      expect(status).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ type: "init", postId: "t3_post" }),
+      );
+    }
+
+    it.each([
+      {
+        postKind: "cta-only-v1",
+        postHeight: "cta",
+        enabled: true,
+        tracked: false,
+        completedTime: 0,
+        exposure: "cta_only",
+      },
+      {
+        postKind: "cta-only-v1",
+        postHeight: "cta",
+        enabled: false,
+        tracked: false,
+        completedTime: 0,
+        exposure: "none",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "short",
+        enabled: true,
+        tracked: true,
+        completedTime: 0,
+        exposure: "secondary_cta",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "short",
+        enabled: false,
+        tracked: true,
+        completedTime: 0,
+        exposure: "none",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "short",
+        enabled: true,
+        tracked: false,
+        completedTime: 0,
+        exposure: "join",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "short",
+        enabled: true,
+        tracked: false,
+        completedTime: 1_789_000_000_000,
+        exposure: "none",
+      },
+      {
+        postKind: "subscribe-only-v1",
+        postHeight: "tiny",
+        enabled: false,
+        tracked: false,
+        completedTime: 0,
+        exposure: "join",
+      },
+    ])(
+      "records $exposure for $postHeight with CTA=$enabled, tracked=$tracked, completedTime=$completedTime",
+      async ({
+        postKind,
+        postHeight,
+        enabled,
+        tracked,
+        completedTime,
+        exposure,
+      }) => {
+        if (tracked) hoisted.context.userId = "t2_user";
+        hoisted.isTrackedSubscriber.mockResolvedValue(tracked);
+        const goal = await hoisted.getSubGoalData();
+        hoisted.getSubGoalData.mockResolvedValue({
+          ...goal,
+          postKind,
+          postHeight,
+          completedTime,
+          afterSubscribeAction: enabled
+            ? goal.afterSubscribeAction
+            : { type: "disabled" },
+        });
+
+        await init(eventId);
+
+        expect(hoisted.recordStatisticsLoad).toHaveBeenCalledExactlyOnceWith(
+          hoisted.redis,
+          {
+            eventId,
+            postId: "t3_post",
+            appTrackedSubscribed: tracked,
+            exposure,
+            visitorIdentity: tracked ? "t2_user" : visitorId,
+          },
+        );
+      },
+    );
+
+    it("skips recording without a load event ID", async () => {
+      await init();
+      expect(hoisted.recordStatisticsLoad).not.toHaveBeenCalled();
+    });
+
+    it("keeps init successful and logs a warning when recording fails", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      hoisted.recordStatisticsLoad.mockRejectedValueOnce(
+        new Error("statistics unavailable"),
+      );
+      try {
+        await init(eventId);
+        expect(hoisted.recordStatisticsLoad).toHaveBeenCalledOnce();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('"event":"statistics_event_failed"'),
+        );
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('"phase":"load"'),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it("initializes CTA-only posts without subscriber state", async () => {
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "cta-only-v1",

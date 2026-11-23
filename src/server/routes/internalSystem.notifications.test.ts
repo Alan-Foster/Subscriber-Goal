@@ -1,6 +1,7 @@
 import type { Request, Response, Router } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { internalRoutes } from "../../shared/routes";
+import { redis } from "@devvit/web/server";
 
 const hoisted = vi.hoisted(() => ({
   getSubGoalData: vi.fn(),
@@ -11,6 +12,8 @@ const hoisted = vi.hoisted(() => ({
   incrBy: vi.fn(),
   expire: vi.fn(),
   onAppChanged: vi.fn(),
+  onModAction: vi.fn(),
+  recordCommunityPostCreated: vi.fn(),
   processAppAccountRecovery: vi.fn(),
 }));
 
@@ -33,9 +36,11 @@ vi.mock("../data/subGoalData", () => ({
 vi.mock("../triggers/appChanged", () => ({
   onAppChanged: hoisted.onAppChanged,
 }));
-vi.mock("../triggers/modAction", () => ({ onModAction: vi.fn() }));
+vi.mock("../triggers/modAction", () => ({ onModAction: hoisted.onModAction }));
 vi.mock("../triggers/scheduler", () => ({ onPostsUpdaterJob: vi.fn() }));
-vi.mock("../data/ctaActivity", () => ({ recordCommunityPostCreated: vi.fn() }));
+vi.mock("../data/ctaActivity", () => ({
+  recordCommunityPostCreated: hoisted.recordCommunityPostCreated,
+}));
 vi.mock("../core/appAccountRecovery", () => ({
   processAppAccountRecovery: hoisted.processAppAccountRecovery,
 }));
@@ -43,6 +48,112 @@ vi.mock("../core/appAccountRecovery", () => ({
 import { registerInternalSystemRoutes } from "./internalSystem";
 
 type Handler = (req: Request, res: Response) => void | Promise<void>;
+
+describe("moderation and post creation trigger routes", () => {
+  const modAction = {
+    action: "removelink",
+    targetPost: { id: "t3_source", subredditId: "t5_source" },
+  };
+  const post = { id: "t3_created", createdAt: 1_789_000_000_000 };
+
+  beforeEach(() => vi.resetAllMocks());
+
+  async function invoke(path: string, body: unknown) {
+    const handlers = new Map<string, Handler>();
+    const router = {
+      post: (route: string, handler: Handler) => handlers.set(route, handler),
+    } as unknown as Router;
+    registerInternalSystemRoutes(router);
+    const handler = handlers.get(path);
+    if (!handler) throw new Error(`Missing trigger route ${path}`);
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+    await handler({ body } as Request, { json, status } as unknown as Response);
+    return { json, status };
+  }
+
+  it.each([
+    ["wrapped", { modAction }],
+    ["bare", modAction],
+  ])("passes the %s mod action to the handler", async (_shape, body) => {
+    const { json, status } = await invoke(
+      internalRoutes.triggers.onModAction,
+      body,
+    );
+    expect(hoisted.onModAction).toHaveBeenCalledExactlyOnceWith(modAction);
+    expect(status).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledExactlyOnceWith({ status: "ok" });
+  });
+
+  it.each([
+    ["wrapped", { post }],
+    ["bare", post],
+  ])("records the %s post using its ID and timestamp", async (_shape, body) => {
+    const { json, status } = await invoke(
+      internalRoutes.triggers.onPostCreate,
+      body,
+    );
+    expect(hoisted.recordCommunityPostCreated).toHaveBeenCalledExactlyOnceWith(
+      redis,
+      post.id,
+      post.createdAt,
+    );
+    expect(status).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledExactlyOnceWith({ status: "ok" });
+  });
+
+  it.each([{ post: { id: 42 } }, { createdAt: post.createdAt }, undefined])(
+    "rejects a post without a string ID (%j)",
+    async (body) => {
+      const { json, status } = await invoke(
+        internalRoutes.triggers.onPostCreate,
+        body,
+      );
+      expect(hoisted.recordCommunityPostCreated).not.toHaveBeenCalled();
+      expect(status).toHaveBeenCalledExactlyOnceWith(400);
+      expect(json).toHaveBeenCalledExactlyOnceWith({
+        status: "error",
+        message: "Post ID is required.",
+      });
+    },
+  );
+
+  it.each([
+    [
+      internalRoutes.triggers.onModAction,
+      { modAction },
+      hoisted.onModAction,
+      "mod_action",
+      "Failed to handle mod action",
+    ],
+    [
+      internalRoutes.triggers.onPostCreate,
+      { post },
+      hoisted.recordCommunityPostCreated,
+      "post_create",
+      "Failed to record post creation",
+    ],
+  ] as const)(
+    "returns a safe error when %s throws",
+    async (path, body, handler, workflow, message) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      handler.mockRejectedValueOnce(new Error("platform unavailable"));
+      try {
+        const { json, status } = await invoke(path, body);
+        expect(status).toHaveBeenCalledExactlyOnceWith(503);
+        expect(json).toHaveBeenCalledExactlyOnceWith({
+          status: "error",
+          message,
+        });
+        expect(error).toHaveBeenCalledWith(
+          expect.stringContaining(`"workflow":"${workflow}"`),
+        );
+      } finally {
+        error.mockRestore();
+      }
+    },
+  );
+});
 
 describe("milestone notification scheduler route", () => {
   beforeEach(() => vi.resetAllMocks());

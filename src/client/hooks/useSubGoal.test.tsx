@@ -10,6 +10,7 @@ import type {
   SubGoalState,
 } from "../../shared/types/api";
 import { useSubGoalRealtime } from "./subGoal/useSubGoalRealtime";
+import { useSubGoalLoading } from "./subGoal/useSubGoalLoading";
 
 const hoisted = vi.hoisted(() => ({
   connectRealtime: vi.fn<typeof connectRealtime>(),
@@ -95,6 +96,23 @@ const NoticeHarness = () => {
   );
 };
 
+const LoadingHarness = () => {
+  const [state, setState] = useState<SubGoalState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const loading = useSubGoalLoading({
+    state,
+    setState,
+    setError,
+    prohibited: false,
+    loadError: "Could not load goal",
+  });
+  return (
+    <output>
+      {loading ? "loading" : (error ?? state?.postHeight ?? "empty")}
+    </output>
+  );
+};
+
 const ignoreAnnouncement = () => {};
 
 const RealtimeHarness = ({
@@ -161,6 +179,85 @@ describe("useSubGoal tiny behavior", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("retries failed initialization on a timer and clears the error after recovery", async () => {
+    vi.useFakeTimers();
+    hoisted.requestJsonWithRetry
+      .mockResolvedValueOnce({
+        data: null,
+        error: "Initial request failed",
+        aborted: false,
+      })
+      .mockResolvedValueOnce({ data: null, error: null, aborted: false });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<LoadingHarness />));
+      expect(container.textContent).toBe("Initial request failed");
+      await act(async () => vi.advanceTimersByTimeAsync(4_999));
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(container.textContent).toBe("Could not load goal");
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(2);
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(container.textContent).toBe("tiny");
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(3);
+      expect(hoisted.requestJsonWithRetry.mock.calls[2]?.[2]).toMatchObject({
+        maxDurationMs: 3_000,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(3);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it("clears the scheduled initialization recovery on unmount", async () => {
+    vi.useFakeTimers();
+    hoisted.requestJsonWithRetry.mockResolvedValueOnce({
+      data: null,
+      error: "Initial request failed",
+      aborted: false,
+    });
+    const installTimer = vi.spyOn(window, "setTimeout");
+    const clearTimer = vi.spyOn(window, "clearTimeout");
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => root.render(<LoadingHarness />));
+      const timerCall = installTimer.mock.calls.findIndex(
+        ([, delay]) => delay === 5_000,
+      );
+      const timer = installTimer.mock.results[timerCall]?.value;
+      expect(timer).toBeDefined();
+      await act(async () => root.render(null));
+      expect(clearTimer.mock.calls.some(([id]) => id === timer)).toBe(true);
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledOnce();
+    } finally {
+      installTimer.mockRestore();
+      clearTimer.mockRestore();
+      await act(async () => root.unmount());
+    }
+  });
+
+  it("stops retrying initialization after the recovery window expires", async () => {
+    vi.useFakeTimers();
+    hoisted.requestJsonWithRetry.mockResolvedValue({
+      data: null,
+      error: "Unavailable",
+      aborted: false,
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<LoadingHarness />));
+      await act(async () => vi.advanceTimersByTimeAsync(35_000));
+      expect(container.textContent).toBe("Unavailable");
+      expect(hoisted.requestJsonWithRetry).toHaveBeenCalledTimes(7);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
 
   it("starts the five-second welcome window only after regular state renders", async () => {
     vi.useFakeTimers();
