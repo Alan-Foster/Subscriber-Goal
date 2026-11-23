@@ -69,33 +69,24 @@ export function useSubGoalRealtime(
     }
     realtimeConnectedRef.current = true;
 
-    let connection: { disconnect: () => Promise<void> } | null = null;
-    let cancelled = false;
-    const disconnect = (
-      target: { disconnect: () => Promise<void> },
-      phase: string,
-    ) => {
-      void target.disconnect().catch((error: unknown) => {
-        logDiagnostic(
-          "warn",
-          "realtime_disconnect_failed",
-          { workflow: "realtime", phase },
-          error,
-        );
-      });
-    };
-    const connect = async () => {
-      const connected = await connectRealtime({
+    try {
+      const connection = connectRealtime({
         channel: "subscriber_updates",
         onMessage: handleRealtimeMessage,
       });
-      if (cancelled) {
-        disconnect(connected, "late_connect_cleanup");
-        return;
-      }
-      connection = connected;
-    };
-    void connect().catch((error: unknown) => {
+
+      return () => {
+        void connection.disconnect().catch((error: unknown) => {
+          logDiagnostic(
+            "warn",
+            "realtime_disconnect_failed",
+            { workflow: "realtime", phase: "disconnect" },
+            error,
+          );
+        });
+        realtimeConnectedRef.current = false;
+      };
+    } catch (error) {
       realtimeConnectedRef.current = false;
       logDiagnostic(
         "error",
@@ -103,14 +94,6 @@ export function useSubGoalRealtime(
         { workflow: "realtime", phase: "connect" },
         error,
       );
-    });
-
-    return () => {
-      cancelled = true;
-      if (connection) {
-        disconnect(connection, "disconnect");
-      }
-      realtimeConnectedRef.current = false;
-    };
+    }
   }, [handleRealtimeMessage, postHeight]);
 }
