@@ -55,7 +55,6 @@ vi.mock("../core/onboardingSubscriberGoal", async (importOriginal) => ({
   markOnboardingSubscriberGoalIneligible:
     hoisted.markOnboardingSubscriberGoalIneligible,
   onboardingMinimumSubscriberCount: 1_000,
-  onboardingUpgradeWaveEnabled: true,
 }));
 
 vi.mock("../core/onboardingWarning", () => ({

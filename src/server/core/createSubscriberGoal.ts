@@ -41,13 +41,8 @@ import { createSubscriberGoalInternal } from "./subscriberGoalCreationSteps";
 export {
   SubscriberGoalModeratorPermissionError,
   SubscriberGoalCreationOutcomeUnknownError,
-  submissionReconciliationDelayMs,
-  SubscriberGoalPermissionVerificationError,
 } from "./subscriberGoalCreationModel";
-export type {
-  CreateSubscriberGoalResult,
-  SubscriberGoalFlairResult,
-} from "./subscriberGoalCreationModel";
+export type { CreateSubscriberGoalResult } from "./subscriberGoalCreationModel";
 
 export class SubscriberGoalCreationInProgressError extends Error {
   constructor(language?: SubGoalLanguage) {

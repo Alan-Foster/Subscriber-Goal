@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   recentSubscriberPostsByUsernameKey,
   subscriberGoalsKey,
@@ -7,8 +7,6 @@ import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 import {
   getSubscriberStats,
   isTrackedSubscriber,
-  markSubscriber,
-  setNewSubscriber,
   subscriberStatsErasedUserIdsKey,
   subscriberStatsByUserIdKey,
   subscriberStatusByUserIdKey,
@@ -68,17 +66,6 @@ class InMemoryRedis {
     }
     this.hashes.set(key, current);
     return added;
-  }
-
-  async hSetNX(key: string, field: string, value: string): Promise<number> {
-    const current = this.hashes.get(key) ?? new Map<string, string>();
-    if (current.has(field)) {
-      this.hashes.set(key, current);
-      return 0;
-    }
-    current.set(field, value);
-    this.hashes.set(key, current);
-    return 1;
   }
 
   async hGet(key: string, field: string): Promise<string | undefined> {
@@ -187,7 +174,6 @@ describe("subscriberStats direct lookup", () => {
 
   beforeEach(() => {
     redis = new InMemoryRedis();
-    vi.restoreAllMocks();
   });
 
   it("returns indexed stats from the user-id hash", async () => {
@@ -209,20 +195,8 @@ describe("subscriberStats direct lookup", () => {
     expect(redis.zRangeCalls).toBe(0);
   });
 
-  it("persists anonymous subscriber status without profile or legacy data", async () => {
-    await expect(
-      markSubscriber(
-        redis as unknown as Parameters<typeof markSubscriber>[0],
-        "t2_tiny",
-      ),
-    ).resolves.toBe(true);
-    await expect(
-      markSubscriber(
-        redis as unknown as Parameters<typeof markSubscriber>[0],
-        "t2_tiny",
-      ),
-    ).resolves.toBe(false);
-
+  it("reads anonymous subscriber status without profile or legacy data", async () => {
+    await redis.hSet(subscriberStatusByUserIdKey, { t2_tiny: "1" });
     expect(await redis.hGet(subscriberStatusByUserIdKey, "t2_tiny")).toBe("1");
     expect(
       await redis.hGet(subscriberStatsByUserIdKey, "t2_tiny"),
@@ -234,20 +208,6 @@ describe("subscriberStats direct lookup", () => {
         "t2_tiny",
       ),
     ).resolves.toBe(true);
-  });
-
-  it("backfills anonymous status for an existing full subscriber", async () => {
-    await redis.hSet(subscriberStatsByUserIdKey, {
-      t2_user: "t2_user:TestUser:123:456",
-    });
-
-    await expect(
-      markSubscriber(
-        redis as unknown as Parameters<typeof markSubscriber>[0],
-        "t2_user",
-      ),
-    ).resolves.toBe(false);
-    expect(await redis.hGet(subscriberStatusByUserIdKey, "t2_user")).toBe("1");
   });
 
   it("does not scan legacy subscriber_stats when the hash is missing", async () => {
@@ -277,81 +237,6 @@ describe("subscriberStats direct lookup", () => {
       ),
     ).resolves.toBeUndefined();
     expect(redis.zRangeCalls).toBe(0);
-  });
-
-  it("uses the direct index as the uniqueness gate for new subscribers", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1_000);
-    await redis.hSet(subscriberStatsByUserIdKey, {
-      t2_user: "t2_user:TestUser:123:900",
-    });
-
-    await expect(
-      setNewSubscriber(
-        redis as unknown as Parameters<typeof setNewSubscriber>[0],
-        "t3_post",
-        124,
-        { id: "t2_user", username: "TestUser" },
-        true,
-      ),
-    ).resolves.toBe(false);
-
-    expect(await redis.zCard(subscriberStatsKey)).toBe(0);
-  });
-
-  it("does not upgrade marker-only Tiny subscribers into profile stats", async () => {
-    await redis.hSet(subscriberStatusByUserIdKey, { t2_tiny: "1" });
-
-    await expect(
-      setNewSubscriber(
-        redis as unknown as Parameters<typeof setNewSubscriber>[0],
-        "t3_post",
-        124,
-        { id: "t2_tiny", username: "PrivateUser" },
-        true,
-      ),
-    ).resolves.toBe(false);
-
-    expect(
-      await redis.hGet(subscriberStatsByUserIdKey, "t2_tiny"),
-    ).toBeUndefined();
-    expect(
-      await redis.hGet(subscriberStatsUsernameToUserIdKey, "privateuser"),
-    ).toBeUndefined();
-    expect(
-      await redis.hGet(subscriberGoalsKey, "t3_post_recent_subscriber"),
-    ).toBeUndefined();
-    expect(await redis.zCard(subscriberStatsKey)).toBe(0);
-  });
-
-  it("writes the direct index and legacy sorted set for a new subscriber", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1_000);
-
-    await expect(
-      setNewSubscriber(
-        redis as unknown as Parameters<typeof setNewSubscriber>[0],
-        "t3_post",
-        124,
-        { id: "t2_user", username: "TestUser" },
-        true,
-      ),
-    ).resolves.toBe(true);
-
-    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_user")).toBe(
-      "t2_user:TestUser:124:1000",
-    );
-    expect(await redis.hGet(subscriberStatusByUserIdKey, "t2_user")).toBe("1");
-    expect(
-      await redis.hGet(subscriberStatsUsernameToUserIdKey, "testuser"),
-    ).toBe("t2_user");
-    expect(
-      await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, "t2_user"),
-    ).toBe(JSON.stringify(["t2_user:TestUser:124"]));
-    expect(
-      await redis.hGet(recentSubscriberPostsByUsernameKey, "testuser"),
-    ).toBe(JSON.stringify(["t3_post"]));
-    expect(await redis.zRange(subscriberStatsKey, 0, -1)).toEqual([
-      { member: "t2_user:TestUser:124", score: 1_000 },
-    ]);
   });
 
   it("completely purges by user id without writing a tombstone", async () => {
@@ -506,8 +391,7 @@ describe("subscriberStats direct lookup", () => {
     },
   );
 
-  it("allows users to be re-added after legacy tombstones are cleared", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(1_000);
+  it("clears a legacy tombstone during erasure", async () => {
     await redis.hSet(subscriberStatsErasedUserIdsKey, {
       t2_user: "2000",
     });
@@ -518,21 +402,8 @@ describe("subscriberStats direct lookup", () => {
       "TestUser",
     );
 
-    await expect(
-      setNewSubscriber(
-        redis as unknown as Parameters<typeof setNewSubscriber>[0],
-        "t3_post",
-        124,
-        { id: "t2_user", username: "TestUser" },
-        true,
-      ),
-    ).resolves.toBe(true);
-
     expect(
       await redis.hGet(subscriberStatsErasedUserIdsKey, "t2_user"),
     ).toBeUndefined();
-    expect(await redis.hGet(subscriberStatsByUserIdKey, "t2_user")).toBe(
-      "t2_user:TestUser:124:1000",
-    );
   });
 });

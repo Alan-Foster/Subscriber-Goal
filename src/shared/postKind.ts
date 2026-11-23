@@ -7,10 +7,6 @@ export type PostKind =
   | typeof subscribeOnlyPostKind
   | typeof ctaOnlyPostKind;
 
-export type SubscriberGoalPostData = {
-  postKind: PostKind;
-};
-
 export function resolvePostKind(value: unknown): PostKind | undefined {
   return value === subscriberGoalPostKind ||
     value === subscribeOnlyPostKind ||
