@@ -15,24 +15,9 @@ import {
   getCrosspostAuthoritySubreddit,
 } from "../crosspost/bookkeeping";
 import { processCrosspostDispatchQueue } from "../crosspost/dispatch";
+import type { ModActionEvent } from "./modActionEvent";
 
-export type ModActionEvent = {
-  action?: string;
-  actionedAt?: string;
-  targetUser?: {
-    name?: string;
-  };
-  targetPost?: {
-    id: string;
-    authorId?: string;
-    subredditId?: string;
-    nsfw?: boolean;
-    subredditName?: string;
-  };
-  moderator?: {
-    name?: string;
-  };
-};
+export type { ModActionEvent } from "./modActionEvent";
 
 export async function onModAction(event: ModActionEvent): Promise<void> {
   const appSettings = getAppSettings();

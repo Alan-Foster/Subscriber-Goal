@@ -308,6 +308,89 @@ describe("milestone notifications", () => {
     expect(result).toMatchObject({ done: true, recipients: 0 });
   });
 
+  it.each([
+    [
+      "a missing job",
+      { version: 2, phase: "prepared", updatedAt: job.completedTime },
+    ],
+    [
+      "an invalid recipient list",
+      {
+        version: 2,
+        job,
+        phase: "prepared",
+        updatedAt: job.completedTime,
+        recipients: "t2_alice",
+      },
+    ],
+    [
+      "an invalid recipient",
+      {
+        version: 2,
+        job,
+        phase: "prepared",
+        updatedAt: job.completedTime,
+        recipients: [
+          { userId: "alice", link: job.postId, data: { goalText: 100 } },
+        ],
+      },
+    ],
+    [
+      "an invalid phase",
+      { version: 2, job, phase: "unrecognized", updatedAt: job.completedTime },
+    ],
+    [
+      "an invalid child job",
+      {
+        version: 2,
+        job,
+        phase: "confirmed",
+        updatedAt: job.completedTime,
+        child: { ...job, cursor: 5 },
+      },
+    ],
+    ["invalid JSON", "{broken"],
+  ])(
+    "skips corrupt persisted state with %s and logs it once",
+    async (_label, value) => {
+      const stateClient = new StateRedisHarness();
+      const key = milestoneNotificationPageKey(job);
+      const raw = typeof value === "string" ? value : JSON.stringify(value);
+      await stateClient.set(key, raw);
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const enqueue = vi.fn();
+      const listOptedInUsers = vi.fn();
+      const incrBy = vi.fn();
+      try {
+        await expect(
+          processMilestoneNotificationBatch(job, campaign, {
+            deliveryEnabled: true,
+            stateClient: stateClient as never,
+            dailyBudgetClient: { incrBy, expire: vi.fn() } as never,
+            notificationClient: { enqueue, listOptedInUsers } as never,
+            now: () => job.completedTime + 1_000,
+          }),
+        ).resolves.toEqual({
+          status: "duplicate",
+          done: true,
+          cursor: job.cursor,
+        });
+        expect(await stateClient.get(key)).toBe(raw);
+        expect(stateClient.set).toHaveBeenCalledOnce();
+        expect(listOptedInUsers).not.toHaveBeenCalled();
+        expect(incrBy).not.toHaveBeenCalled();
+        expect(enqueue).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining(
+            '"event":"milestone_notification_state_invalid"',
+          ),
+        );
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
+
   it("converges sequential and concurrent replays on one debit and send", async () => {
     const stateClient = new StateRedisHarness();
     const dailyBudgetClient = {

@@ -2,7 +2,8 @@ import { AutomaticGoalPrerequisiteError } from "./automaticGoalRetry";
 import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import type { SubGoalLanguage } from "../../shared/subGoalPostI18n";
-import type { CrosspostDispatchResult } from "../data/subGoalData";
+import { isCrosspostDispatchResult } from "../data/crosspostDispatchResult";
+import { parseStoredJson } from "../utils/runtimeValidation";
 import { isLinkId } from "../types";
 import type { HighlightResult } from "../utils/communityHighlights";
 import { logDiagnostic } from "../../shared/diagnostics";
@@ -35,6 +36,7 @@ import {
   type GoalCreationInput,
   type GoalCreationRecoveryHooks,
   createTerminalCreationResult,
+  isSubscriberGoalFlairResult,
 } from "./subscriberGoalCreationModel";
 import { reconcileAmbiguousSubmissionUnderLock } from "../jobs/submissionReconciliation";
 import { createSubscriberGoalInternal } from "./subscriberGoalCreationSteps";
@@ -80,7 +82,8 @@ async function writeCreationOperation(
 type CompletedCreationRecovery =
   | { status: "complete"; result: CreateSubscriberGoalResult }
   | { status: "retired"; postId: `t3_${string}`; reason?: string }
-  | { status: "missing" };
+  | { status: "missing" }
+  | { status: "unknown" };
 
 async function recoverCompletedCreation(
   reddit: RedditClient,
@@ -134,8 +137,18 @@ async function recoverCompletedCreation(
         reason: `creation_retry_removed:${availability.category}`,
       };
     }
+    const crosspostDispatchResult = parseStoredJson(
+      raw.crosspostDispatchResult,
+      isCrosspostDispatchResult,
+      {
+        workflow: "create_subscriber_goal",
+        phase: "completed_crosspost_result",
+        postId,
+      },
+    );
+    if (!crosspostDispatchResult) return { status: "unknown" };
     const storedHighlightResult = raw.highlightResult || raw.stickyResult;
-    if (!raw.crosspostDispatchResult || !storedHighlightResult) {
+    if (!storedHighlightResult) {
       throw new Error(
         "Completed Subscriber Goal operation has missing result metadata.",
       );
@@ -145,14 +158,20 @@ async function recoverCompletedCreation(
       result: {
         outcome: "created",
         post,
-        crosspostDispatchResult: JSON.parse(raw.crosspostDispatchResult),
+        crosspostDispatchResult,
         highlightResult: normalizeStoredHighlightResult(
           JSON.parse(storedHighlightResult),
           postId,
         ),
-        flairResult: raw.flairResult
-          ? JSON.parse(raw.flairResult)
-          : { status: "unknown" },
+        flairResult: parseStoredJson(
+          raw.flairResult,
+          isSubscriberGoalFlairResult,
+          {
+            workflow: "create_subscriber_goal",
+            phase: "completed_flair_result",
+            postId,
+          },
+        ) ?? { status: "unknown" },
       },
     };
   } catch (error) {
@@ -497,6 +516,9 @@ async function readFinishedOperation(
           : undefined,
       );
       if (completed.status === "complete") return completed.result;
+      if (completed.status === "unknown") {
+        throw new SubscriberGoalCreationOutcomeUnknownError(options.language);
+      }
       if (completed.status === "retired") {
         if (completed.reason) {
           await retireSubscriberGoalPost(
@@ -642,14 +664,19 @@ function creationRecoveryCallbacks(
   submissionMarker: string,
   recoveredPost: GoalPost | undefined,
 ): GoalCreationRecoveryHooks {
+  const recoveredCrosspostDispatchResult = parseStoredJson(
+    reloaded.crosspostDispatchResult,
+    isCrosspostDispatchResult,
+    {
+      workflow: "create_subscriber_goal",
+      phase: "registration_crosspost_result",
+      postId: recoveredPost?.id,
+    },
+  );
   return {
     ...(recoveredPost ? { recoveredPost } : {}),
-    ...(reloaded.crosspostDispatchResult
-      ? {
-          recoveredCrosspostDispatchResult: JSON.parse(
-            reloaded.crosspostDispatchResult,
-          ) as CrosspostDispatchResult,
-        }
+    ...(recoveredCrosspostDispatchResult
+      ? { recoveredCrosspostDispatchResult }
       : {}),
     submissionMarker,
     onSubmissionStarted: async (subredditName, subredditId) => {

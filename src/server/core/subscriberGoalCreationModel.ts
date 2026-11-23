@@ -17,6 +17,7 @@ import type {
 } from "../../shared/afterSubscribeAction";
 import type { CommunityGoalMutationLease } from "./communityGoalMutation";
 import type { HighlightReconciliationContext } from "../data/highlightManagement";
+import { isRecord } from "../utils/runtimeValidation";
 
 export type CreateSubscriberGoalOptions = {
   title: string;
@@ -58,6 +59,20 @@ export type SubscriberGoalFlairResult =
       status: "omitted";
       reason: "missing_permission" | "preparation_failed";
     };
+
+export function isSubscriberGoalFlairResult(
+  value: unknown,
+): value is CreateSubscriberGoalResult["flairResult"] {
+  if (!isRecord(value)) return false;
+  if (value.status === "applied") return typeof value.flairId === "string";
+  if (value.status === "omitted") {
+    return (
+      value.reason === "missing_permission" ||
+      value.reason === "preparation_failed"
+    );
+  }
+  return value.status === "unknown";
+}
 
 export class SubscriberGoalModeratorPermissionError extends Error {
   constructor(

@@ -1,7 +1,8 @@
 import type { Router } from "express";
 import { internalRoutes } from "../../shared/routes";
 import { onAppChanged } from "../triggers/appChanged";
-import { onModAction, type ModActionEvent } from "../triggers/modAction";
+import { onModAction } from "../triggers/modAction";
+import { isModActionEvent } from "../triggers/modActionEvent";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
 import { recordCommunityPostCreated } from "../data/ctaActivity";
 import { reddit, redis, scheduler } from "@devvit/web/server";
@@ -14,6 +15,7 @@ import {
   processMilestoneNotificationBatch,
 } from "../core/milestoneNotifications";
 import { processAppAccountRecovery } from "../core/appAccountRecovery";
+import { isRecord } from "../utils/runtimeValidation";
 
 export function registerInternalSystemRoutes(router: Router): void {
   registerAppInstallRoute(router);
@@ -87,8 +89,23 @@ function registerModActionRoute(router: Router): void {
   router.post(
     internalRoutes.triggers.onModAction,
     async (req, res): Promise<void> => {
+      const body: unknown = req.body;
+      const modAction =
+        isRecord(body) && "modAction" in body ? body.modAction : body;
+      if (!isModActionEvent(modAction)) {
+        logDiagnostic("error", "internal_trigger_failed", {
+          route: internalRoutes.triggers.onModAction,
+          workflow: "mod_action",
+          phase: "validation",
+          status: 400,
+        });
+        res.status(400).json({
+          status: "error",
+          message: "Invalid mod action event.",
+        });
+        return;
+      }
       try {
-        const modAction = (req.body?.modAction ?? req.body) as ModActionEvent;
         await onModAction(modAction);
         res.json({ status: "ok" });
       } catch (error) {
