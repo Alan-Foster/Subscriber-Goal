@@ -4,6 +4,7 @@ import { IntlMessageFormat } from "intl-messageformat";
 import {
   appLanguages,
   getLanguageMetadata,
+  getMessageTemplate,
   getTranslationCoverage,
   isMessageKey,
   localizationCatalog,
@@ -237,11 +238,49 @@ describe("localization catalog", () => {
   });
 
   it("rejects missing and unused values", () => {
-    expect(() => translate("en", "post.joinButton")).toThrow("subredditName");
+    expect(() => translate("en", "post.joinButton")).toThrow(
+      "Localization value subredditName is required for post.joinButton.",
+    );
     expect(() =>
       translate("en", "post.thanksTitle", { unused: "value" }),
     ).toThrow("unused");
   });
+
+  it.each([undefined, ""])(
+    "rejects a required translation with value %j",
+    (value) => {
+      const messages = localizationCatalog.locales.es.messages;
+      const key = "post.joinButton";
+      const original = messages[key];
+      try {
+        if (value === undefined) delete messages[key];
+        else messages[key] = value;
+        expect(() => getMessageTemplate("es", key)).toThrow(
+          "Required translation post.joinButton is missing for es.",
+        );
+      } finally {
+        if (original !== undefined) messages[key] = original;
+      }
+    },
+  );
+
+  it.each([undefined, ""])(
+    "rejects an English fallback translation with value %j",
+    (value) => {
+      const messages = localizationCatalog.locales.en.messages;
+      const key = "errors.join.transport";
+      const original = messages[key];
+      try {
+        if (value === undefined) delete messages[key];
+        else messages[key] = value;
+        expect(() => getMessageTemplate("hi", key)).toThrow(
+          "English fallback translation errors.join.transport is missing.",
+        );
+      } finally {
+        if (original !== undefined) messages[key] = original;
+      }
+    },
+  );
 
   it("rejects inherited language and message-key properties", () => {
     expect(resolveAppLanguage("constructor")).toBe("en");

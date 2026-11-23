@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "concurrency": "50%",
+  "ignorePatterns": ["/dist", "/reports", "/.stryker-tmp"],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vite.config.ts",
+    "pool": "threads"
+  },
+  "testFiles": [
+    "src/shared/**/*.test.ts",
+    "src/server/utils/redisOwnedLock.test.ts",
+    "src/server/jobs/**/*.test.ts"
+  ],
+  "mutate": [
+    "src/shared/**/*.ts",
+    "src/server/utils/redisOwnedLock.ts",
+    "src/server/jobs/*.ts",
+    "!**/*.test.ts"
+  ],
+  "reporters": ["progress", "clear-text", "json"],
+  "clearTextReporter": {
+    "reportTests": false,
+    "reportMutants": false
+  }
+}

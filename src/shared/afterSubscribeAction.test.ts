@@ -8,18 +8,25 @@ import {
   getEffectiveAfterSubscribeActions,
   resolveAfterSubscribeAction,
   resolveAfterSubscribePreset,
+  type AfterSubscribeAction,
 } from "./afterSubscribeAction";
 
 describe("after-subscribe defaults", () => {
-  it("recovers activity categories from legacy resolved actions", () => {
+  it.each([
+    "https://www.reddit.com/r/ExampleSub/submit",
+    "https://www.reddit.com/r/ExampleSub/submit/",
+  ])("recovers Create Post from the legacy link %s", (url) => {
     expect(
       resolveAfterSubscribePreset(undefined, {
         type: "link",
         buttonText: "Create a New Post",
-        url: "https://www.reddit.com/r/ExampleSub/submit/",
+        url,
         colorTheme: "blue",
       }),
     ).toBe("create-post");
+  });
+
+  it("recovers a generic web link from a legacy wiki action", () => {
     expect(
       resolveAfterSubscribePreset(undefined, {
         type: "link",
@@ -28,6 +35,89 @@ describe("after-subscribe defaults", () => {
         colorTheme: "blue",
       }),
     ).toBe("web-link");
+  });
+
+  it("preserves a saved preset before trying to infer one from the action", () => {
+    expect(
+      resolveAfterSubscribePreset("discord", {
+        type: "link",
+        buttonText: "Join the Discord",
+        url: "https://discord.com/invite/example",
+        colorTheme: "blue",
+      }),
+    ).toBe("discord");
+  });
+
+  it.each(["top-post-day", "newest-post"] as const)(
+    "recovers the legacy dynamic preset %s",
+    (type) => {
+      expect(
+        resolveAfterSubscribePreset(undefined, {
+          type,
+          buttonText: "Read a post",
+          colorTheme: "blue",
+        }),
+      ).toBe(type);
+    },
+  );
+
+  it("does not infer a preset for disabled or unrecognized legacy actions", () => {
+    expect(
+      resolveAfterSubscribePreset(undefined, { type: "disabled" }),
+    ).toBeNull();
+    const unknownAction: unknown = { type: "legacy-unknown" };
+    expect(
+      resolveAfterSubscribePreset(
+        undefined,
+        unknownAction as AfterSubscribeAction,
+      ),
+    ).toBeNull();
+  });
+
+  it.each(["/x/r/a/submit", "/r/a/submit/extra"])(
+    "does not infer Create Post from the partial path %s",
+    (path) => {
+      expect(
+        resolveAfterSubscribePreset(undefined, {
+          type: "link",
+          buttonText: "Open the link",
+          url: `https://www.reddit.com${path}`,
+          colorTheme: "blue",
+        }),
+      ).toBe("web-link");
+    },
+  );
+
+  it("trims a URL before parsing and rejects objects with a trim method", () => {
+    const link = {
+      type: "link",
+      buttonText: "Read the Wiki",
+      colorTheme: "blue",
+      fallbackColorTheme: "red",
+    } as const;
+    expect(
+      resolveAfterSubscribeAction({
+        ...link,
+        url: "\u00a0https://example.com/wiki\u00a0",
+      }),
+    ).toEqual({
+      action: {
+        type: "link",
+        buttonText: "Read the Wiki",
+        colorTheme: "blue",
+        url: "https://example.com/wiki",
+      },
+      invalidConfiguration: false,
+    });
+    expect(
+      resolveAfterSubscribeAction({
+        ...link,
+        url: { trim: () => "https://example.com/wiki" },
+      }),
+    ).toEqual({
+      action: { type: "disabled" },
+      invalidConfiguration: true,
+    });
   });
 
   it.each([
@@ -240,6 +330,24 @@ describe("effective actions in NSFW communities", () => {
     subredditName: "ExampleSub",
     isNsfw: true,
   } as const;
+
+  it.each([
+    ["top-post-day", "green", "newest-post", "blue"],
+    ["top-post-day", "pink", "newest-post", "green"],
+    ["newest-post", "blue", "link", "green"],
+    ["newest-post", "pink", "link", "blue"],
+  ] as const)(
+    "gives a %s CTA in %s a %s secondary action in %s",
+    (type, colorTheme, secondaryType, secondaryColor) => {
+      const configured = { type, colorTheme, buttonText: "My post action" };
+      expect(
+        getEffectiveAfterSubscribeActions(configured, context).secondary,
+      ).toMatchObject({
+        type: secondaryType,
+        colorTheme: secondaryColor,
+      });
+    },
+  );
 
   it("pairs Most Recent with Create Post using the actual subreddit name", () => {
     const configured = {

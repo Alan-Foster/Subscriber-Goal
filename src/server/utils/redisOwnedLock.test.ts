@@ -160,6 +160,56 @@ describe("releaseOwnedRedisLock", () => {
     ).rejects.toThrow("watch_conflict");
     expect(values.get("lease")).toBe("owner-b");
     expect(transaction.discard).toHaveBeenCalledOnce();
+    expect(transaction.unwatch).not.toHaveBeenCalled();
+  });
+
+  it("returns false when EXEC returns no results and the successor keeps the lease", async () => {
+    const { redis, values, watch } = lockFixture();
+    values.set("lease", "owner-a");
+    const transaction = await watchTestString(redis, "lease");
+    watch.mockResolvedValueOnce({
+      ...transaction,
+      exec: async () => {
+        values.set("lease", "owner-b");
+        return transaction.exec();
+      },
+    });
+
+    await expect(
+      releaseOwnedRedisLock(redis, "lease", "owner-a"),
+    ).resolves.toBe(false);
+    expect(values.get("lease")).toBe("owner-b");
+  });
+
+  it("rejects a client without WATCH support", async () => {
+    const { redis } = lockFixture();
+    const unsupported = {
+      ...redis,
+      watch: undefined,
+    } as unknown as RedisClient;
+    await expect(
+      releaseOwnedRedisLock(unsupported, "lease", "owner-a"),
+    ).rejects.toThrow("redis_watch_not_supported");
+  });
+
+  it("unwatches instead of discarding when reading the token fails before MULTI", async () => {
+    const { redis, values, watch } = lockFixture();
+    values.set("lease", "owner-a");
+    const transaction = await watchTestString(redis, "lease");
+    const unwatch = vi.spyOn(transaction, "unwatch");
+    const discard = vi.spyOn(transaction, "discard");
+    const multi = vi.spyOn(transaction, "multi");
+    watch.mockResolvedValueOnce(transaction);
+    const failure = new Error("could not read lease");
+    vi.spyOn(redis, "get").mockRejectedValueOnce(failure);
+
+    await expect(releaseOwnedRedisLock(redis, "lease", "owner-a")).rejects.toBe(
+      failure,
+    );
+    expect(unwatch).toHaveBeenCalledOnce();
+    expect(multi).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+    expect(values.get("lease")).toBe("owner-a");
   });
 
   it("unwatches without deleting when the token does not match", async () => {

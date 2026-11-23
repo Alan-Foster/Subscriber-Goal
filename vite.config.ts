@@ -6,6 +6,6 @@ import { devvit } from "@devvit/start/vite";
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwind(), ...(command === "build" ? [devvit()] : [])],
   test: {
-    exclude: ["**/node_modules/**", "**/dist/**"],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.stryker-tmp/**"],
   },
 }));
