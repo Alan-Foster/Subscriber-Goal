@@ -7,6 +7,11 @@ import { formatSubscriberCount } from "../../shared/numberFormat";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { translate } from "../../shared/i18n/catalog";
 import { getJobBackoffDelay } from "../jobs/backoff";
+import {
+  isOptionalString,
+  isRecord,
+  parseStoredJson,
+} from "../utils/runtimeValidation";
 
 export const MILESTONE_NOTIFICATION_DELIVERY_ENABLED = false;
 export const milestoneNotificationBatchSize = 200;
@@ -63,16 +68,18 @@ type Recipient = {
   link: LinkId;
   data: Record<string, string>;
 };
-type PagePhase =
-  | "claimed"
-  | "prepared"
-  | "debit_started"
-  | "funded"
-  | "refund_started"
-  | "enqueue_started"
-  | "confirmed"
-  | "terminal"
-  | "unresolved";
+const pagePhases = [
+  "claimed",
+  "prepared",
+  "debit_started",
+  "funded",
+  "refund_started",
+  "enqueue_started",
+  "confirmed",
+  "terminal",
+  "unresolved",
+] as const;
+type PagePhase = (typeof pagePhases)[number];
 
 export type MilestoneNotificationPageState = {
   version: 2;
@@ -175,19 +182,67 @@ const stateExpiration = (job: MilestoneNotificationJob): Date =>
 function parseState(
   value: string | undefined,
 ): MilestoneNotificationPageState | undefined {
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value) as MilestoneNotificationPageState;
-    return parsed.version === 2 ? parsed : undefined;
-  } catch (error) {
-    logDiagnostic(
-      "error",
-      "milestone_notification_state_invalid",
-      { workflow: "milestone_notification", phase: "state_parse" },
-      error,
-    );
-    return undefined;
-  }
+  return parseStoredJson(
+    value,
+    isMilestoneNotificationPageState,
+    { workflow: "milestone_notification", phase: "state_parse" },
+    { event: "milestone_notification_state_invalid", level: "error" },
+  );
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isOptionalNumber = (value: unknown): boolean =>
+  value === undefined || isFiniteNumber(value);
+
+function isMilestoneRecipient(value: unknown): value is Recipient {
+  return (
+    isRecord(value) &&
+    typeof value.userId === "string" &&
+    /^t2_[\w]+$/.test(value.userId) &&
+    typeof value.link === "string" &&
+    isLinkId(value.link) &&
+    isRecord(value.data) &&
+    Object.values(value.data).every((field) => typeof field === "string")
+  );
+}
+
+function hasValidOptionalPageMetadata(state: Record<string, unknown>): boolean {
+  return (
+    isOptionalString(state.owner) &&
+    isOptionalNumber(state.claimUntil) &&
+    isOptionalString(state.budgetKey) &&
+    isOptionalNumber(state.reserved) &&
+    isOptionalString(state.pageNext) &&
+    isOptionalNumber(state.successCount) &&
+    isOptionalNumber(state.failureCount) &&
+    isOptionalNumber(state.recoveryAttempts) &&
+    isOptionalNumber(state.nextRecoveryAt) &&
+    isOptionalString(state.outcome)
+  );
+}
+
+function isMilestoneNotificationPageState(
+  value: unknown,
+): value is MilestoneNotificationPageState {
+  return (
+    isRecord(value) &&
+    value.version === 2 &&
+    isMilestoneNotificationJob(value.job) &&
+    pagePhases.some((phase) => phase === value.phase) &&
+    isFiniteNumber(value.updatedAt) &&
+    hasValidOptionalPageMetadata(value) &&
+    (value.recipients === undefined ||
+      (Array.isArray(value.recipients) &&
+        value.recipients.length <= milestoneNotificationBatchSize &&
+        value.recipients.every(isMilestoneRecipient))) &&
+    (value.child === undefined || isMilestoneNotificationJob(value.child)) &&
+    (value.continuation === undefined ||
+      value.continuation === "pending" ||
+      value.continuation === "scheduled" ||
+      value.continuation === "terminal")
+  );
 }
 
 async function replaceState(
@@ -212,12 +267,14 @@ async function claimPage(
   client: StateRedis,
   job: MilestoneNotificationJob,
   now: number,
-): Promise<{ key: string; state: MilestoneNotificationPageState } | undefined> {
+): Promise<
+  { key: string; state: MilestoneNotificationPageState } | "invalid" | undefined
+> {
   const key = milestoneNotificationPageKey(job);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const raw = await client.get(key);
     const old = parseState(raw);
-    if (raw && !old) return undefined;
+    if (raw && !old) return "invalid";
     if (old && old.job.attemptedRecipients !== job.attemptedRecipients)
       return undefined;
     // Prepared work and a known debit are safe to resume. Uncertain debit,
@@ -393,6 +450,7 @@ export async function processMilestoneNotificationBatch(
   }
   const stateClient = options.stateClient ?? redis;
   const claimed = await claimPage(stateClient, job, now);
+  if (claimed === "invalid") return stoppedPage("duplicate", job.cursor);
   if (!claimed) {
     return describeUnclaimedPage(stateClient, job);
   }

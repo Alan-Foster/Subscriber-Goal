@@ -665,6 +665,142 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.redis.hSet).toHaveBeenCalledTimes(writesBefore);
   });
 
+  it.each([
+    ["an invalid status", '{"status":"unknown"}'],
+    ["an invalid error message", '{"status":"failed","errorMessage":5}'],
+    ["invalid JSON", "{invalid"],
+  ])(
+    "reports unknown when completed crosspost metadata has %s",
+    async (_label, crosspostDispatchResult) => {
+      const operationId = "manual:corrupt-crosspost";
+      const post = createPost();
+      const stored = new Map([
+        ["status", "complete"],
+        ["postId", post.id],
+        ["crosspostDispatchResult", crosspostDispatchResult],
+        [
+          "highlightResult",
+          '{"status":"highlighted","verifiedHighlighted":true}',
+        ],
+      ]);
+      hoisted.redisHashes.set(
+        `subscriber_goal_creation_v1:${operationId}`,
+        stored,
+      );
+      hoisted.reddit.getPostById.mockResolvedValue(post);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          recoverSubscriberGoalCreation({
+            reddit: hoisted.reddit as never,
+            redis: hoisted.redis as never,
+            operationId,
+          }),
+        ).resolves.toEqual({ status: "unknown" });
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining('"event":"persisted_json_invalid"'),
+        );
+        warn.mockClear();
+        await expect(createGoal({ operationId })).rejects.toMatchObject({
+          name: "SubscriberGoalCreationOutcomeUnknownError",
+        });
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining('"event":"persisted_json_invalid"'),
+        );
+        expect(hoisted.redis.hSet).not.toHaveBeenCalled();
+        expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+        expect(hoisted.registerNewSubGoalPost).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    ["a missing flair ID", '{"status":"applied"}'],
+    [
+      "an unrecognized omission reason",
+      '{"status":"omitted","reason":"invalid"}',
+    ],
+    ["invalid JSON", "{invalid"],
+  ])(
+    "recovers a completed post with unknown flair for %s",
+    async (_label, flairResult) => {
+      const operationId = "manual:corrupt-flair";
+      const post = createPost();
+      hoisted.redisHashes.set(
+        `subscriber_goal_creation_v1:${operationId}`,
+        new Map([
+          ["status", "complete"],
+          ["postId", post.id],
+          ["crosspostDispatchResult", '{"status":"skipped"}'],
+          [
+            "highlightResult",
+            '{"status":"highlighted","verifiedHighlighted":true}',
+          ],
+          ["flairResult", flairResult],
+        ]),
+      );
+      hoisted.reddit.getPostById.mockResolvedValue(post);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          recoverSubscriberGoalCreation({
+            reddit: hoisted.reddit as never,
+            redis: hoisted.redis as never,
+            operationId,
+          }),
+        ).resolves.toMatchObject({
+          status: "complete",
+          result: {
+            post: { id: post.id },
+            crosspostDispatchResult: { status: "skipped" },
+            flairResult: { status: "unknown" },
+          },
+        });
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining('"event":"persisted_json_invalid"'),
+        );
+        expect(hoisted.redis.hSet).not.toHaveBeenCalled();
+        expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it.each(['{"status":"unrecognized"}', "{invalid"])(
+    "resumes registration when stored crosspost metadata is corrupt (%s)",
+    async (crosspostDispatchResult) => {
+      const operationId = "manual:corrupt-registration";
+      const post = createPost();
+      hoisted.redisHashes.set(
+        `subscriber_goal_creation_v1:${operationId}`,
+        new Map([
+          ["status", "registered"],
+          ["postId", post.id],
+          ["crosspostDispatchResult", crosspostDispatchResult],
+        ]),
+      );
+      hoisted.reddit.getPostById.mockResolvedValue(post);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await expect(createGoal({ operationId })).resolves.toMatchObject({
+          outcome: "created",
+          post: { id: post.id },
+          crosspostDispatchResult: { status: "skipped" },
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('"event":"persisted_json_invalid"'),
+        );
+        expect(hoisted.createGoalPost).not.toHaveBeenCalled();
+        expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledOnce();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   it("keeps a completed operation intact through two transient lookup failures", async () => {
     const operationId = "auto-next:t3_source";
     const operationKey = `subscriber_goal_creation_v1:${operationId}`;

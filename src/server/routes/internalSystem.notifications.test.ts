@@ -118,6 +118,48 @@ describe("moderation and post creation trigger routes", () => {
     },
   );
 
+  it.each(
+    [
+      {
+        modAction: {
+          action: "removelink",
+          targetPost: { authorId: "t2_author" },
+        },
+      },
+      { action: "removelink", targetPost: { id: 42 } },
+      { action: "removemoderator", targetUser: { name: 42 } },
+      { action: "approvelink", targetPost: { id: "t3_source", nsfw: "false" } },
+      { action: 42 },
+      { actionedAt: 42 },
+      { moderator: [] },
+      { modAction: null },
+      [],
+      null,
+    ].map((body) => ({ body })),
+  )(
+    "returns 400 without invoking the handler for a malformed mod action ($body)",
+    async ({ body }) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const { json, status } = await invoke(
+          internalRoutes.triggers.onModAction,
+          body,
+        );
+        expect(status).toHaveBeenCalledExactlyOnceWith(400);
+        expect(json).toHaveBeenCalledExactlyOnceWith({
+          status: "error",
+          message: "Invalid mod action event.",
+        });
+        expect(hoisted.onModAction).not.toHaveBeenCalled();
+        expect(error).toHaveBeenCalledExactlyOnceWith(
+          expect.stringContaining('"event":"internal_trigger_failed"'),
+        );
+      } finally {
+        error.mockRestore();
+      }
+    },
+  );
+
   it.each([
     [
       internalRoutes.triggers.onModAction,
