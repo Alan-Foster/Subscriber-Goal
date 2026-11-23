@@ -902,8 +902,6 @@ describe("onboarding reminder", () => {
   it.each(["unknown", "unhealthy"])(
     "keeps the onboarding goal recoverable when reminder health is %s",
     async (status) => {
-      const { automaticGoalPrerequisiteMaxAgeMs } =
-        await import("./automaticGoalRetry");
       hoisted.getOnboardingSubscriberGoalState.mockResolvedValue({
         version: "onboarding_subscriber_goal_v4",
         status: "awaiting_warning",

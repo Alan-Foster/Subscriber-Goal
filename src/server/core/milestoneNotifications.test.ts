@@ -10,7 +10,6 @@ import {
   maybeScheduleMilestoneNotification,
   milestoneNotificationBatchDelayMs,
   milestoneNotificationBatchSize,
-  milestoneNotificationBody,
   milestoneNotificationClaimMs,
   milestoneNotificationDeadline,
   milestoneNotificationJobName,

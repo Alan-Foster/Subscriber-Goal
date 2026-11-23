@@ -91,7 +91,7 @@ describe("getSecondaryActions", () => {
     ).toBeNull();
     expect(
       getSecondaryActions(
-        { ...subscribed, completedTime: "2026-01-01T00:00:00Z" },
+        { ...subscribed, completedTime: Date.UTC(2026, 0, 1) },
         true,
         false,
       ).automaticAction,

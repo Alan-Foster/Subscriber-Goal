@@ -96,7 +96,14 @@ class TestRedis {
     const hash = this.hashes.get(key);
     return fields.map((field) => hash?.get(field));
   }
-  async watch(key: string) {
+  async watch(
+    key: string,
+  ): Promise<
+    Pick<
+      Awaited<ReturnType<typeof watchTestHash>>,
+      "multi" | "discard" | "unwatch" | "del" | "exec"
+    >
+  > {
     return (await this.get(key)) === undefined
       ? watchTestHash(this, key)
       : watchTestString(this, key);

@@ -716,7 +716,7 @@ describe("onboarding subscriber goal", () => {
       redis.hGet(autoCreateNextGoalSuccessorsKey, predecessor.id),
     ).resolves.toBe("t3_newer");
     await expect(
-      redis.zRange(autoCreateNextGoalQueueKey, 0, -1),
+      redis.zRange(autoCreateNextGoalQueueKey),
     ).resolves.toContainEqual({
       member: predecessor.id,
       score: nowMs + 123_000,

@@ -280,7 +280,10 @@ function createRouteHarness(): Map<string, RouteHandler> {
             };
             for (const field of response.showForm?.form?.fields ?? []) {
               if (field.name?.includes("__creation_attempt__")) {
-                field.name = field.name.split("__creation_attempt__", 1)[0];
+                field.name = field.name.slice(
+                  0,
+                  field.name.indexOf("__creation_attempt__"),
+                );
               }
             }
             return res.json(payload);

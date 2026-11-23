@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultAppSettings } from "../settings";
 import { highlightManagementStateKey } from "../data/highlightManagement";
 import { watchTestHash, watchTestString } from "../testing/testHashWatch";
 
@@ -194,13 +195,12 @@ const createGoal = (
   createSubscriberGoal({
     reddit: hoisted.reddit as never,
     redis: hoisted.redis as never,
-    appSettings: {
-      promoSubreddit: "SubGoal",
-      crosspostAuthoritySubreddit: "SubGoal",
-    },
+    appSettings: defaultAppSettings,
     options: {
       title: "Welcome!",
-      goal: 200,
+      ...(options.postHeight === "tiny" || options.postHeight === "cta"
+        ? {}
+        : { goal: 200 }),
       subredditDisplayName: "ExampleSub",
       crosspost: false,
       colorTheme: "red",
@@ -309,12 +309,7 @@ describe("createSubscriberGoal highlight handling", () => {
     async (postHeight) => {
       hoisted.isSubredditBlacklisted.mockResolvedValue(true);
 
-      await expect(
-        createGoal({
-          postHeight,
-          ...(postHeight === "tiny" ? { goal: undefined } : {}),
-        }),
-      ).rejects.toMatchObject({
+      await expect(createGoal({ postHeight })).rejects.toMatchObject({
         name: "ProhibitedSubredditError",
         message: "This content is prohibited",
       });
@@ -1765,11 +1760,14 @@ describe("createSubscriberGoal highlight handling", () => {
     expect(hoisted.highlightedIds).toEqual(
       new Set(["t3_newpost", "t3_oldtiny"]),
     );
+    const unhighlightOrder = oldClassic.unhighlight.mock.invocationCallOrder[0];
+    if (unhighlightOrder === undefined)
+      throw new Error("Expected the old post to be unhighlighted");
     expect(
       hoisted.registerNewSubGoalPost.mock.invocationCallOrder[0],
-    ).toBeLessThan(oldClassic.unhighlight.mock.invocationCallOrder[0]);
+    ).toBeLessThan(unhighlightOrder);
     expect(post.approve.mock.invocationCallOrder[0]).toBeLessThan(
-      oldClassic.unhighlight.mock.invocationCallOrder[0],
+      unhighlightOrder,
     );
   });
 
@@ -1893,7 +1891,7 @@ describe("createSubscriberGoal highlight handling", () => {
     const post = createPost();
     hoisted.createGoalPost.mockResolvedValue(post);
 
-    await createGoal({ postHeight: "tiny", goal: undefined, crosspost: true });
+    await createGoal({ postHeight: "tiny", crosspost: true });
 
     expect(hoisted.applyGoalPostFrameStyle).toHaveBeenCalledWith(post, "tiny");
     expect(hoisted.createGoalPost).toHaveBeenCalledWith(
@@ -1925,7 +1923,6 @@ describe("createSubscriberGoal highlight handling", () => {
 
     await createGoal({
       postHeight: "cta",
-      goal: undefined,
       colorTheme: "blue",
       afterSubscribeAction: action,
     });
@@ -1950,9 +1947,9 @@ describe("createSubscriberGoal highlight handling", () => {
   });
 
   it("rejects CTA-only posts without an actionable CTA", async () => {
-    await expect(
-      createGoal({ postHeight: "cta", goal: undefined }),
-    ).rejects.toThrow("CTA-only posts require an actionable CTA.");
+    await expect(createGoal({ postHeight: "cta" })).rejects.toThrow(
+      "CTA-only posts require an actionable CTA.",
+    );
     expect(hoisted.createGoalPost).not.toHaveBeenCalled();
   });
 

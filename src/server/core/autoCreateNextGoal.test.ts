@@ -89,6 +89,17 @@ const hoisted = vi.hoisted(() => ({
   },
 }));
 
+type AutoGoalClients = Pick<
+  Parameters<typeof processDueAutoCreateNextGoals>[0],
+  "reddit" | "redis"
+>;
+
+// These fixtures implement only the client methods exercised by this suite.
+const mockClients: AutoGoalClients = {
+  reddit: hoisted.reddit as unknown as AutoGoalClients["reddit"],
+  redis: hoisted.redis as unknown as AutoGoalClients["redis"],
+};
+
 vi.mock("../data/subGoalData", () => ({
   autoCreateNextGoalSuccessorsKey: "auto_create_next_goal_v1_successors",
   subscriberGoalsKey: "subscriber_goals",
@@ -229,12 +240,7 @@ describe("processDueAutoCreateNextGoals", () => {
   it("does not create a goal before any job is due", async () => {
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
         nowMs: 10,
       }),
@@ -521,12 +527,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
         nowMs: 86_401_000,
       }),
@@ -981,12 +982,7 @@ describe("processDueAutoCreateNextGoals", () => {
     });
 
     await processDueAutoCreateNextGoals({
-      reddit: hoisted.reddit as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["reddit"],
-      redis: hoisted.redis as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["redis"],
+      ...mockClients,
       appSettings: baseSettings,
     });
 
@@ -1054,12 +1050,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
       await expect(
         processDueAutoCreateNextGoals({
-          reddit: hoisted.reddit as Parameters<
-            typeof processDueAutoCreateNextGoals
-          >[0]["reddit"],
-          redis: hoisted.redis as Parameters<
-            typeof processDueAutoCreateNextGoals
-          >[0]["redis"],
+          ...mockClients,
           appSettings: baseSettings,
         }),
       ).resolves.toMatchObject({
@@ -1083,12 +1074,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toMatchObject({
@@ -1116,12 +1102,7 @@ describe("processDueAutoCreateNextGoals", () => {
     });
 
     await processDueAutoCreateNextGoals({
-      reddit: hoisted.reddit as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["reddit"],
-      redis: hoisted.redis as Parameters<
-        typeof processDueAutoCreateNextGoals
-      >[0]["redis"],
+      ...mockClients,
       appSettings: baseSettings,
     });
 
@@ -1150,12 +1131,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toEqual({
@@ -1266,12 +1242,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toEqual({
@@ -1562,12 +1533,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toEqual({
@@ -1597,12 +1563,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toEqual({
@@ -1650,12 +1611,7 @@ describe("processDueAutoCreateNextGoals", () => {
 
     await expect(
       processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["reddit"],
-        redis: hoisted.redis as Parameters<
-          typeof processDueAutoCreateNextGoals
-        >[0]["redis"],
+        ...mockClients,
         appSettings: baseSettings,
       }),
     ).resolves.toEqual({

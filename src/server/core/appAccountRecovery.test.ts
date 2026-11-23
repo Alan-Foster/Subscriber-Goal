@@ -74,6 +74,10 @@ type GetAppUser = () => Promise<{
   getModPermissionsForSubreddit: () => Promise<string[]>;
 }>;
 
+type RunRecoveryJob = Parameters<
+  typeof resolveAppAccountRecoveryGate
+>[0]["scheduler"]["runJob"];
+
 describe("app account recovery", () => {
   let redis: TestRedis;
   let permissions: string[];
@@ -83,7 +87,7 @@ describe("app account recovery", () => {
     getModerators: ReturnType<typeof vi.fn>;
     sendPrivateMessage: ReturnType<typeof vi.fn<() => Promise<void>>>;
   };
-  let scheduler: { runJob: ReturnType<typeof vi.fn> };
+  let scheduler: { runJob: ReturnType<typeof vi.fn<RunRecoveryJob>> };
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -106,7 +110,7 @@ describe("app account recovery", () => {
     };
     scheduler = {
       runJob: vi
-        .fn()
+        .fn<RunRecoveryJob>()
         .mockImplementation(
           async () => `job-${scheduler.runJob.mock.calls.length}`,
         ),
