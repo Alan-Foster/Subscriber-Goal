@@ -1,15 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 import {
   defaultAppSettings,
   getAppSettings,
   getPublicAppSettings,
-} from './settings';
+} from "./settings";
 
-describe('app settings', () => {
-  it('uses hard-coded private server defaults', () => {
+describe("app settings", () => {
+  it("uses hard-coded private server defaults", () => {
     expect(getAppSettings()).toEqual({
-      promoSubreddit: 'SubGoal',
-      crosspostAuthoritySubreddit: 'SubGoal',
+      promoSubreddit: "SubGoal",
+      crosspostAuthoritySubreddit: "SubGoal",
       crosspostMaxSourcePostAgeMinutes: 180,
       crosspostIngestionEnabled: true,
       crosspostMaxRevisionAgeMinutes: 180,
@@ -22,7 +22,7 @@ describe('app settings', () => {
     });
   });
 
-  it('exposes only public app settings to client state', () => {
+  it("exposes only public app settings to client state", () => {
     expect(getPublicAppSettings()).toEqual({
       promoSubreddit: defaultAppSettings.promoSubreddit,
     });

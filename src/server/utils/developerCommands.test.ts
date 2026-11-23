@@ -51,12 +51,12 @@ describe("parseDeveloperCommands", () => {
   });
 
   it("allows whitespace around command separators and equals", () => {
-    expect(parseDeveloperCommands('  runAs  ,  header = "Spaced"  ')).toMatchObject(
-      {
-        submitAsUser: true,
-        headerText: "Spaced",
-      },
-    );
+    expect(
+      parseDeveloperCommands('  runAs  ,  header = "Spaced"  '),
+    ).toMatchObject({
+      submitAsUser: true,
+      headerText: "Spaced",
+    });
   });
 
   it("allows commas inside quoted header text", () => {
@@ -66,7 +66,9 @@ describe("parseDeveloperCommands", () => {
   });
 
   it("keeps wrong-case commands ignored", () => {
-    expect(parseDeveloperCommands('RunAs, SelfPost, Header="Nope"')).toMatchObject({
+    expect(
+      parseDeveloperCommands('RunAs, SelfPost, Header="Nope"'),
+    ).toMatchObject({
       submitAsUser: false,
       selfPost: false,
       ignoredCommands: ["RunAs", "SelfPost", 'Header="Nope"'],
@@ -77,7 +79,9 @@ describe("parseDeveloperCommands", () => {
     const result = parseDeveloperCommands('header="   "');
 
     expect(result.headerText).toBeUndefined();
-    expect(result.warnings).toContain("Ignored empty header developer command.");
+    expect(result.warnings).toContain(
+      "Ignored empty header developer command.",
+    );
   });
 
   it("ignores malformed or unclosed quoted values", () => {

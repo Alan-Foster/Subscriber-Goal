@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
 type LoadingElementProps = {
   isLoading: boolean;
@@ -8,7 +8,7 @@ type LoadingElementProps = {
 
 export const LoadingElement = ({
   isLoading,
-  className = 'h-6 w-6',
+  className = "h-6 w-6",
   children,
 }: LoadingElementProps) => {
   if (!isLoading) {

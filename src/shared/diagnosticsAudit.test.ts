@@ -11,7 +11,10 @@ const expectedControlFlowAnnotation = "diagnostic-allow-silent:";
 const getProductionFiles = (): string[] =>
   productionRoots
     .flatMap((root) =>
-      ts.sys.readDirectory(join(globalThis.process.cwd(), root), [".ts", ".tsx"]),
+      ts.sys.readDirectory(join(globalThis.process.cwd(), root), [
+        ".ts",
+        ".tsx",
+      ]),
     )
     .filter((file) => !file.includes(".test.") && !file.endsWith(".d.ts"));
 
@@ -31,7 +34,9 @@ const hasCatchLocalAnnotation = (
     .includes(expectedControlFlowAnnotation);
 };
 
-const expressionCall = (expression: ts.Expression): ts.CallExpression | null => {
+const expressionCall = (
+  expression: ts.Expression,
+): ts.CallExpression | null => {
   const candidate = ts.isAwaitExpression(expression)
     ? expression.expression
     : expression;
@@ -69,7 +74,10 @@ const blockReportsError = (
       reports = true;
       return;
     }
-    if (ts.isCallExpression(node) && callReportsError(node, source, errorName)) {
+    if (
+      ts.isCallExpression(node) &&
+      callReportsError(node, source, errorName)
+    ) {
       reports = true;
       return;
     }
@@ -89,7 +97,8 @@ const auditSource = (file: string, sourceText: string): string[] => {
   );
   const offenders: string[] = [];
   const report = (node: ts.Node, suffix = "") => {
-    const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+    const line =
+      source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     offenders.push(`${file}:${line}${suffix}`);
   };
   const visit = (node: ts.Node): void => {
@@ -115,7 +124,9 @@ const auditSource = (file: string, sourceText: string): string[] => {
         ts.isIdentifier(handler.parameters[0].name)
           ? handler.parameters[0].name.text
           : null;
-      const annotation = handler.getFullText(source).includes(expectedControlFlowAnnotation);
+      const annotation = handler
+        .getFullText(source)
+        .includes(expectedControlFlowAnnotation);
       const reports =
         (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) &&
         (ts.isBlock(handler.body)
@@ -146,19 +157,50 @@ describe("production error diagnostics", () => {
   });
 
   it("rejects misleading catch-handler patterns", () => {
-    expect(auditSource("fixture.ts", "try { run() } catch (error) { console.error(error) }")).not.toEqual([]);
-    expect(auditSource("fixture.ts", "try { run() } catch (error) { emit(error) }")).not.toEqual([]);
-    expect(auditSource("fixture.ts", "try { run() } catch (error) { (() => { throw error })() }")).not.toEqual([]);
-    expect(auditSource("fixture.ts", "// diagnostic-allow-silent: elsewhere\ntry { run() } catch { return }")).not.toEqual([]);
-    expect(auditSource("fixture.ts", "try { run() } catch (error) { logDiagnostic('error', 'failed', {}, error) }")).toEqual([]);
-    expect(auditSource("fixture.ts", "try { run() } catch {\n// diagnostic-allow-silent: expected parser probe.\nreturn\n}")).toEqual([]);
+    expect(
+      auditSource(
+        "fixture.ts",
+        "try { run() } catch (error) { console.error(error) }",
+      ),
+    ).not.toEqual([]);
+    expect(
+      auditSource("fixture.ts", "try { run() } catch (error) { emit(error) }"),
+    ).not.toEqual([]);
+    expect(
+      auditSource(
+        "fixture.ts",
+        "try { run() } catch (error) { (() => { throw error })() }",
+      ),
+    ).not.toEqual([]);
+    expect(
+      auditSource(
+        "fixture.ts",
+        "// diagnostic-allow-silent: elsewhere\ntry { run() } catch { return }",
+      ),
+    ).not.toEqual([]);
+    expect(
+      auditSource(
+        "fixture.ts",
+        "try { run() } catch (error) { logDiagnostic('error', 'failed', {}, error) }",
+      ),
+    ).toEqual([]);
+    expect(
+      auditSource(
+        "fixture.ts",
+        "try { run() } catch {\n// diagnostic-allow-silent: expected parser probe.\nreturn\n}",
+      ),
+    ).toEqual([]);
   });
 
   it("does not discard promise rejections", () => {
     const offenders: string[] = [];
     for (const file of getProductionFiles()) {
       const sourceText = readFileSync(file, "utf8");
-      if (/\.catch\s*\(\s*\(?.*?\)?\s*=>\s*(?:undefined|\{\s*\})\s*\)/s.test(sourceText)) {
+      if (
+        /\.catch\s*\(\s*\(?.*?\)?\s*=>\s*(?:undefined|\{\s*\})\s*\)/s.test(
+          sourceText,
+        )
+      ) {
         offenders.push(relative(globalThis.process.cwd(), file));
       }
     }
@@ -173,10 +215,15 @@ describe("production error diagnostics", () => {
     const offenders = getProductionFiles()
       .map((file) => ({
         file,
-        relativeFile: relative(globalThis.process.cwd(), file).replaceAll("\\", "/"),
+        relativeFile: relative(globalThis.process.cwd(), file).replaceAll(
+          "\\",
+          "/",
+        ),
       }))
       .filter(({ relativeFile }) => !compatibilityLoggers.has(relativeFile))
-      .filter(({ file }) => /console\.(?:error|warn)\s*\(/.test(readFileSync(file, "utf8")))
+      .filter(({ file }) =>
+        /console\.(?:error|warn)\s*\(/.test(readFileSync(file, "utf8")),
+      )
       .map(({ relativeFile }) => relativeFile);
     expect(offenders, "Direct operational console calls").toEqual([]);
   });

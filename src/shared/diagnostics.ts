@@ -39,13 +39,17 @@ const sanitizeContext = (context: DiagnosticContext): DiagnosticContext =>
     Object.entries(context)
       .slice(0, maxDiagnosticContextFields)
       .map(([key, value]) => {
-      if (value === undefined || typeof value !== "string") return [key, value];
-      if (/^(?:userId|username)$/i.test(key)) return [key, "[redacted]"];
-      return [
-        key,
-        sanitizeDiagnosticText(value).slice(0, maxDiagnosticContextTextLength),
-      ];
-    }),
+        if (value === undefined || typeof value !== "string")
+          return [key, value];
+        if (/^(?:userId|username)$/i.test(key)) return [key, "[redacted]"];
+        return [
+          key,
+          sanitizeDiagnosticText(value).slice(
+            0,
+            maxDiagnosticContextTextLength,
+          ),
+        ];
+      }),
   ) as DiagnosticContext;
 
 const errorDetails = (error: unknown): Record<string, string> => {

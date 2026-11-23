@@ -1,4 +1,4 @@
-import type { PublicAppSettings } from '../shared/types/api';
+import type { PublicAppSettings } from "../shared/types/api";
 
 export type ServerAppSettings = PublicAppSettings & {
   crosspostAuthoritySubreddit: string;
@@ -14,8 +14,8 @@ export type ServerAppSettings = PublicAppSettings & {
 };
 
 export const defaultAppSettings: ServerAppSettings = {
-  promoSubreddit: 'SubGoal',
-  crosspostAuthoritySubreddit: 'SubGoal',
+  promoSubreddit: "SubGoal",
+  crosspostAuthoritySubreddit: "SubGoal",
   crosspostMaxSourcePostAgeMinutes: 180,
   crosspostIngestionEnabled: true,
   crosspostMaxRevisionAgeMinutes: 180,

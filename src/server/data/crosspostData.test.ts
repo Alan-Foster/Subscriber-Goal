@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 import {
   countPendingCrossposts,
   crosspostDeletionDueKey,
@@ -18,7 +18,7 @@ import {
   storeCrosspostDeletionMarker,
   storeProcessedRevision,
   upsertPendingCrosspost,
-} from './crosspostData';
+} from "./crosspostData";
 
 type ZEntry = { member: string; score: number };
 
@@ -93,178 +93,185 @@ class InMemoryRedis {
   }
 }
 
-describe('crosspostData bookkeeping primitives', () => {
-  it('confirms both marker and due handoff before returning', async () => {
+describe("crosspostData bookkeeping primitives", () => {
+  it("confirms both marker and due handoff before returning", async () => {
     const redis = new InMemoryRedis();
     await storeCrosspostDeletionMarker(
       redis as unknown as Parameters<typeof storeCrosspostDeletionMarker>[0],
-      't3_source',
-      'rev_delete',
-      123
+      "t3_source",
+      "rev_delete",
+      123,
     );
 
-    expect(await redis.hGet(crosspostDeletionMarkersKey, 't3_source')).toBeDefined();
-    expect(await redis.zScore(crosspostDeletionDueKey, 't3_source')).toBe(123);
+    expect(
+      await redis.hGet(crosspostDeletionMarkersKey, "t3_source"),
+    ).toBeDefined();
+    expect(await redis.zScore(crosspostDeletionDueKey, "t3_source")).toBe(123);
   });
 
-  it('rejects when the deletion due handoff cannot be confirmed', async () => {
+  it("rejects when the deletion due handoff cannot be confirmed", async () => {
     const redis = new InMemoryRedis();
     redis.zScore = async () => undefined;
 
     await expect(
       storeCrosspostDeletionMarker(
         redis as unknown as Parameters<typeof storeCrosspostDeletionMarker>[0],
-        't3_source',
-        'rev_delete',
-        123
-      )
-    ).rejects.toThrow('handoff was not confirmed');
+        "t3_source",
+        "rev_delete",
+        123,
+      ),
+    ).rejects.toThrow("handoff was not confirmed");
   });
 
-  it('storeProcessedRevision writes hash and time index', async () => {
+  it("storeProcessedRevision writes hash and time index", async () => {
     const redis = new InMemoryRedis();
     await storeProcessedRevision(
       redis as unknown as Parameters<typeof storeProcessedRevision>[0],
-      'rev_1',
-      't3_source',
-      123
+      "rev_1",
+      "t3_source",
+      123,
     );
 
     expect(
       await isProcessedRevision(
         redis as unknown as Parameters<typeof isProcessedRevision>[0],
-        'rev_1'
-      )
+        "rev_1",
+      ),
     ).toBe(true);
     const byTime = await redis.zRange(processedRevisionsByTimeKey, 0, -1);
-    expect(byTime).toEqual([{ member: 'rev_1', score: 123 }]);
+    expect(byTime).toEqual([{ member: "rev_1", score: 123 }]);
   });
 
-  it('removeProcessedRevisions removes from hash and time index', async () => {
+  it("removeProcessedRevisions removes from hash and time index", async () => {
     const redis = new InMemoryRedis();
     await storeProcessedRevision(
       redis as unknown as Parameters<typeof storeProcessedRevision>[0],
-      'rev_1',
-      't3_source',
-      123
+      "rev_1",
+      "t3_source",
+      123,
     );
     await removeProcessedRevisions(
       redis as unknown as Parameters<typeof removeProcessedRevisions>[0],
-      ['rev_1']
+      ["rev_1"],
     );
 
-    expect(await redis.hGet(processedRevisionsKey, 'rev_1')).toBeUndefined();
+    expect(await redis.hGet(processedRevisionsKey, "rev_1")).toBeUndefined();
     expect(await redis.zRange(processedRevisionsByTimeKey, 0, -1)).toEqual([]);
   });
 
-  it('removeCorrespondingPost deletes source-to-crosspost mapping', async () => {
+  it("removeCorrespondingPost deletes source-to-crosspost mapping", async () => {
     const redis = new InMemoryRedis();
     await storeCorrespondingPost(
       redis as unknown as Parameters<typeof storeCorrespondingPost>[0],
-      't3_source',
-      't3_crosspost'
+      "t3_source",
+      "t3_crosspost",
     );
     expect(
       await getCorrespondingPost(
         redis as unknown as Parameters<typeof getCorrespondingPost>[0],
-        't3_source'
-      )
-    ).toBe('t3_crosspost');
+        "t3_source",
+      ),
+    ).toBe("t3_crosspost");
 
     await removeCorrespondingPost(
       redis as unknown as Parameters<typeof removeCorrespondingPost>[0],
-      't3_source'
+      "t3_source",
     );
 
     expect(
       await getCorrespondingPost(
         redis as unknown as Parameters<typeof getCorrespondingPost>[0],
-        't3_source'
-      )
+        "t3_source",
+      ),
     ).toBeUndefined();
     expect(await redis.hGetAll(crosspostListKey)).toEqual({});
   });
 
-  it('upsert/list/remove pending crossposts via due-time index', async () => {
+  it("upsert/list/remove pending crossposts via due-time index", async () => {
     const redis = new InMemoryRedis();
-    const targetSubreddit = 'SubGoal';
+    const targetSubreddit = "SubGoal";
     await upsertPendingCrosspost(
       redis as unknown as Parameters<typeof upsertPendingCrosspost>[0],
       targetSubreddit,
       {
-        revisionId: 'rev_pending_1',
-        postId: 't3_source' as const,
+        revisionId: "rev_pending_1",
+        postId: "t3_source" as const,
         goal: 50,
         firstSeenMs: 1_000,
         nextAttemptMs: 2_000,
         attemptCount: 0,
         lastError: null,
-        status: 'queued_for_crosspost',
-      }
+        status: "queued_for_crosspost",
+      },
     );
 
     const dueAt1500 = await listDuePendingCrossposts(
       redis as unknown as Parameters<typeof listDuePendingCrossposts>[0],
       targetSubreddit,
-      { nowMs: 1_500, limit: 10 }
+      { nowMs: 1_500, limit: 10 },
     );
     expect(dueAt1500).toEqual([]);
 
     const dueAt2500 = await listDuePendingCrossposts(
       redis as unknown as Parameters<typeof listDuePendingCrossposts>[0],
       targetSubreddit,
-      { nowMs: 2_500, limit: 10 }
+      { nowMs: 2_500, limit: 10 },
     );
     expect(dueAt2500).toHaveLength(1);
-    expect(dueAt2500[0]?.revisionId).toBe('rev_pending_1');
+    expect(dueAt2500[0]?.revisionId).toBe("rev_pending_1");
 
     expect(
       await countPendingCrossposts(
         redis as unknown as Parameters<typeof countPendingCrossposts>[0],
-        targetSubreddit
-      )
+        targetSubreddit,
+      ),
     ).toBe(1);
 
     await removePendingCrosspost(
       redis as unknown as Parameters<typeof removePendingCrosspost>[0],
       targetSubreddit,
-      'rev_pending_1'
+      "rev_pending_1",
     );
 
     expect(
       await countPendingCrossposts(
         redis as unknown as Parameters<typeof countPendingCrossposts>[0],
-        targetSubreddit
-      )
+        targetSubreddit,
+      ),
     ).toBe(0);
     expect(
-      await redis.hGet(getCrosspostPendingByRevisionKey(targetSubreddit), 'rev_pending_1')
+      await redis.hGet(
+        getCrosspostPendingByRevisionKey(targetSubreddit),
+        "rev_pending_1",
+      ),
     ).toBeUndefined();
-    expect(await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1)).toEqual([]);
+    expect(
+      await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1),
+    ).toEqual([]);
   });
 
-  it('counts pending crossposts with hLen instead of hGetAll', async () => {
+  it("counts pending crossposts with hLen instead of hGetAll", async () => {
     const redis = new InMemoryRedis();
     await upsertPendingCrosspost(
       redis as unknown as Parameters<typeof upsertPendingCrosspost>[0],
-      'SubGoal',
+      "SubGoal",
       {
-        revisionId: 'rev_1',
-        postId: 't3_post',
+        revisionId: "rev_1",
+        postId: "t3_post",
         goal: 10,
         firstSeenMs: 100,
         nextAttemptMs: 100,
         attemptCount: 0,
         lastError: null,
-        status: 'queued_for_crosspost',
-      }
+        status: "queued_for_crosspost",
+      },
     );
 
     await expect(
       countPendingCrossposts(
         redis as unknown as Parameters<typeof countPendingCrossposts>[0],
-        'SubGoal'
-      )
+        "SubGoal",
+      ),
     ).resolves.toBe(1);
     expect(redis.hLenCalls).toBeGreaterThan(0);
     expect(redis.hGetAllCalls).toBe(0);

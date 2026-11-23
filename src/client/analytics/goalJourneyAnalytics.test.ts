@@ -173,9 +173,7 @@ describe("GoalJourneyAnalytics", () => {
     expect(client.interaction).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "moderator_install_promo_viewed",
-        actionDetails: expect.stringContaining(
-          '"action_type":"install_promo"',
-        ),
+        actionDetails: expect.stringContaining('"action_type":"install_promo"'),
       }),
     );
     expect(client.interaction).toHaveBeenCalledWith(

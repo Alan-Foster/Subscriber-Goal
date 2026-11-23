@@ -524,7 +524,11 @@ describe("existing goal highlight ensurance", () => {
 
     expect(result.classicPostsUnhighlighted).toEqual([oldClassic.id]);
     expect(result.protectedHighlightsPreserved).toEqual([]);
-    expect(result.managedHighlightsRemoved).toEqual([oldClassic.id, cta.id, tiny.id]);
+    expect(result.managedHighlightsRemoved).toEqual([
+      oldClassic.id,
+      cta.id,
+      tiny.id,
+    ]);
     expect(oldClassic.unhighlight).toHaveBeenCalledOnce();
     expect(newClassic.unhighlight).not.toHaveBeenCalled();
     expect(cta.unhighlight).toHaveBeenCalledOnce();
@@ -574,7 +578,10 @@ describe("existing goal highlight ensurance", () => {
     });
 
     expect(result).toMatchObject({ status: "existing", postId: active.id });
-    expect(result.classicPostsUnhighlighted).toEqual([firstCompleted.id, secondCompleted.id]);
+    expect(result.classicPostsUnhighlighted).toEqual([
+      firstCompleted.id,
+      secondCompleted.id,
+    ]);
     expect(firstCompleted.unhighlight).toHaveBeenCalledOnce();
     expect(secondCompleted.unhighlight).toHaveBeenCalledOnce();
     expect(active.unhighlight).not.toHaveBeenCalled();

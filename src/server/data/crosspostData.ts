@@ -1,28 +1,33 @@
-import type { ServerAppSettings } from '../settings';
-import { isLinkId, type LinkId, type RedditClient, type RedisClient } from '../types';
-import { logDiagnostic } from '../../shared/diagnostics';
+import type { ServerAppSettings } from "../settings";
+import {
+  isLinkId,
+  type LinkId,
+  type RedditClient,
+  type RedisClient,
+} from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 
-export type PostActionType = 'remove' | 'approve' | 'delete';
+export type PostActionType = "remove" | "approve" | "delete";
 
 export const crosspostWikiPages = {
-  newPost: 'post',
+  newPost: "post",
   action: {
-    remove: 'remove',
-    approve: 'approve',
-    delete: 'delete',
+    remove: "remove",
+    approve: "approve",
+    delete: "delete",
   } as Record<PostActionType, string>,
 } as const;
 
 export const modToPostActionMap: Record<string, PostActionType> = {
-  removelink: 'remove',
-  spamlink: 'remove',
-  approvelink: 'approve',
+  removelink: "remove",
+  spamlink: "remove",
+  approvelink: "approve",
 };
 
 const newPostReasonRegex = /^Post (t3_[\w\d]+) with goal (\d+)$/;
 
 export function parseNewPostDispatchReason(
-  reason: string
+  reason: string,
 ): { postId: LinkId; goal: number } | undefined {
   const match = reason.match(newPostReasonRegex);
   if (!match) {
@@ -41,10 +46,10 @@ export function parseNewPostDispatchReason(
 
 export function parsePostActionDispatchReason(
   reason: string,
-  expectedAction: PostActionType
+  expectedAction: PostActionType,
 ): { postId: LinkId } | undefined {
   const actionRegex = new RegExp(
-    `^Dispatch ${expectedAction} for (t3_[\\w\\d]+)$`
+    `^Dispatch ${expectedAction} for (t3_[\\w\\d]+)$`,
   );
   const match = reason.match(actionRegex);
   if (!match) {
@@ -61,12 +66,12 @@ export async function dispatchNewPost(
   reddit: RedditClient,
   appSettings: ServerAppSettings,
   postId: string,
-  goal: number
+  goal: number,
 ): Promise<void> {
   const page = crosspostWikiPages.newPost;
   const reason = `Post ${postId} with goal ${goal}`;
   console.info(
-    `[crosspost] dispatch new post: subreddit=${appSettings.promoSubreddit} page=${page} postId=${postId} goal=${goal}`
+    `[crosspost] dispatch new post: subreddit=${appSettings.promoSubreddit} page=${page} postId=${postId} goal=${goal}`,
   );
   await reddit.updateWikiPage({
     subredditName: appSettings.promoSubreddit,
@@ -80,12 +85,12 @@ export async function dispatchPostAction(
   reddit: RedditClient,
   appSettings: ServerAppSettings,
   postId: string,
-  action: PostActionType
+  action: PostActionType,
 ): Promise<void> {
   const page = crosspostWikiPages.action[action];
   const reason = `Dispatch ${action} for ${postId}`;
   console.info(
-    `[crosspost] dispatch action: subreddit=${appSettings.promoSubreddit} page=${page} action=${action} postId=${postId}`
+    `[crosspost] dispatch action: subreddit=${appSettings.promoSubreddit} page=${page} action=${action} postId=${postId}`,
   );
   await reddit.updateWikiPage({
     subredditName: appSettings.promoSubreddit,
@@ -95,20 +100,20 @@ export async function dispatchPostAction(
   });
 }
 
-export const processedRevisionsKey = 'processedRevisions';
-export const processedRevisionsByTimeKey = 'processedRevisionsByTime';
-export const crosspostListKey = 'crosspostList';
-export const crosspostDeletionMarkersKey = 'crosspostDeletionMarkersV1';
-export const crosspostDeletionDueKey = 'crosspostDeletionDueV1';
-export const crosspostPendingByTimeKeyPrefix = 'crosspostPendingByTime';
-export const crosspostPendingByRevisionKeyPrefix = 'crosspostPendingByRevision';
+export const processedRevisionsKey = "processedRevisions";
+export const processedRevisionsByTimeKey = "processedRevisionsByTime";
+export const crosspostListKey = "crosspostList";
+export const crosspostDeletionMarkersKey = "crosspostDeletionMarkersV1";
+export const crosspostDeletionDueKey = "crosspostDeletionDueV1";
+export const crosspostPendingByTimeKeyPrefix = "crosspostPendingByTime";
+export const crosspostPendingByRevisionKeyPrefix = "crosspostPendingByRevision";
 
 export type PendingCrosspostStatus =
-  | 'queued_for_crosspost'
-  | 'crosspost_retrying'
-  | 'crosspost_reconciliation_pending'
-  | 'crosspost_terminal_failed'
-  | 'crosspost_succeeded';
+  | "queued_for_crosspost"
+  | "crosspost_retrying"
+  | "crosspost_reconciliation_pending"
+  | "crosspost_terminal_failed"
+  | "crosspost_succeeded";
 
 export type PendingCrosspost = {
   revisionId: string;
@@ -126,41 +131,43 @@ export type PendingCrosspost = {
 };
 
 const toNormalizedSubredditName = (value: string): string =>
-  value.trim().replace(/^r\//i, '').toLowerCase();
+  value.trim().replace(/^r\//i, "").toLowerCase();
 
 export const getCrosspostPendingByTimeKey = (targetSubreddit: string): string =>
   `${crosspostPendingByTimeKeyPrefix}:${toNormalizedSubredditName(targetSubreddit)}`;
 
 export const getCrosspostPendingByRevisionKey = (
-  targetSubreddit: string
+  targetSubreddit: string,
 ): string =>
   `${crosspostPendingByRevisionKeyPrefix}:${toNormalizedSubredditName(targetSubreddit)}`;
 
-function isPendingCrosspostStatus(value: unknown): value is PendingCrosspostStatus {
+function isPendingCrosspostStatus(
+  value: unknown,
+): value is PendingCrosspostStatus {
   return (
-    value === 'queued_for_crosspost' ||
-    value === 'crosspost_retrying' ||
-    value === 'crosspost_reconciliation_pending' ||
-    value === 'crosspost_terminal_failed' ||
-    value === 'crosspost_succeeded'
+    value === "queued_for_crosspost" ||
+    value === "crosspost_retrying" ||
+    value === "crosspost_reconciliation_pending" ||
+    value === "crosspost_terminal_failed" ||
+    value === "crosspost_succeeded"
   );
 }
 
 function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== "object") {
     return undefined;
   }
   const candidate = value as Partial<PendingCrosspost>;
   if (
-    typeof candidate.revisionId !== 'string' ||
-    typeof candidate.postId !== 'string' ||
-    typeof candidate.goal !== 'number' ||
+    typeof candidate.revisionId !== "string" ||
+    typeof candidate.postId !== "string" ||
+    typeof candidate.goal !== "number" ||
     !Number.isFinite(candidate.goal) ||
-    typeof candidate.firstSeenMs !== 'number' ||
+    typeof candidate.firstSeenMs !== "number" ||
     !Number.isFinite(candidate.firstSeenMs) ||
-    typeof candidate.nextAttemptMs !== 'number' ||
+    typeof candidate.nextAttemptMs !== "number" ||
     !Number.isFinite(candidate.nextAttemptMs) ||
-    typeof candidate.attemptCount !== 'number' ||
+    typeof candidate.attemptCount !== "number" ||
     !Number.isFinite(candidate.attemptCount) ||
     !isPendingCrosspostStatus(candidate.status)
   ) {
@@ -175,34 +182,37 @@ function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
     nextAttemptMs: Math.floor(candidate.nextAttemptMs),
     attemptCount: Math.max(0, Math.floor(candidate.attemptCount)),
     lastError:
-      typeof candidate.lastError === 'string' && candidate.lastError.length > 0
+      typeof candidate.lastError === "string" && candidate.lastError.length > 0
         ? candidate.lastError
         : null,
     status: candidate.status,
   };
 
-  if (typeof candidate.revisionDateMs === 'number' && Number.isFinite(candidate.revisionDateMs)) {
+  if (
+    typeof candidate.revisionDateMs === "number" &&
+    Number.isFinite(candidate.revisionDateMs)
+  ) {
     normalized.revisionDateMs = Math.floor(candidate.revisionDateMs);
   }
   if (
-    typeof candidate.createdCrosspostId === 'string' &&
+    typeof candidate.createdCrosspostId === "string" &&
     /^t3_[\w\d]+$/.test(candidate.createdCrosspostId)
   ) {
     normalized.createdCrosspostId = candidate.createdCrosspostId as LinkId;
   }
   if (
-    typeof candidate.persistenceFailureReason === 'string' &&
+    typeof candidate.persistenceFailureReason === "string" &&
     candidate.persistenceFailureReason.length > 0
   ) {
     normalized.persistenceFailureReason = candidate.persistenceFailureReason;
   }
   if (
-    typeof candidate.reconciliationAttemptCount === 'number' &&
+    typeof candidate.reconciliationAttemptCount === "number" &&
     Number.isFinite(candidate.reconciliationAttemptCount)
   ) {
     normalized.reconciliationAttemptCount = Math.max(
       0,
-      Math.floor(candidate.reconciliationAttemptCount)
+      Math.floor(candidate.reconciliationAttemptCount),
     );
   }
 
@@ -216,11 +226,11 @@ function serializePendingCrosspost(pending: PendingCrosspost): string {
 export async function getPendingCrosspost(
   redis: RedisClient,
   targetSubreddit: string,
-  revisionId: string
+  revisionId: string,
 ): Promise<PendingCrosspost | undefined> {
   const raw = await redis.hGet(
     getCrosspostPendingByRevisionKey(targetSubreddit),
-    revisionId
+    revisionId,
   );
   if (!raw) {
     return undefined;
@@ -228,23 +238,23 @@ export async function getPendingCrosspost(
   try {
     const parsed = toPendingCrosspost(JSON.parse(raw));
     if (!parsed) {
-      logDiagnostic('warn', 'persisted_json_invalid', {
-        workflow: 'crosspost',
-        phase: 'pending_record_schema',
+      logDiagnostic("warn", "persisted_json_invalid", {
+        workflow: "crosspost",
+        phase: "pending_record_schema",
         recordId: revisionId,
       });
     }
     return parsed;
   } catch (error) {
     logDiagnostic(
-      'warn',
-      'persisted_json_invalid',
+      "warn",
+      "persisted_json_invalid",
       {
-        workflow: 'crosspost',
-        phase: 'pending_record_decode',
+        workflow: "crosspost",
+        phase: "pending_record_decode",
         recordId: revisionId,
       },
-      error
+      error,
     );
     return undefined;
   }
@@ -253,14 +263,14 @@ export async function getPendingCrosspost(
 export async function upsertPendingCrosspost(
   redis: RedisClient,
   targetSubreddit: string,
-  pending: PendingCrosspost
+  pending: PendingCrosspost,
 ): Promise<void> {
   const byRevisionKey = getCrosspostPendingByRevisionKey(targetSubreddit);
   const byTimeKey = getCrosspostPendingByTimeKey(targetSubreddit);
   const existing = await getPendingCrosspost(
     redis,
     targetSubreddit,
-    pending.revisionId
+    pending.revisionId,
   );
   const merged: PendingCrosspost = existing
     ? {
@@ -281,20 +291,26 @@ export async function upsertPendingCrosspost(
 export async function removePendingCrosspost(
   redis: RedisClient,
   targetSubreddit: string,
-  revisionId: string
+  revisionId: string,
 ): Promise<void> {
-  await redis.hDel(getCrosspostPendingByRevisionKey(targetSubreddit), [revisionId]);
+  await redis.hDel(getCrosspostPendingByRevisionKey(targetSubreddit), [
+    revisionId,
+  ]);
   await redis.zRem(getCrosspostPendingByTimeKey(targetSubreddit), [revisionId]);
 }
 
 export async function listDuePendingCrossposts(
   redis: RedisClient,
   targetSubreddit: string,
-  options: { nowMs?: number; limit?: number } = {}
+  options: { nowMs?: number; limit?: number } = {},
 ): Promise<PendingCrosspost[]> {
   const nowMs = options.nowMs ?? Date.now();
   const limit = Math.max(1, Math.floor(options.limit ?? 25));
-  const index = await redis.zRange(getCrosspostPendingByTimeKey(targetSubreddit), 0, -1);
+  const index = await redis.zRange(
+    getCrosspostPendingByTimeKey(targetSubreddit),
+    0,
+    -1,
+  );
   const dueRevisionIds = index
     .filter((entry) => Number(entry.score) <= nowMs)
     .slice(0, limit)
@@ -302,7 +318,9 @@ export async function listDuePendingCrossposts(
   if (dueRevisionIds.length === 0) {
     return [];
   }
-  const hash = await redis.hGetAll(getCrosspostPendingByRevisionKey(targetSubreddit));
+  const hash = await redis.hGetAll(
+    getCrosspostPendingByRevisionKey(targetSubreddit),
+  );
   const due: PendingCrosspost[] = [];
   const staleIndexMembers: string[] = [];
   for (const revisionId of dueRevisionIds) {
@@ -314,9 +332,9 @@ export async function listDuePendingCrossposts(
     try {
       const parsed = toPendingCrosspost(JSON.parse(raw));
       if (!parsed) {
-        logDiagnostic('warn', 'persisted_json_invalid', {
-          workflow: 'crosspost',
-          phase: 'pending_index_schema',
+        logDiagnostic("warn", "persisted_json_invalid", {
+          workflow: "crosspost",
+          phase: "pending_index_schema",
           recordId: revisionId,
         });
         staleIndexMembers.push(revisionId);
@@ -325,27 +343,30 @@ export async function listDuePendingCrossposts(
       due.push(parsed);
     } catch (error) {
       logDiagnostic(
-        'warn',
-        'persisted_json_invalid',
+        "warn",
+        "persisted_json_invalid",
         {
-          workflow: 'crosspost',
-          phase: 'pending_index_decode',
+          workflow: "crosspost",
+          phase: "pending_index_decode",
           recordId: revisionId,
         },
-        error
+        error,
       );
       staleIndexMembers.push(revisionId);
     }
   }
   if (staleIndexMembers.length > 0) {
-    await redis.zRem(getCrosspostPendingByTimeKey(targetSubreddit), staleIndexMembers);
+    await redis.zRem(
+      getCrosspostPendingByTimeKey(targetSubreddit),
+      staleIndexMembers,
+    );
   }
   return due;
 }
 
 export async function countPendingCrossposts(
   redis: RedisClient,
-  targetSubreddit: string
+  targetSubreddit: string,
 ): Promise<number> {
   return await redis.hLen(getCrosspostPendingByRevisionKey(targetSubreddit));
 }
@@ -354,7 +375,7 @@ export async function storeProcessedRevision(
   redis: RedisClient,
   wikiRevisionId: string,
   postId: string,
-  processedAtMs: number = Date.now()
+  processedAtMs: number = Date.now(),
 ): Promise<void> {
   await redis.hSet(processedRevisionsKey, {
     [wikiRevisionId]: postId,
@@ -367,7 +388,7 @@ export async function storeProcessedRevision(
 
 export async function isProcessedRevision(
   redis: RedisClient,
-  wikiRevisionId: string
+  wikiRevisionId: string,
 ): Promise<boolean> {
   const revision = await redis.hGet(processedRevisionsKey, wikiRevisionId);
   return !!revision;
@@ -375,7 +396,7 @@ export async function isProcessedRevision(
 
 export async function removeProcessedRevisions(
   redis: RedisClient,
-  revisionIds: string[]
+  revisionIds: string[],
 ): Promise<void> {
   if (revisionIds.length === 0) {
     return;
@@ -387,7 +408,7 @@ export async function removeProcessedRevisions(
 export async function storeCorrespondingPost(
   redis: RedisClient,
   postId: string,
-  crosspostId: string
+  crosspostId: string,
 ): Promise<void> {
   await redis.hSet(crosspostListKey, {
     [postId]: crosspostId,
@@ -396,7 +417,7 @@ export async function storeCorrespondingPost(
 
 export async function getCorrespondingPost(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<string | undefined> {
   const crosspostId = await redis.hGet(crosspostListKey, postId);
   return crosspostId;
@@ -404,14 +425,14 @@ export async function getCorrespondingPost(
 
 export async function removeCorrespondingPost(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<void> {
   await redis.hDel(crosspostListKey, [postId]);
 }
 
 export async function hasCrosspost(
   redis: RedisClient,
-  postId: string
+  postId: string,
 ): Promise<boolean> {
   const crosspostId = await redis.hGet(crosspostListKey, postId);
   return !!crosspostId;
@@ -425,7 +446,7 @@ export type CrosspostDeletionMarker = {
 
 export async function getCrosspostDeletionMarker(
   redis: RedisClient,
-  sourcePostId: string
+  sourcePostId: string,
 ): Promise<CrosspostDeletionMarker | undefined> {
   const raw = await redis.hGet(crosspostDeletionMarkersKey, sourcePostId);
   if (!raw) return undefined;
@@ -433,22 +454,22 @@ export async function getCrosspostDeletionMarker(
     const value = JSON.parse(raw) as Partial<CrosspostDeletionMarker>;
     if (
       value.sourcePostId !== sourcePostId ||
-      typeof value.firstRevisionId !== 'string' ||
-      typeof value.recordedAtMs !== 'number'
+      typeof value.firstRevisionId !== "string" ||
+      typeof value.recordedAtMs !== "number"
     ) {
       return undefined;
     }
     return value as CrosspostDeletionMarker;
   } catch (error) {
     logDiagnostic(
-      'warn',
-      'persisted_json_invalid',
+      "warn",
+      "persisted_json_invalid",
       {
-        workflow: 'crosspost',
-        phase: 'deletion_marker_decode',
+        workflow: "crosspost",
+        phase: "deletion_marker_decode",
         postId: sourcePostId,
       },
-      error
+      error,
     );
     return undefined;
   }
@@ -456,7 +477,7 @@ export async function getCrosspostDeletionMarker(
 
 export async function hasCrosspostDeletionMarker(
   redis: RedisClient,
-  sourcePostId: string
+  sourcePostId: string,
 ): Promise<boolean> {
   return Boolean(await getCrosspostDeletionMarker(redis, sourcePostId));
 }
@@ -466,7 +487,7 @@ export async function storeCrosspostDeletionMarker(
   redis: RedisClient,
   sourcePostId: LinkId,
   revisionId: string,
-  nowMs = Date.now()
+  nowMs = Date.now(),
 ): Promise<CrosspostDeletionMarker> {
   const existing = await getCrosspostDeletionMarker(redis, sourcePostId);
   const marker: CrosspostDeletionMarker = existing ?? {
@@ -480,7 +501,7 @@ export async function storeCrosspostDeletionMarker(
   await scheduleCrosspostDeletionMarker(redis, sourcePostId, nowMs);
   const confirmed = await getCrosspostDeletionMarker(redis, sourcePostId);
   if (!confirmed) {
-    throw new Error('Crosspost deletion marker persistence was not confirmed.');
+    throw new Error("Crosspost deletion marker persistence was not confirmed.");
   }
   return confirmed;
 }
@@ -488,7 +509,7 @@ export async function storeCrosspostDeletionMarker(
 export async function scheduleCrosspostDeletionMarker(
   redis: RedisClient,
   sourcePostId: LinkId,
-  nextAttemptMs: number
+  nextAttemptMs: number,
 ): Promise<void> {
   await redis.zAdd(crosspostDeletionDueKey, {
     member: sourcePostId,
@@ -496,16 +517,16 @@ export async function scheduleCrosspostDeletionMarker(
   });
   const confirmedScore = await redis.zScore(
     crosspostDeletionDueKey,
-    sourcePostId
+    sourcePostId,
   );
   if (confirmedScore !== nextAttemptMs) {
-    throw new Error('Crosspost deletion cleanup handoff was not confirmed.');
+    throw new Error("Crosspost deletion cleanup handoff was not confirmed.");
   }
 }
 
 export async function completeCrosspostDeletionMarkerReplay(
   redis: RedisClient,
-  sourcePostId: LinkId
+  sourcePostId: LinkId,
 ): Promise<void> {
   // The durable marker intentionally remains; only its active replay entry is
   // removed. A delayed create still observes the source-scoped tombstone.
@@ -514,7 +535,7 @@ export async function completeCrosspostDeletionMarkerReplay(
 
 export async function listDueCrosspostDeletionMarkers(
   redis: RedisClient,
-  options: { nowMs?: number; limit?: number } = {}
+  options: { nowMs?: number; limit?: number } = {},
 ): Promise<LinkId[]> {
   const nowMs = options.nowMs ?? Date.now();
   const limit = Math.max(1, Math.min(25, Math.floor(options.limit ?? 10)));

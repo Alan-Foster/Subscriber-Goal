@@ -1,23 +1,23 @@
-export type CrosspostLogLevel = 'info' | 'warn' | 'error';
+export type CrosspostLogLevel = "info" | "warn" | "error";
 
 export type CrosspostLogEvent =
-  | 'crosspost_attempt_started'
-  | 'crosspost_attempt_succeeded'
-  | 'crosspost_attempt_failed'
-  | 'crosspost_attempt_skipped'
-  | 'crosspost_retry_started'
-  | 'crosspost_retry_succeeded'
-  | 'crosspost_retry_failed'
-  | 'crosspost_retry_skipped'
-  | 'crosspost_retry_degraded'
-  | 'crosspost_persistence_failed_after_create'
-  | 'crosspost_finalize_transaction_failed'
-  | 'crosspost_reconciliation_started'
-  | 'crosspost_reconciliation_succeeded'
-  | 'crosspost_reconciliation_failed'
-  | 'wiki_fetch_started'
-  | 'wiki_fetch_succeeded'
-  | 'wiki_fetch_failed';
+  | "crosspost_attempt_started"
+  | "crosspost_attempt_succeeded"
+  | "crosspost_attempt_failed"
+  | "crosspost_attempt_skipped"
+  | "crosspost_retry_started"
+  | "crosspost_retry_succeeded"
+  | "crosspost_retry_failed"
+  | "crosspost_retry_skipped"
+  | "crosspost_retry_degraded"
+  | "crosspost_persistence_failed_after_create"
+  | "crosspost_finalize_transaction_failed"
+  | "crosspost_reconciliation_started"
+  | "crosspost_reconciliation_succeeded"
+  | "crosspost_reconciliation_failed"
+  | "wiki_fetch_started"
+  | "wiki_fetch_succeeded"
+  | "wiki_fetch_failed";
 
 export type CrosspostLogPayload = {
   event: CrosspostLogEvent;
@@ -28,7 +28,7 @@ export type CrosspostLogPayload = {
   revisionId?: string;
   errorMessage?: string;
   page?: string;
-  status?: 'success' | 'partial' | 'failed';
+  status?: "success" | "partial" | "failed";
   revisionsFetched?: number;
   newPostsSeen?: number;
   crosspostsCreated?: number;
@@ -60,30 +60,30 @@ export function toErrorMessage(error: unknown): string {
 
 export function logCrosspostEvent(
   payload: CrosspostLogPayload,
-  level: CrosspostLogLevel = 'info'
+  level: CrosspostLogLevel = "info",
 ): void {
   const compactPayload: Record<string, unknown> = {
     event: payload.event,
   };
   for (const [key, value] of Object.entries(payload)) {
     if (
-      key === 'event' ||
+      key === "event" ||
       value === undefined ||
-      (typeof value === 'number' && value === 0)
+      (typeof value === "number" && value === 0)
     ) {
       continue;
     }
     compactPayload[key] =
-      typeof value === 'string' ? sanitizeDiagnosticText(value) : value;
+      typeof value === "string" ? sanitizeDiagnosticText(value) : value;
   }
   const logLine = JSON.stringify(compactPayload);
 
   try {
-    if (level === 'error') {
+    if (level === "error") {
       console.error(`[crosspost] ${logLine}`);
       return;
     }
-    if (level === 'warn') {
+    if (level === "warn") {
       console.warn(`[crosspost] ${logLine}`);
       return;
     }
@@ -92,7 +92,7 @@ export function logCrosspostEvent(
     // diagnostic-allow-silent: this compatibility logger is attempting its fallback transport.
     try {
       const fallbackLine = `[crosspost:fallback:${level}] ${logLine}\n`;
-      if (level === 'error') {
+      if (level === "error") {
         process.stderr.write(fallbackLine);
       } else {
         process.stdout.write(fallbackLine);
@@ -102,4 +102,4 @@ export function logCrosspostEvent(
     }
   }
 }
-import { sanitizeDiagnosticText } from '../../shared/diagnostics';
+import { sanitizeDiagnosticText } from "../../shared/diagnostics";

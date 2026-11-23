@@ -12,8 +12,7 @@ describe("useNotificationSettings", () => {
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     let update:
-      | ReturnType<typeof useNotificationSettings>["update"]
-      | undefined;
+      ReturnType<typeof useNotificationSettings>["update"] | undefined;
     let resolveMutation: ((response: Response) => void) | undefined;
     const mutationResponse = new Promise<Response>((resolve) => {
       resolveMutation = resolve;

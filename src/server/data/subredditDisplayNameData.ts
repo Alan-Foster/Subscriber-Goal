@@ -1,9 +1,9 @@
-import type { RedisClient } from '../types';
+import type { RedisClient } from "../types";
 
-export const subredditDisplayNameKey = 'subreddit_display_name';
+export const subredditDisplayNameKey = "subreddit_display_name";
 
 export async function getSavedSubredditDisplayName(
-  redis: RedisClient
+  redis: RedisClient,
 ): Promise<string | null> {
   const value = await redis.get(subredditDisplayNameKey);
   if (!value || value.length === 0) {
@@ -14,14 +14,14 @@ export async function getSavedSubredditDisplayName(
 
 export async function setSavedSubredditDisplayName(
   redis: RedisClient,
-  subredditDisplayName: string
+  subredditDisplayName: string,
 ): Promise<void> {
   await redis.set(subredditDisplayNameKey, subredditDisplayName);
 }
 
 export async function ensureSavedSubredditDisplayName(
   redis: RedisClient,
-  defaultSubredditName: string
+  defaultSubredditName: string,
 ): Promise<void> {
   const existing = await getSavedSubredditDisplayName(redis);
   if (existing) {

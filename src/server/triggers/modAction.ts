@@ -1,20 +1,20 @@
-import { reddit, redis, context, scheduler } from '@devvit/web/server';
-import { getAppSettings, type ServerAppSettings } from '../settings';
-import { dispatchPostAction, modToPostActionMap } from '../data/crosspostData';
-import { isLinkId, type LinkId } from '../types';
-import { logDiagnostic } from '../../shared/diagnostics';
+import { reddit, redis, context, scheduler } from "@devvit/web/server";
+import { getAppSettings, type ServerAppSettings } from "../settings";
+import { dispatchPostAction, modToPostActionMap } from "../data/crosspostData";
+import { isLinkId, type LinkId } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   appAccountHealthStateKey,
   subscriberGoalAppUsername,
-} from '../core/appAccountHealth';
-import { handleAppAccountModeratorAction } from '../core/appAccountRecovery';
-import { recordScheduledPostDisplacementCheck } from '../core/scheduledPostDisplacement';
-import { getPostUpdateRecheckKey } from '../utils/postStatus';
+} from "../core/appAccountHealth";
+import { handleAppAccountModeratorAction } from "../core/appAccountRecovery";
+import { recordScheduledPostDisplacementCheck } from "../core/scheduledPostDisplacement";
+import { getPostUpdateRecheckKey } from "../utils/postStatus";
 import {
   toNormalizedSubredditName,
   getCrosspostAuthoritySubreddit,
-} from '../crosspost/bookkeeping';
-import { processCrosspostDispatchQueue } from '../crosspost/dispatch';
+} from "../crosspost/bookkeeping";
+import { processCrosspostDispatchQueue } from "../crosspost/dispatch";
 
 export type ModActionEvent = {
   action?: string;
@@ -47,10 +47,10 @@ export async function onModAction(event: ModActionEvent): Promise<void> {
   const isAuthority =
     toNormalizedSubredditName(subredditName) === authoritySubreddit;
   if (isAuthority) {
-    if (event.action === 'wikirevise') {
-      await processCrosspostDispatchQueue(appSettings, 'mod_action_wikirevise');
+    if (event.action === "wikirevise") {
+      await processCrosspostDispatchQueue(appSettings, "mod_action_wikirevise");
     }
-    if (event.action !== 'approvelink') return;
+    if (event.action !== "approvelink") return;
   }
 
   await handleManagedPostModAction(event, appSettings, isAuthority);
@@ -60,25 +60,25 @@ async function handleAppAccountHealthAction(
   event: ModActionEvent,
   subredditName: string,
   currentSubreddit:
-    Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | undefined
+    Awaited<ReturnType<typeof reddit.getCurrentSubreddit>> | undefined,
 ): Promise<void> {
   const moderatorHealthActions = new Set([
-    'removemoderator',
-    'uninvitemoderator',
-    'setpermissions',
-    'addmoderator',
-    'invitemoderator',
-    'acceptmoderatorinvite',
+    "removemoderator",
+    "uninvitemoderator",
+    "setpermissions",
+    "addmoderator",
+    "invitemoderator",
+    "acceptmoderatorinvite",
   ]);
   const targetUsername = event.targetUser?.name
     ?.trim()
-    .replace(/^u\//i, '')
+    .replace(/^u\//i, "")
     .toLowerCase();
   const isModeratorHealthAction = moderatorHealthActions.has(
-    event.action ?? ''
+    event.action ?? "",
   );
   const storedAppUsername = isModeratorHealthAction
-    ? (await redis.hGet(appAccountHealthStateKey, 'appUsername'))
+    ? (await redis.hGet(appAccountHealthStateKey, "appUsername"))
         ?.trim()
         .toLowerCase()
     : undefined;
@@ -110,39 +110,39 @@ async function handleAppAccountHealthAction(
 async function handleManagedPostModAction(
   event: ModActionEvent,
   appSettings: ServerAppSettings,
-  isAuthority: boolean
+  isAuthority: boolean,
 ): Promise<void> {
-  if (event.action === 'unsticky') {
-    logDiagnostic('info', 'scheduled_post_displacement_unpin_received', {
-      workflow: 'scheduled_post_displacement',
+  if (event.action === "unsticky") {
+    logDiagnostic("info", "scheduled_post_displacement_unpin_received", {
+      workflow: "scheduled_post_displacement",
       postId: event.targetPost?.id,
       hasActionedAt: Boolean(event.actionedAt),
     });
   }
 
   if (
-    event.action !== 'unsticky' &&
-    event.action !== 'removelink' &&
-    event.action !== 'approvelink' &&
-    event.action !== 'spamlink'
+    event.action !== "unsticky" &&
+    event.action !== "removelink" &&
+    event.action !== "approvelink" &&
+    event.action !== "spamlink"
   ) {
     return;
   }
 
   if (!event.targetPost) {
-    logDiagnostic('warn', 'mod_action_validation_failed', {
-      workflow: 'mod_action',
-      phase: 'missing_target_post',
-      category: typeof event.action === 'string' ? event.action : 'unknown',
+    logDiagnostic("warn", "mod_action_validation_failed", {
+      workflow: "mod_action",
+      phase: "missing_target_post",
+      category: typeof event.action === "string" ? event.action : "unknown",
     });
     return;
   }
 
   const appAccount = await reddit.getAppUser();
   if (!appAccount) {
-    logDiagnostic('warn', 'mod_action_context_missing', {
-      workflow: 'mod_action',
-      phase: 'app_account_lookup',
+    logDiagnostic("warn", "mod_action_context_missing", {
+      workflow: "mod_action",
+      phase: "app_account_lookup",
       postId: event.targetPost.id,
     });
     return;
@@ -155,12 +155,12 @@ async function handleManagedPostModAction(
     return;
   }
 
-  if (event.action === 'approvelink' && isLinkId(event.targetPost.id)) {
+  if (event.action === "approvelink" && isLinkId(event.targetPost.id)) {
     await clearPostUpdateRecheck(event.targetPost.id);
   }
   if (isAuthority) return;
 
-  if (event.action === 'unsticky') {
+  if (event.action === "unsticky") {
     const moderator = event.moderator?.name?.trim().toLowerCase();
     if (
       moderator &&
@@ -170,7 +170,7 @@ async function handleManagedPostModAction(
       await recordScheduledPostDisplacementCheck(
         redis,
         event.targetPost.id,
-        event.actionedAt
+        event.actionedAt,
       );
     }
     return;
@@ -185,7 +185,7 @@ async function handleManagedPostModAction(
     reddit,
     appSettings,
     event.targetPost.id,
-    mappedAction
+    mappedAction,
   );
 }
 
@@ -194,13 +194,13 @@ async function clearPostUpdateRecheck(postId: LinkId): Promise<void> {
     await redis.del(getPostUpdateRecheckKey(postId));
   } catch (error) {
     logDiagnostic(
-      'warn',
-      'subscriber_goal_update_recheck_clear_failed',
+      "warn",
+      "subscriber_goal_update_recheck_clear_failed",
       {
-        workflow: 'mod_action',
+        workflow: "mod_action",
         postId,
       },
-      error
+      error,
     );
   }
 }
@@ -212,10 +212,10 @@ export {
   getCrosspostAuthoritySubreddit,
   isCrosspostAuthorityInstall,
   toNormalizedSubredditName,
-} from '../crosspost/bookkeeping';
-export { processCrosspostDispatchQueue } from '../crosspost/dispatch';
-export { isMissingSourcePostError } from '../crosspost/pending';
+} from "../crosspost/bookkeeping";
+export { processCrosspostDispatchQueue } from "../crosspost/dispatch";
+export { isMissingSourcePostError } from "../crosspost/pending";
 export type {
   CrosspostIngestionStatus,
   CrosspostIngestionSummary,
-} from '../crosspost/summary';
+} from "../crosspost/summary";
