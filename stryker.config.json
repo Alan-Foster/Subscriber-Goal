@@ -15,7 +15,7 @@
   "mutate": [
     "src/shared/**/*.ts",
     "src/server/utils/redisOwnedLock.ts",
-    "src/server/jobs/*.ts",
+    "src/server/jobs/{queue,runner,record,backoff}.ts",
     "!**/*.test.ts"
   ],
   "reporters": ["progress", "clear-text", "json"],
