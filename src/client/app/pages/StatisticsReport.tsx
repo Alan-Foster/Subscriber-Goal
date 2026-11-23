@@ -41,7 +41,7 @@ export const StatisticsReport = ({
         </button>
         <input
           ref={jsonInputRef}
-          aria-label="Statistics JSON"
+          aria-label={translate(language, "statistics.jsonLabel")}
           className="h-7 min-w-48 flex-1 rounded border border-[color:var(--sg-border)] bg-[color:var(--sg-surface)] px-2 font-mono text-[10px]"
           readOnly
           value={json}
