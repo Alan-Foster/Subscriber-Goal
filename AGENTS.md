@@ -71,10 +71,12 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 | Install                   | `npm ci`            |
 | Unit tests (CI runs this) | `npm run test:unit` |
 | Lint (CI runs this)       | `npm run lint:ci`   |
-| Full local check          | `npm run check`     |
+| Required pre-PR check     | `npm run verify`    |
+| Local checks and auto-fix | `npm run check`     |
 | Build                     | `npm run build`     |
 | Playtest                  | `npm run dev`       |
 
+- Run `npm run verify` before opening a PR. It runs the same checks as CI without rewriting tracked files.
 - `npm run check` **rewrites files**: it runs `eslint --fix` and `prettier --write .`. Commit only formatting changes to files your task touched. Discard formatting changes to unrelated files.
 - Never run `npm run deploy` or `npm run launch`. Never run `devvit upload` or `devvit publish`.
 - Regenerate `package-lock.json` only when dependencies change, and confirm the diff has no unrelated changes (an older npm once dropped `libc` fields from it).
@@ -92,7 +94,7 @@ Every PR description includes:
 1. **What changed and why**, linking the issue.
 2. **Docs consulted**: the Devvit doc pages (URLs) behind each platform API used or changed, or "No Devvit APIs touched".
 3. **Data compatibility**: any Redis key, field, or stored format added or changed, and how old data is handled.
-4. **Verification**: the commands you ran and their results.
+4. **Verification**: the result of `npm run verify` and any additional checks you ran.
 
 ## Review guidelines
 

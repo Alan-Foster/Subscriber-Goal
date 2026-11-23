@@ -21,7 +21,8 @@
     "prettier": "prettier-package-json --write ./package.json && prettier --write .",
     "test:unit": "vitest run",
     "type-check": "tsc --build",
-    "type-check:tests": "tsc -p src/shared/tsconfig.eslint.json && tsc -p src/client/tsconfig.eslint.json && tsc -p src/server/tsconfig.eslint.json"
+    "type-check:tests": "tsc -p src/shared/tsconfig.eslint.json && tsc -p src/client/tsconfig.eslint.json && tsc -p src/server/tsconfig.eslint.json",
+    "verify": "npm run assets:check && npm run format:check && npm run lint:ci && npm run type-check && npm run type-check:tests && npm run i18n:check && npm run test:unit && npm run build"
   },
   "dependencies": {
     "@devvit/analytics": "0.15.4",
