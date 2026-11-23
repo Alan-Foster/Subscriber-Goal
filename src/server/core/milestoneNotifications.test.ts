@@ -154,9 +154,9 @@ describe("milestone notifications", () => {
     const incrBy = vi.fn();
     const expire = vi.fn();
     const result = await processMilestoneNotificationBatch(job, campaign, {
-      notificationClient: { listOptedInUsers, enqueue } as never,
+      notificationClient: { listOptedInUsers, enqueue },
       schedulerClient: { runJob } as never,
-      dailyBudgetClient: { incrBy, expire } as never,
+      dailyBudgetClient: { incrBy, expire },
     });
     expect(result).toEqual({ status: "suppressed", done: true, cursor: "" });
     expect(listOptedInUsers).not.toHaveBeenCalled();
@@ -183,9 +183,9 @@ describe("milestone notifications", () => {
 
     const result = await processMilestoneNotificationBatch(job, campaign, {
       deliveryEnabled: true,
-      notificationClient: { listOptedInUsers, enqueue } as never,
+      notificationClient: { listOptedInUsers, enqueue },
       schedulerClient: { runJob } as never,
-      dailyBudgetClient: { incrBy, expire } as never,
+      dailyBudgetClient: { incrBy, expire },
       stateClient: new StateRedisHarness() as never,
       now: () => now,
     });
@@ -253,9 +253,9 @@ describe("milestone notifications", () => {
     const results = await Promise.all([
       processMilestoneNotificationBatch(job, campaign, {
         deliveryEnabled: true,
-        notificationClient: firstClient as never,
+        notificationClient: firstClient,
         schedulerClient: { runJob: vi.fn() } as never,
-        dailyBudgetClient: dailyBudgetClient as never,
+        dailyBudgetClient: dailyBudgetClient,
         stateClient: new StateRedisHarness() as never,
         now: () => job.completedTime + 1_000,
       }),
@@ -264,9 +264,9 @@ describe("milestone notifications", () => {
         { ...campaign, postId: "t3_other" },
         {
           deliveryEnabled: true,
-          notificationClient: secondClient as never,
+          notificationClient: secondClient,
           schedulerClient: { runJob: vi.fn() } as never,
-          dailyBudgetClient: dailyBudgetClient as never,
+          dailyBudgetClient: dailyBudgetClient,
           stateClient: new StateRedisHarness() as never,
           now: () => job.completedTime + 1_000,
         },
@@ -297,7 +297,7 @@ describe("milestone notifications", () => {
             .fn()
             .mockResolvedValue({ userIds: [], next: undefined }),
           enqueue,
-        } as never,
+        },
         schedulerClient: { runJob } as never,
         stateClient: new StateRedisHarness() as never,
         now: () => job.completedTime + 1_000,
@@ -308,7 +308,7 @@ describe("milestone notifications", () => {
     expect(result).toMatchObject({ done: true, recipients: 0 });
   });
 
-  it.each([
+  it.each<[string, unknown]>([
     [
       "a missing job",
       { version: 2, phase: "prepared", updatedAt: job.completedTime },
@@ -366,8 +366,8 @@ describe("milestone notifications", () => {
           processMilestoneNotificationBatch(job, campaign, {
             deliveryEnabled: true,
             stateClient: stateClient as never,
-            dailyBudgetClient: { incrBy, expire: vi.fn() } as never,
-            notificationClient: { enqueue, listOptedInUsers } as never,
+            dailyBudgetClient: { incrBy, expire: vi.fn() },
+            notificationClient: { enqueue, listOptedInUsers },
             now: () => job.completedTime + 1_000,
           }),
         ).resolves.toEqual({
@@ -443,11 +443,11 @@ describe("milestone notifications", () => {
     const first = processMilestoneNotificationBatch(job, campaign, {
       deliveryEnabled: true,
       stateClient: stateClient as never,
-      dailyBudgetClient: dailyBudgetClient as never,
+      dailyBudgetClient: dailyBudgetClient,
       notificationClient: {
         listOptedInUsers: vi.fn(() => pausedList),
         enqueue,
-      } as never,
+      },
       now: () => now,
     });
     await vi.waitFor(() => expect(stateClient.get).toHaveBeenCalled());
@@ -455,11 +455,11 @@ describe("milestone notifications", () => {
     await processMilestoneNotificationBatch(job, campaign, {
       deliveryEnabled: true,
       stateClient: stateClient as never,
-      dailyBudgetClient: dailyBudgetClient as never,
+      dailyBudgetClient: dailyBudgetClient,
       notificationClient: {
         listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_alice"] }),
         enqueue,
-      } as never,
+      },
       now: () => now,
     });
     releaseList({ userIds: ["t2_alice"] });
@@ -488,7 +488,7 @@ describe("milestone notifications", () => {
         dailyBudgetClient: {
           incrBy: vi.fn().mockResolvedValue(1),
           expire: vi.fn(),
-        } as never,
+        },
         notificationClient: {
           listOptedInUsers: vi.fn().mockResolvedValue({ userIds: ["t2_bob"] }),
           enqueue: vi.fn(() => pausedSend),
@@ -512,7 +512,7 @@ describe("milestone notifications", () => {
         notificationClient: {
           listOptedInUsers: vi.fn(),
           enqueue: vi.fn(),
-        } as never,
+        },
         now: () => now,
       },
     );
@@ -560,7 +560,7 @@ describe("milestone notifications", () => {
       dailyBudgetClient: {
         incrBy: vi.fn().mockResolvedValue(1),
         expire: vi.fn(),
-      } as never,
+      },
       notificationClient: {
         listOptedInUsers: vi
           .fn()
@@ -568,7 +568,7 @@ describe("milestone notifications", () => {
         enqueue: vi
           .fn()
           .mockResolvedValue({ successCount: 1, failureCount: 0 }),
-      } as never,
+      },
       schedulerClient: failedScheduler as never,
       now: () => job.completedTime + 1_000,
     });
@@ -594,7 +594,7 @@ describe("milestone notifications", () => {
       notificationClient: {
         listOptedInUsers: vi.fn(),
         enqueue: vi.fn(),
-      } as never,
+      },
       now: () => milestoneNotificationDeadline(job.completedTime),
     });
     expect(expired.status).toBe("expired");

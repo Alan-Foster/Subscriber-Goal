@@ -176,7 +176,7 @@ function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
 
   const normalized: PendingCrosspost = {
     revisionId: candidate.revisionId,
-    postId: candidate.postId as LinkId,
+    postId: candidate.postId,
     goal: Math.floor(candidate.goal),
     firstSeenMs: Math.floor(candidate.firstSeenMs),
     nextAttemptMs: Math.floor(candidate.nextAttemptMs),
@@ -198,7 +198,7 @@ function toPendingCrosspost(value: unknown): PendingCrosspost | undefined {
     typeof candidate.createdCrosspostId === "string" &&
     /^t3_[\w\d]+$/.test(candidate.createdCrosspostId)
   ) {
-    normalized.createdCrosspostId = candidate.createdCrosspostId as LinkId;
+    normalized.createdCrosspostId = candidate.createdCrosspostId;
   }
   if (
     typeof candidate.persistenceFailureReason === "string" &&

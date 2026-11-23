@@ -1062,7 +1062,7 @@ describe("onboarding reminder", () => {
     const start = nowMs + onboardingReminderDelayMs;
     const fields = {
       [String(goal.operationId)]: "7",
-      [goal.operationId + ":firstDeferredAt"]: String(
+      [`${String(goal.operationId)}:firstDeferredAt`]: String(
         start - automaticGoalPrerequisiteMaxAgeMs,
       ),
     };

@@ -24,7 +24,7 @@ describe("subscription attempt receipts", () => {
     const set = vi.fn().mockResolvedValue("OK");
 
     await storeSubscriptionAttemptReceipt(
-      { set } as unknown as RedisClient,
+      { set },
       attemptId,
       "t3_post",
       "t2_user",
@@ -73,21 +73,11 @@ describe("subscription attempt receipts", () => {
     );
 
     await expect(
-      hasSubscriptionAttemptReceipt(
-        { get } as unknown as RedisClient,
-        attemptId,
-        "t3_post",
-        "t2_user",
-      ),
+      hasSubscriptionAttemptReceipt({ get }, attemptId, "t3_post", "t2_user"),
     ).resolves.toBe(true);
     vi.setSystemTime(evidence.expiresAt + 1);
     await expect(
-      hasSubscriptionAttemptReceipt(
-        { get } as unknown as RedisClient,
-        attemptId,
-        "t3_post",
-        "t2_user",
-      ),
+      hasSubscriptionAttemptReceipt({ get }, attemptId, "t3_post", "t2_user"),
     ).resolves.toBe(false);
     vi.useRealTimers();
   });

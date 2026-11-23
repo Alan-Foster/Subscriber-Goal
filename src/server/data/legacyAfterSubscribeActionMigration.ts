@@ -98,6 +98,7 @@ export async function initializeLegacyAfterSubscribeActionMigration(
     ),
   });
   console.info(
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Preserve the legacy migration diagnostic until #139 removes it.
     `[legacyAfterSubscribeActionMigration] initialized: version=${legacyAfterSubscribeActionMigrationVersion} candidates=${candidatePostIds.length} subredditType=${String(subreddit.type ?? "unknown")}`,
   );
 }

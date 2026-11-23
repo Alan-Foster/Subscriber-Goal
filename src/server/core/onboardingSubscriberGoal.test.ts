@@ -1690,7 +1690,7 @@ describe("onboarding subscriber goal", () => {
       reddit.getAppUser.mockResolvedValue({
         username: "subscriber-goal",
         getModPermissionsForSubreddit: permissions,
-      } as never);
+      });
       await initializeOnboardingSubscriberGoal(redis as never, {
         lifecycleSource: "install",
         nowMs,

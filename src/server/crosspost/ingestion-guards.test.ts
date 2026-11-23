@@ -12,27 +12,28 @@ import { scheduledPostDisplacementKey } from "../core/scheduledPostDisplacement"
 import type { ServerAppSettings } from "../settings";
 import { crosspostBookkeepingCleanupLastRunKey } from "./bookkeeping";
 
-const hoisted = vi.hoisted(() => ({
-  mockContext: {} as {
-    subredditName?: string;
-    subredditId?: string;
-  },
-  mockReddit: {
-    getAppUser: vi.fn(),
-    updateWikiPage: vi.fn(),
-    getCurrentSubreddit: vi.fn(),
-    getPostById: vi.fn(),
-    getSubredditInfoById: vi.fn(),
-    getNewPosts: vi.fn(),
-    crosspost: vi.fn(),
-  },
-  safeGetWikiPageRevisionsMock: vi.fn(),
-  loggedEvents: [] as Array<Record<string, unknown>>,
-  redisState: {
-    redisMock: undefined as unknown,
-  },
-  handleAppAccountModeratorAction: vi.fn(),
-}));
+const hoisted = vi.hoisted(() => {
+  const mockContext: { subredditName?: string; subredditId?: string } = {};
+  const redisState: { redisMock: InMemoryRedis | undefined } = {
+    redisMock: undefined,
+  };
+  return {
+    mockContext,
+    mockReddit: {
+      getAppUser: vi.fn(),
+      updateWikiPage: vi.fn(),
+      getCurrentSubreddit: vi.fn(),
+      getPostById: vi.fn(),
+      getSubredditInfoById: vi.fn(),
+      getNewPosts: vi.fn(),
+      crosspost: vi.fn(),
+    },
+    safeGetWikiPageRevisionsMock: vi.fn(),
+    loggedEvents: [] as Array<Record<string, unknown>>,
+    redisState,
+    handleAppAccountModeratorAction: vi.fn(),
+  };
+});
 
 const mockContext = hoisted.mockContext;
 const mockReddit = hoisted.mockReddit;

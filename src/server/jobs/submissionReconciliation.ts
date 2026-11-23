@@ -252,5 +252,5 @@ async function findSubmissionMarkerMatch({
     const postData = await reddit.getPostData(post.id);
     if (postData?.submissionMarker === marker) matches.push(post);
   }
-  return matches.length === 1 ? (matches[0] as GoalPost) : undefined;
+  return matches.length === 1 ? matches[0] : undefined;
 }

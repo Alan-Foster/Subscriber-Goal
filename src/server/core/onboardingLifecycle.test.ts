@@ -581,21 +581,21 @@ describe("onboarding lifecycle reconciliation", () => {
     } as never);
     const activity = await import("../data/ctaActivity");
     vi.spyOn(activity, "ensureCommunityPostActivityBackfill").mockResolvedValue(
-      undefined as never,
+      undefined,
     );
     const postKind = await import("../data/postKindMigration");
     vi.spyOn(postKind, "initializePostKindMigration").mockResolvedValue(
-      undefined as never,
+      undefined,
     );
     const legacy = await import("../data/legacyAfterSubscribeActionMigration");
     vi.spyOn(
       legacy,
       "initializeLegacyAfterSubscribeActionMigration",
-    ).mockResolvedValue(undefined as never);
+    ).mockResolvedValue(undefined);
     const flair = await import("./subscriberGoalPostFlair");
     vi.spyOn(flair, "ensureSubscriberGoalPostFlair").mockResolvedValue({
       id: "flair_1",
-    } as never);
+    });
     vi.spyOn(flair, "backfillSubscriberGoalPostFlair").mockResolvedValue({
       applied: 0,
       failed: [],

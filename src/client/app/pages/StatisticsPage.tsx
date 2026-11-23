@@ -80,6 +80,7 @@ const useStatisticsExport = (
       );
       jsonInputRef.current?.focus();
       jsonInputRef.current?.select();
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- Keep copying available when the webview denies Clipboard API access.
       if (document.execCommand("copy")) {
         showToast({
           text: translate(language, "statistics.copied"),

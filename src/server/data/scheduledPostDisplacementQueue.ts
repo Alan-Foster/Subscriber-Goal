@@ -13,7 +13,7 @@ type Update<Result> = {
 
 async function updateChecks<Result>(
   redis: RedisClient,
-  prepare: () => Promise<Update<Result>>,
+  prepare: () => Update<Result> | Promise<Update<Result>>,
 ): Promise<Result> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const tx = await redis.watch(scheduledPostDisplacementKey);
@@ -47,7 +47,7 @@ export async function enqueueDisplacementCheck(
   postId: LinkId,
   unpinnedAt: number,
 ): Promise<void> {
-  await updateChecks(redis, async () => ({
+  await updateChecks(redis, () => ({
     result: undefined,
     write: async (tx) => {
       await tx.hSet(scheduledPostDisplacementKey, {

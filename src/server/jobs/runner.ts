@@ -33,7 +33,7 @@ type JobWorker<T extends JobRecord> = {
   lockKey: string;
   lockTtlMs: number;
   backoff: BackoffPolicy;
-  index?(redis: RedisClient, nowMs: number): Promise<void>;
+  index?(this: void, redis: RedisClient, nowMs: number): Promise<void>;
   handle(
     record: Partial<T>,
     startedAt: number,

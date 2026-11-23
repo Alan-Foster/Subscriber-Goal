@@ -77,7 +77,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function idsOf(snapshot: HighlightedPostInfo[]): LinkId[] {
-  return snapshot.map(({ postId }) => postId as LinkId);
+  return snapshot.map(({ postId }) => postId);
 }
 
 function highlightMetadata(info: HighlightedPostInfo | undefined): {
@@ -279,7 +279,7 @@ async function fetchHighlightablePost(
   reddit: RedditClient,
   postId: LinkId,
 ): Promise<HighlightablePost> {
-  return (await reddit.getPostById(postId)) as unknown as HighlightablePost;
+  return await reddit.getPostById(postId);
 }
 
 async function rollbackUnverifiedReplacement(
@@ -507,7 +507,7 @@ async function makeRoomForHighlight(
       );
       issues.push({
         category: "cleanup",
-        postId: removableInfo.postId as LinkId,
+        postId: removableInfo.postId,
         message: toErrorMessage(error),
       });
       const rollbackOutcome = await restoreRemovedHighlights(
@@ -529,9 +529,7 @@ async function makeRoomForHighlight(
         issues,
         capacityOutcome: "blocked",
         cleanupOutcome: "failed",
-        removedManagedHighlightIds: removed.map(
-          ({ info }) => info.postId as LinkId,
-        ),
+        removedManagedHighlightIds: removed.map(({ info }) => info.postId),
         preservedHighlightIds: idsOf(await subreddit.getHighlightedPosts()),
         rollbackOutcome,
       });
@@ -546,7 +544,7 @@ async function removeManagedHighlightForCapacity(
   const { reddit, subreddit, options, removed } = attempt;
   const removablePost = await fetchHighlightablePost(
     reddit,
-    removableInfo.postId as LinkId,
+    removableInfo.postId,
   );
   if (
     typeof removablePost.unhighlight !== "function" ||
@@ -601,9 +599,7 @@ async function reportCapacityChange(
     issues,
     capacityOutcome,
     cleanupOutcome,
-    removedManagedHighlightIds: removed.map(
-      ({ info }) => info.postId as LinkId,
-    ),
+    removedManagedHighlightIds: removed.map(({ info }) => info.postId),
     preservedHighlightIds: idsOf(await subreddit.getHighlightedPosts()),
     rollbackOutcome,
   });
@@ -679,9 +675,7 @@ async function reportUnverifiedWrite(
       issues,
       capacityOutcome,
       cleanupOutcome,
-      removedManagedHighlightIds: removed.map(
-        ({ info }) => info.postId as LinkId,
-      ),
+      removedManagedHighlightIds: removed.map(({ info }) => info.postId),
       preservedHighlightIds: idsOf(verification.snapshot).filter(
         (postId) => postId !== post.id,
       ),
@@ -705,9 +699,7 @@ async function reportUnverifiedWrite(
     issues,
     capacityOutcome,
     cleanupOutcome,
-    removedManagedHighlightIds: removed.map(
-      ({ info }) => info.postId as LinkId,
-    ),
+    removedManagedHighlightIds: removed.map(({ info }) => info.postId),
     preservedHighlightIds: idsOf(await subreddit.getHighlightedPosts()).filter(
       (postId) => postId !== post.id,
     ),
@@ -725,7 +717,7 @@ async function rollbackConcurrentDisplacement(
   const displaced = preWrite.filter(({ postId }) => !afterWriteIds.has(postId));
   const preWriteIds = new Set(idsOf(preWrite));
   const unexpected = afterWrite.filter(
-    ({ postId }) => postId !== post.id && !preWriteIds.has(postId as LinkId),
+    ({ postId }) => postId !== post.id && !preWriteIds.has(postId),
   );
   const plausibleCapacityEviction =
     preWrite.length === communityHighlightLimit - 1 &&
@@ -785,9 +777,7 @@ async function rollbackConcurrentDisplacement(
       issues,
       capacityOutcome,
       cleanupOutcome,
-      removedManagedHighlightIds: removed.map(
-        ({ info }) => info.postId as LinkId,
-      ),
+      removedManagedHighlightIds: removed.map(({ info }) => info.postId),
       preservedHighlightIds: idsOf(finalSnapshot).filter(
         (postId) => postId !== post.id,
       ),
@@ -820,7 +810,7 @@ async function restoreDisplacedHighlights(
   for (const info of displaced) {
     displacedPosts.push({
       info,
-      post: await fetchHighlightablePost(reddit, info.postId as LinkId),
+      post: await fetchHighlightablePost(reddit, info.postId),
     });
   }
   return restoreRemovedHighlights(
@@ -842,10 +832,7 @@ async function cleanObsoleteHighlights(
   if (cleanupTargets.length > 0) attempt.cleanupOutcome = "completed";
   for (const info of cleanupTargets) {
     try {
-      const obsoletePost = await fetchHighlightablePost(
-        reddit,
-        info.postId as LinkId,
-      );
+      const obsoletePost = await fetchHighlightablePost(reddit, info.postId);
       if (
         typeof obsoletePost.unhighlight !== "function" ||
         typeof obsoletePost.isHighlighted !== "function"
@@ -867,7 +854,7 @@ async function cleanObsoleteHighlights(
       attempt.cleanupOutcome = "failed";
       issues.push({
         category: "cleanup",
-        postId: info.postId as LinkId,
+        postId: info.postId,
         message: toErrorMessage(error),
       });
       logDiagnostic(
@@ -920,9 +907,7 @@ async function verifyFinalHighlight(
     issues,
     capacityOutcome,
     cleanupOutcome,
-    removedManagedHighlightIds: removed.map(
-      ({ info }) => info.postId as LinkId,
-    ),
+    removedManagedHighlightIds: removed.map(({ info }) => info.postId),
     preservedHighlightIds: idsOf(finalSnapshot).filter(
       (postId) => postId !== post.id,
     ),

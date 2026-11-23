@@ -130,7 +130,7 @@ const decode = (
 const parseList = (raw: string | undefined): string[] => {
   if (!raw) return [];
   try {
-    const value = JSON.parse(raw);
+    const value: unknown = JSON.parse(raw);
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === "string")
       : [];

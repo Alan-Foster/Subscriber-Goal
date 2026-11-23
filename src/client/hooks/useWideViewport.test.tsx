@@ -43,10 +43,10 @@ describe("useWideViewport", () => {
       media: wideViewportMediaQuery,
       onchange: null,
       addEventListener: vi.fn((_type: string, listener: EventListener) => {
-        listeners.add(listener as (event: MediaQueryListEvent) => void);
+        listeners.add(listener);
       }),
       removeEventListener: vi.fn((_type: string, listener: EventListener) => {
-        listeners.delete(listener as (event: MediaQueryListEvent) => void);
+        listeners.delete(listener);
       }),
       addListener: vi.fn(),
       removeListener: vi.fn(),

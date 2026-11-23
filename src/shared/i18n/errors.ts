@@ -1,5 +1,5 @@
 import type { ErrorResponse } from "../types/api";
-import { isMessageKey, translate, type MessageValues } from "./catalog";
+import { isMessageKey, translate } from "./catalog";
 
 export type LocalizableError = Pick<ErrorResponse, "message"> &
   Partial<Pick<ErrorResponse, "messageKey" | "messageParams">>;
@@ -11,11 +11,7 @@ export function localizeError(
 ): string {
   if (error && isMessageKey(error.messageKey)) {
     try {
-      return translate(
-        language,
-        error.messageKey,
-        (error.messageParams ?? {}) as MessageValues,
-      );
+      return translate(language, error.messageKey, error.messageParams ?? {});
     } catch {
       // diagnostic-allow-silent: a compatible English message remains the defensive wire fallback.
     }
