@@ -19,22 +19,28 @@ Before you write or change code that touches any Devvit or Reddit capability, ch
 - Settings, forms, menu actions, realtime, notifications, analytics
 - `devvit.json`, permissions, and request or storage limits
 
-How to check, in order of preference:
+How to check:
 
-1. Use the `devvit_search` tool from the `devvit` MCP server. For Redis commands, search `redis.<command>`, for example `redis.zRange`.
-2. If that tool is unavailable, read the docs index at https://developers.reddit.com/docs/llms.txt and fetch the specific `.md` pages it lists.
+1. **Start with the [Devvit docs map](docs/devvit-docs-map.md).** Use both views for behavior changes and the area view for refactors, type or lint changes, and tests that preserve behavior. Read each applicable **Required** page once, including the **Always read** pages. Use the map to prioritize **Recommended** reading.
+2. For each specific question the change raises, and for anything the map doesn't cover, use the `devvit_search` tool from the `devvit` MCP server. Ask one question per search, using API names, option names, or error text. For Redis commands, search `redis.<command>`, for example `redis.zRange`. If that tool is unavailable, read the docs index at https://developers.reddit.com/docs/llms.txt and fetch the specific `.md` pages it lists.
 3. Confirm signatures against the installed type definitions in `node_modules/@devvit/*`. The installed types win over the docs (see "Platform version").
+4. If you find a page the map should have listed, add it to the map in the same PR.
 
 Do not rely on memory for Devvit behavior. If the docs do not answer the question, say so in the PR. Do not guess.
 
 ### Known platform limits (confirmed)
 
-- A server request or scheduled job must finish within **30 seconds**. Any loop over posts, users, or Redis keys must be bounded and batched, and must save a cursor to resume on the next run.
+- A server request or scheduled job must finish within **30 seconds**. Any loop over posts, users, or Redis keys must be bounded and batched, and must save a cursor to resume on the next run. See **Limits and Policies** in the [Devvit FAQ](https://developers.reddit.com/docs/guides/faq).
 - The scheduler allows **10 live recurring actions** per installation. `runJob()` allows up to **60 calls per minute** and **60 deliveries per minute** per installation. See [Scheduler limitations](https://developers.reddit.com/docs/capabilities/server/scheduler#limitations).
 - Redis storage is capped at **5 GB** for published apps and **100 MB** for unpublished (playtest) apps. Every new key needs an expiration or a cleanup path.
+- Redis transactions have a **5-second execution timeout**. Devvit Redis does not support pipelining. The [Devvit 0.15 Redis reference](https://developers.reddit.com/docs/versioned_docs/version-0.15/capabilities/server/redis) lists 20 concurrent transactions per installation by default. The [current Redis docs](https://developers.reddit.com/docs/capabilities/server/redis) list both 20 and 30, so the current concurrency cap is unresolved.
 - `reddit.getPostById` is typed as `Promise<Post>` (never `undefined`). Code must still handle a post that has been deleted or removed. Wrap the call and check the post's status.
 
 Add to this list only from the docs or from a confirmed answer by the Devvit AI assistant, with a link or date.
+
+### Observed platform incidents
+
+- On 2026-11-23, a Redis transaction failed with `transaction not found`. The public Redis docs do not describe this error.
 
 ## Project rules
 
@@ -49,6 +55,8 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 - Release locks only through `releaseOwnedRedisLock` (`src/server/utils/redisOwnedLock.ts`). Never `get` a lock and then `del` it: if the lock expired in between, that deletes another run's lock.
 - Do not create a new hand-written lock, backoff formula, or "next run at" state machine when an existing helper or state can be reused. Search for one first and name it in the PR.
 - Retries must have a cap and an exhausted state that is logged or reported. Never retry silently forever.
+- Size request-scoped lock TTLs from the 30-second request budget with room for cleanup. For leases that span requests, check ownership and recovery across runs. Justify any lock or lease TTL over 2 minutes in the PR. Before shortening one, check whether another worker could start while the first worker's external operation is still unresolved.
+- Treat a busy lock as normal contention. Trigger and job callers should skip or defer the work and log the outcome. Throw only when the work cannot safely be deferred.
 
 ### Code size and structure
 
@@ -95,7 +103,7 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 Every PR description includes:
 
 1. **What changed and why**, linking the issue.
-2. **Docs consulted**: the Devvit doc pages (URLs) behind each platform API used or changed, or "No Devvit APIs touched".
+2. **Docs consulted**: the Devvit doc pages (URLs) behind each platform API used or changed, and the exact `devvit_search` queries you ran with what each answered, or "No Devvit APIs touched".
 3. **Data compatibility**: any Redis key, field, or stored format added or changed, and how old data is handled.
 4. **Verification**: the result of `npm run verify` and any additional checks you ran.
 
@@ -108,6 +116,7 @@ When reviewing a PR in this repository, flag:
 - A new Redis key without an expiration or cleanup path, or any change to an existing key's string.
 - A read-then-write on shared Redis state where concurrent or repeated runs could corrupt it.
 - A lock released without `releaseOwnedRedisLock`, or a new hand-written lock, backoff, or timer state where an existing one could be used.
+- When a PR touches a workflow or updates applicable platform guidance, check existing locks and leases in the affected workflows against the execution budget. Trace acquisition, renewal, release, and contention. Flag TTLs over 2 minutes without a justification and record existing findings for follow-up.
 - A retry without a cap or an exhausted state.
 - New duplicate logic when an existing helper already does the job.
 - Missing tests for the cases listed under "Tests".
