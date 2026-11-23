@@ -242,7 +242,7 @@ describe("cleanupCrosspostBookkeeping", () => {
 
   it("does not advance cleanup last-run marker when cleanup fails", async () => {
     class ThrowingRedis extends InMemoryRedis {
-      async hGetAll(key: string): Promise<Record<string, string>> {
+      override async hGetAll(key: string): Promise<Record<string, string>> {
         if (key === crosspostListKey) {
           throw new Error("forced cleanup failure");
         }

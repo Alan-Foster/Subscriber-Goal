@@ -269,7 +269,6 @@ describe("localization catalog", () => {
       [
         ...new Set([...message.matchAll(pattern)].map((match) => match[1])),
       ].sort();
-    const english = localizationCatalog.locales.en.messages;
     for (const language of appLanguages) {
       const locale = localizationCatalog.locales[language];
       for (const key of Object.keys(localizationCatalog.definitions) as Array<

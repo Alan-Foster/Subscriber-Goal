@@ -1,3 +1,4 @@
+import type { LinkId } from "../types";
 import { describe, expect, it, vi } from "vitest";
 import {
   communityHighlightLimit,
@@ -6,9 +7,9 @@ import {
 
 const verification = { maxWaitMs: 0, intervalMs: 0 };
 
-function createHarness(initialIds: string[]) {
+function createHarness(initialIds: LinkId[]) {
   let ids = [...initialIds];
-  const makePost = (id: string) => ({
+  const makePost = (id: LinkId) => ({
     id,
     highlight: vi.fn(async () => {
       if (!ids.includes(id)) ids.push(id);
@@ -18,21 +19,19 @@ function createHarness(initialIds: string[]) {
     }),
     isHighlighted: vi.fn(async () => ids.includes(id)),
   });
-  const posts = new Map<string, ReturnType<typeof makePost>>();
+  const posts = new Map<LinkId, ReturnType<typeof makePost>>();
   for (const id of initialIds) posts.set(id, makePost(id));
   const target = makePost("t3_target");
   posts.set(target.id, target);
   const subreddit = {
     name: "ExampleSub",
-    getHighlightedPosts: vi.fn(async () =>
-      ids.map((postId) => ({ postId: postId as `t3_${string}` })),
-    ),
-    reorderHighlightedPosts: vi.fn(async (order: readonly `t3_${string}`[]) => {
+    getHighlightedPosts: vi.fn(async () => ids.map((postId) => ({ postId }))),
+    reorderHighlightedPosts: vi.fn(async (order: readonly LinkId[]) => {
       ids = [...order];
     }),
   };
   const reddit = {
-    getPostById: vi.fn(async (id: string) => posts.get(id)),
+    getPostById: vi.fn(async (id: LinkId) => posts.get(id)),
   };
   return { reddit, subreddit, target, posts, getIds: () => ids };
 }
@@ -61,7 +60,7 @@ describe("Community Highlights manager", () => {
   it("does not attempt a seventh highlight when no managed slot is removable", async () => {
     const ids = Array.from(
       { length: communityHighlightLimit },
-      (_, index) => `t3_other${index}`,
+      (_, index): LinkId => `t3_other${index}`,
     );
     const harness = createHarness(ids);
 
@@ -81,7 +80,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("replaces only an explicitly managed highlight when all slots are full", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_oldgoal",
       "t3_other1",
       "t3_other2",
@@ -111,7 +110,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("restores a removed managed highlight with its metadata in a different slot", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_oldgoal",
       "t3_other1",
       "t3_other2",
@@ -123,7 +122,7 @@ describe("Community Highlights manager", () => {
     const expiration = new Date(Date.now() + 60 * 60 * 1000);
     harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
       harness.getIds().map((postId) => ({
-        postId: postId as `t3_${string}`,
+        postId,
         ...(postId === "t3_oldgoal"
           ? {
               highlightLabel: "EVENT" as const,
@@ -155,7 +154,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("restores the displaced app pin when a listed replacement cannot be independently verified", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_old_tiny",
       "t3_other1",
       "t3_other2",
@@ -191,7 +190,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("does not restore a managed highlight whose expiration passed during rollback", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_oldgoal",
       "t3_other1",
       "t3_other2",
@@ -203,7 +202,7 @@ describe("Community Highlights manager", () => {
     const expiration = new Date(Date.now() - 1_000);
     harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
       harness.getIds().map((postId) => ({
-        postId: postId as `t3_${string}`,
+        postId,
         ...(postId === "t3_oldgoal" ? { highlightedUntil: expiration } : {}),
       })),
     );
@@ -225,7 +224,7 @@ describe("Community Highlights manager", () => {
     const expiration = new Date(Date.now() + 60 * 60 * 1000);
     harness.subreddit.getHighlightedPosts.mockImplementation(async () =>
       harness.getIds().map((postId) => ({
-        postId: postId as `t3_${string}`,
+        postId,
         ...(postId === "t3_target"
           ? {
               highlightLabel: "MEGATHREAD" as const,
@@ -251,7 +250,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("does not highlight when a full-capacity removal is a silent no-op", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_oldgoal",
       "t3_other1",
       "t3_other2",
@@ -292,9 +291,7 @@ describe("Community Highlights manager", () => {
     harness.subreddit.getHighlightedPosts.mockImplementation(async () => {
       snapshots += 1;
       if (snapshots === 3) harness.getIds().push("t3_moderator");
-      return harness
-        .getIds()
-        .map((postId) => ({ postId: postId as `t3_${string}` }));
+      return harness.getIds().map((postId) => ({ postId }));
     });
 
     const result = await highlightAndVerifyPost(
@@ -335,7 +332,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("rolls back when a concurrent sixth highlight makes the app write seventh", async () => {
-    const original = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e"];
+    const original: LinkId[] = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e"];
     const harness = createHarness(original);
     harness.target.highlight.mockImplementationOnce(async () => {
       const ids = harness.getIds();
@@ -459,7 +456,7 @@ describe("Community Highlights manager", () => {
   });
 
   it("retains both the triggering issue and a rollback failure", async () => {
-    const ids = [
+    const ids: LinkId[] = [
       "t3_oldgoal",
       "t3_other1",
       "t3_other2",

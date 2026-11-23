@@ -199,7 +199,7 @@ describe("publicApi routes", () => {
     hoisted.getSubscriberTrackingGeneration.mockResolvedValue("");
     hoisted.getPendingSubscriberTracking.mockResolvedValue(undefined);
     hoisted.persistAcceptedSubscriberTracking.mockImplementation(
-      async (redis: unknown, input: Record<string, unknown>) => ({
+      async (_redis: unknown, input: Record<string, unknown>) => ({
         operation: { ...input, phase: "pending", attempts: 0 },
         created: true,
       }),
@@ -454,8 +454,10 @@ describe("publicApi routes", () => {
     await routes.get(apiRoutes.init)?.({} as Request, res);
 
     const response = json.mock.calls[0]?.[0] as InitResponse;
-    expect(response.state.headerText).toBe("Custom Header");
     expect(response.state.postHeight).toBe("short");
+    if (response.state.postHeight !== "short")
+      throw new Error("Expected short goal state");
+    expect(response.state.headerText).toBe("Custom Header");
     expect(response.state.afterSubscribeAction).toEqual({
       type: "link",
       buttonText: "Join the Discord",
@@ -687,6 +689,11 @@ describe("publicApi routes", () => {
       );
 
       const response = json.mock.calls[0]?.[0] as InitResponse;
+      if (
+        response.state.postHeight === "tiny" ||
+        response.state.postHeight === "cta"
+      )
+        throw new Error("Expected subscriber goal state");
       expect(response.state.subreddit.isNsfw).toBe(expected);
     },
   );

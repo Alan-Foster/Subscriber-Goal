@@ -50,7 +50,9 @@ type ZEntry = { member: string; score: number };
 
 class InMemoryRedis {
   async watch(...keys: string[]) {
-    if (keys.length === 1) return watchTestString(this, keys[0]);
+    const [key] = keys;
+    if (keys.length === 1 && key !== undefined)
+      return watchTestString(this, key);
 
     const snapshot = () =>
       JSON.stringify(keys.map((key) => [...(this.hashes.get(key) ?? [])]));

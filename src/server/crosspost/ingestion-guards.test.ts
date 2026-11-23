@@ -130,8 +130,13 @@ class InMemoryRedis {
   }
 
   async watch(...keys: string[]) {
-    if (keys.length === 1 && (await this.get(keys[0])) !== undefined) {
-      return watchTestString(this, keys[0]);
+    const [key] = keys;
+    if (
+      keys.length === 1 &&
+      key !== undefined &&
+      (await this.get(key)) !== undefined
+    ) {
+      return watchTestString(this, key);
     }
     const transaction: {
       multi(): Promise<void>;
@@ -264,8 +269,8 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
   beforeEach(() => {
     redisMock = new InMemoryRedis();
     hoisted.redisState.redisMock = redisMock;
-    mockContext.subredditName = undefined;
-    mockContext.subredditId = undefined;
+    delete mockContext.subredditName;
+    delete mockContext.subredditId;
     mockReddit.getAppUser
       .mockReset()
       .mockResolvedValue({ id: "t2_app", username: "subscriber-goal" });

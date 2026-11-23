@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Gate } from "../testing/faultHarness";
 import { subscriberGoalPostKind } from "../../shared/postKind";
 import {
   postHeightSuffix,
@@ -432,23 +433,22 @@ describe("post kind compatibility migration", () => {
     const redis = new TestRedis();
     await initializePostKindMigration(asRedis(redis), ["t3_pending"]);
     const post = { mergePostData: vi.fn() };
-    const started = Promise.withResolvers<void>();
-    const resume = Promise.withResolvers<void>();
+    const gate = new Gate();
     const reddit = {
       getPostById: vi.fn(async () => {
-        started.resolve();
-        await resume.promise;
+        gate.arrive();
+        await gate.released;
         return post;
       }),
     };
     const migrate = () =>
       processPostKindMigrationBatch(reddit as never, asRedis(redis));
     const processing = migrate();
-    await started.promise;
+    await gate.reached;
     try {
       await expect(migrate()).resolves.toMatchObject({ scanned: 0, failed: 0 });
     } finally {
-      resume.resolve();
+      gate.release();
     }
     await processing;
     expect(reddit.getPostById).toHaveBeenCalledOnce();

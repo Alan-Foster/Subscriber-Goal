@@ -26,7 +26,9 @@ const createClient = () => {
       journeyId = "journey-1";
       return { journeyId, receipt: validReceipt };
     }),
-    interaction: vi.fn(async () => ({ receipt: validReceipt })),
+    interaction: vi.fn<JourneyClient["interaction"]>(async () => ({
+      receipt: validReceipt,
+    })),
     progress: vi.fn(async () => ({ receipt: validReceipt })),
     endJourney: vi.fn(async () => {
       journeyId = undefined;
@@ -151,7 +153,7 @@ describe("GoalJourneyAnalytics", () => {
     });
     await analytics.settled();
 
-    const [{ actionDetails }] = client.interaction.mock.calls[0] ?? [];
+    const actionDetails = client.interaction.mock.calls[0]?.[0].actionDetails;
     expect(client.interaction).toHaveBeenCalledWith(
       expect.objectContaining({ action: "promo_subgoal_activated" }),
     );

@@ -153,6 +153,7 @@ describe("resolveAfterSubscribeAction", () => {
         resolveAfterSubscribeAction({
           type,
           buttonText: "View a Post",
+          url: undefined,
           colorTheme: "pink",
           fallbackColorTheme: "red",
         }),
@@ -172,6 +173,7 @@ describe("resolveAfterSubscribeAction", () => {
       resolveAfterSubscribeAction({
         type: "top-post-day",
         buttonText: "No",
+        url: undefined,
         colorTheme: "blue",
         fallbackColorTheme: "red",
         invalidConfigurationFallback: createTopPostFallbackAction({

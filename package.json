@@ -20,7 +20,8 @@
     "launch": "npm run build && npm run deploy && devvit publish",
     "prettier": "prettier-package-json --write ./package.json && prettier --write .",
     "test:unit": "vitest run",
-    "type-check": "tsc --build"
+    "type-check": "tsc --build",
+    "type-check:tests": "tsc -p src/shared/tsconfig.eslint.json && tsc -p src/client/tsconfig.eslint.json && tsc -p src/server/tsconfig.eslint.json"
   },
   "dependencies": {
     "@devvit/analytics": "0.15.4",
