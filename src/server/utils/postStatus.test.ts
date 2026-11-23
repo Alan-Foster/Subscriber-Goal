@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  getPostAvailability,
-  getTerminalRemovedByCategory,
-  isMissingPostError,
-} from "./postStatus";
+import { getPostAvailability, isMissingPostError } from "./postStatus";
 
 describe("post availability", () => {
   it.each(["deleted", "author"])(
@@ -13,9 +9,6 @@ describe("post availability", () => {
         status: "terminal",
         category,
       });
-      expect(
-        getTerminalRemovedByCategory({ removedByCategory: category }),
-      ).toBe(category);
     },
   );
   it.each([
@@ -33,9 +26,6 @@ describe("post availability", () => {
       status: "temporarily_removed",
       category,
     });
-    expect(
-      getTerminalRemovedByCategory({ removedByCategory: category }),
-    ).toBeUndefined();
   });
   it.each([undefined, null, "", "   "])(
     "treats an empty category %j as active when no removal flag is set",
@@ -57,7 +47,6 @@ describe("post availability", () => {
     undefined,
   ])("keeps unavailable or uncertain metadata %j nonterminal", (post) => {
     expect(getPostAvailability(post).status).toBe("temporarily_removed");
-    expect(getTerminalRemovedByCategory(post)).toBeUndefined();
   });
   it("preserves confirmed missing versus transient lookup classification", () => {
     expect(

@@ -14,7 +14,6 @@ import { ensureExistingSubscriberGoalHighlighted } from "./highlightReconciliati
 import {
   appRepairLockKey,
   appRepairStateKey,
-  appRepairVersion,
   scheduleHighlightRepair,
   recurringHighlightRepairIntervalMs,
   appRepairJob,
@@ -28,7 +27,7 @@ import { isSubscriberGoalPostRetired } from "./postRetirement";
 import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 import { defineDueJob, dispatchDueJobs } from "../jobs/runner";
 
-export { appRepairLockKey, appRepairStateKey, appRepairVersion };
+export { appRepairLockKey, appRepairStateKey };
 const repairBackoff = { baseMs: 5 * 60 * 1000, maxMs: 60 * 60 * 1000 };
 export { recurringHighlightRepairIntervalMs };
 

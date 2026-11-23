@@ -1,9 +1,3 @@
-export {
-  formatSubscriberCount,
-  formatSubscriberCount as formatNumberAlwaysRound,
-  formatSubscriberCount as formatNumberUnlessExact,
-} from "../../shared/numberFormat";
-
 export const getDefaultSubscriberGoal = (subscriberCount: number): number => {
   const thresholds = [
     5, 10, 15, 20, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000,

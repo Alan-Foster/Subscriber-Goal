@@ -1,24 +1,10 @@
 import type { RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
-import type { BasicUserData } from "./basicData";
 import {
-  addRecentSubscriberPostIndex,
   eraseFromRecentSubscribers,
   findRecentSubscriberUserIdsByUsername,
-  postRecentSubscriberOrderSuffix,
-  postRecentSubscriberSuffix,
-  recentSubscriberPostsByUsernameKey,
-  subscriberGoalsKey,
 } from "./subGoalData";
-import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 import { invalidateSubscriberTracking } from "./subscriberTracking";
-import {
-  compareRecentSubscriberOrder,
-  parseRecentSubscriberOrder,
-  serializeRecentSubscriberOrder,
-  type RecentSubscriberOrder,
-} from "./recentSubscriberOrder";
-import { retiredSubscriberGoalKeyPrefix } from "../core/postRetirement";
 import {
   subscriberStatsKey,
   subscriberStatsByUserIdKey,
@@ -72,9 +58,6 @@ const parseSubscriberMember = (
   };
 };
 
-const serializeSubscriberStats = (subStats: SubscriberStats): string =>
-  `${subStats.id}:${subStats.username}:${subStats.subscribers}:${subStats.timestamp}`;
-
 const serializeLegacySubscriberMember = (subStats: SubscriberStats): string =>
   `${subStats.id}:${subStats.username}:${subStats.subscribers}`;
 
@@ -104,25 +87,6 @@ const parseStringList = (raw: string | undefined): string[] => {
     );
     return [];
   }
-};
-
-const stringifyStringList = (values: string[]): string =>
-  JSON.stringify([...new Set(values)]);
-
-const addLegacySubscriberMemberIndex = async (
-  redis: RedisClient,
-  userId: string,
-  legacyMember: string,
-): Promise<void> => {
-  const existing = parseStringList(
-    await redis.hGet(subscriberStatsLegacyMembersByUserIdKey, userId),
-  );
-  if (existing.includes(legacyMember)) {
-    return;
-  }
-  await redis.hSet(subscriberStatsLegacyMembersByUserIdKey, {
-    [userId]: stringifyStringList([...existing, legacyMember]),
-  });
 };
 
 const deleteSubscriberIndexes = async (
@@ -184,145 +148,6 @@ export async function isTrackedSubscriber(
   }
   const subscriberStats = await getSubscriberStats(redis, userId);
   return subscriberStats !== undefined;
-}
-
-export async function markSubscriber(
-  redis: RedisClient,
-  userId: string,
-): Promise<boolean> {
-  const existingStats = await getSubscriberStats(redis, userId);
-  const created = await redis.hSetNX(subscriberStatusByUserIdKey, userId, "1");
-  return created === 1 && existingStats === undefined;
-}
-
-export async function setNewSubscriber(
-  redis: RedisClient,
-  postId: string,
-  currentSubscribers: number,
-  user: BasicUserData,
-  shareUsername: boolean,
-): Promise<boolean> {
-  const alreadySubscribed = await isTrackedSubscriber(redis, user.id);
-  if (alreadySubscribed) {
-    return false;
-  }
-
-  const now = Date.now();
-  const subscriberStats = {
-    id: user.id,
-    username: user.username,
-    subscribers: currentSubscribers,
-    timestamp: now,
-  };
-  const indexedMember = serializeSubscriberStats(subscriberStats);
-  const legacyMember = serializeLegacySubscriberMember(subscriberStats);
-  const indexed = await redis.hSetNX(
-    subscriberStatsByUserIdKey,
-    user.id,
-    indexedMember,
-  );
-  if (indexed === 0) {
-    return false;
-  }
-  await redis.hSetNX(subscriberStatusByUserIdKey, user.id, "1");
-  await redis.hSet(subscriberStatsUsernameToUserIdKey, {
-    [normalizeUsername(user.username)]: user.id,
-  });
-  await addLegacySubscriberMemberIndex(redis, user.id, legacyMember);
-
-  if (typeof (redis as Partial<RedisClient>).watch !== "function") {
-    await redis.hSet(subscriberGoalsKey, {
-      [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
-        ? user.username
-        : "",
-    });
-    if (shareUsername) {
-      await addRecentSubscriberPostIndex(redis, user.username, postId);
-    }
-    await redis.zAdd(subscriberStatsKey, { member: legacyMember, score: now });
-    return true;
-  }
-
-  const generationKey = subscriberTrackingGenerationKey(user.id);
-  const retiredKey = `${retiredSubscriberGoalKeyPrefix}:${postId}`;
-  const normalized = normalizeUsername(user.username);
-  const order: RecentSubscriberOrder = {
-    timestamp: now,
-    operationId: `legacy:${user.id}`,
-    userId: user.id,
-    erasureGeneration: (await redis.get(generationKey)) ?? "",
-  };
-  for (let retry = 0; retry < 3; retry += 1) {
-    const tx = await redis.watch(
-      generationKey,
-      retiredKey,
-      subscriberGoalsKey,
-      recentSubscriberPostsByUsernameKey,
-    );
-    const [generation, retired, storedOrderRaw, storedUsername] =
-      await Promise.all([
-        redis.get(generationKey),
-        redis.get(retiredKey),
-        redis.hGet(
-          subscriberGoalsKey,
-          `${postId}${postRecentSubscriberOrderSuffix}`,
-        ),
-        redis.hGet(
-          subscriberGoalsKey,
-          `${postId}${postRecentSubscriberSuffix}`,
-        ),
-      ]);
-    if ((generation ?? "") !== order.erasureGeneration || retired) {
-      await tx.unwatch();
-      break;
-    }
-    const storedOrder = parseRecentSubscriberOrder(storedOrderRaw);
-    if (storedOrder && compareRecentSubscriberOrder(order, storedOrder) < 0) {
-      await tx.unwatch();
-      break;
-    }
-    const previousNormalized = normalizeUsername(storedUsername ?? "");
-    const affected = new Set(
-      [previousNormalized, shareUsername ? normalized : ""].filter(Boolean),
-    );
-    const indexUpdates = new Map<string, string[]>();
-    for (const affectedUsername of affected) {
-      const posts = parseStringList(
-        await redis.hGet(recentSubscriberPostsByUsernameKey, affectedUsername),
-      ).filter((existingPostId) => existingPostId !== postId);
-      indexUpdates.set(
-        affectedUsername,
-        shareUsername && affectedUsername === normalized
-          ? [...new Set([...posts, postId])]
-          : posts,
-      );
-    }
-    await tx.multi();
-    await tx.hSet(subscriberGoalsKey, {
-      [`${postId}${postRecentSubscriberSuffix}`]: shareUsername
-        ? user.username
-        : "",
-      [`${postId}${postRecentSubscriberOrderSuffix}`]:
-        serializeRecentSubscriberOrder(order),
-    });
-    for (const [affectedUsername, postIds] of indexUpdates) {
-      if (postIds.length > 0) {
-        await tx.hSet(recentSubscriberPostsByUsernameKey, {
-          [affectedUsername]: JSON.stringify(postIds),
-        });
-      } else {
-        await tx.hDel(recentSubscriberPostsByUsernameKey, [affectedUsername]);
-      }
-    }
-    const result = await tx.exec();
-    if (result.length > 0) break;
-    if (retry === 2) throw new Error("recent_subscriber_update_conflict");
-  }
-  await redis.zAdd(subscriberStatsKey, {
-    member: legacyMember,
-    score: now,
-  });
-  return true;
 }
 
 export async function untrackSubscriberById(

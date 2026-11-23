@@ -24,13 +24,6 @@ const postDayKey = (dayStartMs: number): string =>
 const clickDayKey = (postId: string, dayStartMs: number): string =>
   `cta_click_activity:${postId}:${dayStartMs}`;
 
-export const postActivityPresets = new Set<AfterSubscribePreset>([
-  "top-post-day",
-  "newest-post",
-  "create-post",
-  "share-picture",
-]);
-
 export const clickActivityPresets = new Set<AfterSubscribePreset>([
   "web-link",
   "discord",

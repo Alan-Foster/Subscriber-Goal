@@ -6,7 +6,6 @@ import {
 } from "./onboardingEligibility";
 export {
   getOnboardingEligibility,
-  type OnboardingEligibility,
   type OnboardingIneligibilityReason,
 } from "./onboardingEligibility";
 import {
@@ -112,8 +111,6 @@ export {
 
 /** Checked at every onboarding side-effect boundary so a hotfix can pause armed work. */
 export const AUTOMATIC_ONBOARDING_ENABLED = true;
-
-export const onboardingUpgradeWaveEnabled = AUTOMATIC_ONBOARDING_ENABLED;
 
 export const onboardingTinySubscriberThreshold = 1_000_000;
 

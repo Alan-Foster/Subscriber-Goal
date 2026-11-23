@@ -35,14 +35,16 @@ const hoisted = vi.hoisted(() => ({
   observeDailySubscriberCount: vi.fn(),
   getLastKnownSubscriberCount: vi.fn(),
   isTrackedSubscriber: vi.fn(),
-  setNewSubscriber: vi.fn(),
   hasSubscriptionAttemptReceipt: vi.fn(),
   storeSubscriptionAttemptReceipt: vi.fn(),
   getSubscriptionAcceptanceEvidence: vi.fn(),
   getSubscriberTrackingGeneration: vi.fn(),
   getPendingSubscriberTracking: vi.fn(),
   persistAcceptedSubscriberTracking: vi.fn(),
-  applySubscriberTracking: vi.fn(),
+  applySubscriberTracking:
+    vi.fn<
+      typeof import("../data/subscriberTracking").applySubscriberTracking
+    >(),
   cleanupSubscriberTracking: vi.fn(),
   checkCompletionStatus: vi.fn(),
   isSubredditBlacklisted: vi.fn(),
@@ -84,7 +86,6 @@ vi.mock("../data/subGoalData", () => ({
 
 vi.mock("../data/subscriberStats", () => ({
   isTrackedSubscriber: hoisted.isTrackedSubscriber,
-  setNewSubscriber: hoisted.setNewSubscriber,
 }));
 
 vi.mock("../data/subscriberTracking", () => ({
@@ -192,7 +193,6 @@ describe("publicApi routes", () => {
     });
     hoisted.getLastKnownSubscriberCount.mockResolvedValue(null);
     hoisted.isTrackedSubscriber.mockResolvedValue(false);
-    hoisted.setNewSubscriber.mockResolvedValue(true);
     hoisted.hasSubscriptionAttemptReceipt.mockResolvedValue(false);
     hoisted.storeSubscriptionAttemptReceipt.mockResolvedValue(undefined);
     hoisted.getSubscriptionAcceptanceEvidence.mockResolvedValue(undefined);
@@ -204,27 +204,7 @@ describe("publicApi routes", () => {
         created: true,
       }),
     );
-    hoisted.applySubscriberTracking.mockImplementation(
-      async (
-        redis: unknown,
-        operation: {
-          postId: string;
-          subscribers: number;
-          userId: string;
-          username: string;
-          shareUsername: boolean;
-        },
-      ) =>
-        (await hoisted.setNewSubscriber(
-          redis,
-          operation.postId,
-          operation.subscribers,
-          { id: operation.userId, username: operation.username },
-          operation.shareUsername,
-        ))
-          ? "applied"
-          : "obsolete",
-    );
+    hoisted.applySubscriberTracking.mockResolvedValue("applied");
     hoisted.cleanupSubscriberTracking.mockResolvedValue(true);
     hoisted.reddit.getCurrentUsername.mockResolvedValue("TinyUser");
     hoisted.reddit.getCurrentUser.mockResolvedValue({
@@ -992,7 +972,7 @@ describe("publicApi routes", () => {
       postHeight: "short",
       subscribed: true,
     });
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.applySubscriberTracking).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1016,12 +996,15 @@ describe("publicApi routes", () => {
         hoisted.redis,
         expect.objectContaining({ shareUsername }),
       );
-      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+      expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
         hoisted.redis,
-        "t3_post",
-        101,
-        { id: "t2_user", username: "TinyUser" },
-        shareUsername,
+        expect.objectContaining({
+          postId: "t3_post",
+          subscribers: 101,
+          userId: "t2_user",
+          username: "TinyUser",
+          shareUsername,
+        }),
       );
       expect(hoisted.realtime.send).toHaveBeenCalledExactlyOnceWith(
         "subscriber_updates",
@@ -1082,13 +1065,6 @@ describe("publicApi routes", () => {
       expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
         hoisted.redis,
         pending,
-      );
-      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
-        hoisted.redis,
-        "t3_post",
-        101,
-        { id: "t2_user", username: "TinyUser" },
-        shareUsername,
       );
       expect(hoisted.persistAcceptedSubscriberTracking).not.toHaveBeenCalled();
       expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
@@ -1161,12 +1137,15 @@ describe("publicApi routes", () => {
         { json } as unknown as Response,
       );
 
-      expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+      expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
         hoisted.redis,
-        "t3_post",
-        101,
-        { id: "t2_user", username: "TinyUser" },
-        false,
+        expect.objectContaining({
+          postId: "t3_post",
+          subscribers: 101,
+          userId: "t2_user",
+          username: "TinyUser",
+          shareUsername: false,
+        }),
       );
       expect(json).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
@@ -1221,12 +1200,15 @@ describe("publicApi routes", () => {
     });
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.reddit.getCurrentUsername).toHaveBeenCalledOnce();
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
       hoisted.redis,
-      "t3_post",
-      101,
-      { id: "t2_user", username: "TinyUser" },
-      false,
+      expect.objectContaining({
+        postId: "t3_post",
+        subscribers: 101,
+        userId: "t2_user",
+        username: "TinyUser",
+        shareUsername: false,
+      }),
     );
     expect(hoisted.persistAcceptedSubscriberTracking).toHaveBeenCalledWith(
       hoisted.redis,
@@ -1354,7 +1336,9 @@ describe("publicApi routes", () => {
     );
     expect(
       hoisted.storeSubscriptionAttemptReceipt.mock.invocationCallOrder[0],
-    ).toBeLessThan(hoisted.setNewSubscriber.mock.invocationCallOrder[0]!);
+    ).toBeLessThan(
+      hoisted.applySubscriberTracking.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("returns a safe failure when an exact-attempt receipt cannot be stored", async () => {
@@ -1373,7 +1357,7 @@ describe("publicApi routes", () => {
 
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledWith(503);
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.applySubscriberTracking).not.toHaveBeenCalled();
   });
 
   it("surfaces ambiguity when Reddit accepts but durable tracking cannot be saved", async () => {
@@ -1399,7 +1383,7 @@ describe("publicApi routes", () => {
     );
     expect(hoisted.storeSubscriptionAttemptReceipt).not.toHaveBeenCalled();
     expect(hoisted.recordStatisticsConfirmedJoin).not.toHaveBeenCalled();
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.applySubscriberTracking).not.toHaveBeenCalled();
   });
 
   it("replays durable acceptance after a receipt write fails without rejoining", async () => {
@@ -1449,7 +1433,7 @@ describe("publicApi routes", () => {
     expect(hoisted.reddit.getPostById).toHaveBeenCalledOnce();
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
     expect(hoisted.recordStatisticsConfirmedJoin).toHaveBeenCalledOnce();
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledOnce();
     expect(secondJson).toHaveBeenCalledWith(
       expect.objectContaining({ type: "subscribe", postId: "t3_post" }),
     );
@@ -1457,7 +1441,9 @@ describe("publicApi routes", () => {
 
   it("does not report Tiny success when subscriber history persistence fails", async () => {
     hoisted.context.userId = "t2_user";
-    hoisted.setNewSubscriber.mockRejectedValue(new Error("redis unavailable"));
+    hoisted.applySubscriberTracking.mockRejectedValue(
+      new Error("redis unavailable"),
+    );
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscribe-only-v1",
       goal: 0,
@@ -1480,7 +1466,7 @@ describe("publicApi routes", () => {
     );
 
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledOnce();
     expect(status).toHaveBeenCalledWith(503);
     expect(json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1516,14 +1502,14 @@ describe("publicApi routes", () => {
         ),
       }),
     );
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.applySubscriberTracking).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
 
   it("does not duplicate Tiny tracking or realtime for an existing subscriber", async () => {
     hoisted.context.userId = "t2_user";
     hoisted.isTrackedSubscriber.mockResolvedValue(true);
-    hoisted.setNewSubscriber.mockResolvedValue(false);
+    hoisted.applySubscriberTracking.mockResolvedValue("obsolete");
     hoisted.getSubGoalData.mockResolvedValue({
       postKind: "subscribe-only-v1",
       subredditDisplayName: "ExampleSub",
@@ -1546,7 +1532,7 @@ describe("publicApi routes", () => {
       subreddit: { subscribers: 100 },
     });
     expect(hoisted.reddit.subscribeToCurrentSubreddit).toHaveBeenCalledOnce();
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledOnce();
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledOnce();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
     expect(hoisted.checkCompletionStatus).not.toHaveBeenCalled();
   });
@@ -1641,12 +1627,15 @@ describe("publicApi routes", () => {
       { json } as unknown as Response,
     );
 
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
       hoisted.redis,
-      "t3_post",
-      101,
-      { id: "t2_user", username: "TinyUser" },
-      false,
+      expect.objectContaining({
+        postId: "t3_post",
+        subscribers: 101,
+        userId: "t2_user",
+        username: "TinyUser",
+        shareUsername: false,
+      }),
     );
     expect(hoisted.realtime.send).toHaveBeenCalledWith("subscriber_updates", {
       type: "sub",
@@ -1677,12 +1666,15 @@ describe("publicApi routes", () => {
       { json } as unknown as Response,
     );
 
-    expect(hoisted.setNewSubscriber).toHaveBeenCalledWith(
+    expect(hoisted.applySubscriberTracking).toHaveBeenCalledWith(
       hoisted.redis,
-      "t3_post",
-      101,
-      { id: "t2_user", username: "TinyUser" },
-      false,
+      expect.objectContaining({
+        postId: "t3_post",
+        subscribers: 101,
+        userId: "t2_user",
+        username: "TinyUser",
+        shareUsername: false,
+      }),
     );
   });
 
@@ -1714,7 +1706,7 @@ describe("publicApi routes", () => {
       }),
     );
     expect(hoisted.reddit.subscribeToCurrentSubreddit).not.toHaveBeenCalled();
-    expect(hoisted.setNewSubscriber).not.toHaveBeenCalled();
+    expect(hoisted.applySubscriberTracking).not.toHaveBeenCalled();
     expect(hoisted.realtime.send).not.toHaveBeenCalled();
   });
 

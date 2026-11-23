@@ -47,13 +47,6 @@ export function getPostAvailability(post: unknown): PostAvailability {
   return { status: "active" };
 }
 
-export const getTerminalRemovedByCategory = (
-  post: unknown,
-): TerminalRemovedByCategory | undefined => {
-  const availability = getPostAvailability(post);
-  return availability.status === "terminal" ? availability.category : undefined;
-};
-
 // A known removal is a pause, not a failed creation attempt. Keep rechecking
 // without using the finite error budgets or replacing the known post.
 export const temporarilyRemovedPostRecheckDelayMs = 60 * 60 * 1000;

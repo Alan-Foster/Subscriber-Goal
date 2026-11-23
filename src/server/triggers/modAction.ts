@@ -204,18 +204,3 @@ async function clearPostUpdateRecheck(postId: LinkId): Promise<void> {
     );
   }
 }
-
-// Keep the previous exports available while crosspost callers move to their own modules.
-export {
-  cleanupCrosspostBookkeeping,
-  crosspostBookkeepingCleanupLastRunKey,
-  getCrosspostAuthoritySubreddit,
-  isCrosspostAuthorityInstall,
-  toNormalizedSubredditName,
-} from "../crosspost/bookkeeping";
-export { processCrosspostDispatchQueue } from "../crosspost/dispatch";
-export { isMissingSourcePostError } from "../crosspost/pending";
-export type {
-  CrosspostIngestionStatus,
-  CrosspostIngestionSummary,
-} from "../crosspost/summary";
