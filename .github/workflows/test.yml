@@ -4,22 +4,32 @@ on:
   push:
 permissions:
   contents: read
-  actions: read
-  checks: write
-  statuses: write
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - name: checkout repo
         uses: actions/checkout@v5
-        with: # give hint for pull requests
-          ref: ${{ github.head_ref }}
       - name: use node.js
         uses: actions/setup-node@v7
         with:
           node-version: "22.x"
           cache: "npm"
-      - run: npm ci
-      - run: npm run test:unit
-      - run: npm run lint:ci
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit assets
+        run: npm run assets:check
+      - name: Check formatting
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint:ci
+      - name: Type-check production code
+        run: npm run type-check
+      - name: Type-check tests
+        run: npm run type-check:tests
+      - name: Check localization
+        run: npm run i18n:check
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
