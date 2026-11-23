@@ -52,8 +52,7 @@ export function getGoalJourneyContext(state: SubGoalState): GoalJourneyContext {
         ? "subscribed"
         : "unsubscribed",
     hasFollowupCta:
-      (state.postHeight !== "tiny" &&
-        state.moderatorInstallPromoEligible) ||
+      (state.postHeight !== "tiny" && state.moderatorInstallPromoEligible) ||
       state.afterSubscribeAction.type !== "disabled",
   };
 }
@@ -160,15 +159,10 @@ export class GoalJourneyAnalytics {
   }
 
   moderatorInstallPromoActivated(context: GoalJourneyContext): void {
-    this.interactionAndEnd(
-      "moderator_install_promo_activated",
-      context,
-      true,
-      {
-        actionType: "install_promo",
-        result: "success",
-      },
-    );
+    this.interactionAndEnd("moderator_install_promo_activated", context, true, {
+      actionType: "install_promo",
+      result: "success",
+    });
   }
 
   journeyHeaders(): Record<string, string> {

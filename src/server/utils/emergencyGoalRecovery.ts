@@ -4,9 +4,7 @@ import { getLastKnownSubscriberCount } from "../data/subscriberDailyStats";
 import { getDefaultSubscriberGoal } from "./numberUtils";
 
 export type EmergencySubscriberCountSource =
-  | "current"
-  | "last_known"
-  | "zero_default";
+  "current" | "last_known" | "zero_default";
 
 export type EmergencyGoalRecovery = {
   goal: number;

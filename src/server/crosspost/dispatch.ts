@@ -1,29 +1,29 @@
-import { reddit, redis, context } from '@devvit/web/server';
-import { type ServerAppSettings } from '../settings';
-import { countPendingCrossposts } from '../data/crosspostData';
-import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
-import { logDiagnostic } from '../../shared/diagnostics';
-import { acquireRedisLock, releaseRedisLock } from '../utils/redisOwnedLock';
+import { reddit, redis, context } from "@devvit/web/server";
+import { type ServerAppSettings } from "../settings";
+import { countPendingCrossposts } from "../data/crosspostData";
+import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
+import { logDiagnostic } from "../../shared/diagnostics";
+import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
 import {
   toNormalizedSubredditName,
   getCrosspostAuthoritySubreddit,
   cleanupCrosspostBookkeeping,
-} from './bookkeeping';
+} from "./bookkeeping";
 import {
   type CrosspostIngestionSummary,
   emptySummary,
   withErrorMessage,
   type CrosspostIngestionOptions,
-} from './summary';
-import { updateFromWikis } from './ingestion';
+} from "./summary";
+import { updateFromWikis } from "./ingestion";
 
-const crosspostRetryDegradedCountKey = 'crosspostRetryDegradedCount';
+const crosspostRetryDegradedCountKey = "crosspostRetryDegradedCount";
 const crosspostRetryDegradedThreshold = 3;
-const crosspostIngestionLockKeyPrefix = 'crosspostIngestionLock';
+const crosspostIngestionLockKeyPrefix = "crosspostIngestionLock";
 const crosspostIngestionLockTtlMs = 60 * 1000;
 const crosspostSchedulerDaisyChainMaxPasses = 3;
 const getCrosspostMaxSourcePostAgeMs = (
-  appSettings: ServerAppSettings
+  appSettings: ServerAppSettings,
 ): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostMaxSourcePostAgeMinutes) &&
@@ -34,7 +34,7 @@ const getCrosspostMaxSourcePostAgeMs = (
 };
 
 const getCrosspostMaxRevisionAgeMs = (
-  appSettings: ServerAppSettings
+  appSettings: ServerAppSettings,
 ): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostMaxRevisionAgeMinutes) &&
@@ -65,14 +65,14 @@ type CrosspostDispatchLogContext = {
 };
 export async function processCrosspostDispatchQueue(
   appSettings: ServerAppSettings,
-  reason: string
+  reason: string,
 ): Promise<CrosspostIngestionSummary> {
   const crosspostIngestionEnabled =
     appSettings.crosspostIngestionEnabled !== false;
   const currentInstallSubredditRaw =
     context.subredditName ?? (await reddit.getCurrentSubreddit()).name;
   const currentInstallSubreddit = toNormalizedSubredditName(
-    currentInstallSubredditRaw
+    currentInstallSubredditRaw,
   );
   const authoritySubreddit = getCrosspostAuthoritySubreddit(appSettings);
   const freshnessWindowMs = getCrosspostMaxSourcePostAgeMs(appSettings);
@@ -89,7 +89,7 @@ export async function processCrosspostDispatchQueue(
   };
 
   logCrosspostEvent({
-    event: 'crosspost_retry_started',
+    event: "crosspost_retry_started",
     targetSubreddit: appSettings.promoSubreddit,
     reason,
     ...logContext,
@@ -98,50 +98,50 @@ export async function processCrosspostDispatchQueue(
   if (!crosspostIngestionEnabled) {
     logCrosspostEvent(
       {
-        event: 'crosspost_retry_skipped',
+        event: "crosspost_retry_skipped",
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'ingestion_disabled',
-        status: 'success',
+        reason: "ingestion_disabled",
+        status: "success",
         ...logContext,
       },
-      'warn'
+      "warn",
     );
     return emptySummary();
   }
 
   if (!ingestionAllowed) {
-    const logLevel = reason === 'scheduler_posts_updater' ? 'info' : 'warn';
+    const logLevel = reason === "scheduler_posts_updater" ? "info" : "warn";
     logCrosspostEvent(
       {
-        event: 'crosspost_retry_skipped',
+        event: "crosspost_retry_skipped",
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'non_authority',
-        status: 'success',
+        reason: "non_authority",
+        status: "success",
         ...logContext,
       },
-      logLevel
+      logLevel,
     );
     return emptySummary();
   }
 
   const lockKey = `${crosspostIngestionLockKeyPrefix}:${toNormalizedSubredditName(
-    appSettings.promoSubreddit
+    appSettings.promoSubreddit,
   )}`;
   const lock = await acquireRedisLock(
     redis,
     lockKey,
-    crosspostIngestionLockTtlMs
+    crosspostIngestionLockTtlMs,
   );
   if (!lock) {
     logCrosspostEvent(
       {
-        event: 'crosspost_retry_skipped',
+        event: "crosspost_retry_skipped",
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'lock_held',
-        status: 'success',
+        reason: "lock_held",
+        status: "success",
         ...logContext,
       },
-      'warn'
+      "warn",
     );
     return emptySummary();
   }
@@ -152,10 +152,10 @@ export async function processCrosspostDispatchQueue(
         await cleanupCrosspostBookkeeping(redis);
       } catch (cleanupError) {
         logDiagnostic(
-          'warn',
-          'crosspost_cleanup_failed',
-          { workflow: 'crosspost', phase: 'bookkeeping_cleanup' },
-          cleanupError
+          "warn",
+          "crosspost_cleanup_failed",
+          { workflow: "crosspost", phase: "bookkeeping_cleanup" },
+          cleanupError,
         );
       }
       const summary = await runDispatchPasses(appSettings, reason, {
@@ -169,27 +169,27 @@ export async function processCrosspostDispatchQueue(
     } catch (error) {
       const summary: CrosspostIngestionSummary = {
         ...emptySummary(),
-        status: 'failed',
+        status: "failed",
         errorMessage: toErrorMessage(error),
       };
       logCrosspostEvent(
         {
-          event: 'crosspost_retry_failed',
+          event: "crosspost_retry_failed",
           targetSubreddit: appSettings.promoSubreddit,
           reason,
           status: summary.status,
           ...withErrorMessage(summary.errorMessage),
           ...logContext,
         },
-        'error'
+        "error",
       );
       await recordDispatchFailure(appSettings, reason, logContext, summary);
       return summary;
     }
   } finally {
     await releaseRedisLock(redis, lockKey, lock, {
-      event: 'crosspost_cleanup_failed',
-      context: { workflow: 'crosspost', phase: 'ingestion_lock_release' },
+      event: "crosspost_cleanup_failed",
+      context: { workflow: "crosspost", phase: "ingestion_lock_release" },
     });
   }
 }
@@ -197,12 +197,12 @@ export async function processCrosspostDispatchQueue(
 async function runDispatchPasses(
   appSettings: ServerAppSettings,
   reason: string,
-  options: CrosspostIngestionOptions
+  options: CrosspostIngestionOptions,
 ): Promise<CrosspostIngestionSummary> {
   const summary = emptySummary();
   const runErrorMessages: string[] = [];
   const maxPasses =
-    reason === 'scheduler_posts_updater'
+    reason === "scheduler_posts_updater"
       ? crosspostSchedulerDaisyChainMaxPasses
       : 1;
   for (let pass = 1; pass <= maxPasses; pass += 1) {
@@ -228,13 +228,13 @@ async function runDispatchPasses(
     summary.crosspostsSkippedByExistingDetection +=
       passSummary.crosspostsSkippedByExistingDetection;
 
-    if (passSummary.status === 'failed') {
-      summary.status = 'failed';
+    if (passSummary.status === "failed") {
+      summary.status = "failed";
     } else if (
-      passSummary.status === 'partial' &&
-      summary.status !== 'failed'
+      passSummary.status === "partial" &&
+      summary.status !== "failed"
     ) {
-      summary.status = 'partial';
+      summary.status = "partial";
     }
     if (passSummary.errorMessage) {
       runErrorMessages.push(passSummary.errorMessage);
@@ -242,11 +242,11 @@ async function runDispatchPasses(
 
     const pendingDepth = await countPendingCrossposts(
       redis,
-      appSettings.promoSubreddit
+      appSettings.promoSubreddit,
     );
-    if (pendingDepth > 0 || passSummary.status !== 'success') {
+    if (pendingDepth > 0 || passSummary.status !== "success") {
       console.info(
-        `[crosspost] daisy-chain pass ${pass}/${maxPasses}: pendingDepth=${pendingDepth} status=${passSummary.status}`
+        `[crosspost] daisy-chain pass ${pass}/${maxPasses}: pendingDepth=${pendingDepth} status=${passSummary.status}`,
       );
     }
     if (pendingDepth === 0) {
@@ -254,7 +254,7 @@ async function runDispatchPasses(
     }
   }
   if (runErrorMessages.length > 0) {
-    summary.errorMessage = runErrorMessages.join(' | ');
+    summary.errorMessage = runErrorMessages.join(" | ");
   }
   return summary;
 }
@@ -263,25 +263,25 @@ async function recordDispatchOutcome(
   appSettings: ServerAppSettings,
   reason: string,
   logContext: CrosspostDispatchLogContext,
-  summary: CrosspostIngestionSummary
+  summary: CrosspostIngestionSummary,
 ): Promise<void> {
-  if (summary.status === 'success') {
-    await redis.set(crosspostRetryDegradedCountKey, '0');
+  if (summary.status === "success") {
+    await redis.set(crosspostRetryDegradedCountKey, "0");
   } else {
     const previous = parseInt(
-      (await redis.get(crosspostRetryDegradedCountKey)) ?? '0',
-      10
+      (await redis.get(crosspostRetryDegradedCountKey)) ?? "0",
+      10,
     );
     const consecutiveFailures = Number.isNaN(previous) ? 1 : previous + 1;
     await redis.set(
       crosspostRetryDegradedCountKey,
-      consecutiveFailures.toString()
+      consecutiveFailures.toString(),
     );
 
     if (consecutiveFailures >= crosspostRetryDegradedThreshold) {
       logCrosspostEvent(
         {
-          event: 'crosspost_retry_degraded',
+          event: "crosspost_retry_degraded",
           targetSubreddit: appSettings.promoSubreddit,
           reason,
           status: summary.status,
@@ -306,7 +306,7 @@ async function recordDispatchOutcome(
           consecutiveFailures,
           ...logContext,
         },
-        'warn'
+        "warn",
       );
     }
   }
@@ -314,9 +314,9 @@ async function recordDispatchOutcome(
   logCrosspostEvent(
     {
       event:
-        summary.status === 'failed'
-          ? 'crosspost_retry_failed'
-          : 'crosspost_retry_succeeded',
+        summary.status === "failed"
+          ? "crosspost_retry_failed"
+          : "crosspost_retry_succeeded",
       targetSubreddit: appSettings.promoSubreddit,
       reason,
       status: summary.status,
@@ -340,7 +340,7 @@ async function recordDispatchOutcome(
       ...withErrorMessage(summary.errorMessage),
       ...logContext,
     },
-    summary.status === 'failed' ? 'error' : 'info'
+    summary.status === "failed" ? "error" : "info",
   );
 }
 
@@ -348,22 +348,22 @@ async function recordDispatchFailure(
   appSettings: ServerAppSettings,
   reason: string,
   logContext: CrosspostDispatchLogContext,
-  summary: CrosspostIngestionSummary
+  summary: CrosspostIngestionSummary,
 ): Promise<void> {
   try {
     const previous = parseInt(
-      (await redis.get(crosspostRetryDegradedCountKey)) ?? '0',
-      10
+      (await redis.get(crosspostRetryDegradedCountKey)) ?? "0",
+      10,
     );
     const consecutiveFailures = Number.isNaN(previous) ? 1 : previous + 1;
     await redis.set(
       crosspostRetryDegradedCountKey,
-      consecutiveFailures.toString()
+      consecutiveFailures.toString(),
     );
     if (consecutiveFailures >= crosspostRetryDegradedThreshold) {
       logCrosspostEvent(
         {
-          event: 'crosspost_retry_degraded',
+          event: "crosspost_retry_degraded",
           targetSubreddit: appSettings.promoSubreddit,
           reason,
           status: summary.status,
@@ -371,21 +371,21 @@ async function recordDispatchFailure(
           consecutiveFailures,
           ...logContext,
         },
-        'warn'
+        "warn",
       );
     }
   } catch (bookkeepingError) {
     logDiagnostic(
-      'warn',
-      'crosspost_cleanup_failed',
-      { workflow: 'crosspost', phase: 'failure_bookkeeping' },
-      bookkeepingError
+      "warn",
+      "crosspost_cleanup_failed",
+      { workflow: "crosspost", phase: "failure_bookkeeping" },
+      bookkeepingError,
     );
   }
 
   logCrosspostEvent(
     {
-      event: 'crosspost_retry_failed',
+      event: "crosspost_retry_failed",
       targetSubreddit: appSettings.promoSubreddit,
       reason,
       status: summary.status,
@@ -409,6 +409,6 @@ async function recordDispatchFailure(
       ...withErrorMessage(summary.errorMessage),
       ...logContext,
     },
-    'error'
+    "error",
   );
 }

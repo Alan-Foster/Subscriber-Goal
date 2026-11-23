@@ -1,5 +1,5 @@
-import { reddit, redis } from '@devvit/web/server';
-import { type ServerAppSettings } from '../settings';
+import { reddit, redis } from "@devvit/web/server";
+import { type ServerAppSettings } from "../settings";
 import {
   completeCrosspostDeletionMarkerReplay,
   getPendingCrosspost,
@@ -10,28 +10,28 @@ import {
   scheduleCrosspostDeletionMarker,
   storeProcessedRevision,
   upsertPendingCrosspost,
-} from '../data/crosspostData';
-import { logCrosspostEvent, toErrorMessage } from '../utils/crosspostLogs';
-import { isLinkId } from '../types';
-import { logDiagnostic } from '../../shared/diagnostics';
+} from "../data/crosspostData";
+import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
+import { isLinkId } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   crosspostHourlyCreationHistoryKeyPrefix,
   toNormalizedSubredditName,
   isSourceCreateInFlight,
   getCurrentHourlyCrosspostCount,
-} from './bookkeeping';
+} from "./bookkeeping";
 import {
   type CrosspostIngestionSummary,
   emptySummary,
   type CrosspostIngestionOptions,
-} from './summary';
+} from "./summary";
 import {
   type NewPostEvent,
   getNewPosts,
   getNewPostActions,
-} from './wikiRevisions';
-import { processPendingCrossposts } from './pending';
-import { mirrorPostAction } from './moderation';
+} from "./wikiRevisions";
+import { processPendingCrossposts } from "./pending";
+import { mirrorPostAction } from "./moderation";
 
 const getCrosspostRetryWindowMs = (appSettings: ServerAppSettings): number => {
   const minutes =
@@ -43,7 +43,7 @@ const getCrosspostRetryWindowMs = (appSettings: ServerAppSettings): number => {
 };
 
 const getCrosspostRetryBaseDelayMs = (
-  appSettings: ServerAppSettings
+  appSettings: ServerAppSettings,
 ): number => {
   const seconds =
     Number.isFinite(appSettings.crosspostRetryBaseDelaySeconds) &&
@@ -54,7 +54,7 @@ const getCrosspostRetryBaseDelayMs = (
 };
 
 const getCrosspostRetryMaxDelayMs = (
-  appSettings: ServerAppSettings
+  appSettings: ServerAppSettings,
 ): number => {
   const minutes =
     Number.isFinite(appSettings.crosspostRetryMaxDelayMinutes) &&
@@ -65,7 +65,7 @@ const getCrosspostRetryMaxDelayMs = (
 };
 
 const getCrosspostPendingBatchSize = (
-  appSettings: ServerAppSettings
+  appSettings: ServerAppSettings,
 ): number =>
   Number.isFinite(appSettings.crosspostPendingBatchSize) &&
   appSettings.crosspostPendingBatchSize > 0
@@ -74,7 +74,7 @@ const getCrosspostPendingBatchSize = (
 
 export async function updateFromWikis(
   appSettings: ServerAppSettings,
-  options: CrosspostIngestionOptions
+  options: CrosspostIngestionOptions,
 ): Promise<CrosspostIngestionSummary> {
   const summary = emptySummary();
   const fetchErrors: string[] = [];
@@ -82,12 +82,12 @@ export async function updateFromWikis(
   let fetchSuccessCount = 0;
   const nowMs = Date.now();
   const hourlyHistoryKey = `${crosspostHourlyCreationHistoryKeyPrefix}:${toNormalizedSubredditName(
-    appSettings.promoSubreddit
+    appSettings.promoSubreddit,
   )}`;
   const hourlyCreatedCount = await getCurrentHourlyCrosspostCount(
     redis,
     hourlyHistoryKey,
-    nowMs
+    nowMs,
   );
   const retryWindowMs = getCrosspostRetryWindowMs(appSettings);
   const retryBaseDelayMs = getCrosspostRetryBaseDelayMs(appSettings);
@@ -98,7 +98,7 @@ export async function updateFromWikis(
     summary,
     nowMs,
     pendingBatchSize,
-    retryBaseDelayMs
+    retryBaseDelayMs,
   );
   const newPostBatch = await getNewPosts(appSettings);
   summary.revisionsFetched += newPostBatch.revisionsFetched;
@@ -117,7 +117,7 @@ export async function updateFromWikis(
   const duePendingCrossposts = await listDuePendingCrossposts(
     redis,
     appSettings.promoSubreddit,
-    { nowMs, limit: pendingBatchSize }
+    { nowMs, limit: pendingBatchSize },
   );
   await processPendingCrossposts(duePendingCrossposts, {
     appSettings,
@@ -131,9 +131,9 @@ export async function updateFromWikis(
     hourlyCreatedCount,
   });
   const actionBatches = await Promise.all([
-    getNewPostActions(appSettings, 'remove'),
-    getNewPostActions(appSettings, 'approve'),
-    getNewPostActions(appSettings, 'delete'),
+    getNewPostActions(appSettings, "remove"),
+    getNewPostActions(appSettings, "approve"),
+    getNewPostActions(appSettings, "delete"),
   ]);
   const postActions = actionBatches.flatMap((batch) => batch.events);
   for (const batch of actionBatches) {
@@ -153,15 +153,15 @@ export async function updateFromWikis(
   }
 
   if (fetchFailureCount > 0 && fetchSuccessCount === 0) {
-    summary.status = 'failed';
+    summary.status = "failed";
   } else if (fetchFailureCount > 0) {
-    summary.status = 'partial';
+    summary.status = "partial";
   } else {
-    summary.status = 'success';
+    summary.status = "success";
   }
 
   if (fetchErrors.length > 0) {
-    summary.errorMessage = fetchErrors.join(' | ');
+    summary.errorMessage = fetchErrors.join(" | ");
   }
 
   return summary;
@@ -172,7 +172,7 @@ async function replayDeletionMarkers(
   summary: CrosspostIngestionSummary,
   nowMs: number,
   pendingBatchSize: number,
-  retryBaseDelayMs: number
+  retryBaseDelayMs: number,
 ): Promise<void> {
   const dueDeletionMarkers = await listDueCrosspostDeletionMarkers(redis, {
     nowMs,
@@ -187,7 +187,7 @@ async function replayDeletionMarkers(
           await scheduleCrosspostDeletionMarker(
             redis,
             sourcePostId,
-            nowMs + retryBaseDelayMs
+            nowMs + retryBaseDelayMs,
           );
           continue;
         }
@@ -214,14 +214,14 @@ async function replayDeletionMarkers(
       summary.actionsMirrored += 1;
     } catch (error) {
       logDiagnostic(
-        'warn',
-        'crosspost_delete_marker_replay_failed',
+        "warn",
+        "crosspost_delete_marker_replay_failed",
         {
-          workflow: 'crosspost',
-          phase: 'delete_marker_replay',
+          workflow: "crosspost",
+          phase: "delete_marker_replay",
           postId: sourcePostId,
         },
-        error
+        error,
       );
       const message = toErrorMessage(error);
       if (
@@ -233,7 +233,7 @@ async function replayDeletionMarkers(
         await scheduleCrosspostDeletionMarker(
           redis,
           sourcePostId,
-          nowMs + retryBaseDelayMs
+          nowMs + retryBaseDelayMs,
         );
         summary.actionsFailed += 1;
       }
@@ -245,14 +245,14 @@ async function enqueueNewPosts(
   appSettings: ServerAppSettings,
   summary: CrosspostIngestionSummary,
   nowMs: number,
-  newPostIds: NewPostEvent[]
+  newPostIds: NewPostEvent[],
 ): Promise<void> {
   for (const newPost of newPostIds) {
     try {
       const existing = await getPendingCrosspost(
         redis,
         appSettings.promoSubreddit,
-        newPost.revisionId
+        newPost.revisionId,
       );
       await upsertPendingCrosspost(redis, appSettings.promoSubreddit, {
         revisionId: newPost.revisionId,
@@ -262,31 +262,31 @@ async function enqueueNewPosts(
         nextAttemptMs: existing?.nextAttemptMs ?? nowMs,
         attemptCount: existing?.attemptCount ?? 0,
         lastError: existing?.lastError ?? null,
-        status: existing?.status ?? 'queued_for_crosspost',
-        ...(typeof newPost.revisionDateMs === 'number'
+        status: existing?.status ?? "queued_for_crosspost",
+        ...(typeof newPost.revisionDateMs === "number"
           ? { revisionDateMs: newPost.revisionDateMs }
           : {}),
       });
       await storeProcessedRevision(redis, newPost.revisionId, newPost.postId);
       logCrosspostEvent({
-        event: 'crosspost_attempt_started',
+        event: "crosspost_attempt_started",
         sourcePostId: newPost.postId,
         targetSubreddit: appSettings.promoSubreddit,
-        reason: 'queued_for_crosspost',
+        reason: "queued_for_crosspost",
         revisionId: newPost.revisionId,
       });
     } catch (queueError) {
       summary.crosspostsFailed += 1;
       logCrosspostEvent(
         {
-          event: 'crosspost_attempt_failed',
+          event: "crosspost_attempt_failed",
           sourcePostId: newPost.postId,
           targetSubreddit: appSettings.promoSubreddit,
-          reason: 'queue_enqueue_failed',
+          reason: "queue_enqueue_failed",
           revisionId: newPost.revisionId,
           errorMessage: toErrorMessage(queueError),
         },
-        'error'
+        "error",
       );
     }
   }

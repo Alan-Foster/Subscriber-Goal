@@ -1,6 +1,6 @@
 export function resolveShareUsername(
   requestedShareUsername: boolean,
-  isNsfw: boolean
+  isNsfw: boolean,
 ): boolean {
   if (isNsfw) {
     return false;

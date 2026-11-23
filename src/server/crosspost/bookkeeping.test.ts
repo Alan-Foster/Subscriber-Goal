@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock('@devvit/web/server', () => ({
+vi.mock("@devvit/web/server", () => ({
   reddit: {},
   redis: {},
   context: {},
@@ -9,13 +9,13 @@ vi.mock('@devvit/web/server', () => ({
 import {
   cleanupCrosspostBookkeeping,
   crosspostBookkeepingCleanupLastRunKey,
-} from './bookkeeping';
+} from "./bookkeeping";
 import {
   crosspostListKey,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
-} from '../data/crosspostData';
-import { postsKey } from '../data/updaterData';
+} from "../data/crosspostData";
+import { postsKey } from "../data/updaterData";
 
 type ZEntry = { member: string; score: number };
 
@@ -87,22 +87,22 @@ class InMemoryRedis {
   }
 }
 
-describe('cleanupCrosspostBookkeeping', () => {
+describe("cleanupCrosspostBookkeeping", () => {
   let redis: InMemoryRedis;
 
   beforeEach(() => {
     redis = new InMemoryRedis();
   });
 
-  it('removes old processed revisions by age threshold', async () => {
+  it("removes old processed revisions by age threshold", async () => {
     await redis.hSet(processedRevisionsKey, {
-      rev_old: 't3_a',
-      rev_new: 't3_b',
+      rev_old: "t3_a",
+      rev_new: "t3_b",
     });
     await redis.zAdd(
       processedRevisionsByTimeKey,
-      { member: 'rev_old', score: 100 },
-      { member: 'rev_new', score: 1900 }
+      { member: "rev_old", score: 100 },
+      { member: "rev_new", score: 1900 },
     );
 
     await cleanupCrosspostBookkeeping(
@@ -112,24 +112,24 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 500,
         maxEntries: 100,
         minIntervalMs: 0,
-      }
+      },
     );
 
     const remaining = await redis.hGetAll(processedRevisionsKey);
-    expect(remaining).toEqual({ rev_new: 't3_b' });
+    expect(remaining).toEqual({ rev_new: "t3_b" });
   });
 
-  it('removes oldest excess processed revisions by max-count threshold', async () => {
+  it("removes oldest excess processed revisions by max-count threshold", async () => {
     await redis.hSet(processedRevisionsKey, {
-      rev_1: 't3_a',
-      rev_2: 't3_b',
-      rev_3: 't3_c',
+      rev_1: "t3_a",
+      rev_2: "t3_b",
+      rev_3: "t3_c",
     });
     await redis.zAdd(
       processedRevisionsByTimeKey,
-      { member: 'rev_1', score: 1000 },
-      { member: 'rev_2', score: 1001 },
-      { member: 'rev_3', score: 1002 }
+      { member: "rev_1", score: 1000 },
+      { member: "rev_2", score: 1001 },
+      { member: "rev_3", score: 1002 },
     );
 
     await cleanupCrosspostBookkeeping(
@@ -139,18 +139,18 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 100000,
         maxEntries: 2,
         minIntervalMs: 0,
-      }
+      },
     );
 
     const remaining = await redis.hGetAll(processedRevisionsKey);
-    expect(remaining).toEqual({ rev_2: 't3_b', rev_3: 't3_c' });
+    expect(remaining).toEqual({ rev_2: "t3_b", rev_3: "t3_c" });
   });
 
-  it('respects interval gate and skips cleanup when called too soon', async () => {
-    await redis.set(crosspostBookkeepingCleanupLastRunKey, '1900');
-    await redis.hSet(processedRevisionsKey, { rev_old: 't3_a' });
+  it("respects interval gate and skips cleanup when called too soon", async () => {
+    await redis.set(crosspostBookkeepingCleanupLastRunKey, "1900");
+    await redis.hSet(processedRevisionsKey, { rev_old: "t3_a" });
     await redis.zAdd(processedRevisionsByTimeKey, {
-      member: 'rev_old',
+      member: "rev_old",
       score: 100,
     });
 
@@ -161,26 +161,26 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 100,
         maxEntries: 1,
         minIntervalMs: 500,
-      }
+      },
     );
 
     expect(await redis.hGetAll(processedRevisionsKey)).toEqual({
-      rev_old: 't3_a',
+      rev_old: "t3_a",
     });
   });
 
-  it('removes stale mappings (invalid ids and untracked sources) and keeps valid mappings', async () => {
+  it("removes stale mappings (invalid ids and untracked sources) and keeps valid mappings", async () => {
     await redis.zAdd(
       postsKey,
-      { member: 't3_kept', score: 1 },
-      { member: 't3_tracked', score: 2 }
+      { member: "t3_kept", score: 1 },
+      { member: "t3_tracked", score: 2 },
     );
     await redis.hSet(crosspostListKey, {
-      bad_source: 't3_crosspost1',
-      t3_untracked: 't3_crosspost2',
-      t3_tracked: 'not_a_thing_id',
-      t3_comment_mapped: 't1_comment',
-      t3_kept: 't3_crosspost3',
+      bad_source: "t3_crosspost1",
+      t3_untracked: "t3_crosspost2",
+      t3_tracked: "not_a_thing_id",
+      t3_comment_mapped: "t1_comment",
+      t3_kept: "t3_crosspost3",
     });
 
     await cleanupCrosspostBookkeeping(
@@ -190,17 +190,17 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 100000,
         maxEntries: 100,
         minIntervalMs: 0,
-      }
+      },
     );
 
     expect(await redis.hGetAll(crosspostListKey)).toEqual({
-      t3_kept: 't3_crosspost3',
+      t3_kept: "t3_crosspost3",
     });
   });
 
-  it('backfills hash-only processed revisions into the time index', async () => {
+  it("backfills hash-only processed revisions into the time index", async () => {
     await redis.hSet(processedRevisionsKey, {
-      rev_hash_only: 't3_source',
+      rev_hash_only: "t3_source",
     });
 
     await cleanupCrosspostBookkeeping(
@@ -210,20 +210,20 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 100000,
         maxEntries: 100,
         minIntervalMs: 0,
-      }
+      },
     );
 
     expect(await redis.hGetAll(processedRevisionsKey)).toEqual({
-      rev_hash_only: 't3_source',
+      rev_hash_only: "t3_source",
     });
     expect(await redis.zRange(processedRevisionsByTimeKey, 0, -1)).toEqual([
-      { member: 'rev_hash_only', score: 5000 },
+      { member: "rev_hash_only", score: 5000 },
     ]);
   });
 
-  it('removes time-index orphans that are missing from the hash', async () => {
+  it("removes time-index orphans that are missing from the hash", async () => {
     await redis.zAdd(processedRevisionsByTimeKey, {
-      member: 'rev_orphan',
+      member: "rev_orphan",
       score: 100,
     });
 
@@ -234,25 +234,25 @@ describe('cleanupCrosspostBookkeeping', () => {
         retentionMs: 100000,
         maxEntries: 100,
         minIntervalMs: 0,
-      }
+      },
     );
 
     expect(await redis.zRange(processedRevisionsByTimeKey, 0, -1)).toEqual([]);
   });
 
-  it('does not advance cleanup last-run marker when cleanup fails', async () => {
+  it("does not advance cleanup last-run marker when cleanup fails", async () => {
     class ThrowingRedis extends InMemoryRedis {
       async hGetAll(key: string): Promise<Record<string, string>> {
         if (key === crosspostListKey) {
-          throw new Error('forced cleanup failure');
+          throw new Error("forced cleanup failure");
         }
         return await super.hGetAll(key);
       }
     }
     const throwingRedis = new ThrowingRedis();
-    await throwingRedis.hSet(processedRevisionsKey, { rev_1: 't3_source' });
+    await throwingRedis.hSet(processedRevisionsKey, { rev_1: "t3_source" });
     await throwingRedis.zAdd(processedRevisionsByTimeKey, {
-      member: 'rev_1',
+      member: "rev_1",
       score: 100,
     });
 
@@ -266,12 +266,12 @@ describe('cleanupCrosspostBookkeeping', () => {
           retentionMs: 100000,
           maxEntries: 100,
           minIntervalMs: 0,
-        }
-      )
-    ).rejects.toThrow('forced cleanup failure');
+        },
+      ),
+    ).rejects.toThrow("forced cleanup failure");
 
     expect(
-      await throwingRedis.get(crosspostBookkeepingCleanupLastRunKey)
+      await throwingRedis.get(crosspostBookkeepingCleanupLastRunKey),
     ).toBeUndefined();
   });
 });

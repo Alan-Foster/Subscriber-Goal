@@ -1,19 +1,19 @@
-import { reddit, redis } from '@devvit/web/server';
-import { type ServerAppSettings } from '../settings';
+import { reddit, redis } from "@devvit/web/server";
+import { type ServerAppSettings } from "../settings";
 import {
   crosspostWikiPages,
   isProcessedRevision,
   parseNewPostDispatchReason,
   parsePostActionDispatchReason,
-} from '../data/crosspostData';
-import { safeGetWikiPageRevisions } from '../utils/redditUtils';
-import { isLinkId, type LinkId } from '../types';
-import { logDiagnostic } from '../../shared/diagnostics';
+} from "../data/crosspostData";
+import { safeGetWikiPageRevisions } from "../utils/redditUtils";
+import { isLinkId, type LinkId } from "../types";
+import { logDiagnostic } from "../../shared/diagnostics";
 import {
   shouldLogUnexpectedRevision,
   isTerminalRevisionMarked,
-} from './bookkeeping';
-import { withErrorMessage } from './summary';
+} from "./bookkeeping";
+import { withErrorMessage } from "./summary";
 
 export type NewPostEvent = {
   postId: LinkId;
@@ -25,7 +25,7 @@ export type NewPostEvent = {
 export type PostActionEvent = {
   postId: LinkId;
   revisionId: string;
-  action: 'remove' | 'approve' | 'delete';
+  action: "remove" | "approve" | "delete";
 };
 
 export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
@@ -37,7 +37,7 @@ export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
   const result = await safeGetWikiPageRevisions(
     reddit,
     appSettings.promoSubreddit,
-    crosspostWikiPages.newPost
+    crosspostWikiPages.newPost,
   );
   if (!result.ok) {
     return {
@@ -63,12 +63,12 @@ export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
         await shouldLogUnexpectedRevision(
           redis,
           revision.id,
-          'unexpected_new_post_reason'
+          "unexpected_new_post_reason",
         )
       ) {
-        logDiagnostic('warn', 'crosspost_revision_skipped', {
-          workflow: 'crosspost',
-          phase: 'unexpected_new_post_reason',
+        logDiagnostic("warn", "crosspost_revision_skipped", {
+          workflow: "crosspost",
+          phase: "unexpected_new_post_reason",
           recordId: revision.id,
         });
       }
@@ -80,12 +80,12 @@ export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
         await shouldLogUnexpectedRevision(
           redis,
           revision.id,
-          'invalid_new_post_payload'
+          "invalid_new_post_payload",
         )
       ) {
-        logDiagnostic('warn', 'crosspost_revision_skipped', {
-          workflow: 'crosspost',
-          phase: 'invalid_new_post_payload',
+        logDiagnostic("warn", "crosspost_revision_skipped", {
+          workflow: "crosspost",
+          phase: "invalid_new_post_payload",
           recordId: revision.id,
         });
       }
@@ -96,7 +96,7 @@ export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
       postId,
       revisionId: revision.id,
       goal,
-      ...(typeof revision.dateMs === 'number'
+      ...(typeof revision.dateMs === "number"
         ? { revisionDateMs: revision.dateMs }
         : {}),
     };
@@ -112,7 +112,7 @@ export async function getNewPosts(appSettings: ServerAppSettings): Promise<{
 
 export async function getNewPostActions(
   appSettings: ServerAppSettings,
-  actionType: 'remove' | 'approve' | 'delete'
+  actionType: "remove" | "approve" | "delete",
 ): Promise<{
   events: PostActionEvent[];
   revisionsFetched: number;
@@ -122,7 +122,7 @@ export async function getNewPostActions(
   const result = await safeGetWikiPageRevisions(
     reddit,
     appSettings.promoSubreddit,
-    crosspostWikiPages.action[actionType]
+    crosspostWikiPages.action[actionType],
   );
   if (!result.ok) {
     return {
@@ -141,19 +141,19 @@ export async function getNewPostActions(
 
     const parsedReason = parsePostActionDispatchReason(
       revision.reason,
-      actionType
+      actionType,
     );
     if (!parsedReason) {
       if (
         await shouldLogUnexpectedRevision(
           redis,
           revision.id,
-          `unexpected_action_reason_${actionType}`
+          `unexpected_action_reason_${actionType}`,
         )
       ) {
-        logDiagnostic('warn', 'crosspost_revision_skipped', {
-          workflow: 'crosspost',
-          phase: 'unexpected_action_reason',
+        logDiagnostic("warn", "crosspost_revision_skipped", {
+          workflow: "crosspost",
+          phase: "unexpected_action_reason",
           category: actionType,
           recordId: revision.id,
         });
@@ -166,12 +166,12 @@ export async function getNewPostActions(
         await shouldLogUnexpectedRevision(
           redis,
           revision.id,
-          `invalid_action_post_id_${actionType}`
+          `invalid_action_post_id_${actionType}`,
         )
       ) {
-        logDiagnostic('warn', 'crosspost_revision_skipped', {
-          workflow: 'crosspost',
-          phase: 'invalid_action_post_id',
+        logDiagnostic("warn", "crosspost_revision_skipped", {
+          workflow: "crosspost",
+          phase: "invalid_action_post_id",
           category: actionType,
           recordId: revision.id,
         });

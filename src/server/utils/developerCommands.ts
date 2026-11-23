@@ -15,7 +15,9 @@ const emptyResult = (): DeveloperCommandResult => ({
   warnings: [],
 });
 
-const splitCommands = (value: string): { commands: string[]; quoteOpen: boolean } => {
+const splitCommands = (
+  value: string,
+): { commands: string[]; quoteOpen: boolean } => {
   const commands: string[] = [];
   let current = "";
   let inQuote = false;
@@ -90,7 +92,9 @@ export const parseDeveloperCommands = (
     }
 
     if (command.startsWith("header")) {
-      result.warnings.push(`Ignored malformed header developer command: ${command}`);
+      result.warnings.push(
+        `Ignored malformed header developer command: ${command}`,
+      );
       result.ignoredCommands.push(command);
       continue;
     }

@@ -4,10 +4,7 @@ import type { SubGoalPostHeight } from "./subGoalPostHeight";
 export const journeyIdHeader = "x-devvit-journey-id";
 
 export type GoalJourneyEntryState =
-  | "unsubscribed"
-  | "subscribed"
-  | "completed"
-  | "cta";
+  "unsubscribed" | "subscribed" | "completed" | "cta";
 
 export type GoalJourneyContext = {
   goalSize: SubGoalPostHeight;
@@ -16,9 +13,7 @@ export type GoalJourneyContext = {
 };
 
 export type GoalJourneyActionType =
-  | Exclude<AfterSubscribeActionType, "disabled">
-  | "promo"
-  | "install_promo";
+  Exclude<AfterSubscribeActionType, "disabled"> | "promo" | "install_promo";
 
 export type GoalJourneyFailureResult =
   | "login_required"

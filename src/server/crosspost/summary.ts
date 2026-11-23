@@ -1,4 +1,4 @@
-export type CrosspostIngestionStatus = 'success' | 'partial' | 'failed';
+export type CrosspostIngestionStatus = "success" | "partial" | "failed";
 
 export type CrosspostIngestionSummary = {
   status: CrosspostIngestionStatus;
@@ -21,7 +21,7 @@ export type CrosspostIngestionSummary = {
 
 export function emptySummary(): CrosspostIngestionSummary {
   return {
-    status: 'success',
+    status: "success",
     revisionsFetched: 0,
     newPostsSeen: 0,
     crosspostsCreated: 0,
@@ -40,7 +40,7 @@ export function emptySummary(): CrosspostIngestionSummary {
 }
 
 export const withErrorMessage = (
-  errorMessage?: string
+  errorMessage?: string,
 ): { errorMessage?: string } => (errorMessage ? { errorMessage } : {});
 
 export type CrosspostIngestionOptions = {

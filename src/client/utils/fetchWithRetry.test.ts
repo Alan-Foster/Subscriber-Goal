@@ -1,42 +1,42 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { requestJsonWithRetry, type RetryEvent } from './fetchWithRetry';
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { requestJsonWithRetry, type RetryEvent } from "./fetchWithRetry";
 
 const jsonResponse = (payload: unknown, status: number): Response =>
   new Response(JSON.stringify(payload), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
   });
 
-describe('requestJsonWithRetry', () => {
+describe("requestJsonWithRetry", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it('retries a transient network error and then succeeds', async () => {
+  it("retries a transient network error and then succeeds", async () => {
     let calls = 0;
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => {
         calls += 1;
         if (calls === 1) {
-          throw new Error('temporary network issue');
+          throw new Error("temporary network issue");
         }
         return jsonResponse({ ok: true }, 200);
-      })
+      }),
     );
 
     const result = await requestJsonWithRetry<{ ok: boolean }>(
-      '/api/init',
+      "/api/init",
       undefined,
       {
         maxDurationMs: 1000,
         initialDelayMs: 1,
         maxDelayMs: 1,
         attemptTimeoutMs: 100,
-      }
+      },
     );
 
     expect(result.error).toBeNull();
@@ -44,23 +44,23 @@ describe('requestJsonWithRetry', () => {
     expect(calls).toBe(2);
   });
 
-  it('retries 503/429 but does not retry 400', async () => {
+  it("retries 503/429 but does not retry 400", async () => {
     let calls503 = 0;
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => {
         calls503 += 1;
         if (calls503 === 1) {
-          return jsonResponse({ message: 'unavailable' }, 503);
+          return jsonResponse({ message: "unavailable" }, 503);
         }
         return jsonResponse({ ok: true }, 200);
-      })
+      }),
     );
 
     const retryableResult = await requestJsonWithRetry<{ ok: boolean }>(
-      '/api/init',
+      "/api/init",
       undefined,
-      { maxDurationMs: 1000, initialDelayMs: 1, maxDelayMs: 1 }
+      { maxDurationMs: 1000, initialDelayMs: 1, maxDelayMs: 1 },
     );
     expect(retryableResult.error).toBeNull();
     expect(retryableResult.data).toEqual({ ok: true });
@@ -68,44 +68,44 @@ describe('requestJsonWithRetry', () => {
 
     let calls400 = 0;
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => {
         calls400 += 1;
-        return jsonResponse({ message: 'bad request' }, 400);
-      })
+        return jsonResponse({ message: "bad request" }, 400);
+      }),
     );
     const nonRetryableResult = await requestJsonWithRetry<{ ok: boolean }>(
-      '/api/init',
+      "/api/init",
       undefined,
-      { maxDurationMs: 1000, initialDelayMs: 1, maxDelayMs: 1 }
+      { maxDurationMs: 1000, initialDelayMs: 1, maxDelayMs: 1 },
     );
-    expect(nonRetryableResult.error).toBe('bad request');
+    expect(nonRetryableResult.error).toBe("bad request");
     expect(nonRetryableResult.data).toBeNull();
     expect(calls400).toBe(1);
   });
 
-  it('times out a hanging attempt and proceeds to a later successful attempt', async () => {
+  it("times out a hanging attempt and proceeds to a later successful attempt", async () => {
     let calls = 0;
     const events: RetryEvent[] = [];
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
         calls += 1;
         if (calls === 1) {
           return new Promise<Response>((_resolve, reject) => {
             init?.signal?.addEventListener(
-              'abort',
-              () => reject(new DOMException('Aborted', 'AbortError')),
-              { once: true }
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
             );
           });
         }
         return Promise.resolve(jsonResponse({ ok: true }, 200));
-      })
+      }),
     );
 
     const result = await requestJsonWithRetry<{ ok: boolean }>(
-      '/api/init',
+      "/api/init",
       undefined,
       {
         maxDurationMs: 1000,
@@ -113,7 +113,7 @@ describe('requestJsonWithRetry', () => {
         maxDelayMs: 1,
         attemptTimeoutMs: 20,
         onEvent: (event) => events.push(event),
-      }
+      },
     );
 
     expect(result.error).toBeNull();
@@ -121,76 +121,76 @@ describe('requestJsonWithRetry', () => {
     expect(calls).toBe(2);
     expect(
       events.some(
-        (event) => event.event === 'retry_wait' && event.reason === 'timeout'
-      )
+        (event) => event.event === "retry_wait" && event.reason === "timeout",
+      ),
     ).toBe(true);
   });
 
-  it('honors maxDurationMs and returns a deterministic terminal error', async () => {
+  it("honors maxDurationMs and returns a deterministic terminal error", async () => {
     vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => jsonResponse({ message: 'unavailable' }, 503))
+      "fetch",
+      vi.fn(async () => jsonResponse({ message: "unavailable" }, 503)),
     );
 
     const result = await requestJsonWithRetry<{ ok: boolean }>(
-      '/api/init',
+      "/api/init",
       undefined,
       {
         maxDurationMs: 15,
         initialDelayMs: 10,
         maxDelayMs: 10,
         attemptTimeoutMs: 100,
-      }
+      },
     );
 
     expect(result.data).toBeNull();
-    expect(result.error).toBe('unavailable');
+    expect(result.error).toBe("unavailable");
     expect(result.aborted).toBe(false);
   });
 
   it.each([
     {
-      reason: 'protocol_error',
+      reason: "protocol_error",
       status: 200,
-      error: 'Invalid JSON response',
-      respond: async () => new Response('invalid JSON'),
+      error: "Invalid JSON response",
+      respond: async () => new Response("invalid JSON"),
     },
     {
-      reason: 'http_retryable',
+      reason: "http_retryable",
       status: 503,
-      error: 'unavailable',
-      respond: async () => jsonResponse({ message: 'unavailable' }, 503),
+      error: "unavailable",
+      respond: async () => jsonResponse({ message: "unavailable" }, 503),
     },
     {
-      reason: 'network_error',
-      error: 'connection failed',
+      reason: "network_error",
+      error: "connection failed",
       respond: async () => {
-        throw new Error('connection failed');
+        throw new Error("connection failed");
       },
     },
     {
-      reason: 'timeout',
-      error: 'Request timed out',
+      reason: "timeout",
+      error: "Request timed out",
       respond: (_input: RequestInfo | URL, init?: RequestInit) =>
         new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener(
-            'abort',
-            () => reject(new DOMException('Aborted', 'AbortError')),
-            { once: true }
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
           );
         }),
     },
   ])(
-    'aborts during the $reason retry wait',
+    "aborts during the $reason retry wait",
     async ({ respond, ...details }) => {
       vi.useFakeTimers();
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
       const fetchMock = vi.fn(respond);
-      vi.stubGlobal('fetch', fetchMock);
+      vi.stubGlobal("fetch", fetchMock);
       const controller = new AbortController();
       const events: RetryEvent[] = [];
       const result = requestJsonWithRetry(
-        '/api/init',
+        "/api/init",
         { signal: controller.signal },
         {
           maxDurationMs: 1000,
@@ -199,16 +199,16 @@ describe('requestJsonWithRetry', () => {
           jitterRatio: 0,
           onEvent: (event) => {
             events.push(event);
-            if (event.event === 'retry_wait') {
+            if (event.event === "retry_wait") {
               window.setTimeout(() => controller.abort(), 5);
             }
           },
-        }
+        },
       );
 
       await vi.runAllTimersAsync();
 
-      const remainingMs = details.reason === 'timeout' ? 975 : 1000;
+      const remainingMs = details.reason === "timeout" ? 975 : 1000;
       await expect(result).resolves.toEqual({
         data: null,
         error: null,
@@ -216,68 +216,80 @@ describe('requestJsonWithRetry', () => {
       });
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(events).toStrictEqual([
-        { event: 'attempt', attempt: 1, remainingMs: 1000 },
+        { event: "attempt", attempt: 1, remainingMs: 1000 },
         {
-          event: 'retry_wait',
+          event: "retry_wait",
           attempt: 1,
           waitMs: 200,
           remainingMs,
           ...details,
         },
         {
-          event: 'terminal',
+          event: "terminal",
           attempt: 1,
           remainingMs: remainingMs - 5,
-          reason: 'aborted',
+          reason: "aborted",
         },
       ]);
-    }
+    },
   );
 
   it.each([
-    ['gateway', 'failed to call devvit application: unavailable'],
-    ['html', '<html>bad gateway</html>'],
-    ['empty', ''],
-    ['malformed_json', '{broken'],
-  ])('logs and rejects a %s response without logging its body', async (phase, body) => {
+    ["gateway", "failed to call devvit application: unavailable"],
+    ["html", "<html>bad gateway</html>"],
+    ["empty", ""],
+    ["malformed_json", "{broken"],
+  ])(
+    "logs and rejects a %s response without logging its body",
+    async (phase, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(body, {
+              status: 200,
+              headers: { "content-type": "text/plain" },
+            }),
+        ),
+      );
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const result = await requestJsonWithRetry("/api/init", undefined, {
+        maxDurationMs: 0,
+      });
+
+      expect(result).toEqual({
+        data: null,
+        error: "Invalid JSON response",
+        aborted: false,
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`"phase":"${phase}"`),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("client_request_failed"),
+      );
+      expect(warnSpy.mock.calls.flat().join(" ")).not.toContain(
+        body || "not-present",
+      );
+    },
+  );
+
+  it("treats a malformed successful payload as a logged protocol failure", async () => {
     vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        new Response(body, { status: 200, headers: { 'content-type': 'text/plain' } })
-      )
+      "fetch",
+      vi.fn(async () => jsonResponse({}, 200)),
     );
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    const result = await requestJsonWithRetry('/api/init', undefined, {
-      maxDurationMs: 0,
-    });
-
-    expect(result).toEqual({
-      data: null,
-      error: 'Invalid JSON response',
-      aborted: false,
-    });
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`"phase":"${phase}"`)
-    );
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('client_request_failed')
-    );
-    expect(warnSpy.mock.calls.flat().join(' ')).not.toContain(body || 'not-present');
-  });
-
-  it('treats a malformed successful payload as a logged protocol failure', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 200)));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const result = await requestJsonWithRetry('/api/init', undefined, {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await requestJsonWithRetry("/api/init", undefined, {
       maxDurationMs: 0,
       validate: (payload) =>
-        typeof payload === 'object' && payload !== null && 'state' in payload,
+        typeof payload === "object" && payload !== null && "state" in payload,
     });
-    expect(result.error).toBe('Invalid JSON response');
+    expect(result.error).toBe("Invalid JSON response");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('client_invalid_success_payload')
+      expect.stringContaining("client_invalid_success_payload"),
     );
   });
 });

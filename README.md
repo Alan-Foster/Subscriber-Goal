@@ -51,10 +51,10 @@ Celebrate the growth of your subreddit using Subscriber Goals!
 - 2.5.3 - Fixed a bug related to idempotency keys preventing new goals from being created.
 - 2.5.2 - Adjusted how subscriber counts are displayed on Tiny subscribe and CTA posts. Compressed Changelog. Devvit 0.15.3
 - 2.5.1 - Reordered language selection items. AutoGoal now checks highlights properly. Removed unused New Subreddit Invite system, tailwind code.
-- 2.4.3 - Goal Success page text blocks now have static backgrounds to make screenshots easier to read. 
+- 2.4.3 - Goal Success page text blocks now have static backgrounds to make screenshots easier to read.
 - 2.4.2 - Responsive Header, Join and CTA button text sizing scales from 18px to 12px and wraps appropriately. Improved missing goal data fallback and error reporting.
 - 2.4.1 - UI improvements. Login prompt for non-users. Local install metrics for 24h and 7d for subbed vs unsubbed app loads, clicks, click success. Devvit 0.15.2
-- 2.3.3 - Improved auto-goal system on app upgrades to prevent duplicate goals. 
+- 2.3.3 - Improved auto-goal system on app upgrades to prevent duplicate goals.
 - 2.3.2 - Missing mod accounts are re-added when removed, with proper uninstall steps provided via dm.
 - 2.3.1 - Added Hindi, Punjabi, Marathi, now 31 total! Subscribe To is now Join. Invite Page for mods to install to their own subreddits. Removed Most Overrides. Devvit 0.15.1
 - 2.2.1 - Integrated post.highlight (0.14.7) to better track pinned goals. Remove My Own Data fixed. NSFW Most Recent Post fixed. New Create a CTA Menu Item. Devvit 0.15.0
