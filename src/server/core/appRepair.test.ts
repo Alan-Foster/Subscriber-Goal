@@ -745,6 +745,45 @@ describe("scheduled app repair", () => {
     });
   });
 
+  it("backs off repeated degraded highlight results instead of scheduling itself in five minutes", async () => {
+    const minuteMs = 60_000;
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockImplementation(
+      async ({ nowMs, scheduleRepairOnDegraded }) => {
+        if (scheduleRepairOnDegraded !== false) {
+          await scheduleHighlightRepair(redis as never, {
+            nowMs,
+            delayMs: 5 * minuteMs,
+            force: true,
+            reason: "highlight_reconciliation_degraded",
+          });
+        }
+        return {
+          status: "existing_not_highlighted",
+          reconciliationOutcome: "degraded",
+          errorMessage: "Missing Manage Posts permission.",
+        };
+      },
+    );
+    let nowMs = 100;
+    await scheduleAppRepair(redis as never, nowMs, 0);
+    for (const [index, delayMinutes] of [5, 10, 20, 40, 60, 60].entries()) {
+      await expect(
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+        }),
+      ).resolves.toBe("retry");
+      const nextRunAt = nowMs + delayMinutes * minuteMs;
+      expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+        status: "pending",
+        attempts: String(index + 1),
+        nextRunAt: String(nextRunAt),
+      });
+      nowMs = nextRunAt;
+    }
+  });
+
   it("completes after a successful discovery finds no eligible post", async () => {
     hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
       status: "missing",
