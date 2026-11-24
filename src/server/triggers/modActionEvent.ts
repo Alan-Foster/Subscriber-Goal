@@ -29,17 +29,25 @@ function isOptionalTargetPost(value: unknown): boolean {
     value === undefined ||
     (isRecord(value) &&
       typeof value.id === "string" &&
-      isOptionalString(value.authorId) &&
-      isOptionalString(value.subredditId) &&
-      isOptionalString(value.subredditName) &&
-      (value.nsfw === undefined || typeof value.nsfw === "boolean"))
+      hasValidPostMetadata(value))
+  );
+}
+
+function hasValidPostMetadata(post: Record<string, unknown>): boolean {
+  return (
+    isOptionalString(post.authorId) &&
+    isOptionalString(post.subredditId) &&
+    isOptionalString(post.subredditName) &&
+    (post.nsfw === undefined || typeof post.nsfw === "boolean")
   );
 }
 
 function isAbsentTargetPost(value: unknown): boolean {
   return (
     value === null ||
-    (isRecord(value) && (value.id === undefined || value.id === ""))
+    (isRecord(value) &&
+      (value.id === undefined || value.id === "") &&
+      hasValidPostMetadata(value))
   );
 }
 

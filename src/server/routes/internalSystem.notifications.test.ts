@@ -11,16 +11,19 @@ const hoisted = vi.hoisted(() => ({
   enqueue: vi.fn(),
   incrBy: vi.fn(),
   expire: vi.fn(),
+  hGet: vi.fn(),
   onAppChanged: vi.fn(),
   onModAction: vi.fn(),
   recordCommunityPostCreated: vi.fn(),
   processAppAccountRecovery: vi.fn(),
+  handleAppAccountModeratorAction: vi.fn(),
 }));
 
 vi.mock("@devvit/web/server", () => ({
   reddit: { getCurrentSubreddit: hoisted.getCurrentSubreddit },
-  redis: { incrBy: hoisted.incrBy, expire: hoisted.expire },
+  redis: { incrBy: hoisted.incrBy, expire: hoisted.expire, hGet: hoisted.hGet },
   scheduler: { runJob: hoisted.runJob },
+  context: {},
 }));
 
 vi.mock("@devvit/notifications", () => ({
@@ -43,6 +46,7 @@ vi.mock("../data/ctaActivity", () => ({
 }));
 vi.mock("../core/appAccountRecovery", () => ({
   processAppAccountRecovery: hoisted.processAppAccountRecovery,
+  handleAppAccountModeratorAction: hoisted.handleAppAccountModeratorAction,
 }));
 
 import { registerInternalSystemRoutes } from "./internalSystem";
@@ -135,6 +139,36 @@ describe("moderation and post creation trigger routes", () => {
     },
   );
 
+  it.each([{ targetPost: {} }, { targetPost: null }])(
+    "routes an app-account removal with targetPost $targetPost into recovery",
+    async ({ targetPost }) => {
+      const { onModAction } = await vi.importActual<
+        typeof import("../triggers/modAction")
+      >("../triggers/modAction");
+      hoisted.onModAction.mockImplementationOnce(onModAction);
+      hoisted.getCurrentSubreddit.mockResolvedValue({
+        id: "t5_source",
+        name: "ExampleSub",
+      });
+      hoisted.hGet.mockResolvedValue("subscriber-goal");
+      const { json, status } = await invoke(
+        internalRoutes.triggers.onModAction,
+        { action: "removemoderator", targetUser: appAccountTarget, targetPost },
+      );
+      expect(status).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledExactlyOnceWith({ status: "ok" });
+      expect(
+        hoisted.handleAppAccountModeratorAction,
+      ).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          action: "removemoderator",
+          subredditName: "ExampleSub",
+          subredditId: "t5_source",
+        }),
+      );
+    },
+  );
+
   it.each([
     ["wrapped", { post }],
     ["bare", post],
@@ -172,6 +206,8 @@ describe("moderation and post creation trigger routes", () => {
     [
       { action: "removelink", targetPost: { id: 42 } },
       { action: "removelink", targetPost: { id: null } },
+      { action: "removemoderator", targetPost: { id: "", nsfw: "false" } },
+      { action: "removemoderator", targetPost: { authorId: 42 } },
       { action: "removemoderator", targetUser: { name: 42 } },
       { action: "approvelink", targetPost: { id: "t3_source", nsfw: "false" } },
       { action: 42 },
