@@ -387,6 +387,7 @@ async function reconcileRepairHighlights(
       redis,
       nowMs,
       notifyOnFailure: true,
+      scheduleRepairOnDegraded: false,
       reconciliationContext: "repair",
       highlightVerification: { deadlineMs },
       mutationLease,

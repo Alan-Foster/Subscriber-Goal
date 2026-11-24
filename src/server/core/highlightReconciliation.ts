@@ -78,6 +78,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
   redis,
   nowMs = Date.now(),
   notifyOnFailure = false,
+  scheduleRepairOnDegraded = true,
   highlightVerification,
   reconciliationContext = "onboarding",
   mutationLease,
@@ -86,6 +87,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
   redis: RedisClient;
   nowMs?: number;
   notifyOnFailure?: boolean;
+  scheduleRepairOnDegraded?: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext?: HighlightReconciliationContext;
   mutationLease?: CommunityGoalMutationLease;
@@ -98,6 +100,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
         redis,
         nowMs,
         notifyOnFailure,
+        scheduleRepairOnDegraded,
         ...(highlightVerification ? { highlightVerification } : {}),
         reconciliationContext,
         mutationLease: lease,
@@ -111,6 +114,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   redis,
   nowMs,
   notifyOnFailure,
+  scheduleRepairOnDegraded,
   highlightVerification,
   reconciliationContext,
   mutationLease,
@@ -119,6 +123,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   redis: RedisClient;
   nowMs: number;
   notifyOnFailure: boolean;
+  scheduleRepairOnDegraded: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext: HighlightReconciliationContext;
   mutationLease: CommunityGoalMutationLease;
@@ -144,6 +149,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
     redis,
     nowMs,
     notifyOnFailure,
+    scheduleRepairOnDegraded,
     reconciliationContext,
     mutationLease,
     ...(highlightVerification ? { highlightVerification } : {}),
@@ -195,6 +201,7 @@ async function reconcileLiveSubscriberGoalHighlights({
   redis,
   nowMs,
   notifyOnFailure,
+  scheduleRepairOnDegraded,
   highlightVerification,
   reconciliationContext,
   mutationLease,
@@ -206,6 +213,7 @@ async function reconcileLiveSubscriberGoalHighlights({
   redis: RedisClient;
   nowMs: number;
   notifyOnFailure: boolean;
+  scheduleRepairOnDegraded: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext: HighlightReconciliationContext;
   mutationLease: CommunityGoalMutationLease;
@@ -244,6 +252,7 @@ async function reconcileLiveSubscriberGoalHighlights({
       selected: selection.selected,
       nowMs,
       notifyOnFailure,
+      scheduleRepairOnDegraded,
       ...(highlightVerification ? { highlightVerification } : {}),
       removableManagedPostIds: selection.removableManagedPostIds,
       celebrationEndsAt: selection.celebrationEndsAt,
@@ -491,6 +500,7 @@ async function reconcileCanonicalClassicGoal({
   selected,
   nowMs,
   notifyOnFailure,
+  scheduleRepairOnDegraded,
   highlightVerification,
   removableManagedPostIds,
 }: {
@@ -499,6 +509,7 @@ async function reconcileCanonicalClassicGoal({
   selected: OnboardingGoalCandidate;
   nowMs: number;
   notifyOnFailure: boolean;
+  scheduleRepairOnDegraded: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
   removableManagedPostIds: LinkId[];
 }): Promise<{
@@ -522,6 +533,7 @@ async function reconcileCanonicalClassicGoal({
     redis,
     selected,
     notifyOnFailure,
+    scheduleRepairOnDegraded,
     removableManagedPostIds,
     nowMs,
     ...(highlightVerification ? { highlightVerification } : {}),
@@ -543,6 +555,7 @@ async function highlightExistingGoal({
   redis,
   selected,
   notifyOnFailure,
+  scheduleRepairOnDegraded,
   highlightVerification,
   removableManagedPostIds,
   nowMs = Date.now(),
@@ -551,6 +564,7 @@ async function highlightExistingGoal({
   redis: RedisClient;
   selected: OnboardingGoalCandidate;
   notifyOnFailure: boolean;
+  scheduleRepairOnDegraded: boolean;
   highlightVerification?: Partial<HighlightVerificationOptions>;
   removableManagedPostIds?: LinkId[];
   nowMs?: number;
@@ -642,12 +656,14 @@ async function highlightExistingGoal({
     return { highlightResult, notificationOutcome: "not_requested" };
   }
 
-  await scheduleHighlightRepair(redis, {
-    delayMs: 5 * 60 * 1000,
-    force: true,
-    reason: "highlight_reconciliation_degraded",
-    nowMs,
-  });
+  if (scheduleRepairOnDegraded) {
+    await scheduleHighlightRepair(redis, {
+      delayMs: 5 * 60 * 1000,
+      force: true,
+      reason: "highlight_reconciliation_degraded",
+      nowMs,
+    });
+  }
 
   const notificationOutcome = notifyOnFailure
     ? await notifyExistingHighlightFailure({

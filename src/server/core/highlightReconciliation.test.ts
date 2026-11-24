@@ -229,6 +229,71 @@ describe("existing goal highlight ensurance", () => {
     expect(reddit.modMail.createModNotification).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    {
+      caller: "onboarding",
+      reconciliationContext: "onboarding",
+      scheduleRepair: true,
+    },
+    {
+      caller: "AutoGoal",
+      reconciliationContext: "repair",
+      scheduleRepair: true,
+    },
+    {
+      caller: "the repair job",
+      reconciliationContext: "repair",
+      scheduleRepair: false,
+    },
+  ] as const)(
+    "schedules degraded highlight repair for $caller only when enabled",
+    async ({ reconciliationContext, scheduleRepair }) => {
+      const goal = makePost({
+        id: "t3_goal",
+        createdAt: "2026-09-16T00:00:00Z",
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+      });
+      const reddit = makeReddit([goal]);
+      reddit.getAppUser.mockResolvedValue({
+        username: "subscriber-goal-app",
+        getModPermissionsForSubreddit: async () => [],
+      });
+      const redis = new InMemoryRedis();
+      await redis.hSet("subscriber_goals", { t3_goal_goal: "3000" });
+      const repairState = {
+        status: "processing",
+        nextRunAt: String(nowMs),
+        attempts: "2",
+      };
+      if (!scheduleRepair) await redis.hSet(appRepairStateKey, repairState);
+
+      await expect(
+        ensureExistingSubscriberGoalHighlighted({
+          reddit: reddit as never,
+          redis: redis as never,
+          nowMs,
+          notifyOnFailure: true,
+          reconciliationContext,
+          ...(scheduleRepair ? {} : { scheduleRepairOnDegraded: false }),
+        }),
+      ).resolves.toMatchObject({
+        failureCategories: ["permission"],
+        notificationOutcome: "sent",
+      });
+      const state = await redis.hGetAll(appRepairStateKey);
+      if (scheduleRepair) {
+        expect(state).toMatchObject({
+          reason: "highlight_reconciliation_degraded",
+          status: "pending",
+          nextRunAt: String(nowMs + 5 * 60_000),
+        });
+      } else {
+        expect(state).toEqual(repairState);
+      }
+    },
+  );
+
   it("restores an unhighlighted protected Tiny post", async () => {
     const older = makePost({
       id: "t3_older",
