@@ -257,7 +257,7 @@ describe("existing goal highlight ensurance", () => {
       const reddit = makeReddit([goal]);
       reddit.getAppUser.mockResolvedValue({
         username: "subscriber-goal-app",
-        getModPermissionsForSubreddit: async () => [],
+        getModPermissionsForSubreddit: vi.fn(async (): Promise<string[]> => []),
       });
       const redis = new InMemoryRedis();
       await redis.hSet("subscriber_goals", { t3_goal_goal: "3000" });
