@@ -630,13 +630,17 @@ describe("onboarding lifecycle reconciliation", () => {
       });
     const reddit = createReddit({ posts: [removed, live, source] });
     await scheduleAppRepair(redis as never, nowMs, 0);
-    await expect(
-      processDueAppRepair({
-        reddit: reddit as never,
-        redis: redis as never,
-        nowMs,
-      }),
-    ).resolves.toBe("complete");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    try {
+      await expect(
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+        }),
+      ).resolves.toBe("complete");
+    } finally {
+      clock.mockRestore();
+    }
     expect(live.highlight).toHaveBeenCalledOnce();
     expect(removed.highlight).not.toHaveBeenCalled();
     expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
