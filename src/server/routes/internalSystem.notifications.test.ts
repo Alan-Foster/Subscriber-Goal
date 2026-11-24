@@ -85,6 +85,56 @@ describe("moderation and post creation trigger routes", () => {
     expect(json).toHaveBeenCalledExactlyOnceWith({ status: "ok" });
   });
 
+  const appAccountTarget = { name: "subscriber-goal" };
+  it.each([
+    {
+      body: {
+        modAction: {
+          action: "removelink",
+          targetPost: { authorId: "t2_author" },
+        },
+      },
+      expected: { action: "removelink" },
+    },
+    {
+      body: { action: "removelink", targetPost: { id: "" } },
+      expected: { action: "removelink" },
+    },
+    {
+      body: {
+        action: "removemoderator",
+        targetUser: appAccountTarget,
+        targetPost: {},
+      },
+      expected: { action: "removemoderator", targetUser: appAccountTarget },
+    },
+    {
+      body: {
+        action: "removemoderator",
+        targetUser: appAccountTarget,
+        targetPost: null,
+      },
+      expected: { action: "removemoderator", targetUser: appAccountTarget },
+    },
+    {
+      body: { action: "removemoderator", targetUser: null, moderator: null },
+      expected: { action: "removemoderator" },
+    },
+  ])(
+    "treats empty or null mod action targets as absent ($body)",
+    async ({ body, expected }) => {
+      const original = structuredClone(body);
+      const { json, status } = await invoke(
+        internalRoutes.triggers.onModAction,
+        body,
+      );
+      expect(hoisted.onModAction).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(status).not.toHaveBeenCalled();
+      expect(json).toHaveBeenCalledExactlyOnceWith({ status: "ok" });
+      expect(body).toStrictEqual(original);
+    },
+  );
+
   it.each([
     ["wrapped", { post }],
     ["bare", post],
@@ -120,13 +170,8 @@ describe("moderation and post creation trigger routes", () => {
 
   it.each(
     [
-      {
-        modAction: {
-          action: "removelink",
-          targetPost: { authorId: "t2_author" },
-        },
-      },
       { action: "removelink", targetPost: { id: 42 } },
+      { action: "removelink", targetPost: { id: null } },
       { action: "removemoderator", targetUser: { name: 42 } },
       { action: "approvelink", targetPost: { id: "t3_source", nsfw: "false" } },
       { action: 42 },
