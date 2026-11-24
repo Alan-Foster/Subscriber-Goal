@@ -1,6 +1,7 @@
 import type { RedisClient } from "../types";
 import {
   createJobCodec,
+  flagField,
   jobRecordFields,
   textField,
   timeField,
@@ -17,6 +18,10 @@ const appRepairCodec = createJobCodec({
   scheduledAt: timeField,
   reason: textField,
   targetPostId: textField,
+  flairBackfillTemplateId: textField,
+  flairBackfillAfterPostId: textField,
+  flairBackfillHadFailures: flagField,
+  flairBackfillComplete: flagField,
 });
 
 export const appRepairJob = {

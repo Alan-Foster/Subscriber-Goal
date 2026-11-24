@@ -166,4 +166,43 @@ describe("Subscriber Goal post flair", () => {
     });
     expect(result).toEqual({ applied: 1, failed: ["t3_missing"] });
   });
+
+  it("leaves a post at the cursor when its lookup consumes the remaining budget", async () => {
+    let now = 0;
+    const reddit = {
+      getPostById: vi.fn(async (id: string) => {
+        now += 150;
+        return { id, subredditId: "t5_local" };
+      }),
+      setPostFlair: vi.fn(),
+    };
+    const subreddit = { id: "t5_local", name: "ExampleSub" };
+    const postIds = ["t3_a", "t3_b"];
+    const result = await backfillSubscriberGoalPostFlair(
+      reddit as never,
+      subreddit,
+      postIds,
+      "flair_1",
+      { canStart: () => now < 300 },
+    );
+    expect(result).toEqual({ applied: 1, failed: [], nextAfterPostId: "t3_a" });
+    expect(reddit.setPostFlair).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ postId: "t3_a" }),
+    );
+
+    await expect(
+      backfillSubscriberGoalPostFlair(
+        reddit as never,
+        subreddit,
+        postIds,
+        "flair_1",
+        {
+          afterPostId: result.nextAfterPostId ?? "",
+        },
+      ),
+    ).resolves.toEqual({ applied: 1, failed: [] });
+    expect(reddit.setPostFlair).toHaveBeenLastCalledWith(
+      expect.objectContaining({ postId: "t3_b" }),
+    );
+  });
 });

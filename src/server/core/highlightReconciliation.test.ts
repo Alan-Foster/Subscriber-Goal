@@ -873,9 +873,11 @@ describe("existing goal highlight ensurance", () => {
       redis: redis as never,
       nowMs,
       notifyOnFailure: true,
-      highlightVerification: { maxWaitMs: 0, intervalMs: 0 },
       reconciliationContext: "repair",
     });
+    await expect(
+      redis.hGetAll(`${postOperationalStateKeyPrefix}:${active.id}`),
+    ).resolves.toMatchObject({ archived: "true", highlightBlocked: "true" });
     const second = await ensureExistingSubscriberGoalHighlighted({
       reddit: reddit as never,
       redis: redis as never,
@@ -887,12 +889,6 @@ describe("existing goal highlight ensurance", () => {
     expect(first.failureCategories).toContain("post_state");
     expect(second.failureCategories).toContain("post_state");
     expect(active.highlight).toHaveBeenCalledOnce();
-    await expect(
-      redis.hGetAll(`${postOperationalStateKeyPrefix}:${active.id}`),
-    ).resolves.toMatchObject({
-      archived: "true",
-      highlightBlocked: "true",
-    });
     expect(reddit.modMail.createModNotification).toHaveBeenCalledOnce();
   });
 

@@ -37,6 +37,170 @@ function createHarness(initialIds: LinkId[]) {
 }
 
 describe("Community Highlights manager", () => {
+  it("does not wait after a rejected write and still restores the displaced pin", async () => {
+    vi.useFakeTimers();
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    try {
+      const ids: LinkId[] = [
+        "t3_oldgoal",
+        "t3_a",
+        "t3_b",
+        "t3_c",
+        "t3_d",
+        "t3_e",
+      ];
+      const harness = createHarness(ids);
+      harness.target.highlight.mockRejectedValueOnce(new Error("write failed"));
+      const result = highlightAndVerifyPost(
+        harness.reddit as never,
+        harness.subreddit,
+        harness.target,
+        { removableManagedPostIds: ["t3_oldgoal"] },
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(timer).not.toHaveBeenCalled();
+      await expect(result).resolves.toMatchObject({
+        failureCategory: "write",
+        rollbackOutcome: "restored",
+      });
+      expect(harness.target.isHighlighted).toHaveBeenCalledOnce();
+      expect(harness.getIds()).toEqual([...ids.slice(1), "t3_oldgoal"]);
+    } finally {
+      timer.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a write that threw after Reddit applied it from one listing read", async () => {
+    const harness = createHarness([]);
+    const highlight = harness.target.highlight.getMockImplementation()!;
+    harness.target.highlight.mockImplementationOnce(async () => {
+      await highlight();
+      harness.subreddit.getHighlightedPosts.mockClear();
+      throw new Error("response lost");
+    });
+    await expect(
+      highlightAndVerifyPost(
+        harness.reddit as never,
+        harness.subreddit,
+        harness.target,
+      ),
+    ).resolves.toMatchObject({
+      status: "highlighted",
+      verifiedHighlighted: false,
+      failureCategory: "write",
+    });
+    expect(harness.subreddit.getHighlightedPosts).toHaveBeenCalledOnce();
+    expect(harness.target.isHighlighted).toHaveBeenCalledOnce();
+  });
+
+  it("shares a caller deadline across removal, replacement and rollback verification", async () => {
+    vi.useFakeTimers();
+    try {
+      const startedAt = Date.now();
+      const ids: LinkId[] = [
+        "t3_oldgoal",
+        "t3_a",
+        "t3_b",
+        "t3_c",
+        "t3_d",
+        "t3_e",
+      ];
+      const harness = createHarness(ids);
+      const old = harness.posts.get("t3_oldgoal")!;
+      old.isHighlighted
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValue(false);
+      harness.target.isHighlighted.mockResolvedValue(false);
+      const attempt = highlightAndVerifyPost(
+        harness.reddit as never,
+        harness.subreddit,
+        harness.target,
+        {
+          deadlineMs: startedAt + 6_000,
+          removableManagedPostIds: ["t3_oldgoal"],
+          rollbackUnverifiedReplacement: true,
+        },
+      ).then((result) => ({ result, elapsed: Date.now() - startedAt }));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(vi.getTimerCount()).toBe(0);
+      const { result, elapsed } = await attempt;
+      expect(elapsed).toBe(5_000);
+      expect(result).toMatchObject({
+        verifiedHighlighted: false,
+        failureCategory: "verification",
+        rollbackOutcome: "failed",
+      });
+      expect(old.unhighlight).toHaveBeenCalledOnce();
+      expect(harness.target.highlight).toHaveBeenCalledOnce();
+      expect(harness.target.unhighlight).toHaveBeenCalledOnce();
+      expect(old.highlight).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("makes no Reddit calls when the deadline has already expired", async () => {
+    const harness = createHarness([]);
+    await expect(
+      highlightAndVerifyPost(
+        harness.reddit as never,
+        harness.subreddit,
+        harness.target,
+        { deadlineMs: Date.now() - 1 },
+      ),
+    ).resolves.toMatchObject({
+      status: "not_highlighted",
+      verifiedHighlighted: false,
+      failureCategory: "verification",
+    });
+    expect(harness.subreddit.getHighlightedPosts).not.toHaveBeenCalled();
+    expect(harness.target.highlight).not.toHaveBeenCalled();
+    expect(harness.target.unhighlight).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed rollback if the deadline expires after removing the old pin", async () => {
+    vi.useFakeTimers();
+    try {
+      const deadlineMs = Date.now() + 6_000;
+      const ids: LinkId[] = [
+        "t3_oldgoal",
+        "t3_a",
+        "t3_b",
+        "t3_c",
+        "t3_d",
+        "t3_e",
+      ];
+      const harness = createHarness(ids);
+      const old = harness.posts.get("t3_oldgoal")!;
+      const unhighlight = old.unhighlight.getMockImplementation()!;
+      old.unhighlight.mockImplementationOnce(async () => {
+        await unhighlight();
+        vi.setSystemTime(deadlineMs - 1_000);
+      });
+
+      await expect(
+        highlightAndVerifyPost(
+          harness.reddit as never,
+          harness.subreddit,
+          harness.target,
+          { deadlineMs, removableManagedPostIds: ["t3_oldgoal"] },
+        ),
+      ).resolves.toMatchObject({
+        verifiedHighlighted: false,
+        rollbackOutcome: "failed",
+        issues: expect.arrayContaining([
+          expect.objectContaining({ category: "rollback" }),
+        ]),
+      });
+      expect(harness.target.highlight).not.toHaveBeenCalled();
+      expect(old.highlight).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("verifies a new highlight in the position Reddit assigns it", async () => {
     const harness = createHarness(["t3_a", "t3_b"]);
 
