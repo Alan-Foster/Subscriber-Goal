@@ -18,8 +18,6 @@ import {
   createFailedHighlightResult,
   isCapacityOnlyHighlightFailure,
   highlightAndVerifyPost,
-  highlightVerificationIntervalMs,
-  highlightVerificationMaxWaitMs,
   type HighlightResult,
   type HighlightVerificationOptions,
 } from "../utils/communityHighlights";
@@ -618,15 +616,7 @@ async function highlightExistingGoal({
                 : {}),
             },
             {
-              maxWaitMs:
-                highlightVerification?.maxWaitMs ??
-                highlightVerificationMaxWaitMs,
-              intervalMs:
-                highlightVerification?.intervalMs ??
-                highlightVerificationIntervalMs,
-              ...(highlightVerification?.deadlineMs !== undefined
-                ? { deadlineMs: highlightVerification.deadlineMs }
-                : {}),
+              ...highlightVerification,
               ...(removableManagedPostIds ? { removableManagedPostIds } : {}),
               rollbackUnverifiedReplacement: true,
             },
