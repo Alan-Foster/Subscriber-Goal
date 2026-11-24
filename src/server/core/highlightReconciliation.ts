@@ -21,6 +21,7 @@ import {
   highlightVerificationIntervalMs,
   highlightVerificationMaxWaitMs,
   type HighlightResult,
+  type HighlightVerificationOptions,
 } from "../utils/communityHighlights";
 import { checkAppAccountHealth } from "./appAccountHealth";
 import {
@@ -87,10 +88,7 @@ export async function ensureExistingSubscriberGoalHighlighted({
   redis: RedisClient;
   nowMs?: number;
   notifyOnFailure?: boolean;
-  highlightVerification?: Partial<{
-    maxWaitMs: number;
-    intervalMs: number;
-  }>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext?: HighlightReconciliationContext;
   mutationLease?: CommunityGoalMutationLease;
 }): Promise<OnboardingHighlightEnsuranceResult> {
@@ -123,7 +121,7 @@ async function ensureExistingSubscriberGoalHighlightedUnderLease({
   redis: RedisClient;
   nowMs: number;
   notifyOnFailure: boolean;
-  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext: HighlightReconciliationContext;
   mutationLease: CommunityGoalMutationLease;
 }): Promise<OnboardingHighlightEnsuranceResult> {
@@ -210,7 +208,7 @@ async function reconcileLiveSubscriberGoalHighlights({
   redis: RedisClient;
   nowMs: number;
   notifyOnFailure: boolean;
-  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
   reconciliationContext: HighlightReconciliationContext;
   mutationLease: CommunityGoalMutationLease;
   candidates: OnboardingGoalCandidate[];
@@ -503,7 +501,7 @@ async function reconcileCanonicalClassicGoal({
   selected: OnboardingGoalCandidate;
   nowMs: number;
   notifyOnFailure: boolean;
-  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
   removableManagedPostIds: LinkId[];
 }): Promise<{
   highlightResult: HighlightResult;
@@ -555,7 +553,7 @@ async function highlightExistingGoal({
   redis: RedisClient;
   selected: OnboardingGoalCandidate;
   notifyOnFailure: boolean;
-  highlightVerification?: Partial<{ maxWaitMs: number; intervalMs: number }>;
+  highlightVerification?: Partial<HighlightVerificationOptions>;
   removableManagedPostIds?: LinkId[];
   nowMs?: number;
 }): Promise<{
@@ -626,6 +624,9 @@ async function highlightExistingGoal({
               intervalMs:
                 highlightVerification?.intervalMs ??
                 highlightVerificationIntervalMs,
+              ...(highlightVerification?.deadlineMs !== undefined
+                ? { deadlineMs: highlightVerification.deadlineMs }
+                : {}),
               ...(removableManagedPostIds ? { removableManagedPostIds } : {}),
               rollbackUnverifiedReplacement: true,
             },

@@ -86,6 +86,7 @@ export function createAppRepairJob(
     backoff: repairBackoff,
     handle: (record, startedAt, canStart) =>
       runAppRepair({ reddit, redis }, record, startedAt, {
+        deadlineMs,
         canStart,
         canStartHighlight: () => deadlineMs - now() >= highlightBudgetReserveMs,
         canStartFlair: () => deadlineMs - now() > flairCheckpointReserveMs,
@@ -101,6 +102,7 @@ type RepairProgress = {
   budgetDeferred: boolean;
 };
 type RepairBudget = {
+  deadlineMs: number;
   canStart: () => boolean;
   canStartHighlight: () => boolean;
   canStartFlair: () => boolean;
@@ -179,6 +181,7 @@ async function runRepairPhases(
           work,
           state.targetPostId,
           nowMs,
+          budget.deadlineMs,
         );
       },
       budget.canStartHighlight,
@@ -376,6 +379,7 @@ async function reconcileRepairHighlights(
   { reddit, redis }: RepairWork,
   targetPostId: string | undefined,
   nowMs: number,
+  deadlineMs: number,
 ): Promise<boolean> {
   const result = await withCommunityGoalMutationLease(redis, (mutationLease) =>
     ensureExistingSubscriberGoalHighlighted({
@@ -384,6 +388,7 @@ async function reconcileRepairHighlights(
       nowMs,
       notifyOnFailure: true,
       reconciliationContext: "repair",
+      highlightVerification: { deadlineMs },
       mutationLease,
     }),
   );

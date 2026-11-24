@@ -376,6 +376,13 @@ describe("scheduled app repair", () => {
     expect(now).toBeLessThan(20_100);
     expect(
       hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        highlightVerification: { deadlineMs: 20_100 },
+      }),
+    );
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
     ).toHaveBeenCalledBefore(hoisted.backfillSubscriberGoalPostFlair);
     expect(hoisted.checkAppAccountHealth).toHaveBeenCalledBefore(
       hoisted.backfillSubscriberGoalPostFlair,
