@@ -561,6 +561,7 @@ export async function scheduleAutoCreateNextGoal(
   completedTime: number,
 ): Promise<void> {
   await Promise.all([
+    resetAutomaticGoalPrerequisiteRetry(redis, `auto-next:${postId}`),
     redis.zAdd(autoCreateNextGoalQueueKey, {
       member: postId,
       score: completedTime + autoCreateNextGoalDelayMs,

@@ -2,7 +2,16 @@ import { watchTestString } from "../testing/testHashWatch";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
 import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
-import { SubscriberGoalCreationOutcomeUnknownError } from "./createSubscriberGoal";
+import {
+  SubscriberGoalCreationInProgressError,
+  SubscriberGoalCreationOutcomeUnknownError,
+} from "./createSubscriberGoal";
+import {
+  automaticGoalPrerequisiteMaxAgeMs,
+  automaticGoalPrerequisiteRetriesKey,
+  AutomaticGoalPrerequisiteError,
+  nextAutomaticGoalPrerequisiteRetry,
+} from "./automaticGoalRetry";
 
 const baseSettings: ServerAppSettings = {
   promoSubreddit: "SubGoal",
@@ -1037,34 +1046,229 @@ describe("processDueAutoCreateNextGoals", () => {
   );
 
   it.each(["restricted", "private"])(
-    "suppresses automatic replacement in a %s subreddit",
+    "rechecks a %s subreddit without aging the failure window and creates when it reopens",
     async (type) => {
+      const hourMs = 3_600_000;
+      const operationId = "auto-next:t3_source";
+      let runAt = (
+        await nextAutomaticGoalPrerequisiteRetry(
+          mockClients.redis,
+          operationId,
+          1_000,
+        )
+      ).retryAt!;
       hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+      hoisted.getAutoCreateNextGoalRunAt.mockImplementation(async () => runAt);
+      hoisted.scheduleAutoCreateNextGoalReconciliation.mockImplementation(
+        async (_redis, _post, nextAt: number) => {
+          runAt = nextAt;
+        },
+      );
+      const subreddit = {
         id: "t5_example",
         name: "examplesub",
         numberOfSubscribers: 12,
         type,
         nsfw: true,
-      });
-
-      await expect(
+      };
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue(subreddit);
+      const run = (nowMs: number) =>
         processDueAutoCreateNextGoals({
           ...mockClients,
           appSettings: baseSettings,
-        }),
-      ).resolves.toMatchObject({
-        due: 1,
-        created: 0,
-        skipped: 1,
-        failed: 0,
-        rescheduled: 0,
-      });
+          nowMs,
+        });
+
+      for (let check = 0; check < 6; check += 1) {
+        const checkedAt = runAt;
+        await expect(run(checkedAt)).resolves.toMatchObject({
+          due: 1,
+          created: 0,
+          skipped: 1,
+          failed: 0,
+          rescheduled: 1,
+          exhausted: 0,
+        });
+        expect(runAt).toBe(checkedAt + 12 * hourMs);
+        expect(
+          await hoisted.redis.hGetAll(automaticGoalPrerequisiteRetriesKey),
+        ).toEqual({});
+      }
 
       expect(hoisted.createSubscriberGoal).not.toHaveBeenCalled();
+      expect(hoisted.checkAppAccountHealth).not.toHaveBeenCalled();
+      expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledTimes(6);
+      expect(hoisted.cancelAutoCreateNextGoal).not.toHaveBeenCalled();
       expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+      expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
+      expect(
+        hoisted.reddit.modMail.createModNotification,
+      ).not.toHaveBeenCalled();
+
+      hoisted.reddit.getCurrentSubreddit.mockResolvedValue({
+        ...subreddit,
+        type: "public",
+      });
+      await expect(run(runAt)).resolves.toMatchObject({ created: 1 });
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledOnce();
+      expect(hoisted.createSubscriberGoal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({ operationId }),
+        }),
+      );
     },
   );
+
+  it("cancels a queued successor for a profile surface", async () => {
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.reddit.getCurrentSubreddit.mockResolvedValue({ type: "user" });
+    await expect(
+      processDueAutoCreateNextGoals({
+        ...mockClients,
+        appSettings: baseSettings,
+        nowMs: 1_000,
+      }),
+    ).resolves.toMatchObject({ skipped: 1, created: 0, rescheduled: 0 });
+    expect(hoisted.cancelAutoCreateNextGoal).toHaveBeenCalledExactlyOnceWith(
+      hoisted.redis,
+      "t3_source",
+    );
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("restarts the error window after waiting behind a pinned Tiny post past 48 hours", async () => {
+    const operationId = "auto-next:t3_source";
+    const hourMs = 3_600_000;
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    const run = (nowMs: number) =>
+      processDueAutoCreateNextGoals({
+        ...mockClients,
+        appSettings: baseSettings,
+        nowMs,
+      });
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockRejectedValueOnce(
+      new Error("Reddit unavailable"),
+    );
+    await expect(run(1_000)).resolves.toMatchObject({
+      failed: 1,
+      rescheduled: 1,
+    });
+    expect(
+      await hoisted.redis.hGet(
+        automaticGoalPrerequisiteRetriesKey,
+        operationId + ":firstDeferredAt",
+      ),
+    ).toBe("1000");
+
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockResolvedValue({
+      status: "existing",
+      classification: "tiny",
+      eligiblePostIds: ["t3_pinned"],
+    });
+    for (const nowMs of [
+      301_000,
+      301_000 + automaticGoalPrerequisiteMaxAgeMs,
+    ]) {
+      await expect(run(nowMs)).resolves.toMatchObject({
+        skipped: 1,
+        rescheduled: 1,
+        exhausted: 0,
+      });
+      expect(
+        hoisted.scheduleAutoCreateNextGoalReconciliation,
+      ).toHaveBeenLastCalledWith(hoisted.redis, "t3_source", nowMs + hourMs);
+      expect(
+        await hoisted.redis.hGetAll(automaticGoalPrerequisiteRetriesKey),
+      ).toEqual({});
+    }
+
+    const failedAt = 301_000 + automaticGoalPrerequisiteMaxAgeMs + hourMs;
+    hoisted.ensureExistingSubscriberGoalHighlighted.mockRejectedValueOnce(
+      new Error("Reddit unavailable again"),
+    );
+    await expect(run(failedAt)).resolves.toMatchObject({
+      failed: 1,
+      rescheduled: 1,
+      exhausted: 0,
+    });
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenLastCalledWith(hoisted.redis, "t3_source", failedAt + 300_000);
+    expect(
+      await hoisted.redis.hGetAll(automaticGoalPrerequisiteRetriesKey),
+    ).toEqual({
+      [operationId]: "1",
+      [operationId + ":firstDeferredAt"]: String(failedAt),
+    });
+    expect(hoisted.markAutoCreateNextGoalExhausted).not.toHaveBeenCalled();
+    expect(hoisted.reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("clears the failure window when another worker owns the creation lock", async () => {
+    const operationId = "auto-next:t3_source";
+    await nextAutomaticGoalPrerequisiteRetry(
+      mockClients.redis,
+      operationId,
+      1_000,
+    );
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.createSubscriberGoal.mockRejectedValue(
+      new AutomaticGoalPrerequisiteError(
+        new SubscriberGoalCreationInProgressError(),
+      ),
+    );
+    const nowMs = 1_000 + automaticGoalPrerequisiteMaxAgeMs;
+    await expect(
+      processDueAutoCreateNextGoals({
+        ...mockClients,
+        appSettings: baseSettings,
+        nowMs,
+      }),
+    ).resolves.toMatchObject({
+      skipped: 1,
+      failed: 0,
+      exhausted: 0,
+      rescheduled: 1,
+    });
+    expect(
+      await hoisted.redis.hGetAll(automaticGoalPrerequisiteRetriesKey),
+    ).toEqual({});
+    expect(
+      hoisted.scheduleAutoCreateNextGoalReconciliation,
+    ).toHaveBeenCalledWith(hoisted.redis, "t3_source", nowMs + 300_000);
+    expect(hoisted.reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
+
+  it("does not exhaust on the first error after a long wait scheduled before this fix", async () => {
+    const operationId = "auto-next:t3_source";
+    await nextAutomaticGoalPrerequisiteRetry(
+      mockClients.redis,
+      operationId,
+      1_000,
+    );
+    const nowMs = 1_000 + automaticGoalPrerequisiteMaxAgeMs + 3_600_000;
+    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+    hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(nowMs);
+    hoisted.reddit.getPostById.mockRejectedValue(
+      new Error("Reddit unavailable"),
+    );
+    await expect(
+      processDueAutoCreateNextGoals({
+        ...mockClients,
+        appSettings: baseSettings,
+        nowMs,
+      }),
+    ).resolves.toMatchObject({ failed: 1, rescheduled: 1, exhausted: 0 });
+    expect(
+      await hoisted.redis.hGetAll(automaticGoalPrerequisiteRetriesKey),
+    ).toEqual({
+      [operationId]: "1",
+      [operationId + ":firstDeferredAt"]: String(nowMs),
+    });
+    expect(hoisted.reddit.modMail.createModNotification).not.toHaveBeenCalled();
+  });
 
   it("reschedules when subreddit eligibility cannot be fetched", async () => {
     hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
@@ -1434,40 +1638,50 @@ describe("processDueAutoCreateNextGoals", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("exhausts prerequisite uncertainty after 48 hours and sends one notice", async () => {
-    const {
-      automaticGoalPrerequisiteMaxAgeMs,
-      automaticGoalPrerequisiteRetriesKey,
-    } = await import("./automaticGoalRetry");
-    hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
-    hoisted.checkAppAccountHealth.mockResolvedValue({
-      status: "unknown",
-      healthy: false,
-    });
-    const run = (nowMs: number) =>
-      processDueAutoCreateNextGoals({
-        reddit: hoisted.reddit as never,
-        redis: hoisted.redis as never,
-        appSettings: baseSettings,
-        nowMs,
+  it.each(["account health", "creation preflight"])(
+    "exhausts consecutive %s errors after 48 hours and sends one notice",
+    async (failure) => {
+      hoisted.getDueAutoCreateNextGoalPostIds.mockResolvedValue(["t3_source"]);
+      if (failure === "account health") {
+        hoisted.checkAppAccountHealth.mockResolvedValue({
+          status: "unknown",
+          healthy: false,
+        });
+      } else {
+        hoisted.createSubscriberGoal.mockRejectedValue(
+          new AutomaticGoalPrerequisiteError(new Error("Reddit unavailable")),
+        );
+      }
+      const run = (nowMs: number) =>
+        processDueAutoCreateNextGoals({
+          reddit: hoisted.reddit as never,
+          redis: hoisted.redis as never,
+          appSettings: baseSettings,
+          nowMs,
+        });
+      await expect(run(1_000)).resolves.toMatchObject({
+        rescheduled: 1,
+        exhausted: 0,
       });
-    await expect(run(1_000)).resolves.toMatchObject({
-      rescheduled: 1,
-      exhausted: 0,
-    });
-    hoisted.markAutoCreateNextGoalExhausted.mockImplementation(async () => {
-      hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(undefined);
-    });
-    await expect(
-      run(1_000 + automaticGoalPrerequisiteMaxAgeMs),
-    ).resolves.toMatchObject({ rescheduled: 0, exhausted: 1 });
-    await run(2_000 + automaticGoalPrerequisiteMaxAgeMs);
-    expect(hoisted.reddit.modMail.createModNotification).toHaveBeenCalledOnce();
-    expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
-    expect(
-      hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
-    ).toBe(0);
-  });
+      await expect(
+        run(1_000 + automaticGoalPrerequisiteMaxAgeMs - 1),
+      ).resolves.toMatchObject({ rescheduled: 1, exhausted: 0 });
+      hoisted.markAutoCreateNextGoalExhausted.mockImplementation(async () => {
+        hoisted.getAutoCreateNextGoalRunAt.mockResolvedValue(undefined);
+      });
+      await expect(
+        run(1_000 + automaticGoalPrerequisiteMaxAgeMs),
+      ).resolves.toMatchObject({ rescheduled: 0, exhausted: 1 });
+      await run(2_000 + automaticGoalPrerequisiteMaxAgeMs);
+      expect(
+        hoisted.reddit.modMail.createModNotification,
+      ).toHaveBeenCalledOnce();
+      expect(hoisted.recordAutoCreateNextGoalFailure).not.toHaveBeenCalled();
+      expect(
+        hoisted.redisHashes.get(automaticGoalPrerequisiteRetriesKey)?.size,
+      ).toBe(0);
+    },
+  );
 
   it("clears prerequisite fields when a successor recovers before the ceiling", async () => {
     const { automaticGoalPrerequisiteRetriesKey } =

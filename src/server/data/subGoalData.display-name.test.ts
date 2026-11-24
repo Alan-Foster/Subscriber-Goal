@@ -45,6 +45,7 @@ import {
 } from "../../shared/postKind";
 import { postsKey, updatesKey } from "./updaterData";
 import { subscriberGoalPostRegistryKey } from "./subscriberGoalPostRegistry";
+import { automaticGoalPrerequisiteRetriesKey } from "../core/automaticGoalRetry";
 
 type ZEntry = { member: string; score: number };
 
@@ -912,11 +913,18 @@ describe("subGoalData subreddit display name", () => {
 
   it("queues, reads, and clears due auto-create jobs", async () => {
     const redis = new InMemoryRedis();
+    await redis.hSet(automaticGoalPrerequisiteRetriesKey, {
+      "auto-next:t3_auto": "2",
+      "auto-next:t3_auto:firstDeferredAt": "100",
+    });
 
     await scheduleAutoCreateNextGoal(
       redis as unknown as Parameters<typeof scheduleAutoCreateNextGoal>[0],
       "t3_auto",
       1_000,
+    );
+    expect(await redis.hGetAll(automaticGoalPrerequisiteRetriesKey)).toEqual(
+      {},
     );
 
     expect(await redis.zRange(autoCreateNextGoalQueueKey, 0, -1)).toEqual([
