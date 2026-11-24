@@ -355,8 +355,32 @@ it("rebuilds each page once, preserves a newer mapping, and folds in pending mir
     lastError: null,
     status: "crosspost_reconciliation_pending",
   });
-  for (let run = 0; run < 4; run += 1) {
-    await rebuildCrosspostMappings(reddit, client, "SubGoal", nowMs);
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  try {
+    for (let run = 0; run < 4; run += 1) {
+      await rebuildCrosspostMappings(reddit, client, "SubGoal", nowMs);
+    }
+    const logs = info.mock.calls.map(([line]) => line);
+    expect(
+      logs.filter((line) =>
+        String(line).includes('"event":"crosspost_mapping_rebuild_page"'),
+      ),
+    ).toHaveLength(3);
+    expect(
+      logs.filter((line) =>
+        String(line).includes('"event":"crosspost_mapping_rebuild_completed"'),
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        '"pagesRead":3,"listingPagesRead":2,"mappingsRestored":2',
+      ),
+    ]);
+    expect(logs.at(-1)).toContain(
+      `"oldestCrosspostDate":"${new Date(nowMs - crosspostMappingRetentionMs - 1).toISOString()}"`,
+    );
+    expect(logs.at(-1)).toContain('"listingStopReason":"cutoff"');
+  } finally {
+    info.mockRestore();
   }
   expect(getNewPosts).toHaveBeenCalledTimes(2);
   expect(getNewPosts).toHaveBeenLastCalledWith(
@@ -373,6 +397,49 @@ it("rebuilds each page once, preserves a newer mapping, and folds in pending mir
   expect(await redis.zScore(crosspostListByTimeKey, "t3_pending")).toBe(
     nowMs - 20,
   );
+});
+
+it("logs listing exhaustion when the cutoff was not reached", async () => {
+  const redis = new InMemoryRedis() as unknown as RedisClient;
+  const reddit = {
+    getAppUser: vi.fn().mockResolvedValue({ id: "t2_app" }),
+    getNewPosts: vi.fn().mockReturnValue(listing([])),
+  } as unknown as RedditClient;
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  try {
+    await rebuildCrosspostMappings(reddit, redis, "SubGoal");
+    await rebuildCrosspostMappings(reddit, redis, "SubGoal");
+    expect(info).toHaveBeenCalledTimes(3);
+    expect(info).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        '"pagesRead":2,"listingPagesRead":1,"mappingsRestored":0,"oldestCrosspostDate":"none","listingStopReason":"listing_exhausted"',
+      ),
+    );
+  } finally {
+    info.mockRestore();
+  }
+});
+
+it("retries blind mapping writes once on a transaction conflict", async () => {
+  const redis = new InMemoryRedis();
+  const client = redis as unknown as RedisClient;
+  const tx = await redis.watch();
+  const conflicted = { ...tx, exec: async () => [] };
+  const watch = vi.spyOn(redis, "watch").mockResolvedValueOnce(conflicted);
+  await storeCorrespondingPost(client, "t3_source", "t3_mirror");
+  expect(watch).toHaveBeenCalledTimes(2);
+  expect(await redis.hGet(crosspostListKey, "t3_source")).toBe("t3_mirror");
+
+  watch.mockResolvedValueOnce(conflicted).mockResolvedValueOnce(conflicted);
+  await expect(removeCorrespondingPost(client, "t3_source")).rejects.toThrow(
+    "Crosspost mapping transaction conflicted",
+  );
+  expect(watch).toHaveBeenCalledTimes(4);
+  expect(await redis.hGet(crosspostListKey, "t3_source")).toBe("t3_mirror");
+  await removeCorrespondingPost(client, "t3_source");
+  expect(
+    await redis.zScore(crosspostListByTimeKey, "t3_source"),
+  ).toBeUndefined();
 });
 
 it("retries the same rebuild page after a concurrent mapping write aborts the transaction", async () => {

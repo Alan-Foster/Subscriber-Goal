@@ -8,6 +8,13 @@ export const crosspostMappingRetentionMs = 30 * 24 * 60 * 60 * 1000;
 type Transaction = Awaited<ReturnType<RedisClient["watch"]>>;
 type WriteMappings = (tx: Transaction) => Promise<void>;
 
+class CrosspostMappingConflict extends Error {
+  constructor() {
+    super("Crosspost mapping transaction conflicted.");
+    this.name = "CrosspostMappingConflict";
+  }
+}
+
 export async function updateCrosspostMappings(
   redis: RedisClient,
   prepare: () => WriteMappings | undefined | Promise<WriteMappings | undefined>,
@@ -31,8 +38,7 @@ export async function updateCrosspostMappings(
     await write(tx);
     const result = await tx.exec();
     closed = true;
-    if (result.length === 0)
-      throw new Error("Crosspost mapping transaction conflicted.");
+    if (result.length === 0) throw new CrosspostMappingConflict();
   } catch (error) {
     if (!closed) {
       try {
@@ -49,6 +55,18 @@ export async function updateCrosspostMappings(
       }
     }
     throw error;
+  }
+}
+
+async function writeMappingWithConflictRetry(
+  redis: RedisClient,
+  write: WriteMappings,
+): Promise<void> {
+  try {
+    await updateCrosspostMappings(redis, () => write);
+  } catch (error) {
+    if (!(error instanceof CrosspostMappingConflict)) throw error;
+    await updateCrosspostMappings(redis, () => write);
   }
 }
 
@@ -71,9 +89,8 @@ export async function storeCorrespondingPost(
   crosspostId: string,
 ): Promise<void> {
   const now = Date.now();
-  await updateCrosspostMappings(
-    redis,
-    () => (tx) => writeCrosspostMapping(tx, postId, crosspostId, now),
+  await writeMappingWithConflictRetry(redis, (tx) =>
+    writeCrosspostMapping(tx, postId, crosspostId, now),
   );
 }
 
@@ -81,7 +98,7 @@ export async function removeCorrespondingPost(
   redis: RedisClient,
   postId: string,
 ): Promise<void> {
-  await updateCrosspostMappings(redis, () => async (tx) => {
+  await writeMappingWithConflictRetry(redis, async (tx) => {
     await tx.hDel(crosspostListKey, [postId]);
     await tx.zRem(crosspostListByTimeKey, [postId]);
   });
