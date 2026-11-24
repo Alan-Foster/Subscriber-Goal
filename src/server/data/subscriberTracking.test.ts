@@ -91,6 +91,8 @@ class MemoryRedis {
   async hScan(
     key: string,
     _cursor = 0,
+    _pattern?: string,
+    _count?: number,
   ): Promise<{
     cursor: number;
     fieldValues: { field: string; value: string }[];
@@ -201,6 +203,59 @@ const client = (redis: MemoryRedis): RedisClient =>
   redis as unknown as RedisClient;
 
 describe("durable subscriber tracking", () => {
+  it("sweeps a community with 100 goal posts in one erasure request", async () => {
+    const redis = new MemoryRedis();
+    const orderFields = Array.from(
+      { length: 100 },
+      (_, index) => `t3_${index}${postRecentSubscriberOrderSuffix}`,
+    );
+    const fields = Object.fromEntries(
+      orderFields.flatMap((field, index) => [
+        ...Array.from({ length: 13 }, (_, other) => [
+          `t3_${index}_field_${other}`,
+          "0",
+        ]),
+        [
+          field,
+          JSON.stringify({
+            timestamp: index,
+            operationId: `op-${index}`,
+            userId: "t2_u",
+            erasureGeneration: "",
+          }),
+        ],
+      ]),
+    );
+    await redis.hSet(subscriberGoalsKey, fields);
+    const scan = redis.hScan.bind(redis);
+    vi.spyOn(redis, "hScan").mockImplementation(
+      async (key, cursor = 0, pattern, count = 10) => {
+        const page = await scan(key);
+        if (key !== subscriberGoalsKey) return page;
+        expect(pattern).toBe(`*${postRecentSubscriberOrderSuffix}`);
+        const end = cursor + count;
+        return {
+          cursor: end < page.fieldValues.length ? end : 0,
+          fieldValues: page.fieldValues
+            .slice(cursor, end)
+            .filter(({ field }) =>
+              field.endsWith(postRecentSubscriberOrderSuffix),
+            ),
+        };
+      },
+    );
+
+    await expect(
+      untrackSubscriberById(client(redis), "t2_u"),
+    ).resolves.toMatchObject({ status: "complete" });
+    const values = await redis.hMGet(subscriberGoalsKey, orderFields);
+    expect(
+      values.map(
+        (value) => parseRecentSubscriberOrder(value ?? undefined)?.userId,
+      ),
+    ).toEqual(orderFields.map(() => ""));
+  });
+
   it.each([false, true])(
     "erases an ordering record when shareUsername is %s",
     async (shareUsername) => {

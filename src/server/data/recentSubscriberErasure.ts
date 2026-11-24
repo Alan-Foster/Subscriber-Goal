@@ -14,7 +14,7 @@ import {
 import { invalidateSubscriberTracking } from "./subscriberTracking";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 
-const pageSize = 50;
+const pageSize = 500;
 const maxPagesPerRequest = 16;
 const sweepBudgetMs = 10_000;
 const cursorLifetimeMs = 60 * 60 * 1000;
