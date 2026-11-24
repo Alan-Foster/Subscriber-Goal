@@ -7,6 +7,7 @@ import {
   autoCreateNextGoalSuccessorsKey,
   postAutomaticSuccessorSuppressionSuffix,
   postRecentSubscriberOrderSuffix,
+  recentSubscriberPostsByUsernameKey,
   subscriberGoalsKey,
 } from "../data/subGoalData";
 import { subscriberGoalPostRegistryKey } from "../data/subscriberGoalPostRegistry";
@@ -74,6 +75,30 @@ class TestRedis {
 }
 
 describe("subscriber goal post retirement", () => {
+  it.each([{ others: [] }, { others: ["t3_other"] }])(
+    "prunes the retired goal from the recent subscriber index (remaining: $others)",
+    async ({ others }) => {
+      const redis = new TestRedis();
+      await redis.hSet(subscriberGoalsKey, {
+        t3_dead_recent_subscriber: "Alice",
+      });
+      await redis.hSet(recentSubscriberPostsByUsernameKey, {
+        alice: JSON.stringify(["t3_dead", ...others]),
+        bob: JSON.stringify(["t3_bob"]),
+      });
+      await retireSubscriberGoalPost(
+        redis as never,
+        "t3_dead",
+        "confirmed_missing",
+        200,
+      );
+      expect(await redis.hGetAll(recentSubscriberPostsByUsernameKey)).toEqual({
+        ...(others.length ? { alice: JSON.stringify(others) } : {}),
+        bob: JSON.stringify(["t3_bob"]),
+      });
+    },
+  );
+
   it("distinguishes confirmed missing responses from transient failures", () => {
     expect(
       classifyPostLookupError(

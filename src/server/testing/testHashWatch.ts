@@ -27,6 +27,7 @@ export async function watchTestHash(
     hGetAll(key: string): Promise<Record<string, string>>;
     hSet(key: string, changes: Record<string, string>): Promise<unknown>;
     del?(key: string): Promise<unknown>;
+    hDel?(key: string, fields: string[]): Promise<unknown>;
     zAdd?(
       key: string,
       ...members: { member: string; score: number }[]
@@ -47,6 +48,9 @@ export async function watchTestHash(
     },
     hSet: async (targetKey: string, fields: Record<string, string>) => {
       commands.push(() => redis.hSet(targetKey, fields));
+    },
+    hDel: async (targetKey: string, fields: string[]) => {
+      commands.push(async () => redis.hDel?.(targetKey, fields));
     },
     zAdd: async (
       key: string,

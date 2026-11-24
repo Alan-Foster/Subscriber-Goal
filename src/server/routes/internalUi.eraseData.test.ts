@@ -259,29 +259,51 @@ describe("internalUi eraseData routes", () => {
     },
   );
 
-  it("uses the supplied account ID before a prefixed username", async () => {
-    hoisted.reddit.getUserById.mockResolvedValue({
-      id: "t2_bob",
-      username: "Bob",
-    });
-    const routes = createRouteHarness();
+  it.each(["t2_bob", "  T2_Bob ", " bOb "])(
+    "uses the supplied account ID %j before a prefixed username",
+    async (userId) => {
+      hoisted.reddit.getUserById.mockResolvedValue({
+        id: "t2_bob",
+        username: "Bob",
+      });
+      const routes = createRouteHarness();
 
+      await routes.get(internalRoutes.forms.eraseData)?.(
+        {
+          body: { userId, username: "u/Alice", confirm: true },
+        } as Request,
+        { json: vi.fn() } as unknown as Response,
+      );
+
+      expect(hoisted.reddit.getUserById).toHaveBeenCalledExactlyOnceWith(
+        "t2_bob",
+      );
+      expect(hoisted.reddit.getUserByUsername).not.toHaveBeenCalled();
+      expect(hoisted.untrackSubscriberById).toHaveBeenCalledExactlyOnceWith(
+        hoisted.redis,
+        "t2_bob",
+        "Bob",
+      );
+    },
+  );
+
+  it("rejects a malformed account ID before erasing anything", async () => {
+    const routes = createRouteHarness();
+    const json = vi.fn();
     await routes.get(internalRoutes.forms.eraseData)?.(
       {
-        body: { userId: "t2_bob", username: "u/Alice", confirm: true },
+        body: { userId: "not an id!", username: "Alice", confirm: true },
       } as Request,
-      { json: vi.fn() } as unknown as Response,
+      { json } as unknown as Response,
     );
-
-    expect(hoisted.reddit.getUserById).toHaveBeenCalledExactlyOnceWith(
-      "t2_bob",
-    );
+    expect(hoisted.reddit.getUserById).not.toHaveBeenCalled();
     expect(hoisted.reddit.getUserByUsername).not.toHaveBeenCalled();
-    expect(hoisted.untrackSubscriberById).toHaveBeenCalledExactlyOnceWith(
-      hoisted.redis,
-      "t2_bob",
-      "Bob",
-    );
+    expect(hoisted.untrackSubscriberById).not.toHaveBeenCalled();
+    expect(hoisted.untrackSubscriberByUsername).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledExactlyOnceWith({
+      showToast:
+        "User data could not be fully erased. Please try again with the user ID.",
+    });
   });
 
   it.each([

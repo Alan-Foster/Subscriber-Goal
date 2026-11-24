@@ -66,6 +66,7 @@ vi.mock("../data/subGoalData", () => ({
   autoCreateNextGoalExhaustedKey: "auto_create_next_goal_v1_exhausted",
   subscriberGoalsKey: "subscriber_goals",
   subscriberGoalPostFieldSuffixes: ["_goal"],
+  postRecentSubscriberSuffix: "_recent_subscriber",
   postKindSuffix: "_post_kind",
   postHeightSuffix: "_post_height",
   postCompletedTimeSuffix: "_completed_time",

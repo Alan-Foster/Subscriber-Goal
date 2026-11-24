@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 
@@ -19,6 +20,16 @@ const subscriptionAttemptKey = (attemptId: string): string =>
 export const subscriptionAcceptanceKey = (attemptId: string): string =>
   `subscription_acceptance:${attemptId}`;
 
+const receiptOwner = (attemptId: string, userId: string): string =>
+  `sha256:${createHash("sha256").update(attemptId).update("\0").update(userId).digest("hex")}`;
+
+// Legacy receipts expire after two minutes. Continue to accept their raw IDs.
+const matchesReceiptOwner = (
+  stored: unknown,
+  attemptId: string,
+  userId: string,
+): boolean => stored === userId || stored === receiptOwner(attemptId, userId);
+
 export const isValidSubscriptionAttemptId = (
   attemptId: unknown,
 ): attemptId is string =>
@@ -34,20 +45,29 @@ export async function storeSubscriptionAttemptReceipt(
   userId: string,
   expiresAt = Date.now() + subscriptionAttemptReceiptTtlMs,
 ): Promise<void> {
-  const receipt: SubscriptionAttemptReceipt = { postId, userId };
+  const receipt: SubscriptionAttemptReceipt = {
+    postId,
+    userId: receiptOwner(attemptId, userId),
+  };
   await redis.set(subscriptionAttemptKey(attemptId), JSON.stringify(receipt), {
     expiration: new Date(expiresAt),
   });
 }
 
 export function serializeSubscriptionAcceptanceEvidence(
+  attemptId: string,
   postId: string,
   userId: string,
   acceptedAt: number,
 ): { value: string; expiresAt: number } {
   const expiresAt = acceptedAt + subscriptionAttemptReceiptTtlMs;
   return {
-    value: JSON.stringify({ postId, userId, acceptedAt, expiresAt }),
+    value: JSON.stringify({
+      postId,
+      userId: receiptOwner(attemptId, userId),
+      acceptedAt,
+      expiresAt,
+    }),
     expiresAt,
   };
 }
@@ -65,12 +85,17 @@ export async function getSubscriptionAcceptanceEvidence(
     const evidence = JSON.parse(raw) as Partial<SubscriptionAcceptanceEvidence>;
     if (
       evidence.postId === postId &&
-      evidence.userId === userId &&
+      matchesReceiptOwner(evidence.userId, attemptId, userId) &&
       typeof evidence.acceptedAt === "number" &&
       typeof evidence.expiresAt === "number" &&
       Date.now() <= evidence.expiresAt
     ) {
-      return evidence as SubscriptionAcceptanceEvidence;
+      return {
+        postId,
+        userId,
+        acceptedAt: evidence.acceptedAt,
+        expiresAt: evidence.expiresAt,
+      };
     }
   } catch (error) {
     logDiagnostic(
@@ -97,7 +122,11 @@ export async function hasSubscriptionAttemptReceipt(
   if (raw)
     try {
       const receipt = JSON.parse(raw) as Partial<SubscriptionAttemptReceipt>;
-      if (receipt.postId === postId && receipt.userId === userId) return true;
+      if (
+        receipt.postId === postId &&
+        matchesReceiptOwner(receipt.userId, attemptId, userId)
+      )
+        return true;
     } catch (error) {
       logDiagnostic(
         "warn",

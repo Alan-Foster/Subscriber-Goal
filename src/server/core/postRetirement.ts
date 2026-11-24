@@ -17,6 +17,7 @@ import { scheduleHighlightRepair } from "../data/highlightRepair";
 import { clearHighlightFailureIncident } from "../utils/highlightFailureNotifications";
 import { clearHighlightContradictionIncident } from "../data/highlightContradiction";
 import { clearPostOperationalState } from "../data/postOperationalState";
+import { pruneRetiredRecentSubscriber } from "../data/recentSubscriberErasure";
 import type { LinkId, RedisClient } from "../types";
 
 export const retiredSubscriberGoalKeyPrefix = "retired_subscriber_goal_v1";
@@ -89,6 +90,7 @@ export async function retireSubscriberGoalPost(
   const attempt = async (phase: string, operation: () => Promise<unknown>) => {
     try {
       await operation();
+      return true;
     } catch (error) {
       failures.push(phase);
       logDiagnostic(
@@ -97,6 +99,7 @@ export async function retireSubscriberGoalPost(
         { workflow: "post_retirement", phase, postId },
         error,
       );
+      return false;
     }
   };
 
@@ -138,12 +141,17 @@ export async function retireSubscriberGoalPost(
       }
     } while (cursor !== 0);
   });
-  await attempt("goal_data", () =>
-    redis.hDel(
-      subscriberGoalsKey,
-      subscriberGoalPostFieldSuffixes.map((suffix) => `${postId}${suffix}`),
-    ),
+  const recentIndexPruned = await attempt("recent_subscriber_index", () =>
+    pruneRetiredRecentSubscriber(redis, postId),
   );
+  if (recentIndexPruned) {
+    await attempt("goal_data", () =>
+      redis.hDel(
+        subscriberGoalsKey,
+        subscriberGoalPostFieldSuffixes.map((suffix) => `${postId}${suffix}`),
+      ),
+    );
+  }
   await attempt("highlight_incident", () =>
     clearHighlightFailureIncident(redis, postId),
   );

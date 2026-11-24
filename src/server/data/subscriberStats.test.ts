@@ -38,6 +38,9 @@ class InMemoryRedis {
     return {
       multi: async () => {},
       unwatch: async () => {},
+      set: async (key: string, value: string) => {
+        queued.push(() => this.set(key, value));
+      },
       hSet: async (key: string, fields: Record<string, string>) => {
         queued.push(() => this.hSet(key, fields));
       },
@@ -70,6 +73,10 @@ class InMemoryRedis {
 
   async hGet(key: string, field: string): Promise<string | undefined> {
     return this.hashes.get(key)?.get(field);
+  }
+
+  async hMGet(key: string, fields: string[]): Promise<(string | null)[]> {
+    return fields.map((field) => this.hashes.get(key)?.get(field) ?? null);
   }
 
   async hGetAll(key: string): Promise<Record<string, string>> {

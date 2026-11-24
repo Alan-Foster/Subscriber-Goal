@@ -4,7 +4,7 @@ import {
   eraseFromRecentSubscribers,
   findRecentSubscriberUserIdsByUsername,
 } from "./subGoalData";
-import { invalidateSubscriberTracking } from "./subscriberTracking";
+import { eraseSubscriberOrdersById } from "./recentSubscriberErasure";
 import {
   subscriberStatsKey,
   subscriberStatsByUserIdKey,
@@ -157,7 +157,7 @@ export async function untrackSubscriberById(
 ): Promise<SubscriberErasureResult> {
   // Every caller, including local username recovery, must fence stale work
   // before deleting any of the evidence needed to retry an erasure.
-  await invalidateSubscriberTracking(redis, userId);
+  await eraseSubscriberOrdersById(redis, userId);
   const indexedRecord = await redis.hGet(subscriberStatsByUserIdKey, userId);
   const parsed = indexedRecord
     ? parseSubscriberMember(indexedRecord)

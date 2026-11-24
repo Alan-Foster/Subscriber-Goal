@@ -9,6 +9,15 @@ export const serializeRecentSubscriberOrder = (
   order: RecentSubscriberOrder,
 ): string => JSON.stringify(order);
 
+export const scrubRecentSubscriberOrder = (
+  order: RecentSubscriberOrder,
+): string =>
+  serializeRecentSubscriberOrder({
+    ...order,
+    userId: "",
+    erasureGeneration: "",
+  });
+
 export const parseRecentSubscriberOrder = (
   raw: string | undefined,
 ): RecentSubscriberOrder | undefined => {
