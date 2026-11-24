@@ -29,11 +29,42 @@ function isOptionalTargetPost(value: unknown): boolean {
     value === undefined ||
     (isRecord(value) &&
       typeof value.id === "string" &&
-      isOptionalString(value.authorId) &&
-      isOptionalString(value.subredditId) &&
-      isOptionalString(value.subredditName) &&
-      (value.nsfw === undefined || typeof value.nsfw === "boolean"))
+      hasValidPostMetadata(value))
   );
+}
+
+function hasValidPostMetadata(post: Record<string, unknown>): boolean {
+  return (
+    isOptionalString(post.authorId) &&
+    isOptionalString(post.subredditId) &&
+    isOptionalString(post.subredditName) &&
+    (post.nsfw === undefined || typeof post.nsfw === "boolean")
+  );
+}
+
+function isAbsentTargetPost(value: unknown): boolean {
+  return (
+    value === null ||
+    (isRecord(value) &&
+      (value.id === undefined || value.id === "") &&
+      hasValidPostMetadata(value))
+  );
+}
+
+/**
+ * Treats fields the platform may send as empty as absent, so the strict
+ * validator below only rejects real type errors. ts-proto's `PostV2.toJSON`
+ * omits an empty `id`, so a placeholder `targetPost` can arrive without one.
+ * Downstream handlers already handle a missing `targetPost`. Returns a
+ * shallow copy and never mutates the request body.
+ */
+export function normalizeModActionEvent(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const normalized = { ...value };
+  if (isAbsentTargetPost(normalized.targetPost)) delete normalized.targetPost;
+  if (normalized.targetUser === null) delete normalized.targetUser;
+  if (normalized.moderator === null) delete normalized.moderator;
+  return normalized;
 }
 
 export function isModActionEvent(value: unknown): value is ModActionEvent {

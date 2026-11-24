@@ -2,7 +2,10 @@ import type { Router } from "express";
 import { internalRoutes } from "../../shared/routes";
 import { onAppChanged } from "../triggers/appChanged";
 import { onModAction } from "../triggers/modAction";
-import { isModActionEvent } from "../triggers/modActionEvent";
+import {
+  isModActionEvent,
+  normalizeModActionEvent,
+} from "../triggers/modActionEvent";
 import { onPostsUpdaterJob } from "../triggers/scheduler";
 import { recordCommunityPostCreated } from "../data/ctaActivity";
 import { reddit, redis, scheduler } from "@devvit/web/server";
@@ -92,8 +95,9 @@ function registerModActionRoute(router: Router): void {
     internalRoutes.triggers.onModAction,
     async (req, res): Promise<void> => {
       const body: unknown = req.body;
-      const modAction =
-        isRecord(body) && "modAction" in body ? body.modAction : body;
+      const modAction = normalizeModActionEvent(
+        isRecord(body) && "modAction" in body ? body.modAction : body,
+      );
       if (!isModActionEvent(modAction)) {
         logDiagnostic("error", "internal_trigger_failed", {
           route: internalRoutes.triggers.onModAction,
