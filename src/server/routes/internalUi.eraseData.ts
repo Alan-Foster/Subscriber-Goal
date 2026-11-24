@@ -104,7 +104,11 @@ function registerEraseDataFormRoute(router: Router): void {
     internalRoutes.forms.eraseData,
     async (req, res: Response<UiResponse>) => {
       const language = await resolveCurrentSubredditLanguage();
-      const { username, userId, confirm } = req.body as EraseDataFormValues;
+      const {
+        username,
+        userId: rawUserId,
+        confirm,
+      } = req.body as EraseDataFormValues;
       const normalizedUsername =
         typeof username === "string"
           ? username
@@ -116,6 +120,14 @@ function registerEraseDataFormRoute(router: Router): void {
       if (!confirm) {
         res.json({
           showToast: translate(language, "moderator.data.eraseNotConfirmed"),
+        });
+        return;
+      }
+
+      const userId = normalizeEraseUserId(rawUserId);
+      if (userId === false) {
+        res.json({
+          showToast: translate(language, "moderator.data.eraseFailed"),
         });
         return;
       }
@@ -263,23 +275,33 @@ function registerEraseMyDataFormRoute(router: Router): void {
   );
 }
 
+function normalizeEraseUserId(
+  value: unknown,
+): `t2_${string}` | undefined | false {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  const id = trimmed.startsWith("t2_") ? trimmed : `t2_${trimmed}`;
+  return isEraseUserId(id) ? id : false;
+}
+
+function isEraseUserId(value: string): value is `t2_${string}` {
+  return /^t2_[a-z0-9]+$/.test(value);
+}
+
 async function resolveEraseDataIdentity(
-  userId: EraseDataFormValues["userId"],
+  userId: `t2_${string}` | undefined,
   normalizedUsername: string | undefined,
   language: SubGoalLanguage,
 ) {
-  let resolvedUserId = userId;
+  let resolvedUserId: string | undefined = userId;
   let resolvedUsername = userId ? undefined : normalizedUsername;
   let identityLookupWarning: string | null = null;
 
-  if (resolvedUserId && !resolvedUserId.startsWith("t2_")) {
-    resolvedUserId = `t2_${resolvedUserId}`;
-  }
-
   try {
-    if (resolvedUserId) {
-      const typedUserId = resolvedUserId as `t2_${string}`;
-      const user = await reddit.getUserById(typedUserId);
+    if (userId) {
+      const user = await reddit.getUserById(userId);
       if (user) {
         resolvedUsername = user.username;
       }

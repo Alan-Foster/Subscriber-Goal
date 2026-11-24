@@ -17,6 +17,7 @@ import {
   subscriberStatsByUserIdKey,
   subscriberStatsKey,
   subscriberStatsUsernameToUserIdKey,
+  untrackSubscriberById,
   untrackSubscriberByUsername,
 } from "./subscriberStats";
 import {
@@ -26,11 +27,13 @@ import {
   recentSubscriberPostsByUsernameKey,
 } from "./subGoalData";
 import { parseRecentSubscriberOrder } from "./recentSubscriberOrder";
+import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 
 type Entry = { member: string; score: number };
 
 class MemoryRedis {
   strings = new Map<string, string>();
+  expirations = new Map<string, number>();
   hashes = new Map<string, Map<string, string>>();
   sorted = new Map<string, Map<string, number>>();
   versions = new Map<string, number>();
@@ -43,11 +46,28 @@ class MemoryRedis {
   }
 
   async get(key: string): Promise<string | undefined> {
+    if ((this.expirations.get(key) ?? Infinity) <= Date.now()) {
+      await this.del(key);
+    }
     return this.strings.get(key);
   }
-  async set(key: string, value: string): Promise<void> {
+  async set(
+    key: string,
+    value: string,
+    options?: { expiration: Date },
+  ): Promise<void> {
     this.strings.set(key, value);
+    if (options) this.expirations.set(key, options.expiration.getTime());
+    else this.expirations.delete(key);
     this.changed(key);
+  }
+  async del(key: string): Promise<void> {
+    this.strings.delete(key);
+    this.expirations.delete(key);
+    this.changed(key);
+  }
+  async hMGet(key: string, fields: string[]): Promise<(string | null)[]> {
+    return fields.map((field) => this.hashes.get(key)?.get(field) ?? null);
   }
   async hGet(key: string, field: string): Promise<string | undefined> {
     if (
@@ -68,7 +88,10 @@ class MemoryRedis {
     for (const field of fields) this.hashes.get(key)?.delete(field);
     this.changed(key);
   }
-  async hScan(key: string): Promise<{
+  async hScan(
+    key: string,
+    _cursor = 0,
+  ): Promise<{
     cursor: number;
     fieldValues: { field: string; value: string }[];
   }> {
@@ -127,8 +150,19 @@ class MemoryTransaction {
     else await action();
     return this;
   }
-  async set(key: string, value: string): Promise<this> {
-    return await this.command(() => this.redis.set(key, value));
+  async discard(): Promise<this> {
+    this.queued = [];
+    return this;
+  }
+  async set(
+    key: string,
+    value: string,
+    options?: { expiration: Date },
+  ): Promise<this> {
+    return await this.command(() => this.redis.set(key, value, options));
+  }
+  async del(key: string): Promise<this> {
+    return await this.command(() => this.redis.del(key));
   }
   async hSet(key: string, values: Record<string, string>): Promise<this> {
     return await this.command(() => this.redis.hSet(key, values));
@@ -167,6 +201,112 @@ const client = (redis: MemoryRedis): RedisClient =>
   redis as unknown as RedisClient;
 
 describe("durable subscriber tracking", () => {
+  it.each([false, true])(
+    "erases an ordering record when shareUsername is %s",
+    async (shareUsername) => {
+      const redis = new MemoryRedis();
+      const operation = (
+        await persistAcceptedSubscriberTracking(client(redis), {
+          operationId: "op-erased",
+          userId: "t2_u",
+          postId: "t3_post",
+          username: "Alice",
+          subscribers: 101,
+          timestamp: 2_000,
+          shareUsername,
+          erasureGeneration: "",
+        })
+      ).operation;
+      await applySubscriberTracking(client(redis), operation);
+      await cleanupSubscriberTracking(client(redis), {
+        ...operation,
+        phase: "complete",
+      });
+
+      await expect(
+        untrackSubscriberById(client(redis), "t2_u"),
+      ).resolves.toMatchObject({ status: "complete" });
+
+      const field = `t3_post${postRecentSubscriberOrderSuffix}`;
+      const order = await redis.hGet(subscriberGoalsKey, field);
+      expect(JSON.parse(order ?? "null")).toEqual({
+        timestamp: 2_000,
+        operationId: "op-erased",
+        userId: "",
+        erasureGeneration: "",
+      });
+      expect(
+        [...redis.hashes.get(subscriberGoalsKey)!.values()].join(),
+      ).not.toContain("t2_u");
+      expect(
+        await redis.hGet(recentSubscriberPostsByUsernameKey, "alice"),
+      ).toBeUndefined();
+
+      const stale = (
+        await persistAcceptedSubscriberTracking(client(redis), {
+          ...operation,
+          operationId: "op-older",
+          userId: "t2_other",
+          username: "Bob",
+          timestamp: 1_000,
+          shareUsername: true,
+        })
+      ).operation;
+      await applySubscriberTracking(client(redis), stale);
+      expect(await redis.hGet(subscriberGoalsKey, field)).toBe(order);
+    },
+  );
+
+  it("refreshes a live erasure fence and applies a pending join after it expires", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-24T12:00:00Z"));
+      const redis = new MemoryRedis();
+      const key = subscriberTrackingGenerationKey("t2_u");
+      const generation = await invalidateSubscriberTracking(
+        client(redis),
+        "t2_u",
+      );
+      const initialExpiry = Date.now() + 24 * 60 * 60 * 1000;
+      expect(redis.expirations.get(key)).toBe(initialExpiry);
+      const operation = (
+        await persistAcceptedSubscriberTracking(client(redis), {
+          operationId: "op-fresh",
+          userId: "t2_u",
+          postId: "t3_post",
+          username: "Alice",
+          subscribers: 101,
+          timestamp: Date.now(),
+          shareUsername: true,
+          erasureGeneration: generation,
+        })
+      ).operation;
+      vi.setSystemTime(Date.now() + 60_000);
+      redis.execFailures = 1;
+      await processSubscriberTrackingRepairs(client(redis), {
+        nowMs: Date.now(),
+      });
+      const expiry = initialExpiry + 60_000;
+      expect(redis.expirations.get(key)).toBe(expiry);
+      vi.setSystemTime(expiry + 1);
+      expect(await redis.get(key)).toBeUndefined();
+      await processSubscriberTrackingRepairs(client(redis), {
+        nowMs: Date.now(),
+      });
+      expect(
+        await redis.hGet(subscriberGoalsKey, "t3_post_recent_subscriber"),
+      ).toBe("Alice");
+      expect(
+        await redis.hGet(
+          subscriberTrackingPendingByOperationKey,
+          operation.operationId,
+        ),
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["stats index", "post order only"])(
     "erases a username recovered from %s and fences stale work",
     async (source) => {
@@ -282,22 +422,36 @@ describe("durable subscriber tracking", () => {
     await redis.hSet(recentSubscriberPostsByUsernameKey, {
       alice: JSON.stringify(["t3_first", "t3_second"]),
     });
-    const originalHSet = redis.hSet.bind(redis);
+    const originalScan = redis.hScan.bind(redis);
     let fail = true;
-    vi.spyOn(redis, "hSet").mockImplementation(async (key, fields) => {
-      if (
-        key === subscriberGoalsKey &&
-        fields.t3_second_recent_subscriber === "" &&
-        fail
-      ) {
+    vi.spyOn(redis, "hScan").mockImplementation(async (key, cursor = 0) => {
+      const page = await originalScan(key);
+      if (key !== subscriberGoalsKey) return page;
+      if (cursor === 17 && fail) {
         fail = false;
-        throw new Error("display write failed");
+        throw new Error("second page unavailable");
       }
-      await originalHSet(key, fields);
+      return cursor === 17
+        ? {
+            ...page,
+            fieldValues: page.fieldValues.filter(({ field }) =>
+              field.startsWith("t3_second"),
+            ),
+          }
+        : {
+            cursor: 17,
+            fieldValues: page.fieldValues.filter(({ field }) =>
+              field.startsWith("t3_first"),
+            ),
+          };
     });
     await expect(
       untrackSubscriberByUsername(client(redis), "Alice"),
-    ).rejects.toThrow("display write failed");
+    ).rejects.toThrow("second page unavailable");
+    const generation = await getSubscriberTrackingGeneration(
+      client(redis),
+      "t2_u",
+    );
     expect(
       await redis.hGet(subscriberGoalsKey, "t3_first_recent_subscriber"),
     ).toBe("");
@@ -307,6 +461,9 @@ describe("durable subscriber tracking", () => {
     await expect(
       untrackSubscriberByUsername(client(redis), "Alice"),
     ).resolves.toMatchObject({ status: "complete" });
+    expect(await getSubscriberTrackingGeneration(client(redis), "t2_u")).toBe(
+      generation,
+    );
     expect(
       await redis.hGet(subscriberGoalsKey, "t3_second_recent_subscriber"),
     ).toBe("");

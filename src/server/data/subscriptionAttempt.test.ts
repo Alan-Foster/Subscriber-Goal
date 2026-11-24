@@ -32,7 +32,9 @@ describe("subscription attempt receipts", () => {
 
     expect(set).toHaveBeenCalledWith(
       `subscription_attempt:${attemptId}`,
-      JSON.stringify({ postId: "t3_post", userId: "t2_user" }),
+      expect.stringMatching(
+        /^\{"postId":"t3_post","userId":"sha256:[0-9a-f]{64}"\}$/,
+      ),
       { expiration: new Date(1_000 + subscriptionAttemptReceiptTtlMs) },
     );
     vi.useRealTimers();
@@ -64,10 +66,12 @@ describe("subscription attempt receipts", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
     const evidence = serializeSubscriptionAcceptanceEvidence(
+      attemptId,
       "t3_post",
       "t2_user",
       1_000,
     );
+    expect(evidence.value).not.toContain("t2_user");
     const get = vi.fn(async (key: string) =>
       key === subscriptionAcceptanceKey(attemptId) ? evidence.value : undefined,
     );

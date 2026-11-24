@@ -51,6 +51,27 @@ export type PendingSubscriberTracking = {
   attempts: number;
 };
 
+const erasureGenerationTtlMs = 24 * 60 * 60 * 1000;
+const generationExpiration = () => ({
+  expiration: new Date(Date.now() + erasureGenerationTtlMs),
+});
+
+function matchesDurableGeneration(
+  storedGeneration: string | undefined,
+  operation: PendingSubscriberTracking,
+  current: PendingSubscriberTracking | undefined,
+): boolean {
+  // A newer erasure atomically removes the pending record. After the fence
+  // expires, the matching durable record can still prove ownership.
+  return (
+    current?.operationId === operation.operationId &&
+    current.userId === operation.userId &&
+    current.erasureGeneration === operation.erasureGeneration &&
+    (storedGeneration === undefined ||
+      storedGeneration === operation.erasureGeneration)
+  );
+}
+
 const normalizeUsername = (value: string): string => value.trim().toLowerCase();
 type PendingUsernameOwnership = {
   userId: string;
@@ -179,6 +200,7 @@ export async function persistAcceptedSubscriberTracking(
 ): Promise<{ operation: PendingSubscriberTracking; created: boolean }> {
   const evidence = input.attemptId
     ? serializeSubscriptionAcceptanceEvidence(
+        input.attemptId,
         input.postId,
         input.userId,
         input.timestamp,
@@ -197,8 +219,9 @@ export async function persistAcceptedSubscriberTracking(
       ...(evidenceKey ? [evidenceKey] : []),
     ];
     const tx = await redis.watch(...watched);
-    const currentGeneration =
-      (await redis.get(subscriberTrackingGenerationKey(input.userId))) ?? "";
+    const generationKey = subscriberTrackingGenerationKey(input.userId);
+    const storedGeneration = await redis.get(generationKey);
+    const currentGeneration = storedGeneration ?? "";
     if (currentGeneration !== input.erasureGeneration) {
       await tx.unwatch();
       throw new Error("subscriber_tracking_invalidated_by_erasure");
@@ -217,7 +240,9 @@ export async function persistAcceptedSubscriberTracking(
         )
       : undefined;
     const operation: PendingSubscriberTracking =
-      existing?.erasureGeneration === currentGeneration
+      existing?.userId === input.userId &&
+      (storedGeneration === undefined ||
+        existing.erasureGeneration === currentGeneration)
         ? existing
         : {
             operationId: input.operationId,
@@ -269,6 +294,9 @@ export async function persistAcceptedSubscriberTracking(
       await tx.set(evidenceKey, evidence.value, {
         expiration: new Date(evidence.expiresAt),
       });
+    }
+    if (storedGeneration) {
+      await tx.set(generationKey, storedGeneration, generationExpiration());
     }
     const result = await tx.exec();
     if (result.length > 0) return { operation, created };
@@ -324,9 +352,9 @@ export async function applySubscriberTracking(
   ]);
   const current = decode(currentRaw);
   if (
-    (currentGeneration ?? "") !== operation.erasureGeneration ||
     currentOperationId !== operation.operationId ||
-    !current
+    !current ||
+    !matchesDurableGeneration(currentGeneration, operation, current)
   ) {
     await tx.unwatch();
     return "invalidated";
@@ -612,10 +640,9 @@ async function rescheduleSubscriberTracking(
     ]);
     const current = decode(currentRaw);
     if (
-      (generation ?? "") !== operation.erasureGeneration ||
       currentOperationId !== operation.operationId ||
-      current?.operationId !== operation.operationId ||
-      current.erasureGeneration !== operation.erasureGeneration
+      !current ||
+      !matchesDurableGeneration(generation, operation, current)
     ) {
       await tx.unwatch();
       return "invalidated";
@@ -629,6 +656,8 @@ async function rescheduleSubscriberTracking(
       member: operation.operationId,
       score: runAt,
     });
+    if (generation)
+      await tx.set(generationKey, generation, generationExpiration());
     const result = await tx.exec();
     if (result.length > 0) return "rescheduled";
   }
@@ -822,12 +851,22 @@ async function applyTrackingRepair(
 export async function invalidateSubscriberTracking(
   redis: RedisClient,
   userId: string,
-): Promise<void> {
+): Promise<string> {
   const nextGeneration = crypto.randomUUID();
-  await redis.set(subscriberTrackingGenerationKey(userId), nextGeneration);
+  await writeErasureFence(redis, userId, nextGeneration);
+  await clearPendingUsernameOwnership(redis, userId, nextGeneration);
+  return nextGeneration;
+}
 
+async function writeErasureFence(
+  redis: RedisClient,
+  userId: string,
+  generation: string,
+): Promise<void> {
+  const generationKey = subscriberTrackingGenerationKey(userId);
   for (let retry = 0; retry < 3; retry += 1) {
     const tx = await redis.watch(
+      generationKey,
       subscriberTrackingPendingByUserKey,
       subscriberTrackingPendingByOperationKey,
       subscriberTrackingQueueKey,
@@ -836,34 +875,24 @@ export async function invalidateSubscriberTracking(
       subscriberTrackingPendingByUserKey,
       userId,
     );
-    const operation = operationId
-      ? decode(
-          await redis.hGet(
-            subscriberTrackingPendingByOperationKey,
-            operationId,
-          ),
-        )
-      : undefined;
-    if (operation?.erasureGeneration === nextGeneration) {
-      await tx.unwatch();
-      break;
-    }
     await tx.multi();
+    await tx.set(generationKey, generation, generationExpiration());
     if (operationId) {
       await tx.hDel(subscriberTrackingPendingByUserKey, [userId]);
       await tx.hDel(subscriberTrackingPendingByOperationKey, [operationId]);
       await tx.zRem(subscriberTrackingQueueKey, [operationId]);
-    } else {
-      // Keep a command in the transaction so an empty pending state is still
-      // verified against a concurrent fresh join.
-      await tx.hDel(subscriberTrackingPendingByUserKey, [userId]);
     }
     const result = await tx.exec();
-    if (result.length > 0) break;
-    if (retry === 2)
-      throw new Error("subscriber_tracking_invalidation_conflict");
+    if (result.length > 0) return;
   }
+  throw new Error("subscriber_tracking_invalidation_conflict");
+}
 
+async function clearPendingUsernameOwnership(
+  redis: RedisClient,
+  userId: string,
+  nextGeneration: string,
+): Promise<void> {
   let cursor = 0;
   const usernameFields = new Set<string>();
   do {
@@ -882,7 +911,15 @@ export async function invalidateSubscriberTracking(
   } while (cursor !== 0);
   for (const field of usernameFields) {
     for (let retry = 0; retry < 3; retry += 1) {
-      const tx = await redis.watch(subscriberTrackingUsernameToUserIdKey);
+      const generationKey = subscriberTrackingGenerationKey(userId);
+      const tx = await redis.watch(
+        subscriberTrackingUsernameToUserIdKey,
+        generationKey,
+      );
+      if ((await redis.get(generationKey)) !== nextGeneration) {
+        await tx.unwatch();
+        throw new Error("subscriber_tracking_invalidation_conflict");
+      }
       const ownership = decodePendingUsernameOwnership(
         await redis.hGet(subscriberTrackingUsernameToUserIdKey, field),
       );
