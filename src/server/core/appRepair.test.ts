@@ -127,6 +127,10 @@ describe("scheduled app repair", () => {
     });
     hoisted.checkAppAccountHealth.mockResolvedValue({ status: "healthy" });
     hoisted.ensureSubscriberGoalPostFlair.mockResolvedValue({ id: "flair_1" });
+    hoisted.backfillSubscriberGoalPostFlair.mockResolvedValue({
+      applied: 0,
+      failed: [],
+    });
     hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue([
       "t3_registered",
     ]);
@@ -219,13 +223,16 @@ describe("scheduled app repair", () => {
   it("holds the community mutation lease only during highlight reconciliation", async () => {
     for (const phase of [
       hoisted.ensureCommunityPostActivityBackfill,
-      hoisted.backfillSubscriberGoalPostFlair,
       hoisted.checkAppAccountHealth,
     ]) {
       phase.mockImplementation(async () =>
         expect(await redis.get(communityGoalMutationLockKey)).toBeUndefined(),
       );
     }
+    hoisted.backfillSubscriberGoalPostFlair.mockImplementation(async () => {
+      expect(await redis.get(communityGoalMutationLockKey)).toBeUndefined();
+      return { applied: 0, failed: [] };
+    });
     hoisted.ensureSubscriberGoalPostFlair.mockImplementation(async () => {
       expect(await redis.get(communityGoalMutationLockKey)).toBeUndefined();
       return { id: "flair_1" };
@@ -279,11 +286,136 @@ describe("scheduled app repair", () => {
     expect(
       hoisted.ensureExistingSubscriberGoalHighlighted,
     ).not.toHaveBeenCalled();
-    expect(hoisted.backfillSubscriberGoalPostFlair).toHaveBeenCalledTimes(3);
+    expect(hoisted.backfillSubscriberGoalPostFlair).toHaveBeenCalledOnce();
     expect(hoisted.checkAppAccountHealth).toHaveBeenCalledTimes(3);
     expect(await redis.get(communityGoalMutationLockKey)).toBe(
       "manual-creation",
     );
+  });
+
+  it.each([0, 9_000])(
+    "defers highlight repair without acquiring its lease when only %d ms remain",
+    async (remaining) => {
+      let now = 100;
+      const deadlineMs = 20_100;
+      const set = vi.spyOn(redis, "set");
+      hoisted.ensureSubscriberGoalPostFlair.mockImplementationOnce(async () => {
+        now = deadlineMs - remaining;
+        return { id: "flair_1" };
+      });
+      await scheduleAppRepair(redis as never, 100, 0);
+      await expect(
+        processDueAppRepair({
+          reddit: reddit as never,
+          redis: redis as never,
+          now: () => now,
+          deadlineMs,
+        }),
+      ).resolves.toBe("retry");
+      expect(await redis.hGetAll(appRepairStateKey)).toMatchObject({
+        status: "pending",
+        attempts: "0",
+        nextRunAt: "60100",
+        lastError: "",
+      });
+      expect(
+        set.mock.calls.some(([key]) => key === communityGoalMutationLockKey),
+      ).toBe(false);
+      expect(
+        hoisted.ensureExistingSubscriberGoalHighlighted,
+      ).not.toHaveBeenCalled();
+      expect(hoisted.backfillSubscriberGoalPostFlair).not.toHaveBeenCalled();
+      expect(hoisted.checkAppAccountHealth).toHaveBeenCalledTimes(
+        remaining > 0 ? 1 : 0,
+      );
+    },
+  );
+
+  it("repairs highlights and account health first, then resumes bulk flair across runs", async () => {
+    let now = 100;
+    const postIds = Array.from(
+      { length: 200 },
+      (_, i) => `t3_${String(i).padStart(3, "0")}`,
+    );
+    const alreadyFlaired = postIds[0];
+    const flaired = new Set([alreadyFlaired]);
+    const redditWithFlair = {
+      ...reddit,
+      getPostById: vi.fn(async (id: string) => {
+        now += 150;
+        return {
+          id,
+          subredditId: "t5_example",
+          flair: flaired.has(id) ? { templateId: "flair_1" } : undefined,
+        };
+      }),
+      setPostFlair: vi.fn(async ({ postId }: { postId: string }) => {
+        now += 150;
+        flaired.add(postId);
+      }),
+    };
+    const { backfillSubscriberGoalPostFlair } = await vi.importActual<
+      typeof import("./subscriberGoalPostFlair")
+    >("./subscriberGoalPostFlair");
+    hoisted.backfillSubscriberGoalPostFlair.mockImplementation(
+      backfillSubscriberGoalPostFlair,
+    );
+    hoisted.getSubscriberGoalCandidatePostIds.mockResolvedValue(
+      [...postIds].reverse(),
+    );
+    const run = () =>
+      processDueAppRepair({
+        reddit: redditWithFlair as never,
+        redis: redis as never,
+        now: () => now,
+        deadlineMs: now + 20_000,
+      });
+
+    await scheduleAppRepair(redis as never, now, 0);
+    await expect(run()).resolves.toBe("retry"); // The runner maps a defer to this result.
+    expect(now).toBeLessThan(20_100);
+    expect(
+      hoisted.ensureExistingSubscriberGoalHighlighted,
+    ).toHaveBeenCalledBefore(hoisted.backfillSubscriberGoalPostFlair);
+    expect(hoisted.checkAppAccountHealth).toHaveBeenCalledBefore(
+      hoisted.backfillSubscriberGoalPostFlair,
+    );
+    const deferred = await redis.hGetAll(appRepairStateKey);
+    expect(deferred).toMatchObject({
+      status: "pending",
+      attempts: "0",
+      flairBackfillComplete: "false",
+    });
+    expect(deferred.flairBackfillAfterPostId).toBeTruthy();
+    expect(flaired.size).toBeLessThan(postIds.length);
+
+    now = Number(deferred.nextRunAt);
+    await scheduleAppRepair(redis as never, now, 0, { force: true });
+    for (let pass = 0; pass < 4; pass += 1) {
+      if ((await run()) === "complete") break;
+      now = Number((await redis.hGetAll(appRepairStateKey)).nextRunAt);
+    }
+    const completed = await redis.hGetAll(appRepairStateKey);
+    expect(completed).toMatchObject({
+      status: "complete",
+      flairBackfillComplete: "true",
+      recurring: "true",
+    });
+    expect(
+      redditWithFlair.getPostById.mock.calls.filter(
+        ([id]) => id === alreadyFlaired,
+      ),
+    ).toHaveLength(1);
+    expect(redditWithFlair.setPostFlair).toHaveBeenCalledTimes(199);
+    expect(redditWithFlair.setPostFlair).not.toHaveBeenCalledWith(
+      expect.objectContaining({ postId: alreadyFlaired }),
+    );
+    expect(flaired).toEqual(new Set(postIds));
+
+    now = Number(completed.nextRunAt);
+    await expect(run()).resolves.toBe("complete");
+    expect(redditWithFlair.setPostFlair).toHaveBeenCalledTimes(199);
+    expect(hoisted.backfillSubscriberGoalPostFlair).toHaveBeenCalledTimes(4);
   });
 
   it("rechecks due state after acquiring the app repair lock", async () => {

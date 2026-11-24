@@ -17,7 +17,7 @@ export async function dispatchScheduledJobs(
   await dispatchDueJobs(
     redis,
     [
-      createAppRepairJob(reddit, redis),
+      createAppRepairJob(reddit, redis, { now: Date.now, deadlineMs }),
       createSourcePostDeletionJob(reddit, redis, appSettings),
       ...(displacementSubreddit
         ? [

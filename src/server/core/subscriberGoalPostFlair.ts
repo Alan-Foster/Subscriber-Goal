@@ -80,24 +80,34 @@ export async function backfillSubscriberGoalPostFlair(
   subreddit: { id: string; name: string },
   postIds: string[],
   flairId: string,
-): Promise<{ applied: number; failed: string[] }> {
+  {
+    canStart = () => true,
+    afterPostId = "",
+  }: { canStart?: () => boolean; afterPostId?: string } = {},
+): Promise<{ applied: number; failed: string[]; nextAfterPostId?: string }> {
   let applied = 0;
   const failed: string[] = [];
-  for (const postId of [...new Set(postIds)]) {
-    if (!isLinkId(postId)) continue;
+  let lastInspected = afterPostId;
+  const candidates = [...new Set(postIds)].filter(isLinkId).sort();
+  for (const postId of candidates) {
+    if (postId <= afterPostId) continue;
+    if (!canStart()) return { applied, failed, nextAfterPostId: lastInspected };
     try {
       const post = await reddit.getPostById(postId);
       if (
-        post.subredditId !== subreddit.id ||
-        getPostAvailability(post).status !== "active"
-      )
-        continue;
-      await reddit.setPostFlair({
-        subredditName: subreddit.name,
-        postId,
-        flairTemplateId: flairId,
-      });
-      applied += 1;
+        post.subredditId === subreddit.id &&
+        getPostAvailability(post).status === "active" &&
+        post.flair?.templateId !== flairId
+      ) {
+        if (!canStart())
+          return { applied, failed, nextAfterPostId: lastInspected };
+        await reddit.setPostFlair({
+          subredditName: subreddit.name,
+          postId,
+          flairTemplateId: flairId,
+        });
+        applied += 1;
+      }
     } catch (error) {
       failed.push(postId);
       logDiagnostic(
@@ -107,6 +117,7 @@ export async function backfillSubscriberGoalPostFlair(
         error,
       );
     }
+    lastInspected = postId;
   }
   return { applied, failed };
 }

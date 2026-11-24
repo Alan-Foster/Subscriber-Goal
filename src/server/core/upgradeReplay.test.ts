@@ -42,7 +42,10 @@ vi.mock("./appAccountRecovery", async (importOriginal) => ({
 vi.mock("./subscriberGoalPostFlair", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./subscriberGoalPostFlair")>()),
   ensureSubscriberGoalPostFlair: vi.fn(async () => ({ id: "flair_goal" })),
-  backfillSubscriberGoalPostFlair: vi.fn(async () => {}),
+  backfillSubscriberGoalPostFlair: vi.fn(async () => ({
+    applied: 0,
+    failed: [],
+  })),
 }));
 vi.mock("./milestoneNotifications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./milestoneNotifications")>()),

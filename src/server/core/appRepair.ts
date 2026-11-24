@@ -25,10 +25,17 @@ import {
 } from "./communityGoalMutation";
 import { isSubscriberGoalPostRetired } from "./postRetirement";
 import { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
-import { defineDueJob, dispatchDueJobs } from "../jobs/runner";
+import {
+  defineDueJob,
+  dispatchDueJobs,
+  jobRunnerBudgetMs,
+} from "../jobs/runner";
+import { updateJobRecord } from "../jobs/queue";
 
 export { appRepairLockKey, appRepairStateKey };
 const repairBackoff = { baseMs: 5 * 60 * 1000, maxMs: 60 * 60 * 1000 };
+const highlightBudgetReserveMs = 10_000;
+const flairCheckpointReserveMs = 1_000;
 export { recurringHighlightRepairIntervalMs };
 
 export async function scheduleAppRepair(
@@ -49,50 +56,70 @@ export async function processDueAppRepair({
   reddit,
   redis,
   nowMs,
+  now = nowMs === undefined ? Date.now : () => nowMs,
   deadlineMs,
 }: {
   reddit: RedditClient;
   redis: RedisClient;
   nowMs?: number;
+  now?: () => number;
   deadlineMs?: number;
 }): Promise<"not_due" | "complete" | "retry"> {
-  const now = nowMs === undefined ? Date.now : () => nowMs;
-  const worker = createAppRepairJob(reddit, redis);
-  const outcomes = await dispatchDueJobs(redis, [worker], {
-    now,
-    ...(deadlineMs === undefined ? {} : { deadlineMs }),
-  });
+  const window = { now, deadlineMs: deadlineMs ?? now() + jobRunnerBudgetMs };
+  const worker = createAppRepairJob(reddit, redis, window);
+  const outcomes = await dispatchDueJobs(redis, [worker], window);
   const outcome = outcomes.get(worker.id);
   if (outcome === "complete" || outcome === "retry") return outcome;
   return "not_due";
 }
 
-export function createAppRepairJob(reddit: RedditClient, redis: RedisClient) {
+export function createAppRepairJob(
+  reddit: RedditClient,
+  redis: RedisClient,
+  { now, deadlineMs }: { now: () => number; deadlineMs: number },
+) {
   return defineDueJob({
     storage: appRepairJob,
     lockKey: appRepairLockKey,
-    lockTtlMs: 15 * 60 * 1000,
+    // A request can run for 30 seconds. Allow another 30 for expiry margin.
+    lockTtlMs: 60_000,
     backoff: repairBackoff,
-    handle: (record, startedAt) =>
-      runAppRepair({ reddit, redis }, record, startedAt),
+    handle: (record, startedAt, canStart) =>
+      runAppRepair({ reddit, redis }, record, startedAt, {
+        canStart,
+        canStartHighlight: () => deadlineMs - now() >= highlightBudgetReserveMs,
+        canStartFlair: () => deadlineMs - now() > flairCheckpointReserveMs,
+      }),
   });
 }
 
 type RepairWork = { reddit: RedditClient; redis: RedisClient };
 type RepairSubreddit = Awaited<ReturnType<RedditClient["getCurrentSubreddit"]>>;
-type RepairProgress = { failures: string[]; highlightDeferred: boolean };
+type RepairProgress = {
+  failures: string[];
+  highlightDeferred: boolean;
+  budgetDeferred: boolean;
+};
+type RepairBudget = {
+  canStart: () => boolean;
+  canStartHighlight: () => boolean;
+  canStartFlair: () => boolean;
+};
 type RunPhase = (
   phase: string,
   operation: () => Promise<unknown>,
+  hasReserve?: () => boolean,
 ) => Promise<void>;
 
 async function runAppRepair(
   work: RepairWork,
   state: AppRepairRecord,
   nowMs: number,
+  budget: RepairBudget,
 ) {
   try {
-    return await runRepairPhases(work, state, nowMs);
+    if (!budget.canStart()) return deferRepairForBudget(nowMs);
+    return await runRepairPhases(work, state, nowMs, budget);
   } catch (error) {
     logDiagnostic(
       "error",
@@ -111,10 +138,15 @@ async function runRepairPhases(
   work: RepairWork,
   state: AppRepairRecord,
   nowMs: number,
+  budget: RepairBudget,
 ) {
   const { reddit, redis } = work;
-  const progress: RepairProgress = { failures: [], highlightDeferred: false };
-  const runPhase = createRepairPhaseRunner(progress);
+  const progress: RepairProgress = {
+    failures: [],
+    highlightDeferred: false,
+    budgetDeferred: false,
+  };
+  const runPhase = createRepairPhaseRunner(progress, budget.canStart);
   let recurringHighlightCheck = false;
   const subreddit = await reddit.getCurrentSubreddit();
 
@@ -124,6 +156,7 @@ async function runRepairPhases(
 
   let candidatePostIds: string[] | undefined;
   let trackedPosts: string[] | undefined;
+  let flairId: string | undefined;
   await runPhase("candidate_discovery", async () => {
     candidatePostIds = await getSubscriberGoalCandidatePostIds(redis);
   });
@@ -132,34 +165,52 @@ async function runRepairPhases(
   });
 
   if (candidatePostIds && trackedPosts) {
-    await prepareRepairPosts(
+    flairId = await prepareRepairPosts(
       work,
       subreddit,
       candidatePostIds,
       trackedPosts,
       runPhase,
     );
-    await runPhase("highlight_reconciliation", async () => {
-      recurringHighlightCheck = await reconcileRepairHighlights(
-        work,
-        state.targetPostId,
-        nowMs,
-      );
-    });
-  } else {
+    await runPhase(
+      "highlight_reconciliation",
+      async () => {
+        recurringHighlightCheck = await reconcileRepairHighlights(
+          work,
+          state.targetPostId,
+          nowMs,
+        );
+      },
+      budget.canStartHighlight,
+    );
+  } else if (!progress.budgetDeferred) {
     progress.failures.push("migration_discovery: incomplete");
   }
+  await repairAccountHealth(work, subreddit, runPhase);
 
-  await runPhase("app_account_health", () =>
-    checkAppAccountHealth({
-      reddit,
-      redis,
-      subredditName: subreddit.name,
-      subredditId: subreddit.id,
-      language: subreddit.language,
-    }),
-  );
+  const posts = candidatePostIds;
+  const templateId = flairId;
+  const backfillComplete =
+    state.flairBackfillTemplateId === templateId && state.flairBackfillComplete;
+  if (templateId && posts && !backfillComplete && !progress.budgetDeferred) {
+    await runPhase(
+      "flair_backfill",
+      async () => {
+        progress.budgetDeferred = await resumeFlairBackfill({
+          work,
+          subreddit,
+          candidatePostIds: posts,
+          flairId: templateId,
+          state,
+          startedAt: nowMs,
+          canStart: () => budget.canStart() && budget.canStartFlair(),
+        });
+      },
+      budget.canStartFlair,
+    );
+  }
 
+  if (progress.budgetDeferred) return deferRepairForBudget(nowMs);
   if (progress.failures.length > 0)
     return { status: "retry" as const, message: progress.failures.join(" | ") };
   if (progress.highlightDeferred)
@@ -179,8 +230,24 @@ async function runRepairPhases(
   };
 }
 
-function createRepairPhaseRunner(progress: RepairProgress): RunPhase {
-  return async (phase, operation) => {
+function deferRepairForBudget(nowMs: number) {
+  logDiagnostic("info", "app_repair_phase_deferred", {
+    workflow: "app_repair",
+    phase: "execution",
+    reason: "budget",
+  });
+  return { status: "defer" as const, nextRunAt: nowMs + 60_000 };
+}
+
+function createRepairPhaseRunner(
+  progress: RepairProgress,
+  canStart: () => boolean,
+): RunPhase {
+  return async (phase, operation, hasReserve) => {
+    if (!canStart() || (hasReserve && !hasReserve())) {
+      progress.budgetDeferred = true;
+      return;
+    }
     try {
       await operation();
     } catch (error) {
@@ -215,7 +282,7 @@ async function prepareRepairPosts(
   candidatePostIds: string[],
   trackedPosts: string[],
   runPhase: RunPhase,
-): Promise<void> {
+): Promise<string | undefined> {
   await runPhase("post_kind_migration", () =>
     initializePostKindMigration(redis, trackedPosts),
   );
@@ -235,16 +302,74 @@ async function prepareRepairPosts(
       await ensureSubscriberGoalPostFlair(reddit, redis, subreddit.name)
     ).id;
   });
-  if (flairId) {
-    await runPhase("flair_backfill", () =>
-      backfillSubscriberGoalPostFlair(
-        reddit,
-        subreddit,
-        candidatePostIds,
-        flairId!,
-      ),
-    );
-  }
+  return flairId;
+}
+
+function repairAccountHealth(
+  { reddit, redis }: RepairWork,
+  subreddit: RepairSubreddit,
+  runPhase: RunPhase,
+): Promise<void> {
+  return runPhase("app_account_health", () =>
+    checkAppAccountHealth({
+      reddit,
+      redis,
+      subredditName: subreddit.name,
+      subredditId: subreddit.id,
+      language: subreddit.language,
+    }),
+  );
+}
+
+async function resumeFlairBackfill({
+  work: { reddit, redis },
+  subreddit,
+  candidatePostIds,
+  flairId,
+  state,
+  startedAt,
+  canStart,
+}: {
+  work: RepairWork;
+  subreddit: RepairSubreddit;
+  candidatePostIds: string[];
+  flairId: string;
+  state: AppRepairRecord;
+  startedAt: number;
+  canStart: () => boolean;
+}): Promise<boolean> {
+  const sameTemplate = state.flairBackfillTemplateId === flairId;
+  const activeRunId = await redis.get(appRepairLockKey);
+  if (!activeRunId || !canStart()) return true;
+  const result = await backfillSubscriberGoalPostFlair(
+    reddit,
+    subreddit,
+    candidatePostIds,
+    flairId,
+    {
+      canStart,
+      afterPostId: sameTemplate ? (state.flairBackfillAfterPostId ?? "") : "",
+    },
+  );
+  const hasRemaining = result.nextAfterPostId !== undefined;
+  const hadFailures =
+    result.failed.length > 0 ||
+    (sameTemplate && state.flairBackfillHadFailures === true);
+  await updateJobRecord(redis, appRepairJob, (current) => {
+    if (
+      current.version !== appRepairJob.version ||
+      current.startedAt !== startedAt ||
+      current.activeRunId !== activeRunId
+    )
+      return;
+    return {
+      flairBackfillTemplateId: flairId,
+      flairBackfillAfterPostId: result.nextAfterPostId ?? "",
+      flairBackfillHadFailures: hasRemaining && hadFailures,
+      flairBackfillComplete: !hasRemaining && !hadFailures,
+    };
+  });
+  return hasRemaining;
 }
 
 async function reconcileRepairHighlights(
