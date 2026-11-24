@@ -38,6 +38,7 @@ import { logDiagnostic } from "../../shared/diagnostics";
 import { resolveAppAccountHealthGate } from "../jobs/appAccountHealth";
 import { dispatchScheduledJobs } from "../jobs/scheduled";
 import { jobRunnerBudgetMs } from "../jobs/runner";
+import { runGoalHealthCheck } from "../core/goalHealth";
 import { resolveAppAccountRecoveryGate } from "../jobs/appAccountRecovery";
 import { retireSubscriberGoalPost } from "../core/postRetirement";
 import {
@@ -639,4 +640,10 @@ export async function onPostsUpdaterJob(): Promise<void> {
   }
 
   await updateQueuedPosts(appSettings, subreddit);
+  await runGoalHealthCheck({
+    reddit,
+    redis,
+    deadlineMs: jobDeadlineMs,
+    subreddit,
+  });
 }

@@ -1,6 +1,7 @@
 import { FakeRedisImpl } from "../testing/faultHarness";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerAppSettings } from "../settings";
+import { goalHealthThrottleKey } from "../core/goalHealth";
 
 const emptyCrosspostSummary = {
   status: "success" as const,
@@ -222,6 +223,11 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     hoisted.reddit.getCurrentSubreddit.mockReset();
     hoisted.reddit.getPostById.mockReset();
     hoisted.redis.get.mockReset();
+    hoisted.redis.get.mockImplementation(async (key: string) =>
+      key === goalHealthThrottleKey
+        ? JSON.stringify({ checkedAt: Date.now() })
+        : undefined,
+    );
     hoisted.redis.set.mockReset();
     hoisted.redis.hGet.mockReset();
     hoisted.redis.hGetAll.mockReset();
@@ -575,6 +581,27 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
         /scheduler_task_failed.*subscriber_daily_stats.*redis unavailable.*stack/,
       ),
     );
+  });
+
+  it("runs the health check after normal updater work and isolates diagnostic failures", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    hoisted.redis.get.mockImplementation(async (key: string) => {
+      if (key === goalHealthThrottleKey)
+        throw new Error("diagnostic read unavailable");
+      return undefined;
+    });
+
+    await expect(onPostsUpdaterJob()).resolves.toBeUndefined();
+
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalledOnce();
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalledBefore(warning);
+    expect(hoisted.dispatchAutomaticGoalRetryJob).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /goal_health_check_failed.*diagnostic read unavailable/,
+      ),
+    );
+    expect(hoisted.reddit.getCurrentSubreddit).toHaveBeenCalledOnce();
   });
 
   it("isolates the aggregate Reddit lookup when no posts need updating", async () => {
