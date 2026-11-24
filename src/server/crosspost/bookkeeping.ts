@@ -1,15 +1,17 @@
 import { type ServerAppSettings } from "../settings";
 import {
-  crosspostListKey,
   getCrosspostPendingByRevisionKey,
   getCrosspostPendingByTimeKey,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
-  removeCorrespondingPost,
   removeProcessedRevisions,
 } from "../data/crosspostData";
-import { getTrackedPosts } from "../data/updaterData";
-import { isLinkId, type LinkId, type RedisClient } from "../types";
+import { type LinkId, type RedisClient } from "../types";
+import {
+  updateCrosspostMappings,
+  writeCrosspostMapping,
+} from "../data/crosspostMappings";
+import { cleanupCrosspostMappings } from "./mappingCleanup";
 
 export const crosspostBookkeepingCleanupLastRunKey =
   "crosspostBookkeepingCleanupLastRun";
@@ -35,23 +37,6 @@ type CrosspostBookkeepingCleanupOptions = {
   maxEntries?: number;
   minIntervalMs?: number;
   nowMs?: number;
-};
-
-type RedisFinalizeTransaction = {
-  multi(): Promise<void>;
-  set(
-    key: string,
-    value: string,
-    options?: { expiration?: Date; nx?: boolean },
-  ): Promise<unknown>;
-  hSet(key: string, fields: Record<string, string>): Promise<unknown>;
-  hDel(key: string, fields: string[]): Promise<unknown>;
-  zRem(key: string, members: string[]): Promise<unknown>;
-  exec(): Promise<unknown>;
-};
-
-type RedisTransactionCapable = RedisClient & {
-  watch: (...keys: string[]) => Promise<RedisFinalizeTransaction>;
 };
 
 export const toNormalizedSubredditName = (value: string): string =>
@@ -89,26 +74,19 @@ export async function finalizeCrosspostPersistenceAtomic(params: {
   const pendingTimeKey = getCrosspostPendingByTimeKey(targetSubreddit);
   const terminalKey = getTerminalRevisionKey(revisionId);
 
-  const transactionRedis = redisClient as unknown as RedisTransactionCapable;
-  if (typeof transactionRedis.watch !== "function") {
-    throw new Error("redis_watch_not_supported");
-  }
-  const tx = await transactionRedis.watch(
-    terminalKey,
-    crosspostListKey,
-    pendingRevisionKey,
-    pendingTimeKey,
+  const now = Date.now();
+  await updateCrosspostMappings(
+    redisClient,
+    () => async (tx) => {
+      await tx.set(terminalKey, "1", {
+        expiration: new Date(now + crosspostTerminalRevisionTtlMs),
+      });
+      await writeCrosspostMapping(tx, sourcePostId, crosspostId, now);
+      await tx.hDel(pendingRevisionKey, [revisionId]);
+      await tx.zRem(pendingTimeKey, [revisionId]);
+    },
+    [terminalKey, pendingRevisionKey, pendingTimeKey],
   );
-  await tx.multi();
-  await tx.set(terminalKey, "1", {
-    expiration: new Date(Date.now() + crosspostTerminalRevisionTtlMs),
-  });
-  await tx.hSet(crosspostListKey, {
-    [sourcePostId]: crosspostId,
-  });
-  await tx.hDel(pendingRevisionKey, [revisionId]);
-  await tx.zRem(pendingTimeKey, [revisionId]);
-  await tx.exec();
 }
 
 const getSourceCreateCooldownKey = (sourcePostId: LinkId): string =>
@@ -222,10 +200,11 @@ export async function cleanupCrosspostBookkeeping(
     lastRunMs > 0 &&
     nowMs - lastRunMs < minIntervalMs
   ) {
+    await cleanupCrosspostMappings(redisClient, nowMs, false);
     return;
   }
   await cleanProcessedRevisionIndex(redisClient, nowMs, cutoffMs, maxEntries);
-  await cleanStaleCrosspostMappings(redisClient);
+  await cleanupCrosspostMappings(redisClient, nowMs, true);
   await redisClient.set(
     crosspostBookkeepingCleanupLastRunKey,
     nowMs.toString(),
@@ -310,29 +289,5 @@ async function cleanProcessedRevisionIndex(
     await removeProcessedRevisions(redisClient, [
       ...processedRevisionIdsToRemove,
     ]);
-  }
-}
-
-async function cleanStaleCrosspostMappings(
-  redisClient: RedisClient,
-): Promise<void> {
-  const trackedPosts = new Set(await getTrackedPosts(redisClient));
-  const sourceToCrosspostMappings = await redisClient.hGetAll(crosspostListKey);
-  const staleSourcePostIds: string[] = [];
-
-  for (const [sourcePostId, mappedCrosspostId] of Object.entries(
-    sourceToCrosspostMappings,
-  )) {
-    const staleSourcePost =
-      !isLinkId(sourcePostId) || !trackedPosts.has(sourcePostId);
-    const staleMappedCrosspost =
-      typeof mappedCrosspostId !== "string" || !isLinkId(mappedCrosspostId);
-    if (staleSourcePost || staleMappedCrosspost) {
-      staleSourcePostIds.push(sourcePostId);
-    }
-  }
-
-  for (const sourcePostId of staleSourcePostIds) {
-    await removeCorrespondingPost(redisClient, sourcePostId);
   }
 }

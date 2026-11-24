@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FakeRedisImpl } from "../testing/faultHarness";
 import {
   countPendingCrossposts,
   crosspostDeletionDueKey,
@@ -160,7 +161,7 @@ describe("crosspostData bookkeeping primitives", () => {
   });
 
   it("removeCorrespondingPost deletes source-to-crosspost mapping", async () => {
-    const redis = new InMemoryRedis();
+    const redis = new FakeRedisImpl();
     await storeCorrespondingPost(
       redis as unknown as Parameters<typeof storeCorrespondingPost>[0],
       "t3_source",

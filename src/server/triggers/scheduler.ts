@@ -272,6 +272,7 @@ async function runCrosspostDispatch(
   appSettings: ServerAppSettings,
   currentSubredditName: string | undefined,
   permissionWorkAllowed: boolean,
+  deadlineMs: number,
 ): Promise<void> {
   try {
     if (
@@ -282,6 +283,7 @@ async function runCrosspostDispatch(
       const ingestionSummary = await processCrosspostDispatchQueue(
         appSettings,
         "scheduler_posts_updater",
+        deadlineMs,
       );
       const pendingDepth = await countPendingCrossposts(
         redis,
@@ -617,6 +619,7 @@ export async function onPostsUpdaterJob(): Promise<void> {
     appSettings,
     currentSubredditName,
     permissionWorkAllowed,
+    jobDeadlineMs,
   );
   await runMaintenanceMigrations(subreddit);
   await dispatchOnboardingJob({

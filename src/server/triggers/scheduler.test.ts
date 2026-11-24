@@ -625,6 +625,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
       ).toHaveBeenCalledExactlyOnceWith(
         baseSettings,
         "scheduler_posts_updater",
+        expect.any(Number),
       );
       expect(hoisted.countPendingCrossposts).toHaveBeenCalledTimes(
         phase === "dispatch" ? 0 : 1,
@@ -672,6 +673,7 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     expect(hoisted.processCrosspostDispatchQueue).toHaveBeenCalledWith(
       baseSettings,
       "scheduler_posts_updater",
+      expect.any(Number),
     );
     expect(hoisted.countPendingCrossposts).toHaveBeenCalledWith(
       expect.anything(),

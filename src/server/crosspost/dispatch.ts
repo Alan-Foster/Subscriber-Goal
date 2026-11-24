@@ -16,12 +16,14 @@ import {
   type CrosspostIngestionOptions,
 } from "./summary";
 import { updateFromWikis } from "./ingestion";
+import { rebuildCrosspostMappings } from "./mappingRebuild";
 
 const crosspostRetryDegradedCountKey = "crosspostRetryDegradedCount";
 const crosspostRetryDegradedThreshold = 3;
 const crosspostIngestionLockKeyPrefix = "crosspostIngestionLock";
 const crosspostIngestionLockTtlMs = 60 * 1000;
 const crosspostSchedulerDaisyChainMaxPasses = 3;
+const mappingRebuildBudgetMs = 5_000;
 const getCrosspostMaxSourcePostAgeMs = (
   appSettings: ServerAppSettings,
 ): number => {
@@ -66,6 +68,7 @@ type CrosspostDispatchLogContext = {
 export async function processCrosspostDispatchQueue(
   appSettings: ServerAppSettings,
   reason: string,
+  deadlineMs = Number.POSITIVE_INFINITY,
 ): Promise<CrosspostIngestionSummary> {
   const crosspostIngestionEnabled =
     appSettings.crosspostIngestionEnabled !== false;
@@ -158,6 +161,12 @@ export async function processCrosspostDispatchQueue(
           cleanupError,
         );
       }
+      if (
+        reason === "scheduler_posts_updater" &&
+        Date.now() + mappingRebuildBudgetMs < deadlineMs
+      ) {
+        await runMappingRebuild(appSettings.promoSubreddit);
+      }
       const summary = await runDispatchPasses(appSettings, reason, {
         sourcePostFreshnessWindowMs: freshnessWindowMs,
         revisionFreshnessWindowMs,
@@ -191,6 +200,22 @@ export async function processCrosspostDispatchQueue(
       event: "crosspost_cleanup_failed",
       context: { workflow: "crosspost", phase: "ingestion_lock_release" },
     });
+  }
+}
+
+async function runMappingRebuild(targetSubreddit: string): Promise<void> {
+  try {
+    await rebuildCrosspostMappings(reddit, redis, targetSubreddit);
+  } catch (error) {
+    logDiagnostic(
+      "warn",
+      "crosspost_mapping_rebuild_failed",
+      {
+        workflow: "crosspost",
+        phase: "mapping_rebuild",
+      },
+      error,
+    );
   }
 }
 
