@@ -23,6 +23,7 @@ import { getDefaultSubscriberGoal } from "../utils/numberUtils";
 import {
   createSubscriberGoal,
   getStoredTerminalSubscriberGoalCreation,
+  SubscriberGoalCreationInProgressError,
   SubscriberGoalCreationOutcomeUnknownError,
 } from "./createSubscriberGoal";
 import { getSubGoalPostMessages } from "../../shared/subGoalPostI18n";
@@ -68,6 +69,8 @@ export const autoCreateNextGoalLockKeyPrefix = "auto_create_next_goal_v1_lock";
 export { autoCreateNextGoalSuccessorsKey } from "../data/subGoalData";
 const terminalRecoveryInventoryDelayMs = 60 * 1000;
 const protectedSurfaceRecheckDelayMs = 60 * 60 * 1000;
+const closedSubredditRecheckDelayMs = 12 * 60 * 60 * 1000;
+const creationContentionRecheckDelayMs = 5 * 60 * 1000;
 const onboardingSubscriberGoalStateKey = "onboarding_subscriber_goal_v4_state";
 
 export async function processDueAutoCreateNextGoals({
@@ -121,6 +124,7 @@ type AutoGoalAttempt = AutoGoalRun & {
   sourcePostId: string;
   operationId: string;
   language?: unknown;
+  scheduledAt?: number;
   creationAttempted: boolean;
   creationFinished: boolean;
 };
@@ -175,6 +179,7 @@ async function processDueSource(
       summary.skipped += 1;
       return "continue";
     }
+    attempt.scheduledAt = currentRunAt;
 
     // A pre-upgrade worker may still own the old source lock. New workers
     // serialize through the community lease and the creation operation lock.
@@ -188,6 +193,13 @@ async function processDueSource(
       await pauseRemovedSource(attempt, error);
     } else if (error instanceof SubscriberGoalCreationOutcomeUnknownError) {
       await recordUnresolvedSubmission(attempt, error);
+    } else if (
+      error instanceof SubscriberGoalCreationInProgressError ||
+      (error instanceof Error &&
+        error.cause instanceof SubscriberGoalCreationInProgressError)
+    ) {
+      await rescheduleExpectedWait(attempt, creationContentionRecheckDelayMs);
+      summary.skipped += 1;
     } else {
       logDiagnostic(
         "error",
@@ -286,10 +298,16 @@ async function checkAutoGoalPrerequisites(
   const subreddit = await reddit.getCurrentSubreddit();
   const automaticEligibility = getAutomaticGoalEligibility(subreddit);
   if (!automaticEligibility.eligible) {
+    let disposition: "cancelled" | "rescheduled" | "exhausted";
     if (isAutomaticGoalEligibilityUncertain(automaticEligibility)) {
-      await deferPrerequisite(attempt);
-    } else {
+      disposition = await deferPrerequisite(attempt);
+    } else if (automaticEligibility.subredditType === "user") {
+      // A profile surface cannot reopen as a public subreddit.
       await cancelAutoCreateNextGoal(redis, sourcePostId);
+      disposition = "cancelled";
+    } else {
+      await rescheduleExpectedWait(attempt, closedSubredditRecheckDelayMs);
+      disposition = "rescheduled";
     }
     summary.skipped += 1;
     logDiagnostic("info", "auto_create_goal_suppressed", {
@@ -297,6 +315,8 @@ async function checkAutoGoalPrerequisites(
       phase: "eligibility",
       postId: sourcePostId,
       reason: automaticEligibility.reason,
+      subredditType: automaticEligibility.subredditType,
+      disposition,
     });
     return;
   }
@@ -422,13 +442,8 @@ async function checkSuccessorInventory(
     // Tiny/CTA surfaces do not become a classic successor mapping. Keep
     // the original completed source pending so removal/retirement of the
     // blocking surface resumes the already-overdue work.
-    await scheduleAutoCreateNextGoalReconciliation(
-      redis,
-      sourcePostId,
-      nowMs + protectedSurfaceRecheckDelayMs,
-    );
+    await rescheduleExpectedWait(attempt, protectedSurfaceRecheckDelayMs);
     summary.skipped += 1;
-    summary.rescheduled += 1;
     logDiagnostic("info", "auto_create_goal_suppressed", {
       workflow: "auto_create_next_goal",
       phase: "active_inventory",
@@ -640,14 +655,9 @@ async function pauseRemovedSource(
   attempt: AutoGoalAttempt,
   error: PostTemporarilyUnavailableError,
 ): Promise<void> {
-  const { redis, sourcePostId, nowMs, summary } = attempt;
-  await scheduleAutoCreateNextGoalReconciliation(
-    redis,
-    sourcePostId,
-    nowMs + temporarilyRemovedPostRecheckDelayMs,
-  );
+  const { sourcePostId, summary } = attempt;
+  await rescheduleExpectedWait(attempt, temporarilyRemovedPostRecheckDelayMs);
   summary.skipped += 1;
-  summary.rescheduled += 1;
   logDiagnostic("info", "auto_create_goal_post_paused", {
     workflow: "auto_create_next_goal",
     phase: "post_availability",
@@ -655,6 +665,19 @@ async function pauseRemovedSource(
     sourcePostId,
     category: error.category ?? "unknown",
   });
+}
+
+async function rescheduleExpectedWait(
+  { redis, operationId, sourcePostId, nowMs, summary }: AutoGoalAttempt,
+  delayMs: number,
+): Promise<void> {
+  await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
+  await scheduleAutoCreateNextGoalReconciliation(
+    redis,
+    sourcePostId,
+    nowMs + delayMs,
+  );
+  summary.rescheduled += 1;
 }
 
 async function retryAfterAutoGoalFailure(
@@ -681,6 +704,8 @@ async function retryAfterAutoGoalFailure(
     await deferPrerequisite(attempt);
     return;
   }
+  // A submission failure follows successful prerequisite checks.
+  await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
   const retry = await recordAutoCreateNextGoalFailure(
     redis,
     sourcePostId,
@@ -733,6 +758,7 @@ async function recordUnresolvedSubmission(
 ): Promise<void> {
   const { reddit, redis, sourcePostId, operationId, summary, language } =
     attempt;
+  await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
   summary.unresolved = (summary.unresolved ?? 0) + 1;
   if (
     error.reconciliationStatus === "pending" &&
@@ -772,13 +798,16 @@ async function recordUnresolvedSubmission(
   });
 }
 
-async function deferPrerequisite(attempt: AutoGoalAttempt): Promise<void> {
+async function deferPrerequisite(
+  attempt: AutoGoalAttempt,
+): Promise<"rescheduled" | "exhausted"> {
   const { reddit, redis, nowMs, sourcePostId, operationId, summary, language } =
     attempt;
   const retry = await nextAutomaticGoalPrerequisiteRetry(
     redis,
     operationId,
     nowMs,
+    attempt.scheduledAt,
   );
   if (retry.retryAt === null) {
     await markAutoCreateNextGoalExhausted(redis, sourcePostId, retry.attempts);
@@ -798,12 +827,13 @@ async function deferPrerequisite(attempt: AutoGoalAttempt): Promise<void> {
       language,
     });
     await resetAutomaticGoalPrerequisiteRetry(redis, operationId);
-  } else {
-    await scheduleAutoCreateNextGoalReconciliation(
-      redis,
-      sourcePostId,
-      retry.retryAt,
-    );
-    summary.rescheduled += 1;
+    return "exhausted";
   }
+  await scheduleAutoCreateNextGoalReconciliation(
+    redis,
+    sourcePostId,
+    retry.retryAt,
+  );
+  summary.rescheduled += 1;
+  return "rescheduled";
 }

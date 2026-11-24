@@ -16,6 +16,7 @@ export async function nextAutomaticGoalPrerequisiteRetry(
   redis: RedisClient,
   operationId: string,
   nowMs: number,
+  scheduledAt?: number,
 ): Promise<{ attempts: number; retryAt: number | null }> {
   const firstField = operationId + ":firstDeferredAt";
   const previous = Number(
@@ -25,11 +26,19 @@ export async function nextAutomaticGoalPrerequisiteRetry(
     automaticGoalPrerequisiteRetriesKey,
     firstField,
   );
-  const first =
+  const previousFirst =
     rawFirst !== undefined && Number.isFinite(Number(rawFirst))
       ? Number(rawFirst)
       : nowMs;
-  const attempts = (Number.isFinite(previous) ? Math.max(0, previous) : 0) + 1;
+  // Error retries never schedule past their deadline. An older queued wait
+  // can still have a failure window left over from before waits cleared it.
+  const followedWait =
+    scheduledAt !== undefined &&
+    scheduledAt > previousFirst + automaticGoalPrerequisiteMaxAgeMs;
+  const first = followedWait ? nowMs : previousFirst;
+  const attempts =
+    (followedWait || !Number.isFinite(previous) ? 0 : Math.max(0, previous)) +
+    1;
   await redis.hSet(automaticGoalPrerequisiteRetriesKey, {
     [operationId]: String(attempts),
     [firstField]: String(first),
