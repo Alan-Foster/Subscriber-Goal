@@ -6,6 +6,12 @@ import {
   type RedisClient,
 } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { crosspostListKey } from "./crosspostMappings";
+export {
+  crosspostListKey,
+  removeCorrespondingPost,
+  storeCorrespondingPost,
+} from "./crosspostMappings";
 
 export type PostActionType = "remove" | "approve" | "delete";
 
@@ -102,7 +108,6 @@ export async function dispatchPostAction(
 
 export const processedRevisionsKey = "processedRevisions";
 export const processedRevisionsByTimeKey = "processedRevisionsByTime";
-export const crosspostListKey = "crosspostList";
 export const crosspostDeletionMarkersKey = "crosspostDeletionMarkersV1";
 export const crosspostDeletionDueKey = "crosspostDeletionDueV1";
 export const crosspostPendingByTimeKeyPrefix = "crosspostPendingByTime";
@@ -232,6 +237,13 @@ export async function getPendingCrosspost(
     getCrosspostPendingByRevisionKey(targetSubreddit),
     revisionId,
   );
+  return parsePendingCrosspost(raw, revisionId);
+}
+
+export function parsePendingCrosspost(
+  raw: string | undefined,
+  revisionId: string,
+): PendingCrosspost | undefined {
   if (!raw) {
     return undefined;
   }
@@ -405,29 +417,12 @@ export async function removeProcessedRevisions(
   await redis.zRem(processedRevisionsByTimeKey, revisionIds);
 }
 
-export async function storeCorrespondingPost(
-  redis: RedisClient,
-  postId: string,
-  crosspostId: string,
-): Promise<void> {
-  await redis.hSet(crosspostListKey, {
-    [postId]: crosspostId,
-  });
-}
-
 export async function getCorrespondingPost(
   redis: RedisClient,
   postId: string,
 ): Promise<string | undefined> {
   const crosspostId = await redis.hGet(crosspostListKey, postId);
   return crosspostId;
-}
-
-export async function removeCorrespondingPost(
-  redis: RedisClient,
-  postId: string,
-): Promise<void> {
-  await redis.hDel(crosspostListKey, [postId]);
 }
 
 export async function hasCrosspost(

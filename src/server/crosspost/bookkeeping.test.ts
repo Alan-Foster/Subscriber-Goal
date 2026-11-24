@@ -9,81 +9,27 @@ vi.mock("@devvit/web/server", () => ({
 import {
   cleanupCrosspostBookkeeping,
   crosspostBookkeepingCleanupLastRunKey,
+  finalizeCrosspostPersistenceAtomic,
 } from "./bookkeeping";
 import {
   crosspostListKey,
   processedRevisionsByTimeKey,
   processedRevisionsKey,
+  removeCorrespondingPost,
+  storeCorrespondingPost,
+  upsertPendingCrosspost,
 } from "../data/crosspostData";
-import { postsKey } from "../data/updaterData";
+import {
+  crosspostListByTimeKey,
+  crosspostMappingRetentionMs,
+} from "../data/crosspostMappings";
+import { FakeRedisImpl } from "../testing/faultHarness";
+import type { RedisClient, RedditClient } from "../types";
+import { rebuildCrosspostMappings } from "./mappingRebuild";
 
-type ZEntry = { member: string; score: number };
-
-class InMemoryRedis {
-  private hashes = new Map<string, Map<string, string>>();
-  private sortedSets = new Map<string, Map<string, number>>();
-  private kv = new Map<string, string>();
-
-  async get(key: string): Promise<string | undefined> {
-    return this.kv.get(key);
-  }
-
-  async set(key: string, value: string): Promise<void> {
-    this.kv.set(key, value);
-  }
-
-  async hSet(key: string, fields: Record<string, string>): Promise<void> {
-    const current = this.hashes.get(key) ?? new Map<string, string>();
-    for (const [field, value] of Object.entries(fields)) {
-      current.set(field, value);
-    }
-    this.hashes.set(key, current);
-  }
-
-  async hGet(key: string, field: string): Promise<string | undefined> {
-    return this.hashes.get(key)?.get(field);
-  }
-
-  async hGetAll(key: string): Promise<Record<string, string>> {
-    const map = this.hashes.get(key) ?? new Map<string, string>();
-    return Object.fromEntries(map.entries());
-  }
-
-  async hDel(key: string, fields: string[]): Promise<void> {
-    const map = this.hashes.get(key);
-    if (!map) {
-      return;
-    }
-    for (const field of fields) {
-      map.delete(field);
-    }
-  }
-
-  async zAdd(key: string, ...entries: ZEntry[]): Promise<void> {
-    const current = this.sortedSets.get(key) ?? new Map<string, number>();
-    for (const entry of entries) {
-      current.set(entry.member, entry.score);
-    }
-    this.sortedSets.set(key, current);
-  }
-
-  async zRange(key: string, start: number, end: number): Promise<ZEntry[]> {
-    const current = this.sortedSets.get(key) ?? new Map<string, number>();
-    const sorted = [...current.entries()]
-      .map(([member, score]) => ({ member, score }))
-      .sort((a, b) => a.score - b.score);
-    const normalizedEnd = end < 0 ? sorted.length - 1 : end;
-    return sorted.slice(start, normalizedEnd + 1);
-  }
-
-  async zRem(key: string, members: string[]): Promise<void> {
-    const current = this.sortedSets.get(key);
-    if (!current) {
-      return;
-    }
-    for (const member of members) {
-      current.delete(member);
-    }
+class InMemoryRedis extends FakeRedisImpl {
+  async zScan(key: string) {
+    return { cursor: 0, members: await this.zRange(key, 0, -1) };
   }
 }
 
@@ -169,12 +115,7 @@ describe("cleanupCrosspostBookkeeping", () => {
     });
   });
 
-  it("removes stale mappings (invalid ids and untracked sources) and keeps valid mappings", async () => {
-    await redis.zAdd(
-      postsKey,
-      { member: "t3_kept", score: 1 },
-      { member: "t3_tracked", score: 2 },
-    );
+  it("keeps valid mappings without requiring a tracked source on the hub", async () => {
     await redis.hSet(crosspostListKey, {
       bad_source: "t3_crosspost1",
       t3_untracked: "t3_crosspost2",
@@ -194,8 +135,60 @@ describe("cleanupCrosspostBookkeeping", () => {
     );
 
     expect(await redis.hGetAll(crosspostListKey)).toEqual({
+      t3_untracked: "t3_crosspost2",
       t3_kept: "t3_crosspost3",
     });
+    expect(await redis.zScore(crosspostListByTimeKey, "t3_untracked")).toBe(
+      2000,
+    );
+    expect(
+      await redis.zScore(crosspostListByTimeKey, "bad_source"),
+    ).toBeUndefined();
+  });
+
+  it("expires old mappings and removes orphans while keeping the cutoff boundary", async () => {
+    const nowMs = crosspostMappingRetentionMs + 1000;
+    await redis.hSet(crosspostListKey, {
+      t3_old: "t3_mirrorold",
+      t3_boundary: "t3_mirrornew",
+    });
+    await redis.zAdd(
+      crosspostListByTimeKey,
+      { member: "t3_old", score: 999 },
+      { member: "t3_boundary", score: 1000 },
+      { member: "t3_orphan", score: nowMs },
+    );
+    await cleanupCrosspostBookkeeping(redis as unknown as RedisClient, {
+      nowMs,
+    });
+    expect(await redis.hGetAll(crosspostListKey)).toEqual({
+      t3_boundary: "t3_mirrornew",
+    });
+    expect(await redis.zRange(crosspostListByTimeKey, 0, -1)).toEqual([
+      { member: "t3_boundary", score: 1000 },
+    ]);
+  });
+
+  it("resumes a mapping scan before the next six-hour cleanup", async () => {
+    await redis.hSet(crosspostListKey, { t3_first: "t3_a", t3_second: "t3_b" });
+    const scan = vi
+      .spyOn(redis, "hScan")
+      .mockResolvedValueOnce({
+        cursor: 42,
+        fieldValues: [{ field: "t3_first", value: "t3_a" }],
+      })
+      .mockResolvedValueOnce({
+        cursor: 0,
+        fieldValues: [{ field: "t3_second", value: "t3_b" }],
+      });
+    const client = redis as unknown as RedisClient;
+    await cleanupCrosspostBookkeeping(client, { nowMs: 1000 });
+    await cleanupCrosspostBookkeeping(client, { nowMs: 2000 });
+    await cleanupCrosspostBookkeeping(client, { nowMs: 3000 });
+    expect(scan).toHaveBeenCalledTimes(2);
+    expect(scan).toHaveBeenLastCalledWith(crosspostListKey, 42, undefined, 25);
+    expect(await redis.zScore(crosspostListByTimeKey, "t3_second")).toBe(2000);
+    expect(await redis.get(crosspostBookkeepingCleanupLastRunKey)).toBe("1000");
   });
 
   it("backfills hash-only processed revisions into the time index", async () => {
@@ -242,11 +235,11 @@ describe("cleanupCrosspostBookkeeping", () => {
 
   it("does not advance cleanup last-run marker when cleanup fails", async () => {
     class ThrowingRedis extends InMemoryRedis {
-      override async hGetAll(key: string): Promise<Record<string, string>> {
+      override async hScan(key: string) {
         if (key === crosspostListKey) {
           throw new Error("forced cleanup failure");
         }
-        return await super.hGetAll(key);
+        return await super.hScan(key, 0);
       }
     }
     const throwingRedis = new ThrowingRedis();
@@ -274,4 +267,150 @@ describe("cleanupCrosspostBookkeeping", () => {
       await throwingRedis.get(crosspostBookkeepingCleanupLastRunKey),
     ).toBeUndefined();
   });
+});
+
+it("indexes both mapping writes and clears the hash and index on removal", async () => {
+  const redis = new InMemoryRedis();
+  const client = redis as unknown as RedisClient;
+  await storeCorrespondingPost(client, "t3_source", "t3_first");
+  expect(await redis.zScore(crosspostListByTimeKey, "t3_source")).toBeDefined();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(123_456);
+  try {
+    await finalizeCrosspostPersistenceAtomic({
+      redisClient: client,
+      targetSubreddit: "SubGoal",
+      sourcePostId: "t3_source",
+      crosspostId: "t3_second",
+      revisionId: "revision",
+    });
+    expect(await redis.hGet(crosspostListKey, "t3_source")).toBe("t3_second");
+    expect(await redis.zScore(crosspostListByTimeKey, "t3_source")).toBe(
+      123_456,
+    );
+    await removeCorrespondingPost(client, "t3_source");
+    expect(await redis.hGet(crosspostListKey, "t3_source")).toBeUndefined();
+    expect(
+      await redis.zScore(crosspostListByTimeKey, "t3_source"),
+    ).toBeUndefined();
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+function listing<T>(posts: T[], hasMore = false) {
+  return {
+    hasMore,
+    async *[Symbol.asyncIterator]() {
+      yield* posts;
+    },
+  };
+}
+
+it("rebuilds each page once, preserves a newer mapping, and folds in pending mirrors", async () => {
+  const redis = new InMemoryRedis();
+  const client = redis as unknown as RedisClient;
+  const nowMs = Date.now();
+  const mirror = { authorId: "t2_app", createdAt: new Date(nowMs - 1000) };
+  const getNewPosts = vi
+    .fn()
+    .mockReturnValueOnce(
+      listing(
+        [
+          { ...mirror, id: "t3_mirrora", crosspostParentId: "t3_sourcea" },
+          {
+            ...mirror,
+            id: "t3_foreign",
+            authorId: "t2_other",
+            crosspostParentId: "t3_sourceskip",
+          },
+          { ...mirror, id: "t3_ordinary" },
+        ],
+        true,
+      ),
+    )
+    .mockReturnValueOnce(
+      listing([
+        { ...mirror, id: "t3_mirrorb", crosspostParentId: "t3_sourceb" },
+        {
+          ...mirror,
+          id: "t3_old",
+          crosspostParentId: "t3_sourceold",
+          createdAt: new Date(nowMs - crosspostMappingRetentionMs - 1),
+        },
+      ]),
+    );
+  const reddit = {
+    getAppUser: vi.fn().mockResolvedValue({ id: "t2_app" }),
+    getNewPosts,
+  } as unknown as RedditClient;
+  await storeCorrespondingPost(client, "t3_sourceb", "t3_newer");
+  await upsertPendingCrosspost(client, "SubGoal", {
+    revisionId: "rev_pending",
+    postId: "t3_pending",
+    createdCrosspostId: "t3_mirrorpending",
+    goal: 100,
+    firstSeenMs: nowMs - 20,
+    nextAttemptMs: nowMs,
+    attemptCount: 0,
+    lastError: null,
+    status: "crosspost_reconciliation_pending",
+  });
+  for (let run = 0; run < 4; run += 1) {
+    await rebuildCrosspostMappings(reddit, client, "SubGoal", nowMs);
+  }
+  expect(getNewPosts).toHaveBeenCalledTimes(2);
+  expect(getNewPosts).toHaveBeenLastCalledWith(
+    expect.objectContaining({ after: "t3_ordinary" }),
+  );
+  expect(await redis.hGetAll(crosspostListKey)).toEqual({
+    t3_sourcea: "t3_mirrora",
+    t3_sourceb: "t3_newer",
+    t3_pending: "t3_mirrorpending",
+  });
+  expect(await redis.zScore(crosspostListByTimeKey, "t3_sourcea")).toBe(
+    nowMs - 1000,
+  );
+  expect(await redis.zScore(crosspostListByTimeKey, "t3_pending")).toBe(
+    nowMs - 20,
+  );
+});
+
+it("retries the same rebuild page after a concurrent mapping write aborts the transaction", async () => {
+  const redis = new InMemoryRedis();
+  const client = redis as unknown as RedisClient;
+  const nowMs = Date.now();
+  const getNewPosts = vi.fn(() =>
+    listing([
+      {
+        id: "t3_oldmirror",
+        crosspostParentId: "t3_source",
+        authorId: "t2_app",
+        createdAt: new Date(nowMs - 1000),
+      },
+    ]),
+  );
+  const reddit = {
+    getAppUser: vi.fn().mockResolvedValue({ id: "t2_app" }),
+    getNewPosts,
+  } as unknown as RedditClient;
+  const tx = await redis.watch();
+  vi.spyOn(redis, "watch").mockResolvedValueOnce({
+    ...tx,
+    async exec() {
+      await storeCorrespondingPost(client, "t3_source", "t3_newmirror");
+      return [];
+    },
+  });
+
+  await expect(
+    rebuildCrosspostMappings(reddit, client, "SubGoal", nowMs),
+  ).rejects.toThrow("Crosspost mapping transaction conflicted");
+  const newerScore = await redis.zScore(crosspostListByTimeKey, "t3_source");
+  await rebuildCrosspostMappings(reddit, client, "SubGoal", nowMs);
+  expect(getNewPosts).toHaveBeenCalledTimes(2);
+  expect(getNewPosts.mock.calls[0]).toEqual(getNewPosts.mock.calls[1]);
+  expect(await redis.hGet(crosspostListKey, "t3_source")).toBe("t3_newmirror");
+  expect(await redis.zScore(crosspostListByTimeKey, "t3_source")).toBe(
+    newerScore,
+  );
 });

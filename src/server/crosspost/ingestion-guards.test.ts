@@ -86,6 +86,20 @@ class InMemoryRedis {
     return Object.fromEntries(map.entries());
   }
 
+  async hMGet(key: string, fields: string[]): Promise<(string | null)[]> {
+    return fields.map((field) => this.hashes.get(key)?.get(field) ?? null);
+  }
+
+  async hScan(key: string) {
+    return {
+      cursor: 0,
+      fieldValues: [...(this.hashes.get(key) ?? [])].map(([field, value]) => ({
+        field,
+        value,
+      })),
+    };
+  }
+
   async hLen(key: string): Promise<number> {
     return this.hashes.get(key)?.size ?? 0;
   }
@@ -131,6 +145,10 @@ class InMemoryRedis {
     }
   }
 
+  async zScan(key: string) {
+    return { cursor: 0, members: await this.zRange(key, 0, -1) };
+  }
+
   async watch(...keys: string[]) {
     const [key] = keys;
     if (
@@ -147,7 +165,10 @@ class InMemoryRedis {
       hDel(key: string, fields: string[]): Promise<void>;
       zAdd(key: string, ...entries: ZEntry[]): Promise<void>;
       zRem(key: string, members: string[]): Promise<void>;
-      exec(): Promise<string>;
+      del(...keys: string[]): Promise<void>;
+      discard(): Promise<void>;
+      unwatch(): Promise<void>;
+      exec(): Promise<unknown[]>;
     } = {
       multi: async (): Promise<void> => {
         return;
@@ -174,8 +195,11 @@ class InMemoryRedis {
       zRem: async (key: string, members: string[]): Promise<void> => {
         await this.zRem(key, members);
       },
-      exec: async (): Promise<string> => {
-        return "OK";
+      del: async (...keys: string[]) => this.del(...keys),
+      discard: async () => {},
+      unwatch: async () => {},
+      exec: async (): Promise<unknown[]> => {
+        return ["OK"];
       },
     };
     return transaction;
@@ -210,6 +234,10 @@ vi.mock("@devvit/web/server", () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).hGet(...args),
     hGetAll: (...args: [string]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).hGetAll(...args),
+    hMGet: (key: string, fields: string[]) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hMGet(key, fields),
+    hScan: (key: string) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).hScan(key),
     hLen: (...args: [string]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).hLen(...args),
     hDel: (...args: [string, string[]]) =>
@@ -220,6 +248,8 @@ vi.mock("@devvit/web/server", () => ({
       (hoisted.redisState.redisMock as InMemoryRedis).zRange(...args),
     zScore: (...args: [string, string]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zScore(...args),
+    zScan: (key: string) =>
+      (hoisted.redisState.redisMock as InMemoryRedis).zScan(key),
     zRem: (...args: [string, string[]]) =>
       (hoisted.redisState.redisMock as InMemoryRedis).zRem(...args),
     watch: (...args: string[]) =>
@@ -284,6 +314,9 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
     mockReddit.crosspost.mockReset();
     mockReddit.getNewPosts.mockReturnValue({
       get: vi.fn().mockResolvedValue([]),
+      async *[Symbol.asyncIterator]() {
+        yield* [];
+      },
     });
     safeGetWikiPageRevisionsMock.mockReset();
     loggedEvents.length = 0;
@@ -1365,6 +1398,9 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
     });
     mockReddit.getSubredditInfoById.mockResolvedValue({ isNsfw: false });
     mockReddit.getNewPosts.mockReturnValue({
+      async *[Symbol.asyncIterator]() {
+        yield* [];
+      },
       get: vi.fn().mockResolvedValue([
         {
           id: "t3_existing_crosspost",
@@ -1979,11 +2015,6 @@ describe("processCrosspostDispatchQueue ingestion guards", () => {
       t3_remove: "t3_remove_mirror",
       t3_approve: "t3_approve_mirror",
     });
-    await redisMock.zAdd(
-      postsKey,
-      { member: "t3_remove", score: 1 },
-      { member: "t3_approve", score: 2 },
-    );
     const remove = vi.fn(async () => undefined);
     const approve = vi.fn(async () => undefined);
     mockReddit.getPostById.mockImplementation(async (postId: string) => ({
