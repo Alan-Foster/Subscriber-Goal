@@ -842,17 +842,63 @@ describe("publicApi routes", () => {
         completedTime: 0,
         exposure: "join",
       },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        enabled: true,
+        tracked: false,
+        signedIn: true,
+        completedTime: 0,
+        exposure: "join_and_secondary_cta",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "short",
+        enabled: true,
+        tracked: false,
+        signedIn: true,
+        completedTime: 0,
+        exposure: "join_and_secondary_cta",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        enabled: false,
+        tracked: false,
+        signedIn: true,
+        completedTime: 0,
+        exposure: "join",
+      },
+      {
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        enabled: true,
+        tracked: false,
+        signedIn: true,
+        completedTime: 1_789_000_000_000,
+        exposure: "none",
+      },
+      {
+        postKind: "subscribe-only-v1",
+        postHeight: "tiny",
+        enabled: true,
+        tracked: false,
+        signedIn: true,
+        completedTime: 0,
+        exposure: "join",
+      },
     ])(
-      "records $exposure for $postHeight with CTA=$enabled, tracked=$tracked, completedTime=$completedTime",
+      "records $exposure for $postHeight with CTA=$enabled, tracked=$tracked, signedIn=$signedIn, completedTime=$completedTime",
       async ({
         postKind,
         postHeight,
         enabled,
         tracked,
+        signedIn = tracked,
         completedTime,
         exposure,
       }) => {
-        if (tracked) hoisted.context.userId = "t2_user";
+        if (signedIn) hoisted.context.userId = "t2_user";
         hoisted.isTrackedSubscriber.mockResolvedValue(tracked);
         const goal = await hoisted.getSubGoalData();
         hoisted.getSubGoalData.mockResolvedValue({
@@ -874,7 +920,7 @@ describe("publicApi routes", () => {
             postId: "t3_post",
             appTrackedSubscribed: tracked,
             exposure,
-            visitorIdentity: tracked ? "t2_user" : visitorId,
+            visitorIdentity: signedIn ? "t2_user" : visitorId,
           },
         );
       },

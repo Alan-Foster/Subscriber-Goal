@@ -437,6 +437,46 @@ describe("statistics analytics", () => {
     expect(report.metrics.interactions.ctr.value).toBe(100);
   });
 
+  it("counts follow-up CTA exposure for viewers who have not joined", async () => {
+    const store = createRedis();
+    for (const [suffix, visitor] of [
+      [70, "viewer-a"],
+      [71, "viewer-b"],
+    ] as const) {
+      await recordStatisticsLoad(store.redis, {
+        eventId: id(suffix),
+        postId: "t3_goal",
+        visitorIdentity: visitor,
+        appTrackedSubscribed: false,
+        exposure: "join_and_secondary_cta",
+        nowMs: now,
+      });
+    }
+    await recordStatisticsCtaClick(store.redis, {
+      eventId: id(72),
+      postId: "t3_goal",
+      visitorIdentity: "viewer-a",
+      label: "Discord",
+      kind: "secondary",
+      nowMs: now,
+    });
+
+    const report = await getStatisticsReport(
+      store.redis,
+      "ExampleSub",
+      24,
+      now,
+    );
+    expect(report.metrics.ctas.eligibleSessions.value).toBe(2);
+    expect(report.metrics.ctas.uniqueClickSessions.value).toBe(1);
+    expect(report.metrics.ctas.ctr.value).toBe(50);
+    expect(report.metrics.membership.joinEligibleSessions.value).toBe(2);
+    expect(report.metrics.joins.ctr.value).toBe(0);
+    expect(report.methodology.formulas.secondaryCtaCtr).toContain(
+      "signed-in viewers who have not joined",
+    );
+  });
+
   it("sums per-label CTA sessions across UTC hours", async () => {
     const store = createRedis();
     for (const [suffix, nowMs] of [
