@@ -11,7 +11,10 @@ import {
 } from "../../../shared/postKind";
 import { isSubredditBlacklisted } from "../../utils/subredditBlacklist";
 import { createOperationId, logDiagnostic } from "../../../shared/diagnostics";
-import { recordStatisticsLoad } from "../../data/statisticsAnalytics";
+import {
+  recordStatisticsLoad,
+  type StatisticsExposure,
+} from "../../data/statisticsAnalytics";
 import {
   type InitTimings,
   timedInitOperation,
@@ -185,18 +188,11 @@ async function recordInitStatistics(
         eventId: loadEventId,
         postId,
         appTrackedSubscribed,
-        exposure:
-          state.postHeight === "cta"
-            ? state.afterSubscribeAction.type === "disabled"
-              ? "none"
-              : "cta_only"
-            : appTrackedSubscribed
-              ? state.afterSubscribeAction.type === "disabled"
-                ? "none"
-                : "secondary_cta"
-              : state.postHeight === "tiny" || state.completedTime === null
-                ? "join"
-                : "none",
+        exposure: statisticsExposure(
+          state,
+          appTrackedSubscribed,
+          Boolean(context.userId),
+        ),
         ...(identity ? { visitorIdentity: identity } : {}),
       });
     } catch (error) {
@@ -208,4 +204,25 @@ async function recordInitStatistics(
       );
     }
   }
+}
+
+/**
+ * Which tracked buttons this load shows, mirroring the client layouts.
+ * Signed-in viewers who have not joined see the follow-up CTA beside Join on
+ * active regular and short goals; logged-out viewers see sign-in buttons
+ * instead, and Tiny posts show Join alone until the viewer joins.
+ */
+function statisticsExposure(
+  state: InitResponse["state"],
+  appTrackedSubscribed: boolean,
+  signedIn: boolean,
+): StatisticsExposure {
+  const ctaConfigured = state.afterSubscribeAction.type !== "disabled";
+  if (state.postHeight === "cta") return ctaConfigured ? "cta_only" : "none";
+  if (appTrackedSubscribed) return ctaConfigured ? "secondary_cta" : "none";
+  if (state.postHeight !== "tiny" && state.completedTime !== null)
+    return "none";
+  return ctaConfigured && signedIn && state.postHeight !== "tiny"
+    ? "join_and_secondary_cta"
+    : "join";
 }

@@ -25,7 +25,14 @@ type SessionKind =
   | "join_click"
   | "secondary_click"
   | "cta_only_click";
-export type StatisticsExposure = "join" | "secondary_cta" | "cta_only" | "none";
+export type StatisticsExposure =
+  | "join"
+  | "secondary_cta"
+  // A signed-in viewer who has not joined sees Join and the configured
+  // follow-up CTA side by side on active regular and short goals.
+  | "join_and_secondary_cta"
+  | "cta_only"
+  | "none";
 
 const hourStart = (time: number) => Math.floor(time / hourMs) * hourMs;
 const countsKey = (hour: number) => `statistics:v1:counts:${hour}`;
@@ -167,8 +174,16 @@ export async function recordStatisticsLoad(
   const hour = hourStart(now);
   const kinds: SessionKind[] = ["all"];
   if (options.appTrackedSubscribed) kinds.push("subscribed");
-  if (options.exposure === "join") kinds.push("join_eligible");
-  if (options.exposure === "secondary_cta") kinds.push("secondary_eligible");
+  if (
+    options.exposure === "join" ||
+    options.exposure === "join_and_secondary_cta"
+  )
+    kinds.push("join_eligible");
+  if (
+    options.exposure === "secondary_cta" ||
+    options.exposure === "join_and_secondary_cta"
+  )
+    kinds.push("secondary_eligible");
   if (options.exposure === "cta_only") kinds.push("cta_only_eligible");
   if (options.exposure !== "none") kinds.push("interaction_eligible");
   await Promise.all([
@@ -537,7 +552,7 @@ export async function getStatisticsReport(
         joinClickSuccessRate: "Confirmed joins / raw Join clicks.",
         joinCtr: "Unique Join-click sessions / Join-eligible sessions.",
         secondaryCtaCtr:
-          "Unique post-subscription CTA-click sessions / eligible app-tracked subscribed CTA sessions.",
+          "Unique follow-up CTA-click sessions / sessions where the follow-up CTA was shown: app-tracked subscribers, plus signed-in viewers who have not joined on active regular and short goals. Logged-out viewers see sign-in buttons instead and are not counted. Short goals show the CTA before Join only on wider screens, so narrow-screen sessions of viewers who have not joined still count as eligible and can understate this rate.",
         ctaOnlyCtr:
           "Unique CTA-only click sessions / eligible CTA-only sessions.",
         overallInteractionCtr:

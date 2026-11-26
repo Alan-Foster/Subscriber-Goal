@@ -3,8 +3,6 @@ import { context, redis } from "@devvit/web/server";
 import type { RecordCtaClickResponse } from "../../../shared/types/api";
 import { apiRoutes } from "../../../shared/routes";
 import { getSubGoalData } from "../../data/subGoalData";
-import { isTrackedSubscriber } from "../../data/subscriberStats";
-import { ctaOnlyPostKind } from "../../../shared/postKind";
 import { isClickActivityPreset, recordCtaClick } from "../../data/ctaActivity";
 import { logDiagnostic } from "../../../shared/diagnostics";
 import { localizedError, visitorIdentity } from "./request";
@@ -21,15 +19,6 @@ export function registerCtaClickRoutes(router: Router): void {
       if (
         subGoalData.afterSubscribeAction.type === "disabled" ||
         !isClickActivityPreset(subGoalData.afterSubscribePreset)
-      ) {
-        res
-          .status(400)
-          .json(localizedError("errors.api.ctaActivityUnsupported"));
-        return;
-      }
-      if (
-        subGoalData.postKind !== ctaOnlyPostKind &&
-        (!context.userId || !(await isTrackedSubscriber(redis, context.userId)))
       ) {
         res
           .status(400)

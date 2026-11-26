@@ -92,7 +92,7 @@ const interactionGroups = (metrics: Metrics): Group[] => [
         value: metrics.ctas.uniqueClickSessions,
       },
       {
-        label: "Eligible subscribed CTA sessions",
+        label: "Eligible CTA sessions",
         value: metrics.ctas.eligibleSessions,
       },
       {

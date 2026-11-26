@@ -135,12 +135,6 @@
       "placeholders": {},
       "protectedTokens": []
     },
-    "errors.join.required": {
-      "description": "User-facing error: Join required",
-      "policy": "fallback",
-      "placeholders": {},
-      "protectedTokens": []
-    },
     "errors.join.transport": {
       "description": "User-facing error: Join transport",
       "policy": "fallback",
@@ -2269,7 +2263,6 @@
         "errors.join.failedReference": "Could not join the community. Reference: {operationId}",
         "errors.join.invalidAttempt": "Invalid join attempt ID.",
         "errors.join.loginRequired": "Please log in to join.",
-        "errors.join.required": "You must join the community first.",
         "errors.join.transport": "Could not join the community.",
         "errors.join.unsupported": "This post does not support joining.",
         "menu.createCta.description": "Create a new Call to Action Button Post",

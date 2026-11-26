@@ -11,11 +11,7 @@ import type {
 import { apiRoutes } from "../../../shared/routes";
 import { getPublicAppSettings } from "../../settings";
 import { getSubGoalData } from "../../data/subGoalData";
-import { isTrackedSubscriber } from "../../data/subscriberStats";
-import {
-  ctaOnlyPostKind,
-  subscriberGoalPostKind,
-} from "../../../shared/postKind";
+import { subscriberGoalPostKind } from "../../../shared/postKind";
 import { isSubredditBlacklisted } from "../../utils/subredditBlacklist";
 import { getRecentCommunityPostIds } from "../../data/ctaActivity";
 import { logDiagnostic } from "../../../shared/diagnostics";
@@ -23,7 +19,6 @@ import {
   getPostAvailability,
   isMissingPostError,
 } from "../../utils/postStatus";
-import { isNsfwOrUnknown } from "../../utils/subredditSafety";
 import { isPrivateSubredditAccessError } from "../../utils/redditPermissionErrors";
 import {
   type CurrentSubreddit,
@@ -36,7 +31,7 @@ export function registerAfterSubscribeTargetRoutes(router: Router): void {
   router.get(
     apiRoutes.afterSubscribeTarget,
     async (req, res): Promise<void> => {
-      const { postId, userId } = context;
+      const { postId } = context;
       const query = req.query ?? {};
       const hasAutomaticSelector = Object.prototype.hasOwnProperty.call(
         query,
@@ -59,21 +54,9 @@ export function registerAfterSubscribeTargetRoutes(router: Router): void {
         );
         const subreddit = await reddit.getCurrentSubreddit();
         const actions = effectiveGoalActions(subGoalData, subreddit);
-        const canOpenBeforeJoin =
-          !hasAutomaticSelector &&
-          isNsfwOrUnknown(subreddit.nsfw) &&
-          subGoalData.postKind === subscriberGoalPostKind &&
-          (subGoalData.postHeight === "regular" ||
-            subGoalData.postHeight === "short") &&
-          actions.primary.type === "newest-post";
-        if (
-          (hasAutomaticSelector || subGoalData.postKind !== ctaOnlyPostKind) &&
-          (!userId ||
-            (!canOpenBeforeJoin && !(await isTrackedSubscriber(redis, userId))))
-        ) {
-          res.status(403).json(localizedError("errors.join.required"));
-          return;
-        }
+        // Follow-up actions never require joining: every viewer, joined or
+        // not and logged in or not, may open any CTA (Devvit User Actions
+        // rules forbid gating functionality behind subscribing).
         let action = actions.primary;
         if (hasAutomaticSelector) {
           if (!canUseAutomaticAction(subGoalData)) {
@@ -94,10 +77,7 @@ export function registerAfterSubscribeTargetRoutes(router: Router): void {
             .json(localizedError("errors.api.dynamicTargetUnsupported"));
           return;
         }
-        if (
-          (hasAutomaticSelector || canOpenBeforeJoin) &&
-          (await isSubredditBlacklisted(reddit, subreddit.name))
-        ) {
+        if (await isSubredditBlacklisted(reddit, subreddit.name)) {
           res.status(403).json(localizedError("errors.api.forbidden"));
           return;
         }
