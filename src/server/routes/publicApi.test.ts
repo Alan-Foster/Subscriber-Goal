@@ -584,26 +584,44 @@ describe("publicApi routes", () => {
     expect(hoisted.recordStatisticsJoinClick).not.toHaveBeenCalled();
   });
 
-  it("rejects secondary CTA statistics events without tracked membership", async () => {
-    hoisted.context.userId = "t2_untracked";
-    hoisted.isTrackedSubscriber.mockResolvedValue(false);
-    const routes = createRouteHarness();
-    const json = vi.fn();
-    const status = vi.fn(() => ({ json }));
+  it.each([
+    ["an untracked signed-in viewer", "t2_untracked", "t2_untracked"],
+    ["a logged-out viewer", null, "22222222-2222-4222-8222-222222222222"],
+  ])(
+    "records secondary CTA statistics events from %s without requiring Join",
+    async (_viewer, userId, expectedIdentity) => {
+      hoisted.context.userId = userId;
+      hoisted.isTrackedSubscriber.mockResolvedValue(false);
+      const routes = createRouteHarness();
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
 
-    await routes.get(apiRoutes.statisticsEvent)?.(
-      {
-        body: {
-          type: "cta_click",
-          eventId: "11111111-1111-4111-8111-111111111111",
-        },
-      } as unknown as Request,
-      { status } as unknown as Response,
-    );
+      await routes.get(apiRoutes.statisticsEvent)?.(
+        {
+          body: {
+            type: "cta_click",
+            eventId: "11111111-1111-4111-8111-111111111111",
+          },
+          header: (name: string) =>
+            name === "X-SG-Visitor-ID"
+              ? "22222222-2222-4222-8222-222222222222"
+              : undefined,
+        } as unknown as Request,
+        { json, status } as unknown as Response,
+      );
 
-    expect(status).toHaveBeenCalledWith(400);
-    expect(hoisted.recordStatisticsCtaClick).not.toHaveBeenCalled();
-  });
+      expect(status).not.toHaveBeenCalled();
+      expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
+      expect(hoisted.recordStatisticsCtaClick).toHaveBeenCalledExactlyOnceWith(
+        hoisted.redis,
+        expect.objectContaining({
+          kind: "secondary",
+          visitorIdentity: expectedIdentity,
+        }),
+      );
+      expect(json).toHaveBeenCalledWith({ status: "ok" });
+    },
+  );
 
   it("reports init phase durations through Server-Timing", async () => {
     const routes = createRouteHarness();
@@ -1940,21 +1958,32 @@ describe("publicApi routes", () => {
     },
   );
 
-  it.each([
-    "logged out",
-    "untracked",
-    "CTA-only",
-    "Tiny",
-    "completed",
-    "blacklisted",
-    "disabled",
-  ])(
+  it.each(["logged out", "untracked"])(
+    "resolves automatic actions for %s viewers without requiring Join",
+    async (viewer) => {
+      seedAutomaticCard();
+      if (viewer === "logged out") hoisted.context.userId = null;
+      if (viewer === "untracked")
+        hoisted.isTrackedSubscriber.mockResolvedValue(false);
+      const target = {
+        id: "t3_target",
+        authorName: "CommunityMember",
+        url: "https://www.reddit.com/r/ExampleSub/comments/target",
+      };
+      hoisted.reddit.getNewPosts.mockReturnValue({
+        all: vi.fn(async () => [target]),
+      });
+      const res = await requestAction({ automaticAction: "newest-post" });
+      expect(res.status).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ target: { url: target.url } });
+      expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["CTA-only", "Tiny", "completed", "blacklisted", "disabled"])(
     "rejects automatic actions for %s before any listing lookup",
     async (reason) => {
       const data = seedAutomaticCard();
-      if (reason === "logged out") hoisted.context.userId = null;
-      if (reason === "untracked")
-        hoisted.isTrackedSubscriber.mockResolvedValue(false);
       if (reason === "CTA-only") {
         data.postKind = "cta-only-v1";
         data.postHeight = "cta";
@@ -2484,20 +2513,84 @@ describe("publicApi routes", () => {
     });
   });
 
-  it("rejects dynamic navigation for unsubscribed viewers", async () => {
+  it.each([
+    ["an untracked signed-in viewer", "t2_user"],
+    ["a logged-out viewer", null],
+  ])(
+    "opens View Top Post Today on an SFW goal for %s without requiring Join",
+    async (_viewer, userId) => {
+      hoisted.context.userId = userId;
+      hoisted.isTrackedSubscriber.mockResolvedValue(false);
+      hoisted.getSubGoalData.mockResolvedValue({
+        postKind: "subscriber-goal-v1",
+        postHeight: "regular",
+        completedTime: 0,
+        language: "en",
+        afterSubscribeAction: {
+          type: "top-post-day",
+          buttonText: "View the Top Post Today",
+          colorTheme: "blue",
+        },
+      });
+      hoisted.reddit.getTopPosts.mockReturnValue({
+        all: vi.fn().mockResolvedValue([
+          {
+            id: "t3_target",
+            authorName: "member",
+            url: "https://www.reddit.com/r/ExampleSub/comments/target",
+            permalink: "/r/ExampleSub/comments/target",
+          },
+        ]),
+      });
+      const json = vi.fn();
+      const status = vi.fn(() => ({ json }));
+
+      await createRouteHarness().get(apiRoutes.afterSubscribeTarget)?.(
+        {} as Request,
+        { json, status } as unknown as Response,
+      );
+
+      expect(status).not.toHaveBeenCalled();
+      expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
+      expect(hoisted.reddit.getTopPosts).toHaveBeenCalledOnce();
+      expect(json).toHaveBeenCalledWith({
+        target: {
+          url: "https://www.reddit.com/r/ExampleSub/comments/target",
+          permalink: "/r/ExampleSub/comments/target",
+        },
+      });
+    },
+  );
+
+  it("rejects a non-automatic dynamic target in a blacklisted subreddit before any listing lookup", async () => {
     hoisted.context.userId = "t2_user";
-    const routes = createRouteHarness();
+    hoisted.isTrackedSubscriber.mockResolvedValue(true);
+    hoisted.isSubredditBlacklisted.mockResolvedValue(true);
+    hoisted.getSubGoalData.mockResolvedValue({
+      postKind: "subscriber-goal-v1",
+      postHeight: "regular",
+      completedTime: 0,
+      language: "en",
+      afterSubscribeAction: {
+        type: "top-post-day",
+        buttonText: "View the Top Post Today",
+        colorTheme: "blue",
+      },
+    });
     const json = vi.fn();
     const status = vi.fn(() => ({ json }));
 
-    await routes.get(apiRoutes.afterSubscribeTarget)?.(
+    await createRouteHarness().get(apiRoutes.afterSubscribeTarget)?.(
       {} as Request,
-      { status } as unknown as Response,
+      { json, status } as unknown as Response,
     );
 
     expect(status).toHaveBeenCalledWith(403);
-    expect(hoisted.getSubGoalData).toHaveBeenCalledOnce();
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "error" }),
+    );
     expect(hoisted.reddit.getTopPosts).not.toHaveBeenCalled();
+    expect(hoisted.reddit.getNewPosts).not.toHaveBeenCalled();
   });
 
   it("allows anonymous CTA-only posts to resolve a dynamic target", async () => {
@@ -2906,7 +2999,7 @@ describe("publicApi routes", () => {
   );
 
   it.each(["subscriber-goal-v1", "subscribe-only-v1"])(
-    "requires a tracked subscriber for %s public activity",
+    "records %s public activity without requiring Join",
     async (postKind) => {
       hoisted.getSubGoalData.mockResolvedValue({
         postKind,
@@ -2914,6 +3007,7 @@ describe("publicApi routes", () => {
         afterSubscribeAction: { type: "link" },
       });
       hoisted.isClickActivityPreset.mockReturnValue(true);
+      hoisted.isTrackedSubscriber.mockResolvedValue(false);
       const routes = createRouteHarness();
       const json = vi.fn();
       const status = vi.fn(() => ({ json }));
@@ -2921,31 +3015,26 @@ describe("publicApi routes", () => {
         header: () => "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         body: { userId: "t2_forged", postId: "t3_forged" },
       } as unknown as Request;
-      for (const userId of [null, "t2_untracked"]) {
+      for (const [userId, identity] of [
+        [null, "visitor:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+        ["t2_untracked", "user:t2_untracked"],
+        ["t2_tracked", "user:t2_tracked"],
+      ] as const) {
         hoisted.context.userId = userId;
         await routes.get(apiRoutes.ctaClick)?.(request, {
           json,
           status,
         } as unknown as Response);
-        expect(status).toHaveBeenLastCalledWith(400);
+        expect(hoisted.recordCtaClick).toHaveBeenLastCalledWith(
+          hoisted.redis,
+          "t3_post",
+          identity,
+        );
+        expect(json).toHaveBeenLastCalledWith({ status: "ok" });
       }
-      expect(hoisted.recordCtaClick).not.toHaveBeenCalled();
-      hoisted.context.userId = "t2_tracked";
-      hoisted.isTrackedSubscriber.mockResolvedValue(true);
-      await routes.get(apiRoutes.ctaClick)?.(request, {
-        json,
-        status,
-      } as unknown as Response);
-      expect(hoisted.isTrackedSubscriber).toHaveBeenLastCalledWith(
-        hoisted.redis,
-        "t2_tracked",
-      );
-      expect(hoisted.recordCtaClick).toHaveBeenCalledExactlyOnceWith(
-        hoisted.redis,
-        "t3_post",
-        "user:t2_tracked",
-      );
-      expect(json).toHaveBeenLastCalledWith({ status: "ok" });
+      expect(status).not.toHaveBeenCalled();
+      expect(hoisted.recordCtaClick).toHaveBeenCalledTimes(3);
+      expect(hoisted.isTrackedSubscriber).not.toHaveBeenCalled();
     },
   );
 

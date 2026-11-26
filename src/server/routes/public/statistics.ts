@@ -71,16 +71,6 @@ export function registerStatisticsRoutes(router: Router): void {
           return;
         }
         const ctaOnly = data.postKind === ctaOnlyPostKind;
-        if (
-          !ctaOnly &&
-          (!context.userId ||
-            !(await isTrackedSubscriber(redis, context.userId)))
-        ) {
-          res
-            .status(400)
-            .json(localizedError("errors.api.ctaActivityUnsupported"));
-          return;
-        }
         const identity = visitorIdentity(req);
         await recordStatisticsCtaClick(redis, {
           eventId: body.eventId,
