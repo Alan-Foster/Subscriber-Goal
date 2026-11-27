@@ -11,7 +11,7 @@ import { parseOnboardingReminderState } from "../core/onboardingWarning";
 import type { RedisClient } from "../types";
 import { dueJobsKey, updateJobRecord } from "./queue";
 import { createJobCodec, jobRecordFields, timeField } from "./record";
-import { defineDueJob, dispatchDueJobs } from "./runner";
+import { defineDueJob, dispatchDueJobs, jobRunnerLockTtlMs } from "./runner";
 
 const onboardingJob = {
   id: "onboarding",
@@ -76,7 +76,7 @@ export async function dispatchOnboardingJob(
   const worker = defineDueJob({
     storage: onboardingJob,
     lockKey: "onboarding_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexOnboardingJob,
     handle: async (_record, nowMs, canStart) => {

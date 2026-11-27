@@ -4,6 +4,7 @@ import { countPendingCrossposts } from "../data/crosspostData";
 import { logCrosspostEvent, toErrorMessage } from "../utils/crosspostLogs";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 import {
   toNormalizedSubredditName,
   getCrosspostAuthoritySubreddit,
@@ -21,7 +22,10 @@ import { rebuildCrosspostMappings } from "./mappingRebuild";
 const crosspostRetryDegradedCountKey = "crosspostRetryDegradedCount";
 const crosspostRetryDegradedThreshold = 3;
 const crosspostIngestionLockKeyPrefix = "crosspostIngestionLock";
-const crosspostIngestionLockTtlMs = 60 * 1000;
+const crosspostIngestionLockTtlMs = boundedLockTtlMs(
+  "crosspost_ingestion",
+  userFacingLockTtlMs,
+);
 const crosspostSchedulerDaisyChainMaxPasses = 3;
 const mappingRebuildBudgetMs = 5_000;
 const getCrosspostMaxSourcePostAgeMs = (

@@ -1,7 +1,7 @@
 import { getJobBackoffDelay, getJobRetry } from "../jobs/backoff";
 import { createJobCodec, jobRecordFields } from "../jobs/record";
 import { dueJobsKey, updateJobRecord } from "../jobs/queue";
-import { defineDueJob } from "../jobs/runner";
+import { defineDueJob, jobRunnerLockTtlMs } from "../jobs/runner";
 import type { ServerAppSettings } from "../settings";
 import type { LinkId, RedditClient, RedisClient, SubredditId } from "../types";
 import { dispatchPostAction } from "../data/crosspostData";
@@ -283,7 +283,7 @@ export function createSourcePostDeletionJob(
   return defineDueJob({
     storage: sourceDeletionJob,
     lockKey: "source_post_deletion_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexSourceDeletionJob,
     handle: async (_record, startedAt, canStart) => {

@@ -69,7 +69,15 @@ import { processDueAutoCreateNextGoals } from "./autoCreateNextGoal";
 import {
   createSubscriberGoal,
   SubscriberGoalCreationInProgressError,
+  subscriberGoalCreationOperationLockTtlMs,
 } from "./createSubscriberGoal";
+import {
+  onboardingSubscriberGoalLockKey,
+  onboardingSubscriberGoalLockTtlMs,
+} from "./onboardingState";
+import { acquireRedisLock } from "../utils/redisOwnedLock";
+import { SubscriberGoalCreationOutcomeUnknownError } from "./subscriberGoalCreationModel";
+import { userFacingLockTtlMs } from "../utils/lockTtl";
 import { processDueAppRepair } from "./appRepair";
 import {
   acquireCommunityGoalMutationLease,
@@ -425,5 +433,81 @@ describe("lock expiry", () => {
     expect(await world.redisImpl.get(communityGoalMutationLockKey)).toBe(
       second!.token,
     );
+  });
+
+  it.each([
+    [
+      "community goal",
+      communityGoalMutationLockKey,
+      communityGoalMutationLockTtlMs,
+    ],
+    [
+      "onboarding goal",
+      onboardingSubscriberGoalLockKey,
+      onboardingSubscriberGoalLockTtlMs,
+    ],
+    [
+      "goal creation operation",
+      "subscriber_goal_creation_v1:manual-v2:t5_test:t2_mod:attempt-1:lock",
+      subscriberGoalCreationOperationLockTtlMs,
+    ],
+  ])(
+    "a %s lock left by a failed release clears after 60 s, not before",
+    async (_name, key, ttlMs) => {
+      expect(ttlMs).toBe(userFacingLockTtlMs);
+      const acquireAt = async (nowMs: number) => {
+        vi.setSystemTime(nowMs);
+        return acquireRedisLock(world.redis as never, key, ttlMs, { nowMs });
+      };
+
+      // The first holder never releases, as after a failed release.
+      expect(await acquireAt(T0)).toBeDefined();
+      expect(await acquireAt(T0 + ttlMs - 1)).toBeUndefined();
+      expect(await acquireAt(T0 + ttlMs)).toBeDefined();
+    },
+  );
+
+  it("Create succeeds within 60 s of a community lock left by a failed release", async () => {
+    vi.setSystemTime(T0);
+    expect(
+      await acquireCommunityGoalMutationLease(world.redis as never, T0),
+    ).toBeDefined();
+
+    vi.setSystemTime(T0 + communityGoalMutationLockTtlMs - 1);
+    await expect(
+      manualCreate("manual-v2:t5_test:t2_mod:attempt-1"),
+    ).rejects.toBeInstanceOf(SubscriberGoalCreationInProgressError);
+
+    vi.setSystemTime(T0 + communityGoalMutationLockTtlMs);
+    const created = await manualCreate("manual-v2:t5_test:t2_mod:attempt-1");
+    expect(created.outcome).toBe("created");
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+  });
+
+  it("does not submit again when the locks expire while a submission is unresolved", async () => {
+    vi.setSystemTime(T0);
+    const operationId = "manual-v2:t5_test:t2_mod:attempt-1";
+    const gate = new Gate();
+    world.plan.add({
+      target: "reddit",
+      method: "submitCustomPost",
+      mode: "pause",
+      gate,
+    });
+    const original = manualCreate(operationId);
+    await gate.reached;
+
+    // Both the community lock and the operation lock have expired, but the
+    // first submission has not resolved. The stored "submitting" status must
+    // stop a second submission.
+    vi.setSystemTime(T0 + subscriberGoalCreationOperationLockTtlMs + minute);
+    await expect(manualCreate(operationId)).rejects.toBeInstanceOf(
+      SubscriberGoalCreationOutcomeUnknownError,
+    );
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
+
+    gate.release();
+    await original;
+    expect(world.plan.calls("reddit", "submitCustomPost")).toHaveLength(1);
   });
 });

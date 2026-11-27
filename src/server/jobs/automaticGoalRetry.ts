@@ -9,7 +9,7 @@ import type { ServerAppSettings } from "../settings";
 import type { RedditClient, RedisClient } from "../types";
 import { dueJobsKey, updateJobRecord } from "./queue";
 import { createJobCodec, jobRecordFields, timeField } from "./record";
-import { defineDueJob, dispatchDueJobs } from "./runner";
+import { defineDueJob, dispatchDueJobs, jobRunnerLockTtlMs } from "./runner";
 
 const automaticGoalJob = {
   id: "automatic_goal_retry",
@@ -66,7 +66,7 @@ export async function runAutoGoalSuccessorQueue({
   const worker = defineDueJob({
     storage: automaticGoalJob,
     lockKey: "automatic_goal_retry_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexAutomaticGoalJob,
     handle: async (_record, startedAt, canStart) => {

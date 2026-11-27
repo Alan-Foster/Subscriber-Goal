@@ -1,6 +1,6 @@
 import { createJobCodec, jobRecordFields, timeField } from "../jobs/record";
 import { dueJobsKey, updateJobRecord } from "../jobs/queue";
-import { defineDueJob } from "../jobs/runner";
+import { defineDueJob, jobRunnerLockTtlMs } from "../jobs/runner";
 import {
   displacementBatchSize,
   displacementPendingKey,
@@ -127,7 +127,7 @@ export function createScheduledPostDisplacementJob(
   return defineDueJob({
     storage: displacementJob,
     lockKey: "scheduled_post_displacement_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexDisplacementJob,
     handle: async (record, startedAt, canStart) => {

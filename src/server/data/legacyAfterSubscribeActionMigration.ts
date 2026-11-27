@@ -14,6 +14,7 @@ import {
   subscriberGoalsKey,
 } from "./subGoalData";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, perPostLockTtlMs } from "../utils/lockTtl";
 
 // Keep the prior migration keys intact. A separate v3 marker deliberately
 // re-queues installations where the v2 migration has already completed.
@@ -46,7 +47,10 @@ export type LegacyAfterSubscribeActionMigrationSummary = {
 };
 
 const batchSize = 25;
-const lockTtlMs = 30_000;
+const lockTtlMs = boundedLockTtlMs(
+  "legacy_after_subscribe_action_migration",
+  perPostLockTtlMs,
+);
 
 const getRawActionFields = (postId: string): string[] => [
   `${postId}${postAfterSubscribeActionSuffix}`,

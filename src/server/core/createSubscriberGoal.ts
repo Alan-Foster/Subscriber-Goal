@@ -25,6 +25,14 @@ import {
 } from "../utils/postStatus";
 import { getCurrentActorAuthority } from "../utils/actorAuthorization";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
+
+// Held for one creation run. A submission still unresolved when it expires is
+// guarded by the operation's stored "submitting" status, not by this lock.
+export const subscriberGoalCreationOperationLockTtlMs = boundedLockTtlMs(
+  "subscriber_goal_creation_operation",
+  userFacingLockTtlMs,
+);
 import {
   type CreateSubscriberGoalOptions,
   type CreateSubscriberGoalResult,
@@ -403,9 +411,12 @@ async function createSubscriberGoalUnderCommunityLease({
     );
   }
   const nowMs = Date.now();
-  const lockToken = await acquireRedisLock(redis, lockKey, 15 * 60 * 1000, {
-    nowMs,
-  });
+  const lockToken = await acquireRedisLock(
+    redis,
+    lockKey,
+    subscriberGoalCreationOperationLockTtlMs,
+    { nowMs },
+  );
   if (!lockToken) {
     throw new SubscriberGoalCreationInProgressError(options.language);
   }

@@ -7,6 +7,7 @@ import {
   removeProcessedRevisions,
 } from "../data/crosspostData";
 import { type LinkId, type RedisClient } from "../types";
+import { backgroundLockTtlMs, boundedLockTtlMs } from "../utils/lockTtl";
 import {
   updateCrosspostMappings,
   writeCrosspostMapping,
@@ -30,7 +31,10 @@ const crosspostUnexpectedRevisionLogKeyPrefix =
   "crosspostUnexpectedRevisionLog";
 const crosspostUnexpectedRevisionLogTtlMs = 24 * 60 * 60 * 1000;
 const crosspostCreateInFlightKeyPrefix = "crosspostCreateInFlight";
-export const crosspostCreateInFlightTtlMs = 90 * 1000;
+export const crosspostCreateInFlightTtlMs = boundedLockTtlMs(
+  "crosspost_create_in_flight",
+  backgroundLockTtlMs,
+);
 
 type CrosspostBookkeepingCleanupOptions = {
   retentionMs?: number;
