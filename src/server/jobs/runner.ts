@@ -1,6 +1,7 @@
 import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedisClient } from "../types";
 import { withRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 import { getJobRetry, type BackoffPolicy } from "./backoff";
 import {
   dueJobsKey,
@@ -12,6 +13,11 @@ import {
 import type { JobRecord } from "./record";
 
 export const jobRunnerBudgetMs = 20_000;
+// Each run holds its job's lock only within one request.
+export const jobRunnerLockTtlMs = boundedLockTtlMs(
+  "job_runner",
+  userFacingLockTtlMs,
+);
 const batchSize = 25;
 
 type RunResult = "not_due" | "complete" | "retry" | "exhausted" | "budget";

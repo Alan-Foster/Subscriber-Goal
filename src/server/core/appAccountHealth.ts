@@ -18,11 +18,16 @@ import {
   notifyHighlightPermissionIncident,
 } from "../utils/highlightFailureNotifications";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 
 export const appAccountInstallerKey = "app_account_health_v1_installer";
 export const appAccountHealthStateKey = "app_account_health_v1_state";
 export const appAccountHealthNotificationLockKey =
   "app_account_health_v1_notification_lock";
+const appAccountHealthNotificationLockTtlMs = boundedLockTtlMs(
+  "app_account_health_notification",
+  userFacingLockTtlMs,
+);
 export {
   appAccountHealthRetryStateKey,
   appAccountHealthMaxRetryAttempts,
@@ -266,7 +271,7 @@ async function recordUnhealthyAppAccount(
     notificationLockToken = await acquireRedisLock(
       redis,
       appAccountHealthNotificationLockKey,
-      60_000,
+      appAccountHealthNotificationLockTtlMs,
       { nowMs },
     );
     if (!notificationLockToken) {

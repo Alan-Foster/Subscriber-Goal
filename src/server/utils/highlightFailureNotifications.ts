@@ -7,11 +7,16 @@ import {
   releaseRedisLock,
   withRedisLock,
 } from "./redisOwnedLock";
+import { backgroundLockTtlMs, boundedLockTtlMs } from "./lockTtl";
 
 const highlightIncidentKeyPrefix = "highlight_failure_incident_v1";
 const activeHighlightIncidentKey = "highlight_failure_incident_active_v1";
 const highlightIncidentRetryMs = 60 * 60 * 1000;
-const highlightIncidentLockMs = 5 * 60 * 1000;
+// Duplicate notices are prevented by the stored notifiedAt/nextAttemptAt.
+const highlightIncidentLockMs = boundedLockTtlMs(
+  "highlight_failure_incident",
+  backgroundLockTtlMs,
+);
 const highlightIncidentRetentionSeconds = 30 * 24 * 60 * 60;
 export const highlightPermissionIncidentKey =
   "highlight_permission_incident_v1";

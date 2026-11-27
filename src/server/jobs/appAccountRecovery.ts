@@ -18,7 +18,7 @@ import {
   textField,
   timeField,
 } from "./record";
-import { defineDueJob, dispatchDueJobs } from "./runner";
+import { defineDueJob, dispatchDueJobs, jobRunnerLockTtlMs } from "./runner";
 
 const recoveryJob = {
   id: "app_account_recovery",
@@ -116,7 +116,7 @@ export async function resolveAppAccountRecoveryGate({
   const worker = defineDueJob({
     storage: recoveryJob,
     lockKey: "app_account_recovery_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: verificationBackoff,
     index: indexRecoveryJob,
     handle: async (_record, startedAt, canStart) => {

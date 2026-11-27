@@ -53,6 +53,7 @@ import {
 } from "./recentSubscriberOrder";
 import { subscriberTrackingGenerationKey } from "./subscriberTrackingKeys";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, perPostLockTtlMs } from "../utils/lockTtl";
 
 export const subscriberGoalsKey = "subscriber_goals";
 export const postGoalSuffix = "_goal";
@@ -80,7 +81,10 @@ export const autoCreateNextGoalSuccessorsKey =
   "auto_create_next_goal_v1_successors";
 export const completionTransitionLockKeyPrefix =
   "subscriber_goal_completion_transition_lock_v1";
-export const completionTransitionLockTtlMs = 30_000;
+export const completionTransitionLockTtlMs = boundedLockTtlMs(
+  "completion_transition",
+  perPostLockTtlMs,
+);
 export const autoCreateNextGoalRetryAttemptsKey =
   "auto_create_next_goal_retry_attempts_v1";
 export const autoCreateNextGoalExhaustedKey =

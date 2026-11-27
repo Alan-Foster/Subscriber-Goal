@@ -20,10 +20,15 @@ import {
 } from "./appAccountHealth";
 import { getJobRetry } from "../jobs/backoff";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { backgroundLockTtlMs, boundedLockTtlMs } from "../utils/lockTtl";
 
 export const appAccountInstallationStateKey =
   "app_account_recovery_v1_installation";
 export const appAccountRecoveryLockKey = "app_account_recovery_v1_lock";
+export const appAccountRecoveryLockTtlMs = boundedLockTtlMs(
+  "app_account_recovery",
+  backgroundLockTtlMs,
+);
 export const appAccountRecoveryEventKeyPrefix = "app_account_recovery_v1_event";
 export const appAccountRecoveryJobName = "app-account-recovery-job";
 export const appAccountRecoveryDelayMs = 60_000;
@@ -578,7 +583,7 @@ export async function processAppAccountRecovery({
   const lockToken = await acquireRedisLock(
     redis,
     appAccountRecoveryLockKey,
-    2 * 60_000,
+    appAccountRecoveryLockTtlMs,
     { nowMs, token: `${incidentToken}:${crypto.randomUUID()}` },
   );
   if (!lockToken) {

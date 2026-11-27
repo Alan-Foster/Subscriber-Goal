@@ -2,10 +2,15 @@ import { getPostAvailability } from "../utils/postStatus";
 import { isLinkId, type RedditClient, type RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 
 export const subscriberGoalPostFlairText = "Subscriber Goal";
 export const subscriberGoalPostFlairBackgroundColor = "#FF4500";
 const flairCreationLockKey = "subscriber_goal_flair_creation_v1_lock";
+const flairCreationLockTtlMs = boundedLockTtlMs(
+  "subscriber_goal_flair_creation",
+  userFacingLockTtlMs,
+);
 
 const canonicalFlairSettings = {
   allowableContent: "text" as const,
@@ -34,7 +39,11 @@ export async function ensureSubscriberGoalPostFlair(
   }
   let existing = matches[0];
   if (!existing) {
-    const token = await acquireRedisLock(redis, flairCreationLockKey, 60_000);
+    const token = await acquireRedisLock(
+      redis,
+      flairCreationLockKey,
+      flairCreationLockTtlMs,
+    );
     try {
       existing = (await reddit.getPostFlairTemplates(subredditName)).find(
         (template) => template.text === subscriberGoalPostFlairText,

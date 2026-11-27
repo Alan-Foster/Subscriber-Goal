@@ -11,7 +11,7 @@ import {
 import type { RedditClient, RedisClient } from "../types";
 import { dueJobsKey, updateJobRecord } from "./queue";
 import { createJobCodec, jobRecordFields, timeField } from "./record";
-import { defineDueJob, dispatchDueJobs } from "./runner";
+import { defineDueJob, dispatchDueJobs, jobRunnerLockTtlMs } from "./runner";
 
 const healthJob = {
   id: "app_account_health",
@@ -58,7 +58,7 @@ export async function resolveAppAccountHealthGate({
   const worker = defineDueJob({
     storage: healthJob,
     lockKey: "app_account_health_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: appAccountHealthBackoff,
     index: indexHealthRetry,
     handle: async (_record, startedAt, canStart) => {

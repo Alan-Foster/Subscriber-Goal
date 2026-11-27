@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { getUtcDayStartMs } from "./subscriberDailyStats";
 import { withRedisLock } from "../utils/redisOwnedLock";
+import { backgroundLockTtlMs, boundedLockTtlMs } from "../utils/lockTtl";
 
 const utcDayMs = 24 * 60 * 60 * 1000;
 const rollingWindowDays = 7;
@@ -18,6 +19,10 @@ const recentPostCandidateLimit = 10;
 const postBackfillLimit = 1_000;
 const postBackfillCompleteKey = "community_post_activity_backfill_v1";
 const postBackfillLockKey = "community_post_activity_backfill_lock_v1";
+const postBackfillLockTtlMs = boundedLockTtlMs(
+  "community_post_activity_backfill",
+  backgroundLockTtlMs,
+);
 
 const postDayKey = (dayStartMs: number): string =>
   `community_post_activity:${dayStartMs}`;
@@ -85,7 +90,7 @@ export async function ensureCommunityPostActivityBackfill(
   await withRedisLock(
     redis,
     postBackfillLockKey,
-    2 * 60 * 1000,
+    postBackfillLockTtlMs,
     async () => {
       const nowMs = options.nowMs ?? Date.now();
       const oldestDayStartMs =

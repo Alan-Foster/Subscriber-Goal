@@ -1,12 +1,16 @@
 import type { RedisClient } from "../types";
 import { logDiagnostic } from "../../shared/diagnostics";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 
 export const onboardingSubscriberGoalStateKey =
   "onboarding_subscriber_goal_v4_state";
 export const onboardingSubscriberGoalVersion = "onboarding_subscriber_goal_v4";
 export const onboardingSubscriberGoalLockKey =
   "onboarding_subscriber_goal_v4_lock";
-export const onboardingSubscriberGoalLockTtlMs = 15 * 60 * 1000;
+export const onboardingSubscriberGoalLockTtlMs = boundedLockTtlMs(
+  "onboarding_subscriber_goal",
+  userFacingLockTtlMs,
+);
 export const onboardingReminderStateKey = "onboarding_reminder_v3_state";
 export const onboardingWarningDeliveryUnknownMessage =
   "A previous modmail dispatch could not be confirmed.";

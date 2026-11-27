@@ -29,6 +29,7 @@ import {
   defineDueJob,
   dispatchDueJobs,
   jobRunnerBudgetMs,
+  jobRunnerLockTtlMs,
 } from "../jobs/runner";
 import { updateJobRecord } from "../jobs/queue";
 
@@ -82,7 +83,7 @@ export function createAppRepairJob(
     storage: appRepairJob,
     lockKey: appRepairLockKey,
     // A request can run for 30 seconds. Allow another 30 for expiry margin.
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: repairBackoff,
     handle: (record, startedAt, canStart) =>
       runAppRepair({ reddit, redis }, record, startedAt, {

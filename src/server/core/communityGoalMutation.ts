@@ -1,9 +1,13 @@
 import type { RedisClient } from "../types";
 import { acquireRedisLock, releaseRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
 
 export const communityGoalMutationLockKey =
   "subscriber_goal_community_mutation_v1_lock";
-export const communityGoalMutationLockTtlMs = 15 * 60 * 1000;
+export const communityGoalMutationLockTtlMs = boundedLockTtlMs(
+  "community_goal_mutation",
+  userFacingLockTtlMs,
+);
 
 export type CommunityGoalMutationLease = {
   key: typeof communityGoalMutationLockKey;

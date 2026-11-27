@@ -8,7 +8,7 @@ import { getSubGoalData } from "../data/subGoalData";
 import type { RedditClient, RedisClient } from "../types";
 import { dueJobsKey, updateJobRecord } from "./queue";
 import { createJobCodec, jobRecordFields, timeField } from "./record";
-import { defineDueJob, dispatchDueJobs } from "./runner";
+import { defineDueJob, dispatchDueJobs, jobRunnerLockTtlMs } from "./runner";
 
 const recoveryJob = {
   id: "milestone_notification_recovery",
@@ -57,7 +57,7 @@ export function createMilestoneNotificationRecoveryJob(
   return defineDueJob({
     storage: recoveryJob,
     lockKey: "milestone_notification_recovery_job_v1_lock",
-    lockTtlMs: 60_000,
+    lockTtlMs: jobRunnerLockTtlMs,
     backoff: { baseMs: 60_000, maxMs: 60_000 },
     index: indexContinuations,
     handle: async (_record, startedAt, canStart) => {

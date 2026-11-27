@@ -9,6 +9,7 @@ import { shortSubGoalPostHeightPixels } from "../../shared/subGoalPostHeight";
 import { logDiagnostic } from "../../shared/diagnostics";
 import type { RedditClient, RedisClient } from "../types";
 import { isLinkId } from "../types";
+import { backgroundLockTtlMs, boundedLockTtlMs } from "../utils/lockTtl";
 import { isArchivedPostMutationError } from "../utils/communityHighlights";
 import { getPostAvailability, isMissingPostError } from "../utils/postStatus";
 import {
@@ -25,6 +26,10 @@ export const postKindMigrationVersion = "post_kind_v1";
 export const postKindMigrationTerminalKey = "post_kind_migration_v1_terminal";
 const postKindMigrationAttemptsKey = "post_kind_migration_v1_attempts";
 const postKindMigrationLockKey = "post_kind_migration_v1_lock";
+const postKindMigrationLockTtlMs = boundedLockTtlMs(
+  "post_kind_migration",
+  backgroundLockTtlMs,
+);
 const retryBaseMs = 5 * 60 * 1000;
 const retryWindowMs = 24 * 60 * 60 * 1000;
 const firstFailureField = (postId: string) => `${postId}:first_failed_at`;
@@ -91,7 +96,7 @@ export async function processPostKindMigrationBatch(
   const lock = await withRedisLock(
     redis,
     postKindMigrationLockKey,
-    5 * 60 * 1000,
+    postKindMigrationLockTtlMs,
     () => migratePendingPostKinds(reddit, redis, batchSize),
     {
       releaseDiagnostic: {

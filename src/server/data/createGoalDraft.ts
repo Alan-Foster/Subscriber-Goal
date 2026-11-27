@@ -11,16 +11,16 @@ import {
 } from "../../shared/afterSubscribeAction";
 import type { RedisClient } from "../types";
 import { withRedisLock } from "../utils/redisOwnedLock";
+import { boundedLockTtlMs, userFacingLockTtlMs } from "../utils/lockTtl";
+
+export { devvitWebMaximumRequestMs } from "../utils/lockTtl";
 
 export const createGoalDraftExpirationMs = 30 * 60 * 1000;
-export const createGoalDraftLeaseExpirationMs = 15 * 60 * 1000;
-export const devvitWebMaximumRequestMs = 30 * 1000;
-
-// Devvit Web endpoints have a 30-second request limit. The lease is 30x longer.
-// https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview
-if (createGoalDraftLeaseExpirationMs <= devvitWebMaximumRequestMs) {
-  throw new Error("create_goal_draft_lease_too_short");
-}
+// Held only while one form step runs, which ends within the request limit.
+export const createGoalDraftLeaseExpirationMs = boundedLockTtlMs(
+  "create_goal_draft_lease",
+  userFacingLockTtlMs,
+);
 
 type CreateGoalDraftBase = {
   creationAttemptId: string;
