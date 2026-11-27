@@ -261,7 +261,6 @@ export function buildCreateGoalFollowUpForm(
   const submittedButtonText = submittedValues?.afterSubscribeButtonText;
   const submittedUrl = submittedValues?.afterSubscribeUrl;
   const submittedColorTheme = submittedValues?.afterSubscribeColorTheme;
-  const submittedDeveloperField = submittedValues?.customDeveloperField;
   const sharedFields = [
     {
       name: creationAttemptFieldName(
@@ -302,19 +301,6 @@ export function buildCreateGoalFollowUpForm(
       options: getColorOptions(draft.language),
       helpText: translate(draft.language, "moderator.followUp.buttonColorHelp"),
       required: true,
-    },
-    {
-      name: "customDeveloperField",
-      label: translate(draft.language, "moderator.followUp.developerField"),
-      type: "string" as const,
-      helpText: translate(
-        draft.language,
-        "moderator.followUp.developerFieldHelp",
-      ),
-      ...(submittedDeveloperField !== undefined
-        ? { defaultValue: submittedDeveloperField }
-        : {}),
-      required: false,
     },
   ];
 
