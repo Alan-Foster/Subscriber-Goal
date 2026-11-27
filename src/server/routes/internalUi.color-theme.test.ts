@@ -607,6 +607,7 @@ describe("internalUi color theme create goal routes", () => {
         name: string;
         form: {
           title: string;
+          description?: string;
           acceptLabel: string;
           fields: Array<{
             name: string;
@@ -626,8 +627,12 @@ describe("internalUi color theme create goal routes", () => {
       "Sub Goal - Step 1/3 - Choose Post Type",
     );
     expect(response.showForm.form.acceptLabel).toBe("Next");
+    expect(response.showForm.form.description).toBe(
+      "Choose your Post Type and Language.",
+    );
     expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
       type: "select",
+      helpText: "Choose a Subscriber Goal format.",
       defaultValue: ["regular"],
       options: [
         { label: "Full Subscriber Goal", value: "regular" },
@@ -759,12 +764,20 @@ describe("internalUi color theme create goal routes", () => {
       { json } as unknown as Response,
     );
 
-    const fields = json.mock.calls[0]?.[0].showForm.form.fields as Array<{
-      name: string;
-      defaultValue?: unknown;
-    }>;
-    expect(fields.find((field) => field.name === "postHeight")).toMatchObject({
+    const form = json.mock.calls[0]?.[0].showForm.form as {
+      description?: string;
+      fields: Array<{
+        name: string;
+        defaultValue?: unknown;
+        helpText?: string;
+      }>;
+    };
+    expect(form.description).toBe("Choose your Post Type and Language.");
+    expect(
+      form.fields.find((field) => field.name === "postHeight"),
+    ).toMatchObject({
       defaultValue: ["cta"],
+      helpText: "Choose a Subscriber Goal format.",
     });
   });
 
@@ -964,16 +977,10 @@ describe("internalUi color theme create goal routes", () => {
     ).toMatchObject({
       defaultValue: ["top-post-day"],
       options: [
-        { label: "Link to the Top Post Today", value: "top-post-day" },
-        {
-          label: "Link to the Most Recent Post Today",
-          value: "newest-post",
-        },
-        { label: "Link to Create a New Text Post", value: "create-post" },
-        {
-          label: "Link to Create a New Image Post",
-          value: "share-picture",
-        },
+        { label: "View the Top Post Today", value: "top-post-day" },
+        { label: "View the Most Recent Post", value: "newest-post" },
+        { label: "Create a New Text Post", value: "create-post" },
+        { label: "Create a New Image Post", value: "share-picture" },
         { label: "Link to a Discord Server", value: "discord" },
         { label: "Link to a Webpage URL", value: "web-link" },
         { label: "Link to the Subreddit Wiki", value: "wiki" },
@@ -1277,7 +1284,6 @@ describe("internalUi color theme create goal routes", () => {
     expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
       "afterSubscribeButtonText",
       "afterSubscribeColorTheme",
-      "customDeveloperField",
     ]);
     expect(
       response.showForm.form.fields.find(
@@ -1288,14 +1294,10 @@ describe("internalUi color theme create goal routes", () => {
       helpText: "Recommended: 6-24 characters. Accepted: 5-50 characters.",
     });
     expect(
-      response.showForm.form.fields.find(
+      response.showForm.form.fields.some(
         (field) => field.name === "customDeveloperField",
       ),
-    ).toMatchObject({
-      label: "Custom Developer Field",
-      helpText:
-        "This field is for developers and testing only. Please leave this field empty.",
-    });
+    ).toBe(false);
     expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
       version: 5,
       stage: "follow-up",
@@ -1432,7 +1434,6 @@ describe("internalUi color theme create goal routes", () => {
     expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
       "afterSubscribeButtonText",
       "afterSubscribeColorTheme",
-      "customDeveloperField",
     ]);
     expect(JSON.parse(hoisted.redisValues.get(testDraftKey())!)).toMatchObject({
       version: 5,
@@ -1481,7 +1482,6 @@ describe("internalUi color theme create goal routes", () => {
     expect(response.showForm.form.fields.map((field) => field.name)).toEqual([
       "afterSubscribeButtonText",
       "afterSubscribeColorTheme",
-      "customDeveloperField",
     ]);
     expect(response.showForm.form.fields[0]).toMatchObject({
       label: "CTA Button Text",
@@ -1491,6 +1491,59 @@ describe("internalUi color theme create goal routes", () => {
       label: "CTA Button Color",
       defaultValue: ["blue"],
     });
+  });
+
+  it("resumes a pre-existing draft with a stored developer field without showing it or applying it", async () => {
+    seedCreateGoalDraft("regular", "en", {
+      customDeveloperField: 'runAs, header="Old Header"',
+    });
+    const routes = createRouteHarness();
+    const resumeJson = vi.fn();
+
+    await routes.get(internalRoutes.forms.createGoalSetup)?.(
+      {
+        body: {
+          language: ["en"],
+          subredditDisplayName: "ExampleSub",
+          "postHeight__creation_attempt__create-goal-test123": ["regular"],
+        },
+      } as Request,
+      { json: resumeJson } as unknown as Response,
+    );
+
+    const resumed = resumeJson.mock.calls[0]?.[0] as {
+      showForm: { name: string; form: { fields: Array<{ name: string }> } };
+    };
+    expect(resumed.showForm.name).toBe(formNames.createSubscriberGoalFollowUp);
+    expect(resumed.showForm.form.fields.map((field) => field.name)).toEqual([
+      "afterSubscribeButtonText",
+      "afterSubscribeColorTheme",
+    ]);
+
+    const res = { json: vi.fn() } as unknown as Response;
+    await routes.get(internalRoutes.forms.createSubscriberGoalFollowUp)?.(
+      {
+        body: {
+          afterSubscribeButtonText: "View the Top Post Today",
+          afterSubscribeColorTheme: ["blue"],
+        },
+      } as Request,
+      res,
+    );
+
+    expect(hoisted.createGoalPost).toHaveBeenCalledWith({
+      title: "Welcome!",
+      subredditName: "ExampleSub",
+      textFallback: expect.stringContaining(
+        "100 subscribers / 200 subscribers.",
+      ),
+      postHeight: "regular",
+      language: "en",
+      flairId: "flair_subgoal",
+      submissionMarker: expect.any(String),
+    });
+    expect(hoisted.registerNewSubGoalPost).toHaveBeenCalledTimes(1);
+    expect(hoisted.registerNewSubGoalPost.mock.calls[0]?.[10]).toBeUndefined();
   });
 
   it.each([
@@ -1537,7 +1590,6 @@ describe("internalUi color theme create goal routes", () => {
         "afterSubscribeButtonText",
         ...(showUrl ? ["afterSubscribeUrl"] : []),
         "afterSubscribeColorTheme",
-        "customDeveloperField",
       ]);
       expect(
         fields.find((field) => field.name === "afterSubscribeButtonText")
