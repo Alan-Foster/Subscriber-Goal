@@ -1,0 +1,19 @@
+{
+  "id": "R-S9-01",
+  "type": "log_gap",
+  "title": "Source-post deletion verification retries silently until it gives up",
+  "current": "When verifying a deletion finds the post still live or the lookup inconclusive, reschedule() saves a new attempt with no log line. Only the final exhausted attempt logs source_post_deletion_attempts_exhausted, and the intent then becomes terminal_failed.",
+  "location": "src/server/core/sourcePostDeletion.ts:164 (reschedule); src/server/core/sourcePostDeletion.ts:233 (verification check)",
+  "areas": ["9.05", "7.08", "13.06", "6.06"],
+  "paths": ["C6-deletion-verification", "C6-delete-goal"],
+  "evidence": "reschedule() calls saveSourcePostDeletionIntent and logs only when retry.exhausted. Its callers pass reasons such as 'source_still_live' and 'source_lookup_inconclusive' that never reach the logs. Combined with R-W6-01 (a post the app deleted still reads as active), verification can retry silently for the whole retry budget and end terminal_failed, leaving the goal registered.",
+  "required": "An info line per reschedule with the reason and attempt count (or the cron run summary), and a warn line when the intent becomes terminal_failed that names the post and the last reason.",
+  "tests": [
+    "A verification that sees removedByCategory undefined logs each reschedule with reason source_still_live and attemptCount."
+  ],
+  "related": ["R-W6-01", "#246", "#238"],
+  "criticality": {
+    "score": 6,
+    "why": "A stuck deletion leaves a deleted goal registered with no trace until the retry budget runs out."
+  }
+}
