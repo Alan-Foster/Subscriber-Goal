@@ -1,0 +1,26 @@
+{
+  "id": "R-S9-11",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Core and crosspost classify 'post is gone' errors in opposite ways",
+  "current": "Core code treats only HTTP 404/410, NOT_FOUND/GONE codes and two exact messages as 'missing', so Devvit's gRPC 13 'post not found' is retried forever (R-W6-01). Crosspost code treats any message containing 'not found', 'does not exist', 'deleted' or 'no longer exists' as permanent, so an unrelated transient error with one of those words ends a crosspost action for good.",
+  "location": "src/server/core/postRetirement.ts:31 (classifyPostLookupError); src/server/crosspost/pending.ts:44 (isMissingSourcePostError); src/server/crosspost/moderation.ts:118; src/server/crosspost/ingestion.ts:228",
+  "areas": ["9.05", "9.02", "10.10", "6.06"],
+  "paths": [
+    "C7-crosspost-dispatch",
+    "C7-moderation-mirror",
+    "C6-deletion-verification",
+    "C5-queued-post-update"
+  ],
+  "evidence": "Three crosspost sites use /not[\\s-]?found|does not exist|deleted|no longer exists/i on the error text. Messages like 'subreddit not found' during an outage, or an error about a deleted user, would match. Core uses status codes plus a pattern tied to the post id.",
+  "outcome": "The core side is confirmed in production (R-W6-01). The crosspost side has not been observed.",
+  "investigate": [
+    "Collect the real error shapes (code, message, API) for missing posts, missing subreddits and transient failures (#238 error-shape inventory).",
+    "Replace both with one shared classifier that uses codes first, ties text matches to the post id, and needs a second source before a permanent outcome (confirmation rule)."
+  ],
+  "criticality": {
+    "score": 6,
+    "why": "The same error can loop forever in one place and drop work permanently in another."
+  },
+  "related": ["R-W6-01", "#238", "#248"]
+}
