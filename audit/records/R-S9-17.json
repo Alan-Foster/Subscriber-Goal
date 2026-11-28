@@ -1,0 +1,25 @@
+{
+  "id": "R-S9-17",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Install/upgrade onboarding reconciliation is skipped for good when the community lease is busy",
+  "current": "If the community-wide lease is held when the install or upgrade trigger runs, reconcileOnboardingForLifecycle returns { status: 'unchanged', reason: 'community_mutation_in_progress' }. onAppChanged reports only the status; the reason is dropped, and nothing retries the reconciliation until the next install or upgrade.",
+  "location": "src/server/core/onboardingLifecycle.ts:99 (busy lease → unchanged); src/server/triggers/appChanged.ts:127 (status kept, reason discarded)",
+  "areas": ["3.02", "6.01", "7.04", "4.03"],
+  "paths": ["C5-upgrade", "C5-install"],
+  "evidence": "The posts-updater job takes the same lease every minute (R-S7-01), so an upgrade landing during a job run is a realistic collision. reportLifecycleOnboardingState receives reconciliationStatus but not reconciliation.reason.",
+  "outcome": "Not observed.",
+  "assumptions": [
+    "That the upgrade trigger isn't re-delivered by Devvit after a successful (200) response."
+  ],
+  "investigate": [
+    "Log the reason with the lifecycle report.",
+    "Should a busy lease defer reconciliation to the next cron run instead of skipping it until the next upgrade?",
+    "Use the #237 lease timing logs to count how often upgrades collide with the cron."
+  ],
+  "criticality": {
+    "score": 6,
+    "why": "An upgrade's onboarding reconciliation can be silently lost until the next release."
+  },
+  "related": ["R-S7-01", "#209", "#245", "#238"]
+}
