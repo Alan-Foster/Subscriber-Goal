@@ -1,0 +1,23 @@
+{
+  "id": "R-S9-05",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Self-erasure reports success after skipping recent-subscriber cleanup when the username lookup fails",
+  "current": "If reddit.getCurrentUsername() fails during 'Remove My Own Data', the route logs a warning, skips eraseFromRecentSubscribers, and still shows the 'self success' toast.",
+  "location": "src/server/routes/internalUi.eraseData.ts:236 (erase-my-data handler)",
+  "areas": ["9.08", "6.07", "1.03"],
+  "paths": ["C2-erase-my-data"],
+  "evidence": "The username is only used for the recent-subscriber cleanup. When it's missing, that step is skipped by an if, and nothing changes the response.",
+  "outcome": "Not observed.",
+  "assumptions": [
+    "Same as R-S9-04: whether ID-based erasure already covers the display fields."
+  ],
+  "investigate": [
+    "If ID-based erasure doesn't cover the display fields, return the partial or failure toast when the username can't be resolved."
+  ],
+  "criticality": {
+    "score": 6,
+    "why": "The user is told their data is gone when part of it may remain."
+  },
+  "related": ["R-S9-04", "#247", "#238"]
+}

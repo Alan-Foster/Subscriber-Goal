@@ -1,0 +1,19 @@
+{
+  "id": "R-S9-06",
+  "type": "problem",
+  "confidence": "question",
+  "title": "Recovered creation always says a goal was created, even for Action Button or Tiny posts",
+  "current": "When a follow-up form's draft has expired but the creation is recovered as complete, the success toast always uses the 'goal' label.",
+  "location": "src/server/routes/internalUi.createGoal.ts:757 (respondToMissingFollowUpDraft)",
+  "areas": ["9.08", "11.04"],
+  "paths": ["C4-create-follow-up", "C4-submission-recovery"],
+  "evidence": "The toast passes translate(language, 'moderator.create.goalLabel') regardless of the recovered post's kind; the normal path chooses between the goal and CTA labels.",
+  "investigate": [
+    "Use the recovered post's kind for the label, or confirm this wording is intended."
+  ],
+  "criticality": {
+    "score": 2,
+    "why": "Wording only; the right post is created and linked."
+  },
+  "related": ["#249", "#238"]
+}
