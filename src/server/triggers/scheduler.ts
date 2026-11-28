@@ -56,6 +56,7 @@ import { withCommunityGoalMutationLease } from "../core/communityGoalMutation";
 import { processSubscriberTrackingRepairs } from "../data/subscriberTracking";
 import { queueConfirmedSourceDeletionCleanup } from "../core/sourcePostDeletion";
 import { dispatchMilestoneNotificationRecovery } from "../jobs/milestoneNotificationRecovery";
+import { startCronRun, type CronActionOutcome } from "../utils/cronRun";
 
 type CompletedUpdateCleanupPreparation =
   | "auto_disabled"
@@ -594,56 +595,92 @@ export async function onPostsUpdaterJob(): Promise<void> {
   console.log(`postsUpdaterJob ran at ${new Date().toISOString()}`);
 
   const appSettings = getAppSettings();
-  await dispatchMilestoneNotificationRecovery(
-    reddit,
-    redis,
-    scheduler,
-    jobDeadlineMs,
+  // Cron rule: every action is wrapped so a throw is logged with its repeat
+  // count and later actions still run, and the run ends with a summary line.
+  const run = await startCronRun(redis, "posts_updater");
+  await run.action("milestone_recovery", () =>
+    dispatchMilestoneNotificationRecovery(
+      reddit,
+      redis,
+      scheduler,
+      jobDeadlineMs,
+    ),
   );
   // Own-post rendering, completion detection, statistics, and data migrations
   // remain independent. Posting and moderation workers retain their queues
-  // until the current recovery incident permits them to run.
-  let permissionWorkAllowed =
-    await appAccountRecoveryAllowsPermissionWork(jobDeadlineMs);
-  const subreddit = await observeCommunityActivity();
-  permissionWorkAllowed &&=
-    await appAccountHealthAllowsPermissionWork(jobDeadlineMs);
+  // until the current recovery incident permits them to run. A gate that
+  // fails counts as closed (confirmation rule).
+  const recoveryAllows =
+    (await run.action(
+      "recovery_gate",
+      () => appAccountRecoveryAllowsPermissionWork(jobDeadlineMs),
+      gateOutcome,
+    )) ?? false;
+  const subreddit =
+    (await run.action("community_activity", observeCommunityActivity)) ?? null;
+  const healthAllows = recoveryAllows
+    ? ((await run.action(
+        "health_gate",
+        () => appAccountHealthAllowsPermissionWork(jobDeadlineMs),
+        gateOutcome,
+      )) ?? false)
+    : false;
+  if (!recoveryAllows) run.skip("health_gate", "recovery_gate_closed");
+  const permissionWorkAllowed = recoveryAllows && healthAllows;
   const currentSubredditName = context.subredditName ?? subreddit?.name;
-  await runPermissionGatedJobs(
-    appSettings,
-    jobDeadlineMs,
-    subreddit,
-    currentSubredditName,
-    permissionWorkAllowed,
+  await run.action("permission_gated_jobs", () =>
+    runPermissionGatedJobs(
+      appSettings,
+      jobDeadlineMs,
+      subreddit,
+      currentSubredditName,
+      permissionWorkAllowed,
+    ),
   );
-  await runCrosspostDispatch(
-    appSettings,
-    currentSubredditName,
-    permissionWorkAllowed,
-    jobDeadlineMs,
+  await run.action("crosspost_dispatch", () =>
+    runCrosspostDispatch(
+      appSettings,
+      currentSubredditName,
+      permissionWorkAllowed,
+      jobDeadlineMs,
+    ),
   );
-  await runMaintenanceMigrations(subreddit);
-  await dispatchOnboardingJob({
-    reddit,
-    redis,
-    appSettings,
-    permissionWorkAllowed,
-    deadlineMs: jobDeadlineMs,
-  });
-  if (permissionWorkAllowed) {
-    await dispatchAutomaticGoalRetryJob(
+  await run.action("maintenance_migrations", () =>
+    runMaintenanceMigrations(subreddit),
+  );
+  await run.action("onboarding", () =>
+    dispatchOnboardingJob({
       reddit,
       redis,
       appSettings,
-      jobDeadlineMs,
+      permissionWorkAllowed,
+      deadlineMs: jobDeadlineMs,
+    }),
+  );
+  if (permissionWorkAllowed) {
+    await run.action("automatic_goal_retry", () =>
+      dispatchAutomaticGoalRetryJob(reddit, redis, appSettings, jobDeadlineMs),
     );
+  } else {
+    run.skip("automatic_goal_retry", "permission_work_paused");
   }
 
-  await updateQueuedPosts(appSettings, subreddit);
-  await runGoalHealthCheck({
-    reddit,
-    redis,
-    deadlineMs: jobDeadlineMs,
-    subreddit,
-  });
+  await run.action("queued_post_updates", () =>
+    updateQueuedPosts(appSettings, subreddit),
+  );
+  await run.action("goal_health", () =>
+    runGoalHealthCheck({
+      reddit,
+      redis,
+      deadlineMs: jobDeadlineMs,
+      subreddit,
+    }),
+  );
+  await run.finish();
+}
+
+function gateOutcome(allowed: boolean): CronActionOutcome {
+  return allowed
+    ? { status: "acted", detail: "open" }
+    : { status: "skipped", reason: "gate_closed" };
 }
