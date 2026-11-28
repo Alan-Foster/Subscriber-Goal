@@ -1,0 +1,21 @@
+{
+  "id": "R-S9-08",
+  "type": "log_gap",
+  "title": "Job runner results and lock contention don't reach the logs",
+  "current": "dispatchDueJobs returns a map of results (complete, retry, exhausted, not_due), but dispatchScheduledJobs and dispatchOnboardingJob discard it. A worker whose lock is busy returns not_due with no log. Only exhaustion, budget deferral and thrown errors are logged.",
+  "location": "src/server/jobs/scheduled.ts:15 (result discarded); src/server/jobs/runner.ts:194 (lock busy → not_due); src/server/jobs/onboarding.ts:101",
+  "areas": ["13.06", "7.08", "7.04"],
+  "paths": [
+    "C8-job-runner",
+    "C6-app-repair",
+    "C6-deletion-verification",
+    "C5-onboarding-goal"
+  ],
+  "evidence": "A job retrying every minute (status retry) is visible only once it's exhausted. With the cron run summary from #255, the parent action shows as 'ran' with no detail.",
+  "required": "Feed the per-job results into the cron run summary (for example permission_gated_jobs=acted(app_repair:complete,source_deletion:retry)), and log busy worker locks with a reason.",
+  "criticality": {
+    "score": 4,
+    "why": "Repeating job retries stay invisible until they run out."
+  },
+  "related": ["R-S9-01", "#237", "#238"]
+}
