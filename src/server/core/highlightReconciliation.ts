@@ -106,6 +106,8 @@ export async function ensureExistingSubscriberGoalHighlighted({
         mutationLease: lease,
       }),
     mutationLease,
+    undefined,
+    "highlight_reconciliation",
   );
 }
 
