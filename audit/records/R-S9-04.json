@@ -1,0 +1,28 @@
+{
+  "id": "R-S9-04",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Moderator erasure by user ID may leave the user's name in recent subscribers while reporting success",
+  "current": "When the moderator erase form resolves a user ID (directly, or by looking up a username), the route calls untrackSubscriberById only and shows 'erase success'. The username-based recent-subscriber cleanup (eraseFromRecentSubscribers) runs only on the partial-erase branch. Self-erasure, by contrast, calls both.",
+  "location": "src/server/routes/internalUi.eraseData.ts:164 (untrackSubscriberById branch); src/server/data/subGoalData.ts:1230 (eraseFromRecentSubscribers); src/server/data/subscriberStats.ts:153 (untrackSubscriberById)",
+  "areas": ["9.08", "6.07", "5.07"],
+  "paths": ["C2-erase-other-user"],
+  "evidence": "untrackSubscriberById calls eraseSubscriberOrdersById (order records by user ID) and clears subscriber stats. Recent-subscriber display fields are indexed by username in recentSubscriberPostsByUsernameKey and are removed by eraseFromRecentSubscribers, which this branch never calls. Whether eraseSubscriberOrdersById also clears those display fields is unverified.",
+  "outcome": "Not observed.",
+  "assumptions": [
+    "That eraseSubscriberOrdersById does not already remove the username-indexed display fields."
+  ],
+  "investigate": [
+    "Does eraseSubscriberOrdersById (src/server/data/recentSubscriberErasure.ts:29) remove the recent-subscriber display entry and the by-username index?",
+    "Test: subscribe as a user, erase them by user ID from the moderator form, then read every post's recent-subscriber fields."
+  ],
+  "required": "The erase-success toast only after every store that holds the user's data is cleared; otherwise the partial toast.",
+  "tests": [
+    "Moderator erase by user ID removes the username from recent subscribers and the by-username index."
+  ],
+  "criticality": {
+    "score": 7,
+    "why": "A privacy erasure reported as complete could leave the user's name visible on goal posts."
+  },
+  "related": ["#247", "#238", "R-S9-05"]
+}
