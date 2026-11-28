@@ -1,0 +1,28 @@
+{
+  "id": "R-S9-15",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Corrupt numeric goal fields parse to NaN or 0 with no log",
+  "current": "getSubGoalData reads completedTime with parseInt when the field is non-empty; a corrupt or partial value becomes NaN, which every check treats as 'not completed'. The AutoGoal failure counter is read with Number(raw) || 0, so a corrupt counter silently restarts at 0.",
+  "location": "src/server/data/subGoalData.ts:290 (completedTime parse); src/server/data/subGoalData.ts:598 (failureCount)",
+  "areas": ["5.01", "9.03", "5.09", "6.03"],
+  "paths": [
+    "C5-completion-detection",
+    "C5-autogoal-successor",
+    "C5-queued-post-update"
+  ],
+  "evidence": "`completedTime: stored.completedTime ? parseInt(stored.completedTime) : 0` has no validation or log, unlike the goal field (parsePersistedSubscriberGoal) and the suppression field, which logs stored_state_conflict. A NaN completedTime makes a completed goal look unfinished, and makes AutoGoal's source check fail (R-W5-07 cancels the successor silently). A counter reset defeats the retry cap (see #206).",
+  "outcome": "Not observed.",
+  "investigate": [
+    "Can completedTime ever be written as a non-numeric or partial string (older versions, interrupted writes)?",
+    "Validate both fields and log stored_state_conflict, as the suppression field already does."
+  ],
+  "tests": [
+    "getSubGoalData with completedTime 'abc' logs a conflict and doesn't report the goal as unfinished without a warning."
+  ],
+  "criticality": {
+    "score": 5,
+    "why": "One bad stored value can silently undo a goal's completion and the successor that depends on it."
+  },
+  "related": ["R-W5-07", "#206", "#241", "#238"]
+}

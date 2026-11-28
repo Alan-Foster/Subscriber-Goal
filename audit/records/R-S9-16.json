@@ -1,0 +1,26 @@
+{
+  "id": "R-S9-16",
+  "type": "log_gap",
+  "title": "Stored records with the wrong shape are treated as absent with no log",
+  "current": "Four decoders parse JSON, check the fields, and return undefined when the shape doesn't match, without logging. The caller then behaves as if no record exists.",
+  "location": "src/server/data/sourcePostDeletion.ts:38 (parseIntent); src/server/data/subscriberTracking.ts:120 (decode); src/server/data/subscriptionAttempt.ts:80 (acceptance evidence); src/server/data/crosspostData.ts:444 (deletion marker)",
+  "areas": ["5.01", "5.09", "9.03", "13.03"],
+  "paths": [
+    "C6-deletion-verification",
+    "C6-delete-goal",
+    "C2-join-goal",
+    "C2-tracking-repair",
+    "C2-subscription-reconcile",
+    "C7-moderation-mirror"
+  ],
+  "evidence": "Parse exceptions are logged by the surrounding catch, but valid JSON with missing or wrong fields falls through to return undefined. For a deletion intent, that silently drops a pending deletion or verification. For pending tracking, a join's tracking repair never happens. For acceptance evidence, an expired record and a malformed one look identical.",
+  "required": "Keep returning undefined, but log a warn (no user data) when a value exists and fails validation, naming the record type and which check failed.",
+  "tests": [
+    "Each decoder logs when given valid JSON with a missing required field."
+  ],
+  "criticality": {
+    "score": 4,
+    "why": "Malformed state silently cancels pending work such as deletions and tracking repairs."
+  },
+  "related": ["R-S9-02", "#241", "#238"]
+}
