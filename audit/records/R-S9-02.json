@@ -1,0 +1,16 @@
+{
+  "id": "R-S9-02",
+  "type": "log_gap",
+  "title": "A corrupt recent-subscriber order record is treated as missing without a log",
+  "current": "The recent-subscriber order parser returns undefined both for a legacy post with no record and for a record that exists but fails JSON parsing or validation; the second case is silent.",
+  "location": "src/server/data/recentSubscriberOrder.ts:37",
+  "areas": ["5.01", "9.03", "13.03"],
+  "paths": ["C2-join-goal"],
+  "evidence": "The catch carries 'diagnostic-allow-silent: legacy posts do not have an ordering record'. A present but unreadable value also lands in this catch, so corruption looks the same as a legacy post.",
+  "required": "Keep the silent path for a missing value; log a warn (without user data) when a value exists but can't be parsed.",
+  "related": ["#238", "#241"],
+  "criticality": {
+    "score": 3,
+    "why": "Ordering of the recent-subscriber list could be wrong without anyone knowing, but no data is lost."
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "R-S9-03",
+  "type": "log_gap",
+  "title": "Menu and form language lookup hides Reddit failures",
+  "current": "resolveCurrentSubredditLanguage falls back to the default language whenever getCurrentSubreddit throws, and logs nothing.",
+  "location": "src/server/routes/internalUi.common.ts:14 (resolveCurrentSubredditLanguage)",
+  "areas": ["9.03", "1.03", "13.03"],
+  "paths": ["C4-create-menu-setup", "C6-delete-goal", "C2-erase-other-user"],
+  "evidence": "The fallback itself is safe and intended, but the swallowed error is often the first sign that the Reddit API or app permissions are failing for a moderator action.",
+  "required": "Keep the fallback; add an info or warn diagnostic with the error so the failure is visible.",
+  "related": ["#238"],
+  "criticality": {
+    "score": 2,
+    "why": "Diagnostics only: the user still gets a working menu in the default language."
+  }
+}
