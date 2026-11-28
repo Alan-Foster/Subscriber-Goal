@@ -1,0 +1,21 @@
+{
+  "id": "R-S9-13",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "When refreshes keep failing, the post shows old counts as if they were current",
+  "current": "useSubGoalRefresh backs off exponentially on failure (up to 15 minutes between attempts) and keeps the last state on screen. Nothing tells the viewer the numbers are stale, and the failure is logged only to the browser console.",
+  "location": "src/client/hooks/subGoal/useSubGoalRefresh.ts:86 (refresh catch and backoff); src/client/hooks/subGoal/useSubGoalRefresh.ts:67 (maximumIntervalMs)",
+  "areas": ["9.03", "11.04", "13.04"],
+  "paths": ["C1-refresh"],
+  "evidence": "No component in src/client reads consecutiveFailures or shows a 'last updated' or stale state. Client logDiagnostic writes to console only, so devvit logs never shows these failures (#237's client error route would fix that).",
+  "outcome": "Not observed.",
+  "investigate": [
+    "Should the UI show a subtle 'couldn't refresh' state after N consecutive failures?",
+    "Once #237's client error route exists, report repeated refresh failures to the server with a repeat count."
+  ],
+  "criticality": {
+    "score": 4,
+    "why": "Viewers could watch frozen numbers near a goal with no sign anything is wrong."
+  },
+  "related": ["#250", "#237", "#238"]
+}
