@@ -1,0 +1,24 @@
+{
+  "id": "R-S9-10",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "An unpin with no moderator name skips the scheduled-post displacement check silently",
+  "current": "For an 'unsticky' mod action on an app post, the displacement check is recorded only when event.moderator.name is present and isn't the app. Without a moderator name, the handler returns with no log, so the goal may not be re-pinned after a scheduled post displaces it.",
+  "location": "src/server/triggers/modAction.ts:150 (unsticky branch of handleManagedPostModAction)",
+  "areas": ["3.06", "3.08", "10.05", "4.10"],
+  "paths": ["C6-mod-action", "C6-scheduled-post-displacement"],
+  "evidence": "`const moderator = event.moderator?.name?.trim().toLowerCase(); if (moderator && ...)` then `return;`. The scheduled_post_displacement_unpin_received log at the top records hasActionedAt but not whether a moderator was present.",
+  "outcome": "Not observed.",
+  "assumptions": [
+    "That Reddit sends unsticky events without a moderator for some displacement cases (scheduled posts, admin or system actions)."
+  ],
+  "investigate": [
+    "Check the Devvit ModAction trigger payload docs and the installed types: is moderator optional, and when?",
+    "Search r/SubGoal logs for scheduled_post_displacement_unpin_received events and compare them with recorded displacement checks."
+  ],
+  "criticality": {
+    "score": 5,
+    "why": "A goal could lose its highlight to a scheduled post and never be restored, with nothing logged."
+  },
+  "related": ["#246", "#242", "#238"]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "R-S9-09",
+  "type": "log_gap",
+  "title": "onPostCreate rejects an unexpected payload with no log",
+  "current": "If the post-create trigger body has no post id, the route returns 400 and logs nothing. The invalid mod-action branch, by contrast, logs internal_trigger_failed.",
+  "location": "src/server/routes/internalSystem.ts:136 (registerPostCreateRoute)",
+  "areas": ["3.08", "1.05", "13.02"],
+  "paths": ["C5-post-create-activity"],
+  "evidence": "A change in the trigger payload shape would silently stop community post activity from being recorded. Onboarding reads that activity (see #245), so the effect would show up far from the cause.",
+  "required": "A warn diagnostic on the 400 branch naming the payload keys that were present (no content).",
+  "criticality": {
+    "score": 3,
+    "why": "Silent loss of an onboarding input if Reddit's payload ever changes."
+  },
+  "related": ["#242", "#238"]
+}
