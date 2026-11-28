@@ -207,6 +207,47 @@ describe("production error diagnostics", () => {
     expect(offenders, "Discarded promise rejections").toEqual([]);
   });
 
+  it("does not add Redis reads that silently fall back to a default", () => {
+    // Silent-error audit (#237, area 5.01): a missing or unreadable Redis
+    // value turned into 0, "" or [] looks like real data. New occurrences need
+    // a `diagnostic-allow-silent:` reason on the same or previous line. The
+    // baseline below is existing code, assessed by the S5 sweep (#241).
+    const baseline: Record<string, number> = {
+      "src/server/core/automaticGoalRetry.ts": 1,
+      "src/server/data/statisticsAnalytics.ts": 1,
+      "src/server/data/subGoalData.ts": 1,
+      "src/server/data/subscriberTracking.ts": 1,
+      "src/server/triggers/scheduler.ts": 1,
+    };
+    const fallbackPattern =
+      /await redis\.[A-Za-z]+\([^;\n]*\)\)?\s*\?\?\s*(?:0|\[\]|null|""|'')|Number\(\s*await redis\.(?:get|hGet)\b/u;
+    const counts: Record<string, number> = {};
+    for (const file of getProductionFiles()) {
+      const relativeFile = relative(globalThis.process.cwd(), file).replaceAll(
+        "\\",
+        "/",
+      );
+      const lines = readFileSync(file, "utf8").split("\n");
+      lines.forEach((line, index) => {
+        if (!fallbackPattern.test(line)) return;
+        const reasoned = `${lines[index - 1] ?? ""}\n${line}`.includes(
+          expectedControlFlowAnnotation,
+        );
+        if (!reasoned) counts[relativeFile] = (counts[relativeFile] ?? 0) + 1;
+      });
+    }
+    const offenders = Object.entries(counts)
+      .filter(([file, count]) => count > (baseline[file] ?? 0))
+      .map(
+        ([file, count]) =>
+          `${file}: ${count} (baseline ${baseline[file] ?? 0})`,
+      );
+    expect(offenders, "Unreasoned Redis read fallbacks").toEqual([]);
+    expect(fallbackPattern.test("Number(await redis.get(key))")).toBe(true);
+    expect(fallbackPattern.test("(await redis.hGet(k, f)) ?? 0")).toBe(true);
+    expect(fallbackPattern.test("await redis.get(key)")).toBe(false);
+  });
+
   it("routes operational warning and error logs through approved loggers", () => {
     const compatibilityLoggers = new Set([
       "src/shared/diagnostics.ts",
