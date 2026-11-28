@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "baseline": {
+    "commit": "10ad373",
+    "sourceFiles": 219,
+    "physicalLines": 47141
+  },
+  "root": "src",
+  "excludedNote": "Tests and test support are evidence, not scope. TypeScript configs are reviewed with category 8 configuration; packaged assets with their consumers in categories 1 and 8.",
+  "excluded": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.testHelpers.ts",
+    "server/testing/**",
+    "**/tsconfig*.json",
+    "client/public/**"
+  ],
+  "categories": [
+    {
+      "id": 1,
+      "title": "Post loading, rendering and refresh",
+      "yieldsTo": [2, 3],
+      "selectors": [
+        "client/{app,subscribe-only,hooks,utils}/**",
+        "client/{app.html,subscribe-only.html,global.ts,index.css,module.d.ts}",
+        "server/routes/public/{init,state,refresh}.ts",
+        "server/data/subredditDisplayNameData.ts",
+        "server/utils/subredditDisplayName.ts",
+        "shared/{numberFormat,subGoalColorTheme,subGoalPostHeight,subGoalPostI18n}.ts"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "User actions, live subscriber tracking and erasure",
+      "yieldsTo": [],
+      "selectors": [
+        "client/app/components/{AfterSubscribeButton,GoalNotificationButton,LoggedOutAuthButtons,NotificationSwitch,SubscriptionButton,TinySubscriptionConfirmation}.tsx",
+        "client/app/components/afterSubscribeTargetValidation.ts",
+        "client/app/hooks/{useGoalAppSubscription,useGoalPageActions,useNotificationSettings}.ts",
+        "client/app/pages/{NotificationConfirmationPage,NotificationSettingsPage}.tsx",
+        "client/app/pages/subGoalPageActions.ts",
+        "client/app/notificationFeatureFlags.ts",
+        "client/subscribe-only/useTiny*.ts",
+        "client/hooks/subGoal/{subscriptionRequests,useSubGoalSubscription,useSubGoalRealtime,useSubGoalNotices}.ts",
+        "server/routes/public/{subscribe,ctaClick,afterSubscribeTarget,notificationSettings}.ts",
+        "server/routes/internalUi.eraseData.ts",
+        "server/data/{recentSubscriberErasure,recentSubscriberOrder,subscriberTracking,subscriberTrackingKeys,subscriptionAttempt}.ts",
+        "server/utils/usernameSharePolicy.ts",
+        "shared/{afterSubscribeAction,notificationI18n}.ts"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Statistics and analytics",
+      "yieldsTo": [],
+      "selectors": [
+        "client/analytics/**",
+        "client/app/pages/{Statistics*.tsx,statisticsMetricGroups.ts}",
+        "server/analytics/**",
+        "server/routes/public/statistics.ts",
+        "server/data/{ctaActivity,statisticsAnalytics,subscriberDailyStats,subscriberStats,subscriberStatsKeys}.ts",
+        "server/utils/statisticsAuthorization.ts",
+        "shared/goalJourneyAnalytics.ts"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Manual creation and submission recovery",
+      "yieldsTo": [],
+      "selectors": [
+        "server/routes/internalUi.createGoal*.ts",
+        "server/routes/internalUi.common.ts",
+        "server/core/{createSubscriberGoal,subscriberGoalCreationModel,subscriberGoalCreationSteps,subscriberGoalPostFlair,post}.ts",
+        "server/data/createGoalDraft.ts",
+        "server/jobs/submissionReconciliation.ts",
+        "server/utils/{developerCommands,textFallback}.ts"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Goal lifecycle and automatic creation",
+      "yieldsTo": [],
+      "selectors": [
+        "server/triggers/appChanged.ts",
+        "server/core/{onboarding*,autoCreateNextGoal,automaticGoal*,completedGoalReconciliation,postRetirement}.ts",
+        "server/data/{subGoalData,updaterData}.ts",
+        "server/jobs/{automaticGoalRetry,onboarding}.ts",
+        "server/utils/{emergencyGoalRecovery,numberUtils}.ts"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Post integrity, highlights and app-account recovery",
+      "yieldsTo": [],
+      "selectors": [
+        "server/triggers/modAction*.ts",
+        "server/core/{appAccount*,appRepair,canonicalHighlightContradiction,goalDiscovery,goalHealth*,highlightReconciliation,managedGoalHighlight*,scheduledPostDisplacement,sourcePostDeletion}.ts",
+        "server/data/{appAccountHealthRetry,highlight*,liveSubscriberGoalHighlights,postOperationalState,scheduledPostDisplacementQueue,sourcePostDeletion,subscriberGoalCandidates,subscriberGoalPostRegistry}.ts",
+        "server/jobs/appAccount*.ts",
+        "server/routes/internalUi.deleteGoal.ts",
+        "server/utils/{communityHighlights,highlightFailureNotifications,moderatorInviteApi,redditPermissionErrors,postStatus}.ts"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Outbound delivery",
+      "yieldsTo": [],
+      "selectors": [
+        "server/crosspost/**",
+        "server/core/milestoneNotifications.ts",
+        "server/data/crosspost*.ts",
+        "server/jobs/milestoneNotificationRecovery.ts",
+        "server/settings.ts",
+        "server/utils/{crosspostLogs,redditUtils}.ts"
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Shared infrastructure, contracts and migrations",
+      "yieldsTo": [],
+      "selectors": [
+        "server/{index,types}.ts",
+        "server/routes/{internalSystem,internalUi,publicApi}.ts",
+        "server/routes/public/request.ts",
+        "server/triggers/scheduler.ts",
+        "server/jobs/{backoff,queue,record,runner,scheduled}.ts",
+        "server/core/communityGoalMutation.ts",
+        "server/data/{legacyAfterSubscribeActionMigration,postKindMigration}.ts",
+        "server/utils/{actorAuthorization,lockTtl,redisOwnedLock,requestErrorBoundary,runtimeValidation,subredditBlacklist,subredditSafety,timeBudget}.ts",
+        "shared/{contentPolicy,diagnostics,postKind,routes}.ts",
+        "shared/{types,i18n}/**"
+      ]
+    }
+  ]
+}

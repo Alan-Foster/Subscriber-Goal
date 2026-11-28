@@ -1,0 +1,21 @@
+{
+  "id": "R-W5-09",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "AutoGoal successor target comes from a single subscriber-count read",
+  "current": "The successor's goal target comes from one numberOfSubscribers read; a stale or zero count produces a wrong target with no warning.",
+  "location": "src/server/core/autoCreateNextGoal.ts:525",
+  "areas": ["10.09", "4.07"],
+  "paths": [],
+  "evidence": "createSuccessor passes getDefaultSubscriberGoal(subreddit.numberOfSubscribers) directly.",
+  "outcome": "Not observed.",
+  "investigate": [
+    "What does getDefaultSubscriberGoal(0) return?",
+    "Should an implausible count defer creation?"
+  ],
+  "criticality": {
+    "score": 3,
+    "why": "A wrong target is visible but not destructive."
+  },
+  "related": ["#245"]
+}

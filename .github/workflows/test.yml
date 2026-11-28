@@ -19,6 +19,8 @@ jobs:
         run: npm ci
       - name: Audit assets
         run: npm run assets:check
+      - name: Validate silent-error audit
+        run: npm run audit:validate
       - name: Check formatting
         run: npm run format:check
       - name: Lint

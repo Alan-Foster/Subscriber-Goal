@@ -1,0 +1,21 @@
+{
+  "id": "R-W5-07",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "AutoGoal permanently cancels a successor with no log when source data is incomplete",
+  "current": "If the source goal's data lacks goal or completedTime, the scheduled successor is cancelled and nothing is logged.",
+  "location": "src/server/core/autoCreateNextGoal.ts:286",
+  "areas": ["6.04", "6.06", "13.06"],
+  "paths": [],
+  "evidence": "loadCompletedSourceGoal calls cancelAutoCreateNextGoal and returns without logDiagnostic. A read glitch or partial write ends AutoGoal for that community (characteristic E).",
+  "outcome": "Not observed.",
+  "investigate": [
+    "When can getSubGoalData return no completedTime for a scheduled source?",
+    "This should log at warn and defer or re-check rather than cancel."
+  ],
+  "criticality": {
+    "score": 8,
+    "why": "It silently and permanently stops the next goal from ever being created."
+  },
+  "related": ["#245"]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "R-W5-02",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Unparseable onboarding state silently stops onboarding",
+  "current": "When the stored onboarding state fails parsing, the run returns 'not due' or 'complete' and logs nothing, so onboarding can stop forever without a trace.",
+  "location": "src/server/core/onboardingSubscriberGoal.ts:670; src/server/core/onboardingSubscriberGoal.ts:750; src/server/core/onboardingGoalState.ts:12",
+  "areas": ["5.01", "6.05", "13.03"],
+  "paths": [],
+  "evidence": "parseOnboardingState returns undefined for any missing or invalid field. The first read returns not_due; the second read inside runOnboardingCreation returns complete. Neither path calls logDiagnostic.",
+  "outcome": "Not observed.",
+  "investigate": [
+    "What makes the state unparseable (partial hSet, older versions, manual edits)?",
+    "Does initializeOnboardingSubscriberGoal repair it, or skip because fields exist?"
+  ],
+  "required": "Corrupt state logs at error and is repaired or re-armed.",
+  "criticality": {
+    "score": 7,
+    "why": "Onboarding can stop permanently with no log at all."
+  },
+  "related": ["#245"]
+}

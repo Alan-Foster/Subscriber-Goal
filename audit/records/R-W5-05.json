@@ -1,0 +1,20 @@
+{
+  "id": "R-W5-05",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Onboarding saves 'processing' before its checks run",
+  "current": "status: processing is saved before eligibility, health and discovery run, so a run killed at 30 s leaves 'processing'.",
+  "location": "src/server/core/onboardingSubscriberGoal.ts:764",
+  "areas": ["6.07", "7.06"],
+  "paths": [],
+  "evidence": "Recovery appears to re-run it because nextRunAt is kept, but nothing confirms that no path reads 'processing' as 'creation started'.",
+  "outcome": "Not observed.",
+  "investigate": [
+    "Test: kill after line 764 and before creation; confirm the next run proceeds and doesn't trigger unknown-creation recovery."
+  ],
+  "criticality": {
+    "score": 4,
+    "why": "Likely self-recovering, but a wrong read could stall or duplicate creation."
+  },
+  "related": ["#245"]
+}

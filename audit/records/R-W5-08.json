@@ -1,0 +1,19 @@
+{
+  "id": "R-W5-08",
+  "type": "log_gap",
+  "title": "AutoGoal skip and cancel branches print nothing",
+  "current": "In the AutoGoal cron path, a busy community lock, a stale due snapshot, an old per-source lock and an already-mapped successor all skip or cancel silently.",
+  "location": "src/server/core/autoCreateNextGoal.ts:168; src/server/core/autoCreateNextGoal.ts:176; src/server/core/autoCreateNextGoal.ts:186; src/server/core/autoCreateNextGoal.ts:278",
+  "areas": ["13.06", "7.04"],
+  "paths": [],
+  "evidence": "These branches increment summary.skipped and return without logDiagnostic. The cron rule requires an info line with a reason, plus a per-run summary line.",
+  "required": "info lines with a reason via the #237 cron action helper.",
+  "investigate": [
+    "Count how often a due source is skipped for lock contention (related to R-S7-01)."
+  ],
+  "criticality": {
+    "score": 4,
+    "why": "Delays to the next goal would be invisible, though they self-recover."
+  },
+  "related": ["R-S7-01", "#245"]
+}

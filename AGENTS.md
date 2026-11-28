@@ -4,9 +4,9 @@ Subscriber Goal is a Reddit Developer Platform (Devvit Web) app. It shows subscr
 
 ## Platform version: read this first
 
-- This app is pinned to **Devvit 0.15.4**. Every `@devvit/*` package in `package.json` uses that exact version.
+- This app is pinned to **Devvit 0.15.6**. Every `@devvit/*` package in `package.json` uses that exact version.
 - Do not upgrade, add, or remove `@devvit/*` packages, and do not run `npm audit fix --force`, unless the task explicitly asks for it.
-- The documentation tools describe the **latest** Devvit release, which may be newer than 0.15.4. If the docs describe an API, option, or behavior that the installed types in `node_modules/@devvit/*` do not have, stop and report the mismatch. Never "upgrade" the code to match the docs.
+- The documentation tools describe the **latest** Devvit release, which may be newer than 0.15.6. If the docs describe an API, option, or behavior that the installed types in `node_modules/@devvit/*` do not have, stop and report the mismatch. Never "upgrade" the code to match the docs.
 
 ## Devvit documentation is required
 
@@ -57,6 +57,14 @@ Add to this list only from the docs or from a confirmed answer by the Devvit AI 
 - Retries must have a cap and an exhausted state that is logged or reported. Never retry silently forever.
 - Size request-scoped lock TTLs from the 30-second request budget with room for cleanup. For leases that span requests, check ownership and recovery across runs. Justify any lock or lease TTL over 2 minutes in the PR. Before shortening one, check whether another worker could start while the first worker's external operation is still unresolved.
 - Treat a busy lock as normal contention. Trigger and job callers should skip or defer the work and log the outcome. Throw only when the work cannot safely be deferred.
+
+### Silent failures (from the silent-error audit, #234)
+
+- **Cron rule: nothing repeats silently.** Every action a repeating scheduled job performs must have both a command-line output and error handling. Log an `info` line when it acts, a `warn`/`error` line when it fails (caught, so later actions still run), and an `info` line with a `reason` when it's skipped. A failure that recurs across runs carries a repeat count and first-seen time. Each run prints one summary line, which also shows the job ran at all.
+- **Confirmation rule.** A workflow moves to its next step, or ends something permanently (retire a post, cancel a successor, finish onboarding), only when every relevant source has positively confirmed it. A failed, empty, stale or uncertain answer from any source defers and logs. Never treat one source's silence as "done" or "gone".
+- **No untracked jobs.** Every scheduled job running for an installation must be one the current code knows about. Adding, renaming or removing a scheduler task or a `runJob` name needs a step that finds and cancels the old jobs (`scheduler.listJobs()` / `scheduler.cancelJob()`). Recurring jobs created in code survive upgrades until cancelled.
+- Every location that passes data (client requests, Reddit API calls, Redis reads, writes and transactions, triggers, scheduler entries, job queues, realtime, parsing) must print an error to `devvit logs` when it fails, through `logDiagnostic` (`src/shared/diagnostics.ts`).
+- The audit's working files are in `audit/` (see `audit/README.md`). Run `npm run audit:validate` after changing them.
 
 ### Code size and structure
 
@@ -111,13 +119,17 @@ Every PR description includes:
 
 When reviewing a PR in this repository, flag:
 
-- A Devvit or Reddit API used or changed without a docs link in the PR, or used in a way that contradicts the docs or the 0.15.4 types.
+- A Devvit or Reddit API used or changed without a docs link in the PR, or used in a way that contradicts the docs or the 0.15.6 types.
 - A loop or job that could exceed the 30-second limit or is not bounded and batched.
 - A new Redis key without an expiration or cleanup path, or any change to an existing key's string.
 - A read-then-write on shared Redis state where concurrent or repeated runs could corrupt it.
 - A lock released without `releaseOwnedRedisLock`, or a new hand-written lock, backoff, or timer state where an existing one could be used.
 - When a PR touches a workflow or updates applicable platform guidance, check existing locks and leases in the affected workflows against the execution budget. Trace acquisition, renewal, release, and contention. Flag TTLs over 2 minutes without a justification and record existing findings for follow-up.
 - A retry without a cap or an exhausted state.
+- A scheduled-job action that doesn't log when it acts, fails or is skipped, or a recurring failure with no repeat count (cron rule).
+- A step that advances, or ends something permanently, on a single source's answer or on a failed, empty or uncertain lookup (confirmation rule).
+- A scheduler task or `runJob` name added, renamed or removed without a step that cancels the old jobs (no untracked jobs).
+- A new data handoff (Reddit call, Redis write or transaction, route, trigger, job) whose failure prints nothing to `devvit logs`.
 - New duplicate logic when an existing helper already does the job.
 - Missing tests for the cases listed under "Tests".
 - Changes to the intended policies above, unless the linked issue asks for them.

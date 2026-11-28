@@ -4,8 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 
 const imageExtensionPattern = /\.(?:avif|gif|jpe?g|png|svg|webp)$/iu;
 const allowedAssetPattern = /^(?:assets|src\/client\/public)\//u;
+// audit/ holds generated audit grids (npm run audit:grid), not app images.
 const excludedFixturePattern =
-  /^(?:(?:coverage|dist|docs?|node_modules)\/)|(?:^|\/)(?:__fixtures__|fixtures)\//u;
+  /^(?:(?:audit|coverage|dist|docs?|node_modules)\/)|(?:^|\/)(?:__fixtures__|fixtures)\//u;
 const requiredAssets = [
   "assets/icon.png",
   "src/client/public/reddit_temp_logo.jpg",
