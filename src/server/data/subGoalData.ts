@@ -828,6 +828,8 @@ export async function checkCompletionStatus(
           mutationLease,
         }),
       options.mutationLease,
+      undefined,
+      "completion_check",
     );
   } catch (error) {
     if (!(error instanceof CommunityGoalMutationInProgressError)) throw error;

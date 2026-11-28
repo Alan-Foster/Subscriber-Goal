@@ -347,6 +347,8 @@ export async function createSubscriberGoal({
           options: { ...options, mutationLease },
         }),
       options.mutationLease,
+      undefined,
+      "goal_creation",
     );
   } catch (error) {
     if (error instanceof CommunityGoalMutationInProgressError) {

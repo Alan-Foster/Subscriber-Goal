@@ -299,6 +299,7 @@ async function deleteGoalWithLease(
       ),
     undefined,
     deleteGoalLeaseRetry,
+    "delete_goal",
   );
   return outcome;
 }

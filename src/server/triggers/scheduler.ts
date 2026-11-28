@@ -71,41 +71,50 @@ type CompletedUpdateCleanupPreparation =
 async function prepareCompletedUpdateCleanup(
   postId: string,
 ): Promise<CompletedUpdateCleanupPreparation> {
-  return withCommunityGoalMutationLease(redis, async () => {
-    // Re-read under the same lease used by completion, onboarding, manual goal
-    // creation, and the AutoGoal worker. This makes the decision current and
-    // prevents a repair from overwriting a newer retry or supersession decision.
-    const latest = await getSubGoalData(redis, postId);
-    if (!latest.completedTime) {
-      throw new Error("Completed goal lost its persisted completion time.");
-    }
-    if (latest.automaticSuccessorSuppression) {
-      await clearAutomaticSuccessorSuppression(redis, postId);
-    }
+  return withCommunityGoalMutationLease(
+    redis,
+    async () => {
+      // Re-read under the same lease used by completion, onboarding, manual goal
+      // creation, and the AutoGoal worker. This makes the decision current and
+      // prevents a repair from overwriting a newer retry or supersession decision.
+      const latest = await getSubGoalData(redis, postId);
+      if (!latest.completedTime) {
+        throw new Error("Completed goal lost its persisted completion time.");
+      }
+      if (latest.automaticSuccessorSuppression) {
+        await clearAutomaticSuccessorSuppression(redis, postId);
+      }
 
-    const [successor, onboardingIntent, replacementSourcePostId, status] =
-      await Promise.all([
-        redis.hGet(autoCreateNextGoalSuccessorsKey, postId),
-        redis.hGet(onboardingSubscriberGoalStateKey, "intent"),
-        redis.hGet(onboardingSubscriberGoalStateKey, "replacementSourcePostId"),
-        redis.hGet(onboardingSubscriberGoalStateKey, "status"),
-      ]);
-    if (successor) return "successor_mapped";
-    if (
-      onboardingIntent === "orphaned_completed_goal" &&
-      replacementSourcePostId === postId &&
-      status !== "complete"
-    ) {
-      return "onboarding_takeover";
-    }
+      const [successor, onboardingIntent, replacementSourcePostId, status] =
+        await Promise.all([
+          redis.hGet(autoCreateNextGoalSuccessorsKey, postId),
+          redis.hGet(onboardingSubscriberGoalStateKey, "intent"),
+          redis.hGet(
+            onboardingSubscriberGoalStateKey,
+            "replacementSourcePostId",
+          ),
+          redis.hGet(onboardingSubscriberGoalStateKey, "status"),
+        ]);
+      if (successor) return "successor_mapped";
+      if (
+        onboardingIntent === "orphaned_completed_goal" &&
+        replacementSourcePostId === postId &&
+        status !== "complete"
+      ) {
+        return "onboarding_takeover";
+      }
 
-    const repaired = await repairAutoCreateNextGoal(
-      redis,
-      postId,
-      latest.completedTime,
-    );
-    return repaired.status;
-  });
+      const repaired = await repairAutoCreateNextGoal(
+        redis,
+        postId,
+        latest.completedTime,
+      );
+      return repaired.status;
+    },
+    undefined,
+    undefined,
+    "completed_update_cleanup",
+  );
 }
 
 async function cleanupCompletedUpdate(postId: string): Promise<boolean> {

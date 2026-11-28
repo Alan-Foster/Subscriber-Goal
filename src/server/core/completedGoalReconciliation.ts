@@ -71,6 +71,8 @@ export async function reconcileCompletedGoal({
         mutationLease: heldMutationLease,
       }),
     mutationLease,
+    undefined,
+    "completed_goal_reconciliation",
   );
 }
 

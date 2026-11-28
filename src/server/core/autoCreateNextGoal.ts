@@ -164,7 +164,7 @@ async function processDueSource(
 
     mutationLease =
       existingMutationLease ??
-      (await acquireCommunityGoalMutationLease(redis, nowMs));
+      (await acquireCommunityGoalMutationLease(redis, nowMs, "autogoal"));
     if (!mutationLease) {
       // Leave scheduler state untouched so the same due work is retried.
       summary.skipped += 1;
