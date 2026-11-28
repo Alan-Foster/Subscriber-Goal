@@ -1,0 +1,30 @@
+{
+  "id": "R-S8-01",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Legacy postsUpdaterJob cron from the Devvit Blocks version may still fire unseen",
+  "current": "The app never lists or cancels scheduled jobs. Installations that ran the pre-Devvit Web version may still have a runtime cron named postsUpdaterJob firing every minute with no matching task, so nothing appears in the app's logs.",
+  "location": "devvit.json (scheduler.tasks has no postsUpdaterJob task); created by _original/src/triggers/appChanged.ts:19 at commit 4783d61^ via startSingletonJob(context.scheduler, 'postsUpdaterJob', '* * * * *', {}); no listJobs or cancelJob anywhere in src/",
+  "areas": ["8.01", "8.08", "12.03", "13.01", "13.09"],
+  "paths": [],
+  "evidence": "The Devvit 0.15 scheduler docs say a job created with scheduler.runJob({ name, cron }) keeps its stored schedule until the app cancels it. The Devvit Web migration (4783d61, 2026-01-26) replaced the job with the devvit.json task posts-updater-job but never cancelled the old runtime job. Characteristics: B, C, E.",
+  "outcome": "Not observed. Needs a scheduler.listJobs() inventory on a real installation; the Devvit CLI has no command for it.",
+  "assumptions": [
+    "That the old job still exists on some installations (only an inventory can confirm).",
+    "That it would show as MANAGER_UNSPECIFIED."
+  ],
+  "investigate": [
+    "Log scheduler.listJobs() with no filter on upgrade, then read devvit logs for r/SubGoal and an installation from before 2026-01-26.",
+    "What does Devvit do when a job fires with no matching task?",
+    "Does it count toward the 10 recurring actions per installation?",
+    "Confirm the retired devvit.json crons invite-new-subs-poll-job and invite-new-subs-report-job (2026-10-22 to 2026-11-06) are gone."
+  ],
+  "docs": [
+    "https://developers.reddit.com/docs/versioned_docs/version-0.15/capabilities/server/scheduler (Managing recurring jobs across deployments)"
+  ],
+  "criticality": {
+    "score": 5,
+    "why": "Wasted runs and possibly a slot of the 10-recurring-action limit, completely invisible in the app's logs."
+  },
+  "related": ["#240", "#243"]
+}

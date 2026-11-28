@@ -1,0 +1,897 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": 1,
+      "title": "System Boundaries",
+      "owner": "workflow"
+    },
+    {
+      "id": 2,
+      "title": "User Interactions",
+      "owner": "workflow"
+    },
+    {
+      "id": 3,
+      "title": "Event Detection and Triggers",
+      "owner": "sweep"
+    },
+    {
+      "id": 4,
+      "title": "Conditional Logic and Decision Points",
+      "owner": "workflow"
+    },
+    {
+      "id": 5,
+      "title": "Data Storage and Retrieval",
+      "owner": "sweep"
+    },
+    {
+      "id": 6,
+      "title": "State Transitions",
+      "owner": "workflow"
+    },
+    {
+      "id": 7,
+      "title": "Asynchronous Operations and Concurrency",
+      "owner": "sweep"
+    },
+    {
+      "id": 8,
+      "title": "Scheduling and Time-Dependent Operations",
+      "owner": "sweep"
+    },
+    {
+      "id": 9,
+      "title": "Error Handling and Recovery",
+      "owner": "sweep"
+    },
+    {
+      "id": 10,
+      "title": "Reddit-Specific Behavior",
+      "owner": "workflow"
+    },
+    {
+      "id": 11,
+      "title": "Frontend Rendering and Presentation",
+      "owner": "workflow"
+    },
+    {
+      "id": 12,
+      "title": "Configuration and Deployment",
+      "owner": "sweep"
+    },
+    {
+      "id": 13,
+      "title": "Observability and Logging Blind Spots",
+      "owner": "workflow"
+    }
+  ],
+  "areas": [
+    {
+      "id": "1.01",
+      "section": 1,
+      "title": "Client to server",
+      "definition": "User actions never reach the backend.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.02",
+      "section": 1,
+      "title": "Server to client",
+      "definition": "Backend operations succeed, but the interface never updates.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.03",
+      "section": 1,
+      "title": "Devvit to Reddit API",
+      "definition": "Requests succeed without producing the intended result.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.04",
+      "section": 1,
+      "title": "Devvit to Redis",
+      "definition": "Data is incorrectly stored, retrieved, or overwritten.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.05",
+      "section": 1,
+      "title": "Reddit to Devvit",
+      "definition": "Expected events never reach the application.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.06",
+      "section": 1,
+      "title": "Function to function",
+      "definition": "Incorrect, incomplete, or missing parameters are passed between functions.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.07",
+      "section": 1,
+      "title": "External API integrations",
+      "definition": "Missing, incomplete, or unexpected responses are accepted as valid.",
+      "owner": "workflow"
+    },
+    {
+      "id": "1.08",
+      "section": 1,
+      "title": "Data serialization",
+      "definition": "Information is lost, altered, or incorrectly interpreted during conversion.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.01",
+      "section": 2,
+      "title": "Button clicks",
+      "definition": "Clicks are registered but no intended action occurs.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.02",
+      "section": 2,
+      "title": "Event handlers",
+      "definition": "Handlers are missing, incorrectly bound, or never executed.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.03",
+      "section": 2,
+      "title": "Form submissions",
+      "definition": "Forms close without completing the intended operation.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.04",
+      "section": 2,
+      "title": "Join button",
+      "definition": "The interface indicates success without confirmed subscription.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.05",
+      "section": 2,
+      "title": "Secondary action button",
+      "definition": "Incorrect destinations or fallbacks are selected.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.06",
+      "section": 2,
+      "title": "Moderator menu actions",
+      "definition": "Actions are displayed but do not execute.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.07",
+      "section": 2,
+      "title": "Settings changes",
+      "definition": "Settings appear saved but are not persisted.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.08",
+      "section": 2,
+      "title": "Repeated interactions",
+      "definition": "Duplicate protection incorrectly blocks legitimate actions.",
+      "owner": "workflow"
+    },
+    {
+      "id": "2.09",
+      "section": 2,
+      "title": "Navigation",
+      "definition": "Redirects never occur or open incorrect destinations.",
+      "owner": "workflow"
+    },
+    {
+      "id": "3.01",
+      "section": 3,
+      "title": "App installation",
+      "definition": "Required initialization never occurs.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.02",
+      "section": 3,
+      "title": "App upgrade",
+      "definition": "Required migrations or initialization procedures never execute.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.03",
+      "section": 3,
+      "title": "App uninstallation",
+      "definition": "Required cleanup never occurs.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.04",
+      "section": 3,
+      "title": "Post creation",
+      "definition": "Newly created posts are not detected.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.05",
+      "section": 3,
+      "title": "Post deletion",
+      "definition": "Deleted goals remain registered as active.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.06",
+      "section": 3,
+      "title": "Moderator actions",
+      "definition": "Unhighlighting, removal, or other relevant moderator actions are not detected.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.07",
+      "section": 3,
+      "title": "Scheduled triggers",
+      "definition": "Expected scheduled events never execute.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.08",
+      "section": 3,
+      "title": "Event filtering",
+      "definition": "Valid events are incorrectly discarded.",
+      "owner": "sweep"
+    },
+    {
+      "id": "3.09",
+      "section": 3,
+      "title": "Trigger registration",
+      "definition": "Event handlers exist but are never registered.",
+      "owner": "sweep"
+    },
+    {
+      "id": "4.01",
+      "section": 4,
+      "title": "If/else statements",
+      "definition": "Incorrect execution paths are selected.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.02",
+      "section": 4,
+      "title": "Early returns",
+      "definition": "Functions exit before completing required work.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.03",
+      "section": 4,
+      "title": "Guard clauses",
+      "definition": "Valid operations are incorrectly blocked.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.04",
+      "section": 4,
+      "title": "Eligibility checks",
+      "definition": "Eligible subreddits, users, or operations are classified as ineligible.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.05",
+      "section": 4,
+      "title": "Permission checks",
+      "definition": "Authorized users or operations are incorrectly denied functionality.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.06",
+      "section": 4,
+      "title": "Feature flags",
+      "definition": "Functionality is unintentionally disabled.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.07",
+      "section": 4,
+      "title": "Default values",
+      "definition": "Missing information is interpreted incorrectly.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.08",
+      "section": 4,
+      "title": "Switch statements",
+      "definition": "Unexpected cases are silently ignored.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.09",
+      "section": 4,
+      "title": "Boolean expressions",
+      "definition": "Multiple conditions interact incorrectly.",
+      "owner": "workflow"
+    },
+    {
+      "id": "4.10",
+      "section": 4,
+      "title": "Optional chaining",
+      "definition": "Missing objects silently prevent required operations.",
+      "owner": "workflow"
+    },
+    {
+      "id": "5.01",
+      "section": 5,
+      "title": "Redis reads",
+      "definition": "Missing or invalid data is interpreted as valid data.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.02",
+      "section": 5,
+      "title": "Redis writes",
+      "definition": "Incorrect values are persisted.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.03",
+      "section": 5,
+      "title": "Redis keys",
+      "definition": "Information is stored under or retrieved from incorrect keys.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.04",
+      "section": 5,
+      "title": "Key expiration",
+      "definition": "Required information disappears prematurely.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.05",
+      "section": 5,
+      "title": "Cached data",
+      "definition": "Outdated information is treated as current.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.06",
+      "section": 5,
+      "title": "Data migrations",
+      "definition": "Existing installations retain incompatible or outdated data.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.07",
+      "section": 5,
+      "title": "Data deletion",
+      "definition": "Required information is accidentally removed.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.08",
+      "section": 5,
+      "title": "Counters",
+      "definition": "Stored values drift away from actual totals.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.09",
+      "section": 5,
+      "title": "Data validation",
+      "definition": "Invalid information enters persistent storage.",
+      "owner": "sweep"
+    },
+    {
+      "id": "5.10",
+      "section": 5,
+      "title": "Data isolation",
+      "definition": "Information belonging to different entities is incorrectly associated.",
+      "owner": "sweep"
+    },
+    {
+      "id": "6.01",
+      "section": 6,
+      "title": "Initialization",
+      "definition": "The application never reaches a ready state.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.02",
+      "section": 6,
+      "title": "Goal creation",
+      "definition": "A post exists, but internal state is not correctly updated.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.03",
+      "section": 6,
+      "title": "Goal completion",
+      "definition": "The subscriber target is reached but not recognized.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.04",
+      "section": 6,
+      "title": "Successor creation",
+      "definition": "A completed goal never receives its required replacement.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.05",
+      "section": 6,
+      "title": "Recovery states",
+      "definition": "The application remains indefinitely stuck in recovery.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.06",
+      "section": 6,
+      "title": "Terminal states",
+      "definition": "Recoverable conditions are incorrectly classified as permanent.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.07",
+      "section": 6,
+      "title": "Partial completion",
+      "definition": "Only some required steps of an operation succeed.",
+      "owner": "workflow"
+    },
+    {
+      "id": "6.08",
+      "section": 6,
+      "title": "State synchronization",
+      "definition": "Reddit and Redis disagree about the current state.",
+      "owner": "workflow"
+    },
+    {
+      "id": "7.01",
+      "section": 7,
+      "title": "Promises",
+      "definition": "Operations are started but never awaited when completion is required.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.02",
+      "section": 7,
+      "title": "Race conditions",
+      "definition": "Execution order produces incorrect results.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.03",
+      "section": 7,
+      "title": "Concurrent writes",
+      "definition": "One operation incorrectly overwrites another.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.04",
+      "section": 7,
+      "title": "Locks and leases",
+      "definition": "Stale or incorrectly managed locks prevent future operations.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.05",
+      "section": 7,
+      "title": "Idempotency checks",
+      "definition": "Legitimate operations are incorrectly treated as duplicates.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.06",
+      "section": 7,
+      "title": "Timeouts",
+      "definition": "Operations stop without appropriate recovery.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.07",
+      "section": 7,
+      "title": "Parallel operations",
+      "definition": "Partial failures are ignored.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.08",
+      "section": 7,
+      "title": "Retry mechanisms",
+      "definition": "Operations are never retried, or retries are exhausted without appropriate resolution.",
+      "owner": "sweep"
+    },
+    {
+      "id": "7.09",
+      "section": 7,
+      "title": "Background tasks",
+      "definition": "Tasks fail outside the original execution context without detection.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.01",
+      "section": 8,
+      "title": "Scheduler registration",
+      "definition": "Required jobs are never registered.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.02",
+      "section": 8,
+      "title": "Scheduler execution",
+      "definition": "Registered jobs never run.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.03",
+      "section": 8,
+      "title": "Job cancellation",
+      "definition": "Required future jobs are accidentally cancelled.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.04",
+      "section": 8,
+      "title": "Time calculations",
+      "definition": "Operations are scheduled for incorrect times.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.05",
+      "section": 8,
+      "title": "Expiration checks",
+      "definition": "Valid records are incorrectly considered expired.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.06",
+      "section": 8,
+      "title": "Cooldowns",
+      "definition": "Cooldowns never reset or expire correctly.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.07",
+      "section": 8,
+      "title": "Delayed operations",
+      "definition": "Operations become invalid while waiting for execution.",
+      "owner": "sweep"
+    },
+    {
+      "id": "8.08",
+      "section": 8,
+      "title": "Recurring jobs",
+      "definition": "Recurring operations silently stop recurring.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.01",
+      "section": 9,
+      "title": "Empty catch blocks",
+      "definition": "Exceptions are swallowed without appropriate handling.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.02",
+      "section": 9,
+      "title": "Broad catch blocks",
+      "definition": "Unrelated errors are incorrectly treated identically.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.03",
+      "section": 9,
+      "title": "Fallback values",
+      "definition": "Failures are disguised as legitimate results.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.04",
+      "section": 9,
+      "title": "Fallback operations",
+      "definition": "Secondary operations also fail silently.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.05",
+      "section": 9,
+      "title": "Error classification",
+      "definition": "Temporary failures are incorrectly treated as permanent.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.06",
+      "section": 9,
+      "title": "Recovery logic",
+      "definition": "Recovery operations introduce additional failures.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.07",
+      "section": 9,
+      "title": "Cleanup operations",
+      "definition": "Resources or incorrect state remain after failures.",
+      "owner": "sweep"
+    },
+    {
+      "id": "9.08",
+      "section": 9,
+      "title": "Success reporting",
+      "definition": "Success is reported despite incomplete or incorrect execution.",
+      "owner": "sweep"
+    },
+    {
+      "id": "10.01",
+      "section": 10,
+      "title": "Post listings",
+      "definition": "Valid posts are omitted from results.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.02",
+      "section": 10,
+      "title": "Pagination",
+      "definition": "Relevant records exist beyond the retrieved results.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.03",
+      "section": 10,
+      "title": "NSFW filtering",
+      "definition": "Relevant content is silently excluded.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.04",
+      "section": 10,
+      "title": "Community visibility",
+      "definition": "Private, restricted, or public communities behave differently than expected.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.05",
+      "section": 10,
+      "title": "Highlight management",
+      "definition": "Goals are no longer highlighted despite internal state indicating otherwise.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.06",
+      "section": 10,
+      "title": "Moderator permissions",
+      "definition": "The application loses required permissions without recognizing the loss.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.07",
+      "section": 10,
+      "title": "App account restrictions",
+      "definition": "The application account cannot access expected functionality.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.08",
+      "section": 10,
+      "title": "Rate limiting",
+      "definition": "Operations are delayed or abandoned without appropriate recovery.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.09",
+      "section": 10,
+      "title": "Subscriber counts",
+      "definition": "Stale or incorrect subscriber counts prevent accurate goal tracking or completion.",
+      "owner": "workflow"
+    },
+    {
+      "id": "10.10",
+      "section": 10,
+      "title": "API response changes",
+      "definition": "Previously valid assumptions about Reddit API responses become incorrect.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.01",
+      "section": 11,
+      "title": "Conditional rendering",
+      "definition": "Required interface elements are not displayed.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.02",
+      "section": 11,
+      "title": "Responsive layouts",
+      "definition": "Buttons or other functionality disappear on certain screen sizes.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.03",
+      "section": 11,
+      "title": "Loading states",
+      "definition": "The interface remains indefinitely in a loading state.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.04",
+      "section": 11,
+      "title": "State updates",
+      "definition": "The interface displays outdated or incorrect information.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.05",
+      "section": 11,
+      "title": "Translations",
+      "definition": "Missing or invalid translations produce empty or incorrect text.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.06",
+      "section": 11,
+      "title": "Text overflow",
+      "definition": "Important information becomes invisible or inaccessible.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.07",
+      "section": 11,
+      "title": "Client compatibility",
+      "definition": "Functionality behaves differently across Reddit clients.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.08",
+      "section": 11,
+      "title": "Disabled controls",
+      "definition": "Controls remain disabled after operations complete.",
+      "owner": "workflow"
+    },
+    {
+      "id": "11.09",
+      "section": 11,
+      "title": "Rendering failures",
+      "definition": "Components disappear or fail to render without producing backend errors.",
+      "owner": "workflow"
+    },
+    {
+      "id": "12.01",
+      "section": 12,
+      "title": "App manifest",
+      "definition": "Required capabilities, handlers, or permissions are not registered.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.02",
+      "section": 12,
+      "title": "Environment variables",
+      "definition": "Missing configuration activates unintended defaults.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.03",
+      "section": 12,
+      "title": "Version compatibility",
+      "definition": "Older installations behave incorrectly following updates.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.04",
+      "section": 12,
+      "title": "Dependency updates",
+      "definition": "Library behavior changes without producing compilation errors.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.05",
+      "section": 12,
+      "title": "Build configuration",
+      "definition": "Required functionality is excluded from the application build.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.06",
+      "section": 12,
+      "title": "Deployment",
+      "definition": "Production behavior differs unexpectedly from playtest behavior.",
+      "owner": "sweep"
+    },
+    {
+      "id": "12.07",
+      "section": 12,
+      "title": "Installation-specific settings",
+      "definition": "Individual communities develop incompatible or invalid configurations.",
+      "owner": "sweep"
+    },
+    {
+      "id": "13.01",
+      "section": 13,
+      "title": "Before function entry",
+      "definition": "Required functions are never invoked.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.02",
+      "section": 13,
+      "title": "Before first log statement",
+      "definition": "Execution exits before diagnostics begin.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.03",
+      "section": 13,
+      "title": "Unlogged branches",
+      "definition": "Incorrect execution paths leave no diagnostic evidence.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.04",
+      "section": 13,
+      "title": "Client-side execution",
+      "definition": "Failures never reach backend logging.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.05",
+      "section": 13,
+      "title": "Log filtering",
+      "definition": "Important diagnostic information is suppressed.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.06",
+      "section": 13,
+      "title": "Success-only logging",
+      "definition": "Failed or skipped operations remain invisible.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.07",
+      "section": 13,
+      "title": "Missing postcondition checks",
+      "definition": "Operations are assumed successful without verifying the intended outcome.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.08",
+      "section": 13,
+      "title": "Missing reconciliation",
+      "definition": "Internal and external states diverge without detection.",
+      "owner": "workflow"
+    },
+    {
+      "id": "13.09",
+      "section": 13,
+      "title": "Missing activity",
+      "definition": "The absence of an expected event or operation is never recognized.",
+      "owner": "workflow"
+    }
+  ],
+  "characteristics": [
+    {
+      "id": "A",
+      "title": "Silent incorrect execution",
+      "definition": "Executes but produces an incorrect, incomplete, or unintended result without reporting a failure."
+    },
+    {
+      "id": "B",
+      "title": "Silent non-execution",
+      "definition": "Should execute but never does, so its own logging and error handling cannot detect the failure."
+    },
+    {
+      "id": "C",
+      "title": "External silent failure",
+      "definition": "Originates outside the app, such as Reddit not delivering an event or returning incomplete data."
+    },
+    {
+      "id": "D",
+      "title": "Transient silent failure",
+      "definition": "Temporarily disrupts functionality but may self-resolve through later runs, retries, or reconciliation."
+    },
+    {
+      "id": "E",
+      "title": "Persistent silent failure",
+      "definition": "Leaves an installation, goal, interaction, or workflow broken indefinitely without recovery or notification."
+    }
+  ]
+}

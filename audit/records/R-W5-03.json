@@ -1,0 +1,17 @@
+{
+  "id": "R-W5-03",
+  "type": "log_gap",
+  "title": "Busy onboarding or community lock skips onboarding with no log",
+  "current": "A busy onboarding lock or community-wide lock returns not_due and prints nothing.",
+  "location": "src/server/core/onboardingSubscriberGoal.ts:595; src/server/core/onboardingSubscriberGoal.ts:617",
+  "areas": ["7.04", "13.06"],
+  "paths": [],
+  "evidence": "Both branches return { status: 'not_due' } without logDiagnostic. Under the cron rule this is a silent repeating skip. Related to R-S7-01.",
+  "required": "An info skip line with a reason and the lock holder's workflow (via the #237 lock timing).",
+  "investigate": ["How often does onboarding get starved by lock contention?"],
+  "criticality": {
+    "score": 4,
+    "why": "Onboarding starvation would be invisible, though it self-recovers when the lock frees."
+  },
+  "related": ["R-S7-01", "#245"]
+}

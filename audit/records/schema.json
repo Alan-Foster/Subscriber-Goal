@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Silent-error audit record",
+  "description": "One problem, test gap or log gap. Sections follow audit/issue-template.md. audit/scripts/validate.mjs enforces the rules; this schema documents them.",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "title",
+    "current",
+    "location",
+    "areas",
+    "evidence",
+    "criticality"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^R-(F[1-3]|S(3|5|7|8|9|12)|W[1-8]|G1)-[0-9]{2,}$"
+    },
+    "type": { "enum": ["problem", "test_gap", "log_gap"] },
+    "confidence": {
+      "description": "Problem records only.",
+      "enum": ["suspected", "confirmed", "question"]
+    },
+    "title": { "type": "string" },
+    "current": {
+      "description": "Template 1: what happens today, regardless of intent.",
+      "type": "string"
+    },
+    "location": {
+      "description": "file:line + function. Must name at least one existing repository file.",
+      "type": "string"
+    },
+    "areas": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "paths": { "type": "array", "items": { "type": "string" } },
+    "evidence": {
+      "description": "Template 2: who it affects, one concrete example, the verified code path.",
+      "type": "string"
+    },
+    "outcome": {
+      "description": "What was observed, or 'Not observed.'",
+      "type": "string"
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "required": {
+      "description": "Template 3: expected behavior and what must be preserved.",
+      "type": "string"
+    },
+    "docs": { "type": "array", "items": { "type": "string" } },
+    "reuse": { "type": "string" },
+    "blockers": { "type": "string" },
+    "investigate": {
+      "description": "Required for problem records.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "edgeCases": { "type": "array", "items": { "type": "string" } },
+    "tests": { "type": "array", "items": { "type": "string" } },
+    "criticality": {
+      "type": "object",
+      "required": ["score", "why"],
+      "properties": {
+        "score": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "why": { "type": "string" }
+      }
+    },
+    "estimatedLoc": {
+      "type": "object",
+      "required": ["code", "tests"],
+      "properties": {
+        "code": { "type": "integer" },
+        "tests": { "type": "integer" }
+      }
+    },
+    "related": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "R-W5-04",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "Duplicate-goal check can report 'no goal' from an incomplete search",
+  "current": "Goal discovery fails closed on errors, but can still return no candidates without an error when the existing goal is beyond the 100-post author search, not yet indexed by Reddit search, or unclassifiable. Onboarding then creates a duplicate goal.",
+  "location": "src/server/core/goalDiscovery.ts:34; src/server/core/goalDiscovery.ts:420",
+  "areas": ["10.01", "10.02", "4.03", "6.08"],
+  "paths": [],
+  "evidence": "searchForGoalPosts uses limit onboardingAuthorSearchLimit = 100. Errors throw (lines ~376, ~412). #225 shows real goal posts whose post data can't be read.",
+  "outcome": "Not observed.",
+  "investigate": [
+    "Does a known source (registered, tracked, queued, persisted, highlighted) always cover a goal the search misses?",
+    "Test: the goal exists only beyond 100 search results; the goal was created seconds ago."
+  ],
+  "criticality": {
+    "score": 7,
+    "why": "A duplicate goal post is moderator-visible and confusing for subscribers."
+  },
+  "related": ["#225", "#245"]
+}

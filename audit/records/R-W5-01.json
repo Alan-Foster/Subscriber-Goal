@@ -1,0 +1,24 @@
+{
+  "id": "R-W5-01",
+  "type": "problem",
+  "confidence": "suspected",
+  "title": "One subscriber-count read can end onboarding permanently",
+  "current": "If getCurrentSubreddit() returns fewer than 1,000 subscribers (or a stale, zero or missing count), onboarding saves itself as complete/ineligible and is not retried until the next install or upgrade.",
+  "location": "src/server/core/onboardingEligibility.ts:24; src/server/core/onboardingSubscriberGoal.ts:865",
+  "areas": ["4.04", "6.06", "10.09"],
+  "paths": [],
+  "evidence": "Eligibility uses a single numberOfSubscribers read; !(NaN >= 1000) is also true. The subscriber_count reason is explicitly excluded from 'uncertain', so it never defers or retries. Only lifecycle reconciliation on install or upgrade re-arms onboarding.",
+  "outcome": "Not observed.",
+  "assumptions": [
+    "That Devvit can return 0 or undefined for numberOfSubscribers."
+  ],
+  "investigate": [
+    "Can Devvit return 0 or undefined for numberOfSubscribers? Check the docs and installed types.",
+    "Should a below-threshold result be confirmed by a second read or re-checked periodically instead of ending onboarding?"
+  ],
+  "criticality": {
+    "score": 7,
+    "why": "A single bad read can stop a community's onboarding goal indefinitely with no visible error."
+  },
+  "related": ["#245"]
+}
