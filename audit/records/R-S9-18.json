@@ -1,0 +1,16 @@
+{
+  "id": "R-S9-18",
+  "type": "log_gap",
+  "title": "Onboarding warning skips silently when the community lease is busy",
+  "current": "processDueOnboardingReminder returns notDue() when the community-wide lease is busy, with no log, so a repeatedly starved warning looks the same as one that isn't due.",
+  "location": "src/server/core/onboardingWarning.ts:463",
+  "areas": ["7.04", "13.06"],
+  "paths": ["C5-onboarding-warning"],
+  "evidence": "`if (error instanceof CommunityGoalMutationInProgressError) return notDue();` — same pattern as R-W5-03 for the onboarding goal.",
+  "required": "An info skip line with reason lock_busy (the #237 lease logs will also name the holder).",
+  "criticality": {
+    "score": 3,
+    "why": "Self-recovering, but starvation would be invisible."
+  },
+  "related": ["R-W5-03", "R-S7-01", "#238"]
+}
