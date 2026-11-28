@@ -300,6 +300,49 @@ describe("validateAudit", () => {
   });
 });
 
+describe("path steps and record mapping", () => {
+  const readText = (file) =>
+    file === "src/client/app/Join.tsx" ? "export function JoinButton() {}" : "";
+  const runWithText = (audit) =>
+    validateAudit(audit, {
+      files,
+      fileExists: (f) => existing.has(f),
+      readText,
+    }).errors;
+
+  it("checks that each step's symbol exists in its file", () => {
+    const steps = [
+      { at: "src/client/app/Join.tsx:JoinButton", handoff: "client_request" },
+      { at: "src/client/app/Join.tsx:Missing", handoff: "client_request" },
+    ];
+    const errors = runWithText(fixture({ paths: [{ ...path, steps }] }));
+    expect(errors).toContain(
+      'paths.json C2-join: symbol "Missing" not found in src/client/app/Join.tsx',
+    );
+    expect(errors.some((e) => e.includes('"JoinButton"'))).toBe(false);
+  });
+  it("reports missing test files on a path", () => {
+    const errors = run(
+      fixture({ paths: [{ ...path, tests: ["src/nope.test.ts"] }] }),
+    );
+    expect(errors).toContain(
+      'paths.json C2-join: test file "src/nope.test.ts" does not exist',
+    );
+  });
+  it("doesn't require a gray cell to reference a record mapped to its path", () => {
+    const errors = run(
+      withCell({
+        tests: "not_relevant",
+        problem: "none",
+        output: null,
+        by: "F2",
+        note: "n/a",
+      }),
+    );
+    expect(errors).toEqual([]);
+  });
+});
+
 describe("rendering", () => {
   it("draws the grid layers and summary", () => {
     const audit = fixture();

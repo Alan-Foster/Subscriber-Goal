@@ -1,0 +1,82 @@
+{
+  "path": "C4-create-follow-up",
+  "cells": {
+    "1.01": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: no client request or client update on this path."
+    },
+    "1.02": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: no client request or client update on this path."
+    },
+    "11.01": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.02": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.03": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.04": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.05": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.06": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.07": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.08": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    },
+    "11.09": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "Server-only path: nothing is rendered in the interface."
+    }
+  }
+}

@@ -6,7 +6,7 @@
   "current": "When a moderator submits the create-goal form while posts-updater work holds the community-wide lock, creation fails immediately with an 'already in progress' message. Deletion waits up to 4 s, then fails the same way.",
   "location": "src/server/core/communityGoalMutation.ts:44 (withCommunityGoalMutationLease); src/server/core/createSubscriberGoal.ts:340; src/server/triggers/scheduler.ts:73; src/server/routes/internalUi.deleteGoal.ts:39; src/server/utils/lockTtl.ts:24",
   "areas": ["7.04", "7.02", "2.03", "8.07"],
-  "paths": [],
+  "paths": ["C8-community-mutation-lease", "C4-create-classic"],
   "evidence": "One lock, subscriber_goal_community_mutation_v1_lock, is taken at 13 call sites, including work run by posts-updater-job every minute (completed-goal cleanup, highlight reconciliation, app repair, scheduled-post displacement, source-post deletion, onboarding). Manual creation passes no retry option. The lock's 60 s TTL (userFacingLockTtlMs) can outlive a job killed at the 30 s request limit. Characteristics: A, D.",
   "outcome": "Reported by the maintainer: form progression appears stuck while the cron job runs. Not yet confirmed in logs.",
   "assumptions": [

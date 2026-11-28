@@ -6,7 +6,7 @@
   "current": "The successor's goal target comes from one numberOfSubscribers read; a stale or zero count produces a wrong target with no warning.",
   "location": "src/server/core/autoCreateNextGoal.ts:525",
   "areas": ["10.09", "4.07"],
-  "paths": [],
+  "paths": ["C5-autogoal-successor"],
   "evidence": "createSuccessor passes getDefaultSubscriberGoal(subreddit.numberOfSubscribers) directly.",
   "outcome": "Not observed.",
   "investigate": [

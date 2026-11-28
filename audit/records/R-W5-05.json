@@ -6,7 +6,7 @@
   "current": "status: processing is saved before eligibility, health and discovery run, so a run killed at 30 s leaves 'processing'.",
   "location": "src/server/core/onboardingSubscriberGoal.ts:764",
   "areas": ["6.07", "7.06"],
-  "paths": [],
+  "paths": ["C5-onboarding-goal"],
   "evidence": "Recovery appears to re-run it because nextRunAt is kept, but nothing confirms that no path reads 'processing' as 'creation started'.",
   "outcome": "Not observed.",
   "investigate": [

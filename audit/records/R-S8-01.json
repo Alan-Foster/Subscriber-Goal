@@ -6,7 +6,7 @@
   "current": "The app never lists or cancels scheduled jobs. Installations that ran the pre-Devvit Web version may still have a runtime cron named postsUpdaterJob firing every minute with no matching task, so nothing appears in the app's logs.",
   "location": "devvit.json (scheduler.tasks has no postsUpdaterJob task); created by _original/src/triggers/appChanged.ts:19 at commit 4783d61^ via startSingletonJob(context.scheduler, 'postsUpdaterJob', '* * * * *', {}); no listJobs or cancelJob anywhere in src/",
   "areas": ["8.01", "8.08", "12.03", "13.01", "13.09"],
-  "paths": [],
+  "paths": ["C8-posts-updater-run"],
   "evidence": "The Devvit 0.15 scheduler docs say a job created with scheduler.runJob({ name, cron }) keeps its stored schedule until the app cancels it. The Devvit Web migration (4783d61, 2026-01-26) replaced the job with the devvit.json task posts-updater-job but never cancelled the old runtime job. Characteristics: B, C, E.",
   "outcome": "Not observed. Needs a scheduler.listJobs() inventory on a real installation; the Devvit CLI has no command for it.",
   "assumptions": [
