@@ -6,7 +6,7 @@
   "current": "If the source goal's data lacks goal or completedTime, the scheduled successor is cancelled and nothing is logged.",
   "location": "src/server/core/autoCreateNextGoal.ts:286",
   "areas": ["6.04", "6.06", "13.06"],
-  "paths": [],
+  "paths": ["C5-autogoal-successor"],
   "evidence": "loadCompletedSourceGoal calls cancelAutoCreateNextGoal and returns without logDiagnostic. A read glitch or partial write ends AutoGoal for that community (characteristic E).",
   "outcome": "Not observed.",
   "investigate": [

@@ -1,5 +1,5 @@
 // npm run audit:validate: checks the audit ledger, records, paths and scope map.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { listSourceFiles, loadAudit, validateAudit } from "./lib.mjs";
 
@@ -9,6 +9,7 @@ const files = listSourceFiles(rootDir, audit.scope.root);
 const { errors, mapping } = validateAudit(audit, {
   files,
   fileExists: (file) => existsSync(join(rootDir, file)),
+  readText: (file) => readFileSync(join(rootDir, file), "utf8"),
 });
 
 if (errors.length > 0) {

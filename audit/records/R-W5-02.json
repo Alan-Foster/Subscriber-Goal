@@ -6,7 +6,7 @@
   "current": "When the stored onboarding state fails parsing, the run returns 'not due' or 'complete' and logs nothing, so onboarding can stop forever without a trace.",
   "location": "src/server/core/onboardingSubscriberGoal.ts:670; src/server/core/onboardingSubscriberGoal.ts:750; src/server/core/onboardingGoalState.ts:12",
   "areas": ["5.01", "6.05", "13.03"],
-  "paths": [],
+  "paths": ["C5-onboarding-goal"],
   "evidence": "parseOnboardingState returns undefined for any missing or invalid field. The first read returns not_due; the second read inside runOnboardingCreation returns complete. Neither path calls logDiagnostic.",
   "outcome": "Not observed.",
   "investigate": [

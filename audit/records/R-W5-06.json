@@ -6,7 +6,7 @@
   "current": "An NSFW or unknown-safety subreddit passes onboarding eligibility; the subreddit_not_sfw reason exists only in types and parsing.",
   "location": "src/server/core/onboardingEligibility.ts:8; src/server/core/automaticGoalEligibility.ts:20",
   "areas": ["4.04", "4.06"],
-  "paths": [],
+  "paths": ["C5-onboarding-goal"],
   "evidence": "getAutomaticGoalEligibility checks only that the subreddit is public. isOnboardingIneligibilityReason accepts subreddit_not_sfw, but nothing sets it.",
   "investigate": [
     "Ask the maintainer whether onboarding should create goals in NSFW subreddits (#90 restored NSFW goal buttons). Then remove the dead reason or implement it."

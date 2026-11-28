@@ -5,7 +5,7 @@
   "current": "In the AutoGoal cron path, a busy community lock, a stale due snapshot, an old per-source lock and an already-mapped successor all skip or cancel silently.",
   "location": "src/server/core/autoCreateNextGoal.ts:168; src/server/core/autoCreateNextGoal.ts:176; src/server/core/autoCreateNextGoal.ts:186; src/server/core/autoCreateNextGoal.ts:278",
   "areas": ["13.06", "7.04"],
-  "paths": [],
+  "paths": ["C5-autogoal-successor"],
   "evidence": "These branches increment summary.skipped and return without logDiagnostic. The cron rule requires an info line with a reason, plus a per-run summary line.",
   "required": "info lines with a reason via the #237 cron action helper.",
   "investigate": [

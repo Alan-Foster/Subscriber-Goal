@@ -344,9 +344,24 @@ function validatePaths(audit, ctx, errors) {
           `${where}: step "${step.at}" has unknown handoff "${step.handoff}"`,
         );
       }
-      const file = String(step.at ?? "").split(":")[0];
+      const [file, symbol] = String(step.at ?? "").split(":");
       if (!ctx.fileExists(file)) {
         errors.push(`${where}: step file "${file}" does not exist`);
+        continue;
+      }
+      const text = ctx.readText?.(file);
+      if (!symbol) {
+        errors.push(`${where}: step "${step.at}" must be file:symbol`);
+      } else if (
+        text !== undefined &&
+        !new RegExp(`\\b${symbol}\\b`, "u").test(text)
+      ) {
+        errors.push(`${where}: symbol "${symbol}" not found in ${file}`);
+      }
+    }
+    for (const test of path.tests ?? []) {
+      if (!ctx.fileExists(test)) {
+        errors.push(`${where}: test file "${test}" does not exist`);
       }
     }
     if (!ctx.ledgerByPath.has(path.id)) {
@@ -357,9 +372,10 @@ function validatePaths(audit, ctx, errors) {
 
 /**
  * Validates the whole audit. `files` are tracked files under the scope root;
- * `fileExists(repoRelativePath)` checks the working tree.
+ * `fileExists(repoRelativePath)` checks the working tree; the optional
+ * `readText(repoRelativePath)` lets path steps be checked for their symbol.
  */
-export function validateAudit(audit, { files, fileExists }) {
+export function validateAudit(audit, { files, fileExists, readText }) {
   const errors = [];
   const areaById = new Map(
     audit.checklist.areas.map((area) => [area.id, area]),
@@ -371,7 +387,14 @@ export function validateAudit(audit, { files, fileExists }) {
   const ledgerByPath = new Map(
     audit.ledgers.map((ledger) => [ledger.path, ledger]),
   );
-  const ctx = { areaById, pathById, recordById, ledgerByPath, fileExists };
+  const ctx = {
+    areaById,
+    pathById,
+    recordById,
+    ledgerByPath,
+    fileExists,
+    readText,
+  };
 
   if (audit.checklist.areas.length !== new Set(areaById.keys()).size) {
     errors.push("checklist.json: duplicate area ids");
@@ -420,7 +443,8 @@ export function validateAudit(audit, { files, fileExists }) {
     }
   }
 
-  // A record mapped to paths must be referenced by each of its cells.
+  // A record mapped to paths must be referenced by each of its reviewed,
+  // relevant cells. (A record can span paths where only some areas apply.)
   for (const record of audit.records) {
     for (const pathId of record.paths ?? []) {
       const ledger = ledgerByPath.get(pathId);
@@ -429,6 +453,7 @@ export function validateAudit(audit, { files, fileExists }) {
         if (
           cell &&
           cell.tests !== "unreviewed" &&
+          cell.tests !== "not_relevant" &&
           !(cell.records ?? []).includes(record.id)
         ) {
           errors.push(

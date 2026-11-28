@@ -1,1 +1,1325 @@
-[]
+[
+  {
+    "id": "C1-init-goal-view",
+    "category": 1,
+    "title": "Classic goal post loads its first screen",
+    "entry": "client startup (app.html)",
+    "steps": [
+      {
+        "at": "src/client/app/index.tsx:App",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/client/hooks/subGoal/useSubGoalLoading.ts:useSubGoalLoading",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/client/utils/fetchWithRetry.ts:requestJsonWithRetry",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/init.ts:handleInit",
+        "handoff": "trigger_entry",
+        "note": "public API route /api/init"
+      },
+      {
+        "at": "src/server/routes/public/state.ts:buildState",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isInitResponse",
+        "handoff": "parse_validate"
+      },
+      {
+        "at": "src/client/app/viewSelection.ts:selectGoalView",
+        "handoff": "internal"
+      }
+    ],
+    "outcome": "UI state: the goal page renders with correct counts, or a visible error",
+    "tests": [
+      "src/client/hooks/useSubGoal.test.tsx",
+      "src/server/routes/publicApi.test.ts",
+      "src/client/app/App.test.tsx",
+      "src/client/app/viewSelection.test.ts"
+    ]
+  },
+  {
+    "id": "C1-init-tiny-view",
+    "category": 1,
+    "title": "Tiny (subscribe-only) post loads",
+    "entry": "client startup (subscribe-only.html)",
+    "steps": [
+      {
+        "at": "src/client/subscribe-only/index.tsx:SubscribeOnlyApp",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/client/utils/fetchWithRetry.ts:requestJsonWithRetry",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/init.ts:handleInit",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/routes/public/state.ts:buildSubscribeOnlyState",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isInitResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "UI state: the tiny post renders its join button",
+    "tests": [
+      "src/client/subscribe-only/SubscribeOnlyApp.test.tsx",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C1-init-cta-view",
+    "category": 1,
+    "title": "Action Button (CTA) post loads",
+    "entry": "client startup (app.html, CTA post kind)",
+    "steps": [
+      {
+        "at": "src/client/app/index.tsx:App",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/routes/public/init.ts:handleInit",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/routes/public/state.ts:buildCtaOnlyState",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isInitResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "UI state: the action button renders with its destination",
+    "tests": [
+      "src/client/app/App.test.tsx",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C1-refresh",
+    "category": 1,
+    "title": "Open post refreshes its counts",
+    "entry": "client timer / visibility change",
+    "steps": [
+      {
+        "at": "src/client/hooks/subGoal/useSubGoalRefresh.ts:useSubGoalRefresh",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/refresh.ts:registerRefreshRoutes",
+        "handoff": "trigger_entry",
+        "note": "public API route /api/refresh"
+      },
+      {
+        "at": "src/server/routes/public/state.ts:buildState",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isRefreshResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "UI state: counts and completion state update, or a stale-state notice",
+    "tests": [
+      "src/client/hooks/useSubGoal.test.tsx",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C1-display-name",
+    "category": 1,
+    "title": "Subreddit display name resolved and cached",
+    "entry": "init/refresh state build",
+    "steps": [
+      {
+        "at": "src/server/utils/subredditDisplayName.ts:validateSubredditDisplayName",
+        "handoff": "parse_validate"
+      },
+      {
+        "at": "src/server/data/subredditDisplayNameData.ts:ensureSavedSubredditDisplayName",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Redis cache + UI header text",
+    "tests": [
+      "src/server/utils/subredditDisplayName.test.ts",
+      "src/server/data/subredditDisplayNameData.test.ts"
+    ]
+  },
+  {
+    "id": "C2-join-goal",
+    "category": 2,
+    "title": "User joins from a classic goal post",
+    "entry": "click: Join button",
+    "steps": [
+      {
+        "at": "src/client/app/hooks/useGoalAppSubscription.ts:useGoalAppSubscription",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/client/hooks/subGoal/subscriptionRequests.ts:requestSubscribeJson",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/subscribe.ts:registerSubscribeRoutes",
+        "handoff": "trigger_entry",
+        "note": "public API route /api/subscribe"
+      },
+      {
+        "at": "src/server/routes/public/subscribe.ts:subscribeToCurrentSubreddit",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/data/subscriberTracking.ts:persistAcceptedSubscriberTracking",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/data/subscriberTracking.ts:applySubscriberTracking",
+        "handoff": "redis_write"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isSubscribeResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Reddit subscription + Redis tracking + UI shows joined only after confirmation",
+    "tests": [
+      "src/server/routes/publicApi.test.ts",
+      "src/server/data/subscriberTracking.test.ts",
+      "src/client/app/components/SubscriptionButton.test.tsx",
+      "src/client/hooks/useSubGoal.test.tsx"
+    ]
+  },
+  {
+    "id": "C2-join-tiny",
+    "category": 2,
+    "title": "User joins from a Tiny post",
+    "entry": "click: Tiny join button",
+    "steps": [
+      {
+        "at": "src/client/subscribe-only/useTinySubscription.ts:useTinySubscription",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/subscribe.ts:registerSubscribeRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/data/subscriberTracking.ts:persistAcceptedSubscriberTracking",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/client/hooks/subGoal/stateValidation.ts:isSubscribeResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Reddit subscription + tracking + Tiny confirmation",
+    "tests": [
+      "src/client/subscribe-only/SubscribeOnlyApp.test.tsx",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C2-subscription-reconcile",
+    "category": 2,
+    "title": "Uncertain join result is reconciled",
+    "entry": "client after a lost subscribe response",
+    "steps": [
+      {
+        "at": "src/client/hooks/subGoal/subscriptionRequests.ts:reconcileSubscriptionStatus",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/data/subscriptionAttempt.ts:getSubscriptionAcceptanceEvidence",
+        "handoff": "redis_read"
+      }
+    ],
+    "outcome": "UI shows the confirmed join state",
+    "tests": [
+      "src/server/data/subscriptionAttempt.test.ts",
+      "src/client/hooks/useSubGoal.test.tsx"
+    ]
+  },
+  {
+    "id": "C2-realtime-updates",
+    "category": 2,
+    "title": "Live subscriber updates reach open posts",
+    "entry": "server realtime publish after a join",
+    "steps": [
+      {
+        "at": "src/server/routes/public/subscribe.ts:registerSubscribeRoutes",
+        "handoff": "realtime"
+      },
+      {
+        "at": "src/client/hooks/subGoal/useSubGoalRealtime.ts:useSubGoalRealtime",
+        "handoff": "realtime"
+      }
+    ],
+    "outcome": "UI state: other viewers see the new count",
+    "tests": ["src/client/hooks/useSubGoal.test.tsx"]
+  },
+  {
+    "id": "C2-after-subscribe-target",
+    "category": 2,
+    "title": "Post-join button resolves its destination",
+    "entry": "click: post-join action",
+    "steps": [
+      {
+        "at": "src/client/app/components/AfterSubscribeButton.tsx:AfterSubscribeButton",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/afterSubscribeTarget.ts:registerAfterSubscribeTargetRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/client/app/components/afterSubscribeTargetValidation.ts:isAfterSubscribeTargetResponse",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Navigation to the right destination or a fallback",
+    "tests": [
+      "src/client/app/components/AfterSubscribeButton.test.tsx",
+      "src/client/app/components/afterSubscribeTargetValidation.test.ts",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C2-cta-click",
+    "category": 2,
+    "title": "Action Button click is recorded and navigates",
+    "entry": "click: CTA button",
+    "steps": [
+      {
+        "at": "src/client/app/hooks/useGoalPageActions.ts:useGoalPageActions",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/ctaClick.ts:registerCtaClickRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/data/ctaActivity.ts:recordCtaClick",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Redis click record + navigation",
+    "tests": [
+      "src/server/data/ctaActivity.test.ts",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C2-notification-settings",
+    "category": 2,
+    "title": "User changes milestone notification preference",
+    "entry": "click: notification switch",
+    "steps": [
+      {
+        "at": "src/client/app/hooks/useNotificationSettings.ts:useNotificationSettings",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/notificationSettings.ts:registerNotificationSettingsRoutes",
+        "handoff": "trigger_entry"
+      }
+    ],
+    "outcome": "Devvit notification opt-in state + UI",
+    "tests": [
+      "src/client/app/hooks/useNotificationSettings.test.tsx",
+      "src/client/app/pages/NotificationSettingsPage.test.tsx",
+      "src/server/routes/publicApi.test.ts"
+    ]
+  },
+  {
+    "id": "C2-tracking-repair",
+    "category": 2,
+    "title": "Pending subscriber tracking is repaired by the cron",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:runMaintenanceMigrations",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/data/subscriberTracking.ts:processSubscriberTrackingRepairs",
+        "handoff": "scheduled_action"
+      }
+    ],
+    "outcome": "Redis tracking consistent with accepted joins",
+    "tests": [
+      "src/server/data/subscriberTracking.test.ts",
+      "src/server/triggers/scheduler.test.ts"
+    ]
+  },
+  {
+    "id": "C2-erase-other-user",
+    "category": 2,
+    "title": "Moderator erases another user's data",
+    "entry": "menu: Erase Another User's Data → form",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.eraseData.ts:registerEraseDataRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/data/subscriberTracking.ts:findPendingSubscriberUserIdByUsername",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/server/data/recentSubscriberErasure.ts:eraseSubscriberOrdersById",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "User's data removed from Redis + moderator toast",
+    "tests": ["src/server/routes/internalUi.eraseData.test.ts"]
+  },
+  {
+    "id": "C2-erase-my-data",
+    "category": 2,
+    "title": "User erases their own data",
+    "entry": "menu: Remove My Own Data → form",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.eraseData.ts:registerEraseDataRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/data/recentSubscriberErasure.ts:eraseSubscriberOrdersById",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "Own data removed + toast",
+    "tests": ["src/server/routes/internalUi.eraseData.test.ts"]
+  },
+  {
+    "id": "C3-statistics-event",
+    "category": 3,
+    "title": "Page load and click statistics are recorded",
+    "entry": "client page load / click",
+    "steps": [
+      {
+        "at": "src/client/analytics/statisticsAnalytics.ts:recordStatisticsEvent",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/statistics.ts:registerStatisticsRoutes",
+        "handoff": "trigger_entry",
+        "note": "/api/statistics-event"
+      },
+      {
+        "at": "src/server/data/statisticsAnalytics.ts:recordStatisticsLoad",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Redis statistics counters",
+    "tests": [
+      "src/client/analytics/statisticsAnalytics.test.ts",
+      "src/server/data/statisticsAnalytics.test.ts"
+    ]
+  },
+  {
+    "id": "C3-confirmed-join-stat",
+    "category": 3,
+    "title": "Confirmed joins are counted",
+    "entry": "server: accepted subscribe",
+    "steps": [
+      {
+        "at": "src/server/routes/public/subscribe.ts:registerSubscribeRoutes",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/data/statisticsAnalytics.ts:recordStatisticsConfirmedJoin",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Redis confirmed-join counter",
+    "tests": ["src/server/data/statisticsAnalytics.test.ts"]
+  },
+  {
+    "id": "C3-statistics-report",
+    "category": 3,
+    "title": "Moderator opens the statistics report",
+    "entry": "client: Statistics page",
+    "steps": [
+      {
+        "at": "src/client/app/pages/StatisticsPage.tsx:StatisticsPage",
+        "handoff": "client_request"
+      },
+      {
+        "at": "src/server/routes/public/statistics.ts:registerStatisticsRoutes",
+        "handoff": "trigger_entry",
+        "note": "/api/statistics"
+      },
+      {
+        "at": "src/server/utils/statisticsAuthorization.ts:canViewCurrentSubredditStatistics",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/data/statisticsAnalytics.ts:getStatisticsReport",
+        "handoff": "redis_read"
+      }
+    ],
+    "outcome": "UI report with real values; missing data shown as missing, not zero",
+    "tests": [
+      "src/client/app/pages/StatisticsPage.test.tsx",
+      "src/server/utils/statisticsAuthorization.test.ts",
+      "src/server/data/statisticsAnalytics.test.ts"
+    ]
+  },
+  {
+    "id": "C3-journey-analytics",
+    "category": 3,
+    "title": "Goal journey analytics events are sent",
+    "entry": "client interactions",
+    "steps": [
+      {
+        "at": "src/client/analytics/goalJourneyAnalytics.ts:goalJourneyAnalytics",
+        "handoff": "client_request",
+        "note": "Devvit analytics (external)"
+      }
+    ],
+    "outcome": "Devvit Journeys events",
+    "tests": ["src/client/analytics/goalJourneyAnalytics.test.ts"]
+  },
+  {
+    "id": "C3-daily-baseline",
+    "category": 3,
+    "title": "Daily subscriber baseline is recorded by the cron",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:observeCommunityActivity",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/data/subscriberDailyStats.ts:observeDailySubscriberCount",
+        "handoff": "scheduled_action"
+      }
+    ],
+    "outcome": "Redis daily stats",
+    "tests": [
+      "src/server/data/subscriberDailyStats.test.ts",
+      "src/server/triggers/scheduler.test.ts"
+    ]
+  },
+  {
+    "id": "C4-create-menu-setup",
+    "category": 4,
+    "title": "Moderator opens Create a New Goal / Action Button",
+    "entry": "menu: Create a New Goal / Create an Action Button",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.createGoal.ts:registerCreateGoalRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/routes/internalUi.createGoalForms.ts:buildCreateGoalSetupForm",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/routes/internalUi.createGoal.ts:submitCreateGoalSetup",
+        "handoff": "parse_validate"
+      },
+      {
+        "at": "src/server/data/createGoalDraft.ts:saveCreateGoalDraft",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Details form shown with a saved draft",
+    "tests": [
+      "src/server/routes/internalUi.color-theme.test.ts",
+      "src/server/data/createGoalDraft.test.ts"
+    ]
+  },
+  {
+    "id": "C4-create-classic",
+    "category": 4,
+    "title": "Moderator creates a classic goal post",
+    "entry": "form: createSubscriberGoalForm",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.createGoal.ts:registerCreateGoalRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/utils/developerCommands.ts:parseDeveloperCommands",
+        "handoff": "parse_validate"
+      },
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:createSubscriberGoal",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/core/subscriberGoalCreationSteps.ts:createSubscriberGoalInternal",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/core/subscriberGoalPostFlair.ts:ensureSubscriberGoalPostFlair",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/data/subGoalData.ts:registerSubscriberGoalPost",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Reddit post + Redis registration + highlight + toast",
+    "tests": [
+      "src/server/core/createSubscriberGoal.test.ts",
+      "src/server/routes/internalUi.color-theme.test.ts",
+      "src/server/core/subscriberGoalPostFlair.test.ts"
+    ]
+  },
+  {
+    "id": "C4-create-tiny",
+    "category": 4,
+    "title": "Moderator creates a Tiny post",
+    "entry": "form: createSubscribeOnlyForm",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.createGoal.ts:registerCreateGoalRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:createSubscriberGoal",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Reddit post + Redis registration",
+    "tests": [
+      "src/server/core/createSubscriberGoal.test.ts",
+      "src/server/routes/internalUi.color-theme.test.ts"
+    ]
+  },
+  {
+    "id": "C4-create-cta",
+    "category": 4,
+    "title": "Moderator creates an Action Button post",
+    "entry": "form: createCtaOnlyForm",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.createGoal.ts:registerCreateGoalRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:createSubscriberGoal",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Reddit post + Redis registration",
+    "tests": [
+      "src/server/core/createSubscriberGoal.test.ts",
+      "src/server/routes/internalUi.color-theme.test.ts"
+    ]
+  },
+  {
+    "id": "C4-create-follow-up",
+    "category": 4,
+    "title": "Follow-up form after a validation problem",
+    "entry": "form: *FollowUpForm",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.createGoalForms.ts:buildCreateGoalFollowUpForm",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/routes/internalUi.createGoalFields.ts:readCreationAttemptCallback",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Corrected submission or clear error",
+    "tests": ["src/server/routes/internalUi.color-theme.test.ts"]
+  },
+  {
+    "id": "C4-submission-recovery",
+    "category": 4,
+    "title": "Lost submission result is reconciled",
+    "entry": "creation retry / cron",
+    "steps": [
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:recoverSubscriberGoalCreation",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/server/jobs/submissionReconciliation.ts:reconcileAmbiguousSubmissionUnderLock",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Exactly one post registered, or a logged exhausted state",
+    "tests": [
+      "src/server/core/createSubscriberGoal.test.ts",
+      "src/server/core/faultInjection.test.ts"
+    ]
+  },
+  {
+    "id": "C5-install",
+    "category": 5,
+    "title": "App install initializes the community",
+    "entry": "trigger: onAppInstall",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/triggers/appChanged.ts:onAppChanged",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/core/onboardingLifecycle.ts:reconcileOnboardingForLifecycle",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "Onboarding armed; account recorded; repair scheduled",
+    "tests": [
+      "src/server/triggers/appChanged.test.ts",
+      "src/server/core/onboardingLifecycle.test.ts"
+    ]
+  },
+  {
+    "id": "C5-upgrade",
+    "category": 5,
+    "title": "App upgrade reconciles state",
+    "entry": "trigger: onAppUpgrade",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/triggers/appChanged.ts:onAppChanged",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/core/onboardingLifecycle.ts:reconcileOnboardingForLifecycle",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "Migrations and reconciliation done or deferred with a log",
+    "tests": [
+      "src/server/triggers/appChanged.test.ts",
+      "src/server/core/upgradeReplay.test.ts"
+    ]
+  },
+  {
+    "id": "C5-post-create-activity",
+    "category": 5,
+    "title": "New community posts are recorded for onboarding",
+    "entry": "trigger: onPostCreate",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/data/ctaActivity.ts:recordCommunityPostCreated",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Redis community activity",
+    "tests": ["src/server/data/ctaActivity.test.ts"]
+  },
+  {
+    "id": "C5-onboarding-warning",
+    "category": 5,
+    "title": "Onboarding warning modmail is sent",
+    "entry": "cron: posts-updater-job → onboarding job",
+    "steps": [
+      {
+        "at": "src/server/jobs/onboarding.ts:dispatchOnboardingJob",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/onboardingWarning.ts:processDueOnboardingReminder",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Modmail sent once; state advanced",
+    "tests": ["src/server/core/onboardingReminder.test.ts"]
+  },
+  {
+    "id": "C5-onboarding-goal",
+    "category": 5,
+    "title": "Onboarding finds, adopts or creates the first goal",
+    "entry": "cron: posts-updater-job → onboarding job",
+    "steps": [
+      {
+        "at": "src/server/jobs/onboarding.ts:dispatchOnboardingJob",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/onboardingSubscriberGoal.ts:processDueOnboardingSubscriberGoal",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/core/onboardingEligibility.ts:getOnboardingEligibility",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/core/highlightReconciliation.ts:ensureExistingSubscriberGoalHighlighted",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:createSubscriberGoal",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Exactly one highlighted goal, or a logged terminal reason",
+    "tests": [
+      "src/server/core/onboardingSubscriberGoal.test.ts",
+      "src/server/core/onboardingLifecycle.test.ts"
+    ]
+  },
+  {
+    "id": "C5-completion-detection",
+    "category": 5,
+    "title": "Goal completion is detected",
+    "entry": "subscribe, refresh or posts-updater",
+    "steps": [
+      {
+        "at": "src/server/data/subGoalData.ts:checkCompletionStatus",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/data/subGoalData.ts:scheduleAutoCreateNextGoal",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "completedTime set once; successor scheduled at +24 h",
+    "tests": [
+      "src/server/data/subGoalData.goal.test.ts",
+      "src/server/core/raceConditions.test.ts"
+    ]
+  },
+  {
+    "id": "C5-queued-post-update",
+    "category": 5,
+    "title": "Queued goal posts are refreshed each minute",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:updateQueuedPosts",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/triggers/scheduler.ts:loadQueuedPost",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/utils/postStatus.ts:getPostAvailability",
+        "handoff": "parse_validate"
+      },
+      {
+        "at": "src/server/utils/emergencyGoalRecovery.ts:recoverEmergencySubscriberGoal",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/server/utils/textFallback.ts:applyTextFallback",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/data/updaterData.ts:queueUpdate",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Post text updated; queue entry kept, retired or capped",
+    "tests": [
+      "src/server/triggers/scheduler.test.ts",
+      "src/server/utils/emergencyGoalRecovery.test.ts",
+      "src/server/utils/textFallback.test.ts"
+    ]
+  },
+  {
+    "id": "C5-autogoal-successor",
+    "category": 5,
+    "title": "AutoGoal creates the next goal after 24 h",
+    "entry": "cron: posts-updater-job → automatic goal retry job",
+    "steps": [
+      {
+        "at": "src/server/jobs/automaticGoalRetry.ts:dispatchAutomaticGoalRetryJob",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/autoCreateNextGoal.ts:processDueAutoCreateNextGoals",
+        "handoff": "redis_read"
+      },
+      {
+        "at": "src/server/core/automaticGoalEligibility.ts:getAutomaticGoalEligibility",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/core/createSubscriberGoal.ts:createSubscriberGoal",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Successor created and mapped, or a logged deferral",
+    "tests": [
+      "src/server/core/autoCreateNextGoal.test.ts",
+      "src/server/core/automaticGoalRetry.test.ts"
+    ]
+  },
+  {
+    "id": "C5-retirement",
+    "category": 5,
+    "title": "Completed or missing goals are retired",
+    "entry": "posts-updater / discovery",
+    "steps": [
+      {
+        "at": "src/server/core/completedGoalReconciliation.ts:reconcileCompletedGoal",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/core/postRetirement.ts:retireSubscriberGoalPost",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Goal removed from active tracking; history kept",
+    "tests": [
+      "src/server/core/completedGoalReconciliation.test.ts",
+      "src/server/core/postRetirement.test.ts"
+    ]
+  },
+  {
+    "id": "C6-mod-action",
+    "category": 6,
+    "title": "Moderator actions on goal posts are handled",
+    "entry": "trigger: onModAction",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/triggers/modAction.ts:onModAction",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Highlight repaired / post state updated, or filtered with a log",
+    "tests": ["src/server/core/raceConditions.test.ts"]
+  },
+  {
+    "id": "C6-highlight-reconciliation",
+    "category": 6,
+    "title": "One app-managed highlight is kept",
+    "entry": "onboarding, AutoGoal, repair",
+    "steps": [
+      {
+        "at": "src/server/core/goalDiscovery.ts:findValidSubscriberGoals",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/core/highlightReconciliation.ts:ensureExistingSubscriberGoalHighlighted",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/utils/communityHighlights.ts:highlightAndVerifyPost",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Reddit highlights match the selection policy",
+    "tests": [
+      "src/server/core/highlightReconciliation.test.ts",
+      "src/server/utils/communityHighlights.test.ts"
+    ]
+  },
+  {
+    "id": "C6-app-repair",
+    "category": 6,
+    "title": "App repair job runs",
+    "entry": "cron: posts-updater-job → scheduled jobs",
+    "steps": [
+      {
+        "at": "src/server/jobs/scheduled.ts:dispatchScheduledJobs",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/appRepair.ts:processDueAppRepair",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/data/updaterData.ts:queueUpdates",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Highlights, flair and queues repaired",
+    "tests": [
+      "src/server/core/appRepair.test.ts",
+      "src/server/jobs/runner.test.ts"
+    ]
+  },
+  {
+    "id": "C6-scheduled-post-displacement",
+    "category": 6,
+    "title": "Recurring scheduled posts that displace the goal are handled",
+    "entry": "cron: posts-updater-job → scheduled jobs",
+    "steps": [
+      {
+        "at": "src/server/jobs/scheduled.ts:dispatchScheduledJobs",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/scheduledPostDisplacement.ts:createScheduledPostDisplacementJob",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Goal re-pinned after displacement",
+    "tests": ["src/server/core/scheduledPostDisplacement.test.ts"]
+  },
+  {
+    "id": "C6-app-account-health",
+    "category": 6,
+    "title": "App account permissions are checked",
+    "entry": "cron gates, creation preflight",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:appAccountHealthAllowsPermissionWork",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/core/appAccountHealth.ts:checkAppAccountHealth",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Permission work allowed or paused with a notice",
+    "tests": ["src/server/core/appAccountHealth.test.ts"]
+  },
+  {
+    "id": "C6-app-account-recovery",
+    "category": 6,
+    "title": "App account recovery job",
+    "entry": "runJob: app-account-recovery-job",
+    "steps": [
+      {
+        "at": "src/server/core/appAccountRecovery.ts:scheduleAppAccountRecovery",
+        "handoff": "job_queue"
+      },
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/core/appAccountRecovery.ts:processAppAccountRecovery",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Moderator invite restored or a capped, logged retry",
+    "tests": ["src/server/core/appAccountRecovery.test.ts"]
+  },
+  {
+    "id": "C6-delete-goal",
+    "category": 6,
+    "title": "Moderator deletes a goal",
+    "entry": "menu: Delete This Goal → form",
+    "steps": [
+      {
+        "at": "src/server/routes/internalUi.deleteGoal.ts:registerDeleteGoalRoutes",
+        "handoff": "trigger_entry"
+      },
+      {
+        "at": "src/server/core/sourcePostDeletion.ts:prepareSourcePostDeletionIntent",
+        "handoff": "redis_write"
+      },
+      {
+        "at": "src/server/routes/internalUi.deleteGoal.ts:registerDeleteGoalRoutes",
+        "handoff": "reddit_api",
+        "note": "post.delete()"
+      },
+      {
+        "at": "src/server/core/sourcePostDeletion.ts:recordSourceDeletionConfirmed",
+        "handoff": "redis_write"
+      },
+      {
+        "at": "src/server/core/sourcePostDeletion.ts:dispatchConfirmedSourceDeletion",
+        "handoff": "internal"
+      }
+    ],
+    "outcome": "Post deleted on Reddit; registration and crosspost cleaned up",
+    "tests": [
+      "src/server/routes/internalUi.deleteGoal.test.ts",
+      "src/server/core/sourcePostDeletion.test.ts"
+    ]
+  },
+  {
+    "id": "C6-deletion-verification",
+    "category": 6,
+    "title": "Uncertain deletions are verified and cleaned up",
+    "entry": "cron: posts-updater-job → scheduled jobs",
+    "steps": [
+      {
+        "at": "src/server/core/sourcePostDeletion.ts:createSourcePostDeletionJob",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/postRetirement.ts:classifyPostLookupError",
+        "handoff": "parse_validate"
+      }
+    ],
+    "outcome": "Deletion confirmed by more than one source, or a capped, logged retry",
+    "tests": [
+      "src/server/core/sourcePostDeletion.test.ts",
+      "src/server/core/postRetirement.test.ts"
+    ]
+  },
+  {
+    "id": "C6-goal-health",
+    "category": 6,
+    "title": "Goal health check",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/core/goalHealth.ts:runGoalHealthCheck",
+        "handoff": "scheduled_action"
+      }
+    ],
+    "outcome": "Stuck or overdue workflows are reported",
+    "tests": ["src/server/core/goalHealth.test.ts"]
+  },
+  {
+    "id": "C7-crosspost-dispatch",
+    "category": 7,
+    "title": "Goal posts are crossposted to the hub",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:runCrosspostDispatch",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/crosspost/dispatch.ts:processCrosspostDispatchQueue",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/crosspost/pending.ts:processPendingCrossposts",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Crosspost created and mapped once",
+    "tests": [
+      "src/server/crosspost/pending.missing-source.test.ts",
+      "src/server/crosspost/bookkeeping.test.ts"
+    ]
+  },
+  {
+    "id": "C7-crosspost-ingestion",
+    "category": 7,
+    "title": "Hub ingests crosspost requests from wiki revisions",
+    "entry": "cron in the hub installation",
+    "steps": [
+      {
+        "at": "src/server/crosspost/ingestion.ts:updateFromWikis",
+        "handoff": "reddit_api"
+      },
+      {
+        "at": "src/server/data/crosspostData.ts:upsertPendingCrosspost",
+        "handoff": "redis_write"
+      }
+    ],
+    "outcome": "Requests validated and queued",
+    "tests": [
+      "src/server/crosspost/ingestion-guards.test.ts",
+      "src/server/data/crosspostData.test.ts"
+    ]
+  },
+  {
+    "id": "C7-moderation-mirror",
+    "category": 7,
+    "title": "Source moderation is mirrored to hub crossposts",
+    "entry": "mod action / deletion cleanup",
+    "steps": [
+      {
+        "at": "src/server/crosspost/moderation.ts:mirrorPostAction",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Hub crosspost removed/approved/deleted to match",
+    "tests": ["src/server/crosspost/bookkeeping.test.ts"]
+  },
+  {
+    "id": "C7-milestone-schedule",
+    "category": 7,
+    "title": "Milestone notification campaign is scheduled",
+    "entry": "goal milestone reached",
+    "steps": [
+      {
+        "at": "src/server/core/milestoneNotifications.ts:maybeScheduleMilestoneNotification",
+        "handoff": "job_queue"
+      }
+    ],
+    "outcome": "Campaign job scheduled (or disabled path logged)",
+    "tests": ["src/server/core/milestoneNotifications.test.ts"]
+  },
+  {
+    "id": "C7-milestone-batch",
+    "category": 7,
+    "title": "Milestone notification batch is delivered",
+    "entry": "runJob: milestone-notification-job",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/core/milestoneNotifications.ts:processMilestoneNotificationBatch",
+        "handoff": "reddit_api"
+      }
+    ],
+    "outcome": "Notifications sent within daily limits; continuation scheduled",
+    "tests": [
+      "src/server/core/milestoneNotifications.test.ts",
+      "src/server/routes/internalSystem.notifications.test.ts"
+    ]
+  },
+  {
+    "id": "C7-milestone-recovery",
+    "category": 7,
+    "title": "Stalled milestone campaigns are resumed",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/jobs/milestoneNotificationRecovery.ts:dispatchMilestoneNotificationRecovery",
+        "handoff": "scheduled_action"
+      },
+      {
+        "at": "src/server/core/milestoneNotifications.ts:recoverMilestoneNotificationContinuations",
+        "handoff": "job_queue"
+      }
+    ],
+    "outcome": "Continuations rescheduled or exhausted with a log",
+    "tests": ["src/server/core/milestoneNotifications.recovery.test.ts"]
+  },
+  {
+    "id": "C8-posts-updater-run",
+    "category": 8,
+    "title": "posts-updater-job run orchestration",
+    "entry": "cron: posts-updater-job (*/1 * * * *)",
+    "steps": [
+      {
+        "at": "src/server/routes/internalSystem.ts:registerInternalSystemRoutes",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/triggers/scheduler.ts:onPostsUpdaterJob",
+        "handoff": "internal"
+      }
+    ],
+    "outcome": "Every action runs or logs why not; one summary line per run",
+    "tests": ["src/server/triggers/scheduler.test.ts"]
+  },
+  {
+    "id": "C8-job-runner",
+    "category": 8,
+    "title": "Due-job runner and queue",
+    "entry": "scheduled job dispatch",
+    "steps": [
+      {
+        "at": "src/server/jobs/runner.ts:dispatchDueJobs",
+        "handoff": "job_queue"
+      },
+      {
+        "at": "src/server/jobs/queue.ts:updateJobRecord",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "Each due job runs once, with capped retries",
+    "tests": ["src/server/jobs/runner.test.ts", "src/server/jobs/queue.test.ts"]
+  },
+  {
+    "id": "C8-request-error-boundary",
+    "category": 8,
+    "title": "Unhandled request errors",
+    "entry": "any route that throws",
+    "steps": [
+      {
+        "at": "src/server/utils/requestErrorBoundary.ts:unhandledRequestErrorHandler",
+        "handoff": "internal"
+      }
+    ],
+    "outcome": "Logged with operationId; user sees a localized error",
+    "tests": ["src/server/utils/requestErrorBoundary.test.ts"]
+  },
+  {
+    "id": "C8-post-kind-migration",
+    "category": 8,
+    "title": "Post-kind migration batches",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:runMaintenanceMigrations",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/data/postKindMigration.ts:processPostKindMigrationBatch",
+        "handoff": "scheduled_action"
+      }
+    ],
+    "outcome": "Old posts migrated, replay-safe",
+    "tests": ["src/server/data/postKindMigration.test.ts"]
+  },
+  {
+    "id": "C8-after-subscribe-migration",
+    "category": 8,
+    "title": "Legacy after-subscribe action migration",
+    "entry": "cron: posts-updater-job",
+    "steps": [
+      {
+        "at": "src/server/triggers/scheduler.ts:runMaintenanceMigrations",
+        "handoff": "scheduler_entry"
+      },
+      {
+        "at": "src/server/data/legacyAfterSubscribeActionMigration.ts:processLegacyAfterSubscribeActionMigrationBatch",
+        "handoff": "scheduled_action"
+      }
+    ],
+    "outcome": "Legacy settings migrated, replay-safe",
+    "tests": ["src/server/data/legacyAfterSubscribeActionMigration.test.ts"]
+  },
+  {
+    "id": "C8-community-mutation-lease",
+    "category": 8,
+    "title": "Community-wide mutation lease",
+    "entry": "any goal mutation",
+    "steps": [
+      {
+        "at": "src/server/core/communityGoalMutation.ts:withCommunityGoalMutationLease",
+        "handoff": "redis_txn"
+      },
+      {
+        "at": "src/server/utils/redisOwnedLock.ts:releaseOwnedRedisLock",
+        "handoff": "redis_txn"
+      }
+    ],
+    "outcome": "Mutations serialized; contention skipped and logged",
+    "tests": [
+      "src/server/utils/redisOwnedLock.test.ts",
+      "src/server/core/raceConditions.test.ts"
+    ]
+  },
+  {
+    "id": "C8-route-registration",
+    "category": 8,
+    "title": "Server routes and manifest registration",
+    "entry": "server startup",
+    "steps": [
+      {
+        "at": "src/server/index.ts:registerPublicApiRoutes",
+        "handoff": "internal"
+      },
+      {
+        "at": "src/server/routes/internalUi.ts:registerInternalUiRoutes",
+        "handoff": "internal"
+      }
+    ],
+    "outcome": "Every devvit.json endpoint has a handler and vice versa",
+    "tests": ["src/server/routes.config.test.ts"]
+  }
+]

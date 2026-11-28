@@ -1,0 +1,68 @@
+{
+  "path": "C2-realtime-updates",
+  "cells": {
+    "2.01": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.02": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.03": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.04": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.05": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.06": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.07": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.08": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    },
+    "2.09": {
+      "tests": "not_relevant",
+      "problem": "none",
+      "output": null,
+      "by": "F2",
+      "note": "No user or moderator interaction: the entry point is \"server realtime publish after a join\"."
+    }
+  }
+}
