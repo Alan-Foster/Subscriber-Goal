@@ -379,6 +379,29 @@ describe("onPostsUpdaterJob crosspost scheduling", () => {
     ).toHaveBeenCalledOnce();
   });
 
+  it("keeps running later actions when one throws, and prints a run summary", async () => {
+    hoisted.context.subredditName = "CorporateGifts";
+    hoisted.dispatchAutomaticGoalRetryJob.mockRejectedValueOnce(
+      new Error("autogoal exploded"),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await onPostsUpdaterJob();
+
+    expect(hoisted.getQueuedUpdates).toHaveBeenCalledOnce();
+    const lines = [...error.mock.calls, ...warn.mock.calls].map((c) =>
+      String(c[0]),
+    );
+    const failed = lines.find((l) => l.includes('"cron_action_failed"'));
+    expect(failed).toContain('"phase":"automatic_goal_retry"');
+    expect(failed).toContain('"repeatCount":1');
+    const summary = lines.find((l) => l.includes('"cron_run_summary"'));
+    expect(summary).toContain('"a_automatic_goal_retry":"failed(x1)');
+    expect(summary).toContain('"a_queued_post_updates":"ran');
+  });
+
   it("records the aggregate total even with no queued posts", async () => {
     hoisted.context.subredditName = "CorporateGifts";
 
